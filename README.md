@@ -4,7 +4,7 @@
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
 
 <p align="center">
-    <img src="docs/images/banner.png" />
+    <img src="docs/images/banner.png" height="200" />
 </p>
 
 > [!NOTE]  
