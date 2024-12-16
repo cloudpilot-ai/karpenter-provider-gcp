@@ -14,7 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// +k8s:openapi-gen=true
-// +k8s:deepcopy-gen=package,register
-// +groupName=karpenter.k8s.gcp
 package v1alpha1
+
+import (
+	"context"
+)
+
+func (in *GCENodeClass) SetDefaults(_ context.Context) {}
