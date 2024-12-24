@@ -14,15 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package apis contains Kubernetes API groups.
-package apis
+// +k8s:openapi-gen=true
+// +k8s:deepcopy-gen=package,register
+// +groupName=karpenter.k8s.gcp
+package v1alpha1
 
 import (
-	"sigs.k8s.io/karpenter/pkg/apis"
+	corev1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis"
 )
 
-var (
-	Group              = "karpenter.k8s.gcp"
-	CompatibilityGroup = "compatibility." + Group
-	CRDs               = apis.CRDs // object.Unmarshal[apiextensionsv1.CustomResourceDefinition](crds.GCENodeClassCRD)
-)
+func init() {
+	gv := schema.GroupVersion{Group: apis.Group, Version: "v1alpha1"}
+	corev1.AddToGroupVersion(scheme.Scheme, gv)
+	scheme.Scheme.AddKnownTypes(gv,
+		&GCENodeClass{},
+		&GCENodeClassList{},
+	)
+}

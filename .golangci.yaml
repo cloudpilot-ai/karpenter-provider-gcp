@@ -1,0 +1,66 @@
+# See https://github.com/golangci/golangci-lint/blob/master/.golangci.example.yml
+run:
+  tests: true
+  timeout: 5m
+linters:
+  enable:
+    - asciicheck
+    - bidichk
+    - errorlint
+    - copyloopvar
+    - gosec
+    - revive
+    - stylecheck
+    - tparallel
+    - unconvert
+    - unparam
+    - gocyclo
+    - govet
+    - goimports
+    - goheader
+    - misspell
+    - nilerr
+    - gci
+  disable:
+    - prealloc
+    - unused
+linters-settings:
+  gocyclo:
+    min-complexity: 11
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  revive:
+    rules:
+    - name: dot-imports
+      disabled: true
+  stylecheck:
+    dot-import-whitelist:
+      - "github.com/onsi/ginkgo/v2"
+      - "github.com/onsi/gomega"
+  misspell:
+    locale: US
+    ignore-words: []
+  goimports:
+    local-prefixes: github.com/cloudpilot-ai/karpenter-provider-gcp
+  gci:
+    sections:
+      - standard # Standard section: captures all standard packages.
+      - default # Default section: contains all imports that could not be matched to another section type.
+      - localmodule # Local module section: contains all local packages. This section is not present unless explicitly enabled.
+    skip-generated: true
+issues:
+  fix: true
+  exclude: ['declaration of "(err|ctx)" shadows declaration at']
+  exclude-dirs:
+    - tools
+    - website
+    - hack
+    - charts
+    - designs
+  exclude-rules:
+  - linters:
+    - goheader
+    path: 'zz_(.+)\.go'
+
