@@ -10,7 +10,6 @@ labels: kind/bug
 If the matter is security related, please email to admin@cloudpilot.ai
 -->
 
-
 **What happened**:
 
 **What you expected to happen**:
@@ -20,6 +19,7 @@ If the matter is security related, please email to admin@cloudpilot.ai
 **Anything else we need to know?**:
 
 **Environment**:
+
 - Karpenter-provider-gcp version (use `git describe --tags --dirty --always`):
 - GKE version:
 - Others:

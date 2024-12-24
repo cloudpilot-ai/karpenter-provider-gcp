@@ -26,3 +26,5 @@ go.work.sum
 
 # ide file
 .idea/
+.vscode/
+.DS_Store
