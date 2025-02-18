@@ -41,7 +41,7 @@ Karpenter observes the aggregate resource requests of unscheduled pods and makes
 
 ## Documentation
 
-Full documentation is available at [karpenter alibabacloud provider docs](https://docs.cloudpilot.ai/karpenter/alibabacloud/).
+Full documentation is available at [karpenter gcp cloud provider docs](https://docs.cloudpilot.ai/karpenter/alibabacloud/).
 
 ## Community
 
@@ -56,8 +56,8 @@ This project includes code derived from karpenter-provider-aws, used under the A
 
 ## Code Of Conduct
 
-Karpenter Alibaba Cloud Provider adopts [CNCF code of conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
+Karpenter GCP Cloud Provider adopts [CNCF code of conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
 ## License
 
-Karpenter Alibaba Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
+Karpenter GCP Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
