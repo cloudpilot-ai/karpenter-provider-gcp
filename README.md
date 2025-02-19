@@ -34,14 +34,16 @@ Karpenter observes the aggregate resource requests of unscheduled pods and makes
   </p>
 </div>
 
+<!--
 ## Getting started
 
-* [Introduction](https://docs.cloudpilot.ai/karpenter/alibabacloud)
-* [Installation](https://docs.cloudpilot.ai/karpenter/alibabacloud/installation)
+* [Introduction](https://docs.cloudpilot.ai/karpenter/gcp)
+* [Installation](https://docs.cloudpilot.ai/karpenter/gcp/installation)
 
 ## Documentation
 
-Full documentation is available at [karpenter gcp cloud provider docs](https://docs.cloudpilot.ai/karpenter/alibabacloud/).
+Full documentation is available at [karpenter gcp cloud provider docs](https://docs.cloudpilot.ai/karpenter/gcp/).
+-->
 
 ## Community
 
