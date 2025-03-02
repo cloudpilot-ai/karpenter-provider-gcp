@@ -73,6 +73,9 @@ var (
 	ResourceAMDGPU     corev1.ResourceName = "amd.com/gpu"
 	GCEClusterIDTagKey                     = "gce:gce-cluster-id"
 
+	ImageFamilyUbuntu               = "Ubuntu"
+	ImageFamilyContainerOptimizedOS = "ContainerOptimizedOS"
+
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
 	LabelInstanceCategory                    = apis.Group + "/instance-category"

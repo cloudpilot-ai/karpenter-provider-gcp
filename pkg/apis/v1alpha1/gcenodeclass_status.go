@@ -18,38 +18,37 @@ package v1alpha1
 
 import (
 	"github.com/awslabs/operatorpkg/status"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
-	ConditionTypeSecurityGroupsReady = "SecurityGroupsReady"
-	ConditionTypeInstanceRAMReady    = "InstanceRAMReady"
+	ConditionTypeImagesReady = "ImagesReady"
 )
-
-// SecurityGroup contains resolved SecurityGroup selector values utilized for node launch
-type SecurityGroup struct {
-	// ID of the security group
-	// +required
-	ID string `json:"id"`
-	// Name of the security group
-	// +optional
-	Name string `json:"name,omitempty"`
-}
 
 // GCENodeClassStatus contains the resolved state of the GCENodeClass
 type GCENodeClassStatus struct {
-	// SecurityGroups contains the current Security Groups values that are available to the
-	// cluster under the SecurityGroups selectors.
+	// Image contains the current image that are available to the
+	// cluster under the Image selectors.
 	// +optional
-	SecurityGroups []SecurityGroup `json:"securityGroups,omitempty"`
+	Images []Image `json:"images,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
+// Image contains resolved image selector values utilized for node launch
+type Image struct {
+	// SourceImage represents the source image, format like projects/gke-node-images/global/images/gke-1309-gke1046000-cos-113-18244-291-9-c-pre
+	// +required
+	SourceImage string `json:"sourceImage"`
+	// Requirements of the Image to be utilized on an instance type
+	// +required
+	Requirements []corev1.NodeSelectorRequirement `json:"requirements"`
+}
+
 func (in *GCENodeClass) StatusConditions() status.ConditionSet {
 	return status.NewReadyConditions(
-		ConditionTypeSecurityGroupsReady,
-		ConditionTypeInstanceRAMReady,
+		ConditionTypeImagesReady,
 	).For(in)
 }
 

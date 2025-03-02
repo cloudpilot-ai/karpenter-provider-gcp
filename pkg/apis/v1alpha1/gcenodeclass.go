@@ -27,14 +27,15 @@ import (
 // GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
 // This will contain the configuration necessary to launch instances in GCP.
 type GCENodeClassSpec struct {
-	// SecurityGroupSelectorTerms is a list of or security group selector terms. The terms are ORed.
-	// +kubebuilder:validation:XValidation:message="securityGroupSelectorTerms cannot be empty",rule="self.size() != 0"
-	// +kubebuilder:validation:XValidation:message="expected at least one, got none, ['tags', 'id', 'name']",rule="self.all(x, has(x.tags) || has(x.id) || has(x.name))"
-	// +kubebuilder:validation:XValidation:message="'id' is mutually exclusive, cannot be set with a combination of other fields in securityGroupSelectorTerms",rule="!self.all(x, has(x.id) && (has(x.tags) || has(x.name)))"
-	// +kubebuilder:validation:XValidation:message="'name' is mutually exclusive, cannot be set with a combination of other fields in securityGroupSelectorTerms",rule="!self.all(x, has(x.name) && (has(x.tags) || has(x.id)))"
+	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
+	// +kubebuilder:validation:XValidation:message="expected at least one, got none, ['id', 'alias']",rule="self.all(x, has(x.id) || has(x.alias))"
+	// +kubebuilder:validation:XValidation:message="'id' is mutually exclusive, cannot be set with a combination of other fields in imageSelectorTerms",rule="!self.exists(x, has(x.id) && (has(x.alias)))"
+	// +kubebuilder:validation:XValidation:message="'alias' is mutually exclusive, cannot be set with a combination of other fields in imageSelectorTerms",rule="!self.exists(x, has(x.alias) && (has(x.id)))"
+	// +kubebuilder:validation:XValidation:message="'alias' is mutually exclusive, cannot be set with a combination of other imageSelectorTerms",rule="!(self.exists(x, has(x.alias)) && self.size() != 1)"
+	// +kubebuilder:validation:MinItems:=1
 	// +kubebuilder:validation:MaxItems:=30
 	// +required
-	SecurityGroupSelectorTerms []SecurityGroupSelectorTerm `json:"securityGroupSelectorTerms" hash:"ignore"`
+	ImageSelectorTerms []ImageSelectorTerm `json:"imageSelectorTerms" hash:"ignore"`
 	// KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
 	// They are a vswitch of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
@@ -52,28 +53,23 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching karpenter.k8s.gcp/gcenodeclass",rule="self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')"
 	// +optional
 	Tags map[string]string `json:"tags,omitempty"`
-	// ResourceGroupID is the resource group id in GCE
-	// +kubebuilder:validation:Pattern:="rg-[0-9a-z]+"
-	// +optional
-	ResourceGroupID string `json:"resourceGroupId,omitempty"`
 }
 
-// SecurityGroupSelectorTerm defines selection logic for a security group used by Karpenter to launch nodes.
+// ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
 // If multiple fields are used for selection, the requirements are ANDed.
-type SecurityGroupSelectorTerm struct {
-	// Tags is a map of key/value tags used to select vSwitches
-	// Specifying '*' for a value selects all values for a given tag key.
-	// +kubebuilder:validation:XValidation:message="empty tag keys aren't supported",rule="self.all(k, k != '')"
-	// +kubebuilder:validation:MaxProperties:=20
+type ImageSelectorTerm struct {
+	// Alias specifies which ACK image to select.
+	// Each alias consists of a family and an image version, specified as "family@version".
+	// Valid families include: ContainerOptimizedOS,Ubuntu
+	// Setting the version to latest will result in drift when a new Image is released. This is **not** recommended for production environments.
+	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.matches('^[a-zA-Z0-9]*$')"
+	// +kubebuilder:validation:XValidation:message="family is not supported, must be one of the following: 'ContainerOptimizedOS,Ubuntu'",rule="self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']"
+	// +kubebuilder:validation:MaxLength=30
 	// +optional
-	Tags map[string]string `json:"tags,omitempty"`
-	// ID is the security group id in GCE
-	// +kubebuilder:validation:Pattern:="sg-[0-9a-z]+"
+	Alias string `json:"alias,omitempty"`
+	// ID is the image id in ECS
 	// +optional
 	ID string `json:"id,omitempty"`
-	// Name is the security group name in GCE.
-	// This value is the name field, which is different from the name tag.
-	Name string `json:"name,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
