@@ -16,5 +16,44 @@ limitations under the License.
 
 package main
 
+import (
+	"github.com/samber/lo"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
+	corecontrollers "sigs.k8s.io/karpenter/pkg/controllers"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator"
+)
+
 func main() {
+	ctx, op := operator.NewOperator(coreoperator.NewOperator())
+
+	gcpCloudProvider := cloudprovider.New(
+		op.GetClient(),
+		op.EventRecorder,
+	)
+
+	lo.Must0(op.AddHealthzCheck("cloud-provider", gcpCloudProvider.LivenessProbe))
+	cloudProvider := metrics.Decorate(gcpCloudProvider)
+	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
+
+	op.
+		WithControllers(ctx, corecontrollers.NewControllers(
+			ctx,
+			op.Manager,
+			op.Clock,
+			op.GetClient(),
+			op.EventRecorder,
+			cloudProvider,
+			clusterState,
+		)...).
+		WithControllers(ctx, controllers.NewController(
+			ctx,
+			op.GetClient(),
+			op.ImagesProvider,
+		)...).
+		Start(ctx)
 }
