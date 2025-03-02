@@ -21,4 +21,7 @@ import "time"
 const (
 	// DefaultCleanupInterval triggers cache cleanup (lazy eviction) at this interval.
 	DefaultCleanupInterval = 1 * time.Minute
+
+	ImageCacheExpirationPeriod         = 5 * time.Minute
+	ServerVersionCacheExpirationPeriod = 5 * time.Minute
 )
