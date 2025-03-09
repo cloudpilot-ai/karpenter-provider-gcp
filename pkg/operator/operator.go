@@ -20,12 +20,14 @@ import (
 	"context"
 	"os"
 
-	compute "cloud.google.com/go/compute/apiv1"
+	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
@@ -39,15 +41,21 @@ type Operator struct {
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
-	// TODO: load from secret
-	imagesClient, err := compute.NewImagesRESTClient(ctx, option.WithCredentialsFile("demo/account.json"))
+	computeService, err := compute.NewService(ctx, option.WithCredentialsFile("demo/account.json"))
 	if err != nil {
-		log.FromContext(ctx).Error(err, "error creating images client")
+		log.FromContext(ctx).Error(err, "failed to create compute service")
+		os.Exit(1)
+	}
+	containerService, err := container.NewService(ctx, option.WithCredentialsFile("demo/account.json"))
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to create container service")
 		os.Exit(1)
 	}
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
-	imageProvider := imagefamily.NewDefaultProvider(versionProvider, imagesClient)
+	nodeTemplateProvider := nodepooltemplate.NewDefaultProvider(operator.GetClient(),
+		computeService, containerService, versionProvider)
+	imageProvider := imagefamily.NewDefaultProvider(versionProvider, nodeTemplateProvider)
 
 	return ctx, &Operator{
 		Operator:       operator,
