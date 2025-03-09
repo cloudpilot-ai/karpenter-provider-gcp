@@ -4,7 +4,6 @@ go 1.23.2
 
 require (
 	cloud.google.com/go/compute v1.23.3
-	github.com/alibabacloud-go/tea v1.2.2
 	github.com/awslabs/operatorpkg v0.0.0-20241205163410-0fff9f28d115
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/patrickmn/go-cache v2.1.0+incompatible
@@ -20,7 +19,6 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
-	github.com/alibabacloud-go/debug v1.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect

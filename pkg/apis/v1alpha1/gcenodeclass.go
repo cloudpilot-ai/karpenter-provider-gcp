@@ -58,18 +58,13 @@ type GCENodeClassSpec struct {
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
 // If multiple fields are used for selection, the requirements are ANDed.
 type ImageSelectorTerm struct {
-	// Alias specifies which ACK image to select.
-	// Each alias consists of a family and an image version, specified as "family@version".
+	// Alias specifies which GKE image to select.
 	// Valid families include: ContainerOptimizedOS,Ubuntu
-	// Setting the version to latest will result in drift when a new Image is released. This is **not** recommended for production environments.
 	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.matches('^[a-zA-Z0-9]*$')"
 	// +kubebuilder:validation:XValidation:message="family is not supported, must be one of the following: 'ContainerOptimizedOS,Ubuntu'",rule="self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']"
 	// +kubebuilder:validation:MaxLength=30
 	// +optional
 	Alias string `json:"alias,omitempty"`
-	// ID is the image id in ECS
-	// +optional
-	ID string `json:"id,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
