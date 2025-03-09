@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"sync"
 
-	compute "cloud.google.com/go/compute/apiv1"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
@@ -41,13 +41,19 @@ type DefaultProvider struct {
 
 	versionProvider              version.Provider
 	containerOptimizedOSProvider *ContainerOptimizedOS
+	ubuntuOSProvider             *Ubuntu
 }
 
-func NewDefaultProvider(versionProvider version.Provider, imagesClient *compute.ImagesClient) *DefaultProvider {
+func NewDefaultProvider(versionProvider version.Provider, nodePoolTemplateProvider nodepooltemplate.Provider) *DefaultProvider {
 	return &DefaultProvider{
-		cache:                        cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
-		versionProvider:              versionProvider,
-		containerOptimizedOSProvider: &ContainerOptimizedOS{imageClient: imagesClient},
+		cache:           cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
+		versionProvider: versionProvider,
+		containerOptimizedOSProvider: &ContainerOptimizedOS{
+			nodePoolTemplateProvider: nodePoolTemplateProvider,
+		},
+		ubuntuOSProvider: &Ubuntu{
+			nodePoolTemplateProvider: nodePoolTemplateProvider,
+		},
 	}
 }
 
@@ -63,11 +69,6 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		return images.(Images), nil
 	}
 
-	k8sVersion, err := p.versionProvider.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	images := map[uint64]Image{}
 	for _, selectorTerm := range nodeClass.Spec.ImageSelectorTerms {
 		var ims Images
@@ -77,7 +78,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 				continue
 			}
 
-			ims, err = familyProvider.ResolveImages(ctx, k8sVersion)
+			ims, err = familyProvider.ResolveImages(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -101,7 +102,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
 	switch family {
 	case v1alpha1.ImageFamilyUbuntu:
-		return nil
+		return p.ubuntuOSProvider
 	case v1alpha1.ImageFamilyContainerOptimizedOS:
 		return p.containerOptimizedOSProvider
 	default:
