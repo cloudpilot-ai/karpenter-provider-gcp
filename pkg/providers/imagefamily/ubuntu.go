@@ -16,9 +16,56 @@ limitations under the License.
 
 package imagefamily
 
+import (
+	"context"
+	"regexp"
+
+	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+)
+
 type Ubuntu struct {
+	nodePoolTemplateProvider nodepooltemplate.Provider
 }
 
-func (u *Ubuntu) ResolveImages(images Images) Images {
-	return nil
+func (u *Ubuntu) ResolveImages(ctx context.Context) (Images, error) {
+	sourceImage, err := getSourceImage(ctx, u.nodePoolTemplateProvider, nodepooltemplate.KarpenterUbuntuNodePoolTemplate)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get source image")
+		return Images{}, err
+	}
+
+	return u.resolveImages(sourceImage), nil
+}
+
+var (
+	ubuntuArm64Pattern     = `(projects\/ubuntu-os-gke-cloud\/global\/images\/ubuntu-gke-\d+-\d+-\d+)-v(\d+)`
+	ubuntuArm64Replacement = `$1-arm64-$2`
+	ubuntuArm64Re          = regexp.MustCompile(ubuntuArm64Pattern)
+)
+
+func (u *Ubuntu) resolveImages(sourceImage string) Images {
+	ret := Images{}
+
+	// x86 & gpu
+	ret = append(ret, Image{
+		SourceImage: sourceImage,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, "amd64")),
+	})
+
+	// arm64
+	arm64Image := ubuntuArm64Re.ReplaceAllString(sourceImage, ubuntuArm64Replacement)
+	ret = append(ret, Image{
+		SourceImage: arm64Image,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, "arm64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpDoesNotExist)),
+	})
+
+	return ret
 }

@@ -6,13 +6,6 @@ cloud.google.com/go/compute/internal
 # cloud.google.com/go/compute/metadata v0.3.0
 ## explicit; go 1.19
 cloud.google.com/go/compute/metadata
-# github.com/alibabacloud-go/debug v1.0.1
-## explicit; go 1.18
-github.com/alibabacloud-go/debug/debug
-# github.com/alibabacloud-go/tea v1.2.2
-## explicit; go 1.14
-github.com/alibabacloud-go/tea/tea
-github.com/alibabacloud-go/tea/utils
 # github.com/awslabs/operatorpkg v0.0.0-20241205163410-0fff9f28d115
 ## explicit; go 1.23.0
 github.com/awslabs/operatorpkg/controller
@@ -263,9 +256,7 @@ golang.org/x/net/http/httpguts
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
-golang.org/x/net/internal/socks
 golang.org/x/net/internal/timeseries
-golang.org/x/net/proxy
 golang.org/x/net/trace
 # golang.org/x/oauth2 v0.23.0
 ## explicit; go 1.18
@@ -311,10 +302,13 @@ golang.org/x/time/rate
 gomodules.xyz/jsonpatch/v2
 # google.golang.org/api v0.149.0
 ## explicit; go 1.19
+google.golang.org/api/compute/v1
+google.golang.org/api/container/v1
 google.golang.org/api/googleapi
 google.golang.org/api/googleapi/transport
 google.golang.org/api/internal
 google.golang.org/api/internal/cert
+google.golang.org/api/internal/gensupport
 google.golang.org/api/internal/impersonate
 google.golang.org/api/internal/third_party/uritemplates
 google.golang.org/api/iterator
