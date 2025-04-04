@@ -23,14 +23,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
+	providernodepooltemplate "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 )
 
 func NewController(ctx context.Context,
 	kubeClient client.Client,
-	imageProvider imagefamily.Provider) []controller.Controller {
+	imageProvider imagefamily.Provider,
+	nodePoolTemplateProvider providernodepooltemplate.Provider) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
+		nodepooltemplate.NewController(nodePoolTemplateProvider),
 	}
 
 	return controllers
