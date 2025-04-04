@@ -37,7 +37,8 @@ func init() {
 type Operator struct {
 	*operator.Operator
 
-	ImagesProvider imagefamily.Provider
+	ImagesProvider           imagefamily.Provider
+	NodePoolTemplateProvider nodepooltemplate.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -58,7 +59,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	imageProvider := imagefamily.NewDefaultProvider(versionProvider, nodeTemplateProvider)
 
 	return ctx, &Operator{
-		Operator:       operator,
-		ImagesProvider: imageProvider,
+		Operator:                 operator,
+		ImagesProvider:           imageProvider,
+		NodePoolTemplateProvider: nodeTemplateProvider,
 	}
 }

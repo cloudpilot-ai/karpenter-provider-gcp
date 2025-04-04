@@ -54,6 +54,7 @@ func main() {
 			ctx,
 			op.GetClient(),
 			op.ImagesProvider,
+			op.NodePoolTemplateProvider,
 		)...).
 		Start(ctx)
 }
