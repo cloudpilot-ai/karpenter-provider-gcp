@@ -1,0 +1,22 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: default-nodepool
+spec:
+  weight: 10
+  template:
+    spec:
+      nodeClassRef:
+        name: default-example
+        kind: GCENodeClass
+        group: karpenter.k8s.gcp
+      requirements:
+        - key: "karpenter.sh/capacity-type"
+          operator: In
+          values: ["on-demand"]
+        - key: "kubernetes.io/arch"
+          operator: In
+          values: ["amd64"]
+        - key: "topology.kubernetes.io/zone"
+          operator: In
+          values: ["us-central1-c", "us-central1-a", "us-central1-f", "us-central1-b"]
