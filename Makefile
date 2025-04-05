@@ -15,6 +15,11 @@ KARPENTER_VERSION ?= $(shell git tag --sort=committerdate | tail -1 | cut -d"v" 
 KO_DOCKER_REPO ?= ko.local
 KOCACHE ?= ~/.ko
 
+# GCP Cluster Context
+PROJECT_ID ?= karpenter-provider-gcp
+CLUSTER_NAME ?= karpenter-provider-gcp
+CLUSTER_LOCATION ?= us-central1
+
 # Common Directories
 MOD_DIRS = $(shell find . -path "./website" -prune -o -name go.mod -type f -print | xargs dirname)
 KARPENTER_CORE_DIR = $(shell go list -m -f '{{ .Dir }}' sigs.k8s.io/karpenter)
@@ -35,6 +40,8 @@ run: ## Run Karpenter controller binary against your local cluster
 		KUBERNETES_MIN_VERSION="v1.26.0" \
 		DISABLE_LEADER_ELECTION=true \
 		CLUSTER_NAME=${CLUSTER_NAME} \
+		PROJECT_ID=${PROJECT_ID} \
+		CLUSTER_LOCATION=${CLUSTER_LOCATION} \
 		INTERRUPTION_QUEUE=${CLUSTER_NAME} \
 		FEATURE_GATES="SpotToSpotConsolidation=true" \
 		go run ./cmd/controller/main.go

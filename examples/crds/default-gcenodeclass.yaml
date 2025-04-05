@@ -1,0 +1,9 @@
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: default-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS
+  tags:
+    env: dev

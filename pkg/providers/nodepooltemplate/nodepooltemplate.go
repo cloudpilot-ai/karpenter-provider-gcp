@@ -22,13 +22,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
+	"os"
 	"strings"
 
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
-	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -45,6 +44,14 @@ type DefaultProvider struct {
 	containerService *container.Service
 	kubeClient       client.Client
 	versionProvider  version.Provider
+	ClusterInfo      ClusterInfo
+}
+
+type ClusterInfo struct {
+	ProjectID string
+	Region    string
+	Name      string
+	Zones     []string
 }
 
 const (
@@ -53,10 +60,6 @@ const (
 
 	KarpenterUbuntuNodePoolTemplate          = "karpenter-ubuntu"
 	KarpenterUbuntuNodePoolTemplateImageType = "UBUNTU_CONTAINERD"
-
-	// ClusterNameNodeLabelKey is the key used to identify the cluster name
-	// TODO: make sure the following key is correct
-	ClusterNameNodeLabelKey = "goog-k8s-cluster-name"
 )
 
 func NewDefaultProvider(kubeClient client.Client, computeService *compute.Service,
@@ -70,109 +73,132 @@ func NewDefaultProvider(kubeClient client.Client, computeService *compute.Servic
 }
 
 func (p *DefaultProvider) Create(ctx context.Context) error {
-	projectID, region, clusterName, err := p.resolveClusterInfo(ctx)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "error resolving projectID and clusterName")
+	if err := p.resolveClusterInfo(); err != nil {
+		log.FromContext(ctx).Error(err, "error resolving cluster info")
 		return err
 	}
 
-	zones, err := p.resolveZones(ctx, projectID, region)
-	if err != nil {
+	if err := p.resolveZones(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "error resolving zones")
 		return err
 	}
 
-	if err := p.ensureKarpenterNodePoolTemplate(ctx, projectID, region, clusterName, KarpenterDefaultNodePoolTemplateImageType, KarpenterDefaultNodePoolTemplate, zones); err != nil {
+	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterDefaultNodePoolTemplateImageType, KarpenterDefaultNodePoolTemplate); err != nil {
 		return err
 	}
 
-	if err := p.ensureKarpenterNodePoolTemplate(ctx, projectID, region, clusterName, KarpenterUbuntuNodePoolTemplateImageType, KarpenterUbuntuNodePoolTemplate, zones); err != nil {
+	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterUbuntuNodePoolTemplateImageType, KarpenterUbuntuNodePoolTemplate); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context,
-	projectID, region, clusterName, imageType, nodePoolName string,
-	zones []string) error {
+func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, imageType, nodePoolName string) error {
+	logger := log.FromContext(ctx)
+
+	// adding simple validation, becuase previous code was failing
+	// here and no reasonable log was printed out
+	if p.ClusterInfo.Name == "" {
+		return fmt.Errorf("clusterName is required but was empty")
+	}
+	if len(p.ClusterInfo.Zones) == 0 {
+		return fmt.Errorf("no zones provided for node pool %s", nodePoolName)
+	}
+
+	logger.Info("ensuring node pool template exists",
+		"projectID", p.ClusterInfo.ProjectID,
+		"region", p.ClusterInfo.Region,
+		"name", p.ClusterInfo.Name,
+		"nodePoolName", nodePoolName,
+		"zones", p.ClusterInfo.Zones)
+
 	nodePoolSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-		projectID, region, clusterName, nodePoolName)
+		p.ClusterInfo.ProjectID, p.ClusterInfo.Region, p.ClusterInfo.Name, nodePoolName)
+
 	_, err := p.containerService.Projects.Locations.Clusters.NodePools.Get(nodePoolSelfLink).Context(ctx).Do()
 	if err == nil {
+		logger.Info("template node pool already exists", "name", nodePoolName)
 		return nil
 	}
 
 	var gcpErr *googleapi.Error
 	if errors.As(err, &gcpErr) && gcpErr.Code != http.StatusNotFound {
-		log.FromContext(ctx).Error(err, "error getting node pool")
+		logger.Error(err, "Failed to get node pool", "name", nodePoolName, "nodePoolSelfLink", nodePoolSelfLink)
 		return err
 	}
 
+	// Prepare request
 	nodePoolOpts := &container.CreateNodePoolRequest{
 		NodePool: &container.NodePool{
 			Name:             nodePoolName,
 			Autoscaling:      &container.NodePoolAutoscaling{Enabled: false},
 			InitialNodeCount: 0,
-			Locations:        []string{zones[0]},
+			Locations:        p.ClusterInfo.Zones,
 			Config: &container.NodeConfig{
 				ImageType: imageType,
 			},
 		},
 	}
-	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", projectID, region, clusterName)
+
+	logger.Info("creating node pool", "name", nodePoolName)
+	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.ClusterInfo.ProjectID, p.ClusterInfo.Region, p.ClusterInfo.Name)
 	_, err = p.containerService.Projects.Locations.Clusters.NodePools.Create(clusterSelfLink, nodePoolOpts).Context(ctx).Do()
 	if err != nil {
-		log.FromContext(ctx).Error(err, "error creating node pool")
+		if errors.As(err, &gcpErr) && gcpErr.Code == http.StatusConflict {
+			logger.Info("node pool already created concurrently", "name", nodePoolName)
+			return nil
+		}
+		logger.Error(err, "failed to create node pool", "name", nodePoolName)
 		return err
 	}
+
+	logger.Info("node pool created successfully", "name", nodePoolName)
 	return nil
 }
 
-func (p *DefaultProvider) resolveZones(ctx context.Context, projectID, region string) ([]string, error) {
-	var ret []string
-	req := p.computeService.Zones.List(projectID)
-	err := req.Pages(ctx, func(page *compute.ZoneList) error {
+func (p *DefaultProvider) resolveZones(ctx context.Context) error {
+	logger := log.FromContext(ctx)
+
+	logger.Info("resolving zones", "ProjectID", p.ClusterInfo.ProjectID, "Region", p.ClusterInfo.Region)
+
+	var zones []string
+	prefix := p.ClusterInfo.Region + "-"
+	err := p.computeService.Zones.List(p.ClusterInfo.ProjectID).Pages(ctx, func(page *compute.ZoneList) error {
 		for _, zone := range page.Items {
-			if strings.HasPrefix(zone.Name, region) {
-				ret = append(ret, zone.Name)
+			if strings.HasPrefix(zone.Name, prefix) {
+				zones = append(zones, zone.Name)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		log.FromContext(ctx).Error(err, "error listing zones")
-		return nil, err
+		logger.Error(err, "error listing zones from GCP")
+		return err
 	}
 
-	if len(ret) == 0 {
-		log.FromContext(ctx).Info("No zones found")
-		return nil, fmt.Errorf("no zones found")
+	if len(zones) == 0 {
+		logger.Info("no zones found matching region prefix", "region", p.ClusterInfo.Region)
+		return fmt.Errorf("no zones found for region: %s", p.ClusterInfo.Region)
 	}
 
-	return ret, nil
+	p.ClusterInfo.Zones = zones
+	logger.Info("resolved zones", "zones", zones)
+	return nil
 }
 
-func (p *DefaultProvider) resolveClusterInfo(ctx context.Context) (string, string, string, error) {
-	var nodes v1.NodeList
-	if err := p.kubeClient.List(ctx, &nodes); err != nil {
-		log.FromContext(ctx).Error(err, "error listing nodes")
-		return "", "", "", err
+// probably better to pass as arbitrary flags using lib like Cobra
+// also, would be good if this had more validation
+func (p *DefaultProvider) resolveClusterInfo() error {
+	p.ClusterInfo.ProjectID = os.Getenv("PROJECT_ID")
+	p.ClusterInfo.Name = os.Getenv("CLUSTER_NAME")
+	p.ClusterInfo.Region = os.Getenv("CLUSTER_LOCATION")
+
+	if p.ClusterInfo.ProjectID == "" || p.ClusterInfo.Name == "" || p.ClusterInfo.Region == "" {
+		return fmt.Errorf("environment variables PROJECT_ID, CLUSTER_NAME, and CLUSTER_LOCATION are required")
 	}
 
-	if len(nodes.Items) == 0 {
-		return "", "", "", fmt.Errorf("no nodes found")
-	}
-
-	clusterName := nodes.Items[0].Labels[ClusterNameNodeLabelKey]
-	providerID := nodes.Items[0].Spec.ProviderID
-	re := regexp.MustCompile(`^gce://([^/]+)/([^/]+)/.*$`)
-	matches := re.FindStringSubmatch(providerID)
-	if len(matches) > 2 {
-		projectID := matches[1]
-		region := strings.Join(strings.Split(matches[2], "-")[:2], "-")
-		return projectID, region, clusterName, nil
-	}
-	return "", clusterName, "", fmt.Errorf("failed to resolve projectID/region: %s", providerID)
+	return nil
 }
 
 func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]*compute.InstanceTemplate, error) {
@@ -196,9 +222,9 @@ func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]
 	return ret, nil
 }
 
-func (p *DefaultProvider) getNodePool(ctx context.Context, projectID, region, clusterName, nodePoolName string) (*container.NodePool, error) {
+func (p *DefaultProvider) getNodePool(ctx context.Context, nodePoolName string) (*container.NodePool, error) {
 	nodePoolSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-		projectID, region, clusterName, nodePoolName)
+		p.ClusterInfo.ProjectID, p.ClusterInfo.Region, p.ClusterInfo.Name, nodePoolName)
 	nodePool, err := p.containerService.Projects.Locations.Clusters.NodePools.Get(nodePoolSelfLink).Context(ctx).Do()
 	if err != nil {
 		log.FromContext(ctx).Error(err, "error getting node pool")
@@ -208,78 +234,75 @@ func (p *DefaultProvider) getNodePool(ctx context.Context, projectID, region, cl
 }
 
 func (p *DefaultProvider) getInstanceTemplate(ctx context.Context, nodePoolName string) (*compute.InstanceTemplate, error) {
-	projectID, region, clusterName, err := p.resolveClusterInfo(ctx)
+	logger := log.FromContext(ctx)
+
+	if p.ClusterInfo.ProjectID == "" || p.ClusterInfo.Name == "" || p.ClusterInfo.Region == "" {
+		return nil, fmt.Errorf("ClusterInfo not initialized")
+	}
+
+	nodePool, err := p.getNodePool(ctx, nodePoolName)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "error resolving projectID and clusterName")
 		return nil, err
 	}
 
-	nodePool, err := p.getNodePool(ctx, projectID, region, clusterName, nodePoolName)
-	if err != nil {
-		return nil, err
-	}
 	if nodePool.Status != "RUNNING" {
 		return nil, nil
 	}
-	if len(nodePool.InstanceGroupUrls) != 0 {
-		zone, managerName, err := resolveInstanceGroupZoneAndManagerName(nodePool.InstanceGroupUrls[0])
-		if err != nil {
-			log.FromContext(ctx).Error(err, "error resolving instance group url")
-			return nil, err
-		}
 
-		ig, err := p.computeService.InstanceGroupManagers.Get(projectID, zone, managerName).Do()
-		if err != nil {
-			log.FromContext(ctx).Error(err, "error getting instance group manager")
-			return nil, err
-		}
-
-		templateName, err := resolveInstanceTemplateName(ig.InstanceTemplate)
-		if err != nil {
-			return nil, err
-		}
-
-		template, err := p.computeService.RegionInstanceTemplates.Get(projectID, region, templateName).Context(ctx).Do()
-		if err != nil {
-			log.FromContext(ctx).Error(err, "error getting instance template")
-			return nil, err
-		}
-
-		return template, nil
+	if len(nodePool.InstanceGroupUrls) == 0 {
+		return nil, fmt.Errorf("no instance group URLs found for node pool: %s", nodePoolName)
 	}
 
-	return nil, fmt.Errorf("instance template not found")
+	zone, managerName, err := resolveInstanceGroupZoneAndManagerName(nodePool.InstanceGroupUrls[0])
+	if err != nil {
+		logger.Error(err, "error resolving instance group URL")
+		return nil, err
+	}
+
+	ig, err := p.computeService.InstanceGroupManagers.Get(p.ClusterInfo.ProjectID, zone, managerName).Do()
+	if err != nil {
+		logger.Error(err, "error getting instance group manager")
+		return nil, err
+	}
+
+	templateName, err := resolveInstanceTemplateName(ig.InstanceTemplate)
+	if err != nil {
+		return nil, err
+	}
+
+	template, err := p.computeService.RegionInstanceTemplates.Get(p.ClusterInfo.ProjectID, p.ClusterInfo.Region, templateName).Context(ctx).Do()
+	if err != nil {
+		logger.Error(err, "error getting instance template")
+		return nil, err
+	}
+
+	return template, nil
 }
 
 func resolveInstanceTemplateName(instanceTemplateURL string) (string, error) {
-	// Parse the URL to extract path components
 	parsedURL, err := url.Parse(instanceTemplateURL)
 	if err != nil {
 		return "", err
 	}
 
-	// Split the path into components
 	parts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
 
-	// Ensure the path has enough components to extract project ID and instance template name
-	if len(parts) < 8 || parts[6] != "instanceTemplates" {
-		return "", fmt.Errorf("invalid instance template URL: %s", instanceTemplateURL)
+	// Look for the last part only if path contains "instanceTemplates"
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] == "instanceTemplates" {
+			return parts[i+1], nil
+		}
 	}
 
-	// Extract project ID and instance template name
-	instanceTemplateName := parts[7]
-
-	return instanceTemplateName, nil
+	return "", fmt.Errorf("invalid instance template URL: %s", instanceTemplateURL)
 }
 
 func resolveInstanceGroupZoneAndManagerName(instanceGroupURL string) (string, string, error) {
-	// Parse the URL to extract path components
 	parsedURL, err := url.Parse(instanceGroupURL)
 	if err != nil {
 		return "", "", err
 	}
 
-	// Split the path into components
 	parts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
 
 	// Ensure the path has enough components to extract zone and instance group manager name
