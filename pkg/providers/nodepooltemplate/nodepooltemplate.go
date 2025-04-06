@@ -62,27 +62,58 @@ const (
 	KarpenterUbuntuNodePoolTemplateImageType = "UBUNTU_CONTAINERD"
 )
 
-func NewDefaultProvider(kubeClient client.Client, computeService *compute.Service,
-	containerService *container.Service, versionProvider version.Provider) *DefaultProvider {
+func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
+	containerService *container.Service, versionProvider version.Provider,
+	clusterName, region, projectID string) *DefaultProvider {
+	zones, err := resolveZones(ctx, computeService, projectID, region)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
+		os.Exit(1)
+	}
 	return &DefaultProvider{
 		kubeClient:       kubeClient,
 		computeService:   computeService,
 		containerService: containerService,
 		versionProvider:  versionProvider,
+		ClusterInfo: ClusterInfo{
+			ProjectID: projectID,
+			Region:    region,
+			Name:      clusterName,
+			Zones:     zones,
+		},
 	}
 }
 
+func resolveZones(ctx context.Context, computeService *compute.Service, projectID, region string) ([]string, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("resolving zones", "ProjectID", projectID, "Region", region)
+
+	var zones []string
+	prefix := region + "-"
+	err := computeService.Zones.List(projectID).Pages(ctx, func(page *compute.ZoneList) error {
+		for _, zone := range page.Items {
+			if strings.HasPrefix(zone.Name, prefix) {
+				zones = append(zones, zone.Name)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Error(err, "error listing zones from GCP")
+		return nil, err
+	}
+
+	if len(zones) == 0 {
+		logger.Info("no zones found matching region prefix", "region", region)
+		return nil, fmt.Errorf("no zones found for region: %s", region)
+	}
+
+	logger.Info("resolved zones", "zones", zones)
+	return zones, nil
+}
+
+// creating both default nodepool templates could be run concurrently
 func (p *DefaultProvider) Create(ctx context.Context) error {
-	if err := p.resolveClusterInfo(); err != nil {
-		log.FromContext(ctx).Error(err, "error resolving cluster info")
-		return err
-	}
-
-	if err := p.resolveZones(ctx); err != nil {
-		log.FromContext(ctx).Error(err, "error resolving zones")
-		return err
-	}
-
 	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterDefaultNodePoolTemplateImageType, KarpenterDefaultNodePoolTemplate); err != nil {
 		return err
 	}
@@ -154,50 +185,6 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 	}
 
 	logger.Info("node pool created successfully", "name", nodePoolName)
-	return nil
-}
-
-func (p *DefaultProvider) resolveZones(ctx context.Context) error {
-	logger := log.FromContext(ctx)
-
-	logger.Info("resolving zones", "ProjectID", p.ClusterInfo.ProjectID, "Region", p.ClusterInfo.Region)
-
-	var zones []string
-	prefix := p.ClusterInfo.Region + "-"
-	err := p.computeService.Zones.List(p.ClusterInfo.ProjectID).Pages(ctx, func(page *compute.ZoneList) error {
-		for _, zone := range page.Items {
-			if strings.HasPrefix(zone.Name, prefix) {
-				zones = append(zones, zone.Name)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Error(err, "error listing zones from GCP")
-		return err
-	}
-
-	if len(zones) == 0 {
-		logger.Info("no zones found matching region prefix", "region", p.ClusterInfo.Region)
-		return fmt.Errorf("no zones found for region: %s", p.ClusterInfo.Region)
-	}
-
-	p.ClusterInfo.Zones = zones
-	logger.Info("resolved zones", "zones", zones)
-	return nil
-}
-
-// probably better to pass as arbitrary flags using lib like Cobra
-// also, would be good if this had more validation
-func (p *DefaultProvider) resolveClusterInfo() error {
-	p.ClusterInfo.ProjectID = os.Getenv("PROJECT_ID")
-	p.ClusterInfo.Name = os.Getenv("CLUSTER_NAME")
-	p.ClusterInfo.Region = os.Getenv("CLUSTER_LOCATION")
-
-	if p.ClusterInfo.ProjectID == "" || p.ClusterInfo.Name == "" || p.ClusterInfo.Region == "" {
-		return fmt.Errorf("environment variables PROJECT_ID, CLUSTER_NAME, and CLUSTER_LOCATION are required")
-	}
-
 	return nil
 }
 
