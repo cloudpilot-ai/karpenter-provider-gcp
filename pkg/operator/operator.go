@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
@@ -54,8 +55,16 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
-	nodeTemplateProvider := nodepooltemplate.NewDefaultProvider(operator.GetClient(),
-		computeService, containerService, versionProvider)
+	nodeTemplateProvider := nodepooltemplate.NewDefaultProvider(
+		ctx,
+		operator.GetClient(),
+		computeService,
+		containerService,
+		versionProvider,
+		options.FromContext(ctx).ClusterName,
+		options.FromContext(ctx).Region,
+		options.FromContext(ctx).ProjectID,
+	)
 	imageProvider := imagefamily.NewDefaultProvider(versionProvider, nodeTemplateProvider)
 
 	return ctx, &Operator{

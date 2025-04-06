@@ -1,5 +1,3 @@
-CLUSTER_NAME ?= $(shell kubectl config view --minify -o jsonpath='{.clusters[].name}' | rev | cut -d"/" -f1 | rev | cut -d"." -f1)
-
 ## Inject the app version into operator.Version
 LDFLAGS ?= -ldflags=-X=sigs.k8s.io/karpenter/pkg/operator.Version=$(shell git describe --tags --always | cut -d"v" -f2)
 
@@ -14,6 +12,11 @@ KARPENTER_VERSION ?= $(shell git tag --sort=committerdate | tail -1 | cut -d"v" 
 # KO_DOCKER_REPO ?= ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/dev
 KO_DOCKER_REPO ?= ko.local
 KOCACHE ?= ~/.ko
+
+# GCP Cluster Context
+PROJECT_ID ?= karpenter-provider-gcp
+CLUSTER_NAME ?= karpenter-provider-gcp
+REGION ?= us-central1
 
 # Common Directories
 MOD_DIRS = $(shell find . -path "./website" -prune -o -name go.mod -type f -print | xargs dirname)
@@ -35,6 +38,8 @@ run: ## Run Karpenter controller binary against your local cluster
 		KUBERNETES_MIN_VERSION="v1.26.0" \
 		DISABLE_LEADER_ELECTION=true \
 		CLUSTER_NAME=${CLUSTER_NAME} \
+		PROJECT_ID=${PROJECT_ID} \
+		REGION=${REGION} \
 		INTERRUPTION_QUEUE=${CLUSTER_NAME} \
 		FEATURE_GATES="SpotToSpotConsolidation=true" \
 		go run ./cmd/controller/main.go
