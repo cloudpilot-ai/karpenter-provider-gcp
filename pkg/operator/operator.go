@@ -22,7 +22,6 @@ import (
 
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
-	"google.golang.org/api/option"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
@@ -43,12 +42,12 @@ type Operator struct {
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
-	computeService, err := compute.NewService(ctx, option.WithCredentialsFile("demo/account.json"))
+	computeService, err := compute.NewService(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create compute service")
 		os.Exit(1)
 	}
-	containerService, err := container.NewService(ctx, option.WithCredentialsFile("demo/account.json"))
+	containerService, err := container.NewService(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create container service")
 		os.Exit(1)
