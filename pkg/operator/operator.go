@@ -28,6 +28,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
@@ -39,6 +40,7 @@ type Operator struct {
 
 	ImagesProvider           imagefamily.Provider
 	NodePoolTemplateProvider nodepooltemplate.Provider
+	PricingProvider          pricing.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -65,10 +67,12 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).ProjectID,
 	)
 	imageProvider := imagefamily.NewDefaultProvider(versionProvider, nodeTemplateProvider)
+	pricingProvider := pricing.NewDefaultProvider(ctx, options.FromContext(ctx).Region)
 
 	return ctx, &Operator{
 		Operator:                 operator,
 		ImagesProvider:           imageProvider,
 		NodePoolTemplateProvider: nodeTemplateProvider,
+		PricingProvider:          pricingProvider,
 	}
 }
