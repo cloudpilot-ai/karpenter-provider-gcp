@@ -20,7 +20,9 @@ gcloud services enable compute.googleapis.com
 gcloud services enable container.googleapis.com
 ```
 
-3. Next go ahead and create the service account in the project and give necessary permission and create the service account key by following this [link](https://cloud.google.com/iam/docs/creating-managing-service-account-keys)
+3. Next go ahead and create the service account in the project and assign `OWNER` role and create the service account key by following this [link](https://cloud.google.com/iam/docs/creating-managing-service-account-keys)
+
+> Note : For now we are assigning the `OWNER` role to the service account. We are working on the more fine grained permissions for the service account. So please assign the `OWNER` role for now and we will update the documentation once we have the fine grained permissions ready.
 
 
 4. Once you have created the service account key, go ahead and download the json file and stored it somewhere secure in your local machine
