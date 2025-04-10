@@ -12,7 +12,7 @@ This guides breaks down into two parts
 1. Setting up the GKE cluster - If you have already setup the GKE cluster, you can skip this part
 2. Setting up the development environment - This part is required for all the contributors
 
-### Setting up the GKE cluster
+## Setting up the GKE cluster
 
 1. First Go ahead and create new project in the Google Cloud Platform and enable billing for the project if you don't have it already enabled. You can follow the below links as guide on how to create a new project and enable billing for the project
     - [Creating the project](https://cloud.google.com/resource-manager/docs/creating-managing-projects)
@@ -58,13 +58,13 @@ This guides breaks down into two parts
     ```
 
 
-7. Once the cluster is created, go ahead and get the credentials for the cluster by running the below command
+8. Once the cluster is created, go ahead and get the credentials for the cluster by running the below command
 
     ```
     gcloud container clusters get-credentials $CLUSTER_NAME --location=$REGION --project $PROJECT_ID
     ```
 
-8. Now export the generated kubeconfig file to the `KUBECONFIG` environment variable by running the below command
+9. Now export the generated kubeconfig file to the `KUBECONFIG` environment variable by running the below command
 
 
     ```
@@ -72,14 +72,14 @@ This guides breaks down into two parts
     ```
 
 
-9. Next export the service account key to the `GOOGLE_APPLICATION_CREDENTIALS` environment variable by running the below command
+10. Next export the service account key to the `GOOGLE_APPLICATION_CREDENTIALS` environment variable by running the below command
 
 
     ```
     export GOOGLE_APPLICATION_CREDENTIALS="/path/to/key.json"
     ```
 
-### Setting up the development environment
+## Setting up the development environment
 
 1. If you already setup the PROJECT_ID ,REGION and CLUSTER_NAME environment variables in the while setting up the GKE cluster, you can skip this step. If not, go ahead and export the below environment variables
 
