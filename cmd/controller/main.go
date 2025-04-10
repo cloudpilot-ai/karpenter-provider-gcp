@@ -34,6 +34,7 @@ func main() {
 	gcpCloudProvider := cloudprovider.New(
 		op.GetClient(),
 		op.EventRecorder,
+		op.InstanceTypeProvider,
 	)
 
 	lo.Must0(op.AddHealthzCheck("cloud-provider", gcpCloudProvider.LivenessProbe))
@@ -55,6 +56,7 @@ func main() {
 			op.GetClient(),
 			op.ImagesProvider,
 			op.NodePoolTemplateProvider,
+			op.InstanceTypeProvider,
 		)...).
 		Start(ctx)
 }
