@@ -25,8 +25,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
@@ -41,6 +43,7 @@ type Operator struct {
 	ImagesProvider           imagefamily.Provider
 	NodePoolTemplateProvider nodepooltemplate.Provider
 	PricingProvider          pricing.Provider
+	InstanceTypeProvider     instancetype.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -53,6 +56,10 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create container service")
 		os.Exit(1)
+	}
+	auth := auth.Credential{
+		ProjectID: options.FromContext(ctx).ProjectID,
+		Region:    options.FromContext(ctx).Region,
 	}
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
@@ -68,11 +75,13 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	)
 	imageProvider := imagefamily.NewDefaultProvider(versionProvider, nodeTemplateProvider)
 	pricingProvider := pricing.NewDefaultProvider(ctx, options.FromContext(ctx).Region)
+	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth)
 
 	return ctx, &Operator{
 		Operator:                 operator,
 		ImagesProvider:           imageProvider,
 		NodePoolTemplateProvider: nodeTemplateProvider,
 		PricingProvider:          pricingProvider,
+		InstanceTypeProvider:     instanceTypeProvider,
 	}
 }

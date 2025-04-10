@@ -24,17 +24,18 @@ import (
 
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
+	providerinstancetype "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	providernodepooltemplate "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 )
 
-func NewController(ctx context.Context,
-	kubeClient client.Client,
-	imageProvider imagefamily.Provider,
-	nodePoolTemplateProvider providernodepooltemplate.Provider) []controller.Controller {
+func NewController(ctx context.Context, kubeClient client.Client, imageProvider imagefamily.Provider,
+	nodePoolTemplateProvider providernodepooltemplate.Provider, instanceTypeProvider providerinstancetype.Provider) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
 		nodepooltemplate.NewController(nodePoolTemplateProvider),
+		instancetype.NewController(instanceTypeProvider),
 	}
 
 	return controllers

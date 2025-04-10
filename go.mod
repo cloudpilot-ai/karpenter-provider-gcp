@@ -7,7 +7,7 @@ require (
 	github.com/awslabs/operatorpkg v0.0.0-20241205163410-0fff9f28d115
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/samber/lo v1.47.0
+	github.com/samber/lo v1.49.1
 	go.uber.org/multierr v1.11.0
 	google.golang.org/api v0.149.0
 	k8s.io/api v0.32.1
