@@ -134,9 +134,6 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 }
 
 func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.MachineType, error) {
-	p.muCache.Lock()
-	defer p.muCache.Unlock()
-
 	if cached, ok := p.cache.Get(InstanceTypesCacheKey); ok {
 		return cached.([]*computepb.MachineType), nil
 	}

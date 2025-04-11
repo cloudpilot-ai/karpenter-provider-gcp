@@ -85,6 +85,9 @@ download: ## Run "go mod download"
 codegen: ## Auto generate files based on GCP APIs
 	./hack/codegen.sh
 
+crds: ## Apply CRDs
+	kubectl apply -f charts/karpenter/crds/
+
 .PHONY: help presubmit run ut-test coverage update verify image apply delete toolchain tidy download
 
 define newline

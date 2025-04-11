@@ -35,6 +35,7 @@ func main() {
 		op.GetClient(),
 		op.EventRecorder,
 		op.InstanceTypeProvider,
+		op.InstanceProvider,
 	)
 
 	lo.Must0(op.AddHealthzCheck("cloud-provider", gcpCloudProvider.LivenessProbe))
@@ -54,6 +55,7 @@ func main() {
 		WithControllers(ctx, controllers.NewController(
 			ctx,
 			op.GetClient(),
+			op.KubernetesInterface,
 			op.ImagesProvider,
 			op.NodePoolTemplateProvider,
 			op.InstanceTypeProvider,

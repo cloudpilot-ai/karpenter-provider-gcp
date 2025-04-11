@@ -3,6 +3,9 @@ kind: GCENodeClass
 metadata:
   name: default-example
 spec:
+  serviceAccount: <fill-me>
+  subnetworkSelectorTerms:
+    - name: karpenter-provider-gcp
   imageSelectorTerms:
     - alias: ContainerOptimizedOS
   tags:
