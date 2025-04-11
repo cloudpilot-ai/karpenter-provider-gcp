@@ -27,11 +27,15 @@ import (
 // GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
 // This will contain the configuration necessary to launch instances in GCP.
 type GCENodeClassSpec struct {
+	// ServiceAccount is the GCP IAM service account email to assign to the instance
+	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
+	ServiceAccount string `json:"serviceAccount"`
+	// Disk defines the boot disk to attach to the instance.
+	// +optional
+	Disk *DiskSpec `json:"disk,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
-	// +kubebuilder:validation:XValidation:message="expected at least one, got none, ['id', 'alias']",rule="self.all(x, has(x.id) || has(x.alias))"
-	// +kubebuilder:validation:XValidation:message="'id' is mutually exclusive, cannot be set with a combination of other fields in imageSelectorTerms",rule="!self.exists(x, has(x.id) && (has(x.alias)))"
-	// +kubebuilder:validation:XValidation:message="'alias' is mutually exclusive, cannot be set with a combination of other fields in imageSelectorTerms",rule="!self.exists(x, has(x.alias) && (has(x.id)))"
-	// +kubebuilder:validation:XValidation:message="'alias' is mutually exclusive, cannot be set with a combination of other imageSelectorTerms",rule="!(self.exists(x, has(x.alias)) && self.size() != 1)"
+	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.all(x, has(x.alias))"
+	// Remove or adjust mutual exclusivity rules since there's only one field
 	// +kubebuilder:validation:MinItems:=1
 	// +kubebuilder:validation:MaxItems:=30
 	// +required
@@ -44,6 +48,10 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	// +optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
+	// SubnetworkSelectorTerms is a list of subnetwork selector terms. The terms are ORed.
+	// +kubebuilder:validation:MinItems:=1
+	// +kubebuilder:validation:MaxItems:=30
+	SubnetworkSelectorTerms []SubnetworkSelectorTerm `json:"subnetworkSelectorTerms"`
 	// Tags to be applied on gce resources like instances and launch templates.
 	// +kubebuilder:validation:XValidation:message="empty tag keys aren't supported",rule="self.all(k, k != '')"
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching gce:gce-cluster-name",rule="self.all(k, k !='gce:gce-cluster-name')"
@@ -53,6 +61,9 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching karpenter.k8s.gcp/gcenodeclass",rule="self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')"
 	// +optional
 	Tags map[string]string `json:"tags,omitempty"`
+	// Metadata contains key/value pairs to set as instance metadata
+	// +optional
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
@@ -134,6 +145,21 @@ type KubeletConfiguration struct {
 	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
 	// +optional
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
+}
+
+type SubnetworkSelectorTerm struct {
+	// Name of the subnetwork (optional)
+	Name string `json:"name,omitempty"`
+	// Tags is a map of labels used to select subnetworks
+	Tags map[string]string `json:"tags,omitempty"`
+}
+
+type DiskSpec struct {
+	// SizeGiB is the size of the boot disk
+	// +kubebuilder:validation:Minimum=10
+	SizeGiB int32 `json:"sizeGiB"`
+	// Type of the disk (e.g., pd-standard, pd-balanced, pd-ssd)
+	Type string `json:"type"`
 }
 
 // GCENodeClass is the Schema for the GCENodeClass API

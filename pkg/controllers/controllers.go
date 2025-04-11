@@ -20,8 +20,10 @@ import (
 	"context"
 
 	"github.com/awslabs/operatorpkg/controller"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/csr"
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/instancetype"
@@ -32,13 +34,19 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 )
 
-func NewController(ctx context.Context, kubeClient client.Client, imageProvider imagefamily.Provider,
-	nodePoolTemplateProvider providernodepooltemplate.Provider, instanceTypeProvider providerinstancetype.Provider,
+func NewController(
+	ctx context.Context,
+	kubeClient client.Client,
+	kubernetesInterface kubernetes.Interface,
+	imageProvider imagefamily.Provider,
+	nodePoolTemplateProvider providernodepooltemplate.Provider,
+	instanceTypeProvider providerinstancetype.Provider,
 	pricingProvider pricing.Provider) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
 		nodepooltemplate.NewController(nodePoolTemplateProvider),
 		instancetype.NewController(instanceTypeProvider),
+		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),
 	}
 
