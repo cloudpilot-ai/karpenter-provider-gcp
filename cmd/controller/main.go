@@ -35,6 +35,7 @@ func main() {
 		op.GetClient(),
 		op.EventRecorder,
 		op.InstanceTypeProvider,
+		op.InstanceProvider,
 	)
 
 	lo.Must0(op.AddHealthzCheck("cloud-provider", gcpCloudProvider.LivenessProbe))
