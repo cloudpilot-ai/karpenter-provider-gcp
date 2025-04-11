@@ -28,6 +28,7 @@ This guides breaks down into two parts
 
 3. Next go ahead and create the service account in the project and assign the following role to the service account
 
+    - Compute Admin
     - Kubernetes Engine Admin
     - Monitoring Admin
     - Service Account User
