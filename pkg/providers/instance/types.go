@@ -34,15 +34,17 @@ const (
 )
 
 type Instance struct {
-	CreationTime     time.Time         `json:"creationTime"`
-	Status           string            `json:"status"`
-	ID               string            `json:"id"`
-	ImageID          string            `json:"imageId"`
-	Type             string            `json:"type"`
-	Region           string            `json:"region"`
-	Zone             string            `json:"zone"`
-	CapacityType     string            `json:"capacityType"`
-	SecurityGroupIDs []string          `json:"securityGroupIds"`
-	VSwitchID        string            `json:"vSwitchId"`
-	Tags             map[string]string `json:"tags"`
+	CapacityReservationID string            `json:"capacityReservationId"`
+	CapacityType          string            `json:"capacityType"`
+	CreationTime          time.Time         `json:"creationTime"`
+	ImageID               string            `json:"imageId"`
+	InstanceID            string            `json:"instanceId"`
+	InstanceTemplate      string            `json:"instanceTemplate"`
+	Labels                map[string]string `json:"labels"`
+	Location              string            `json:"location"`
+	Name                  string            `json:"name"`
+	ProjectID             string            `json:"projectId"`
+	Status                string            `json:"status"`
+	Tags                  map[string]string `json:"tags"`
+	Type                  string            `json:"type"`
 }
