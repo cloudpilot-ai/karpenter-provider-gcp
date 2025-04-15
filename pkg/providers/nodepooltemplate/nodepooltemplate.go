@@ -128,7 +128,7 @@ func (p *DefaultProvider) Create(ctx context.Context) error {
 func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, imageType, nodePoolName string) error {
 	logger := log.FromContext(ctx)
 
-	// adding simple validation, becuase previous code was failing
+	// adding simple validation, because previous code was failing
 	// here and no reasonable log was printed out
 	if p.ClusterInfo.Name == "" {
 		return fmt.Errorf("clusterName is required but was empty")
