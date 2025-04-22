@@ -73,9 +73,6 @@ func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential) *Defa
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
-	p.muCache.Lock()
-	defer p.muCache.Unlock()
-
 	vmTypes, err := p.getInstanceTypes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing instance types: %w", err)
