@@ -16,8 +16,19 @@ package pricing
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
+
+	"k8s.io/klog/v2"
+)
+
+const (
+	initialOnDemandPricesFile = "initial-on-demand-prices.json"
 )
 
 type Provider interface {
@@ -33,58 +44,94 @@ type DefaultProvider struct {
 	muPriceLastUpdatedTimestamp sync.RWMutex
 	muOnDemand                  sync.RWMutex
 	muSpot                      sync.RWMutex
+	region                      string
+	prices                      map[string]map[string]float64
 }
 
 func NewDefaultProvider(ctx context.Context, region string) *DefaultProvider {
-	// Implement me
+	p := &DefaultProvider{
+		region: region,
+		prices: make(map[string]map[string]float64),
+	}
+
+	if err := p.loadInitialPrices(); err != nil {
+		klog.Errorf("Failed to load initial prices: %v", err)
+	}
+
+	return p
+}
+
+func (p *DefaultProvider) loadInitialPrices() error {
+	p.muOnDemand.Lock()
+	defer p.muOnDemand.Unlock()
+
+	// Get the directory of the current file
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		return fmt.Errorf("failed to get current file path")
+	}
+	dir := filepath.Dir(filename)
+
+	// Read the JSON file
+	data, err := os.ReadFile(filepath.Join(dir, initialOnDemandPricesFile))
+	if err != nil {
+		return fmt.Errorf("reading initial prices file: %w", err)
+	}
+
+	// Parse the JSON data
+	if err := json.Unmarshal(data, &p.prices); err != nil {
+		return fmt.Errorf("parsing initial prices: %w", err)
+	}
+
+	klog.V(2).Infof("Loaded prices for %d regions", len(p.prices))
 	return nil
 }
 
 func (p *DefaultProvider) LivenessProbe(_ *http.Request) error {
-	// Implement me
-	p.muOnDemand.Lock()
-	p.muSpot.Lock()
-	p.muPriceLastUpdatedTimestamp.Lock()
-	//nolint: staticcheck
-	p.muOnDemand.Unlock()
-	p.muSpot.Unlock()
-	p.muPriceLastUpdatedTimestamp.Unlock()
 	return nil
 }
 
 func (p *DefaultProvider) InstanceTypes() []string {
-	// Implement me
 	p.muOnDemand.RLock()
-	p.muSpot.RLock()
 	defer p.muOnDemand.RUnlock()
-	defer p.muSpot.RUnlock()
-	return nil
+
+	regionPrices, ok := p.prices[p.region]
+	if !ok {
+		return nil
+	}
+
+	types := make([]string, 0, len(regionPrices))
+	for t := range regionPrices {
+		types = append(types, t)
+	}
+	return types
 }
 
 func (p *DefaultProvider) OnDemandPrice(instanceType string) (float64, bool) {
-	// Implement me
 	p.muOnDemand.RLock()
 	defer p.muOnDemand.RUnlock()
-	return -1.0, false
+
+	regionPrices, ok := p.prices[p.region]
+	if !ok {
+		fmt.Println(p.prices)
+		return 0, false
+	}
+
+	price, ok := regionPrices[instanceType]
+	return price, ok
 }
 
 func (p *DefaultProvider) SpotPrice(instanceType string, zone string) (float64, bool) {
-	// Implement me
-	p.muSpot.RLock()
-	defer p.muSpot.RUnlock()
-	return -1.0, false
+	// Currently, we don't have spot price information
+	return 0, false
 }
 
 func (p *DefaultProvider) UpdateOnDemandPricing(ctx context.Context) error {
-	// Implement me
-	p.muOnDemand.RLock()
-	defer p.muOnDemand.RUnlock()
+	// For now, we only use static pricing data
 	return nil
 }
 
 func (p *DefaultProvider) UpdateSpotPricing(ctx context.Context) error {
-	// Implement me
-	p.muSpot.RLock()
-	defer p.muSpot.RUnlock()
+	// Currently, we don't have spot price information
 	return nil
 }
