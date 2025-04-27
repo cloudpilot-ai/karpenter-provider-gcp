@@ -16,12 +16,14 @@ package pricing
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 
 	"k8s.io/klog/v2"
@@ -29,6 +31,7 @@ import (
 
 const (
 	initialOnDemandPricesFile = "initial-on-demand-prices.json"
+	pricingCSVURL             = "https://gcloud-compute.com/machine-types-regions.csv"
 )
 
 type Provider interface {
@@ -40,18 +43,22 @@ type Provider interface {
 	UpdateSpotPricing(context.Context) error
 }
 
+type pricesStorage = map[string]float64
+
 type DefaultProvider struct {
-	muPriceLastUpdatedTimestamp sync.RWMutex
-	muOnDemand                  sync.RWMutex
-	muSpot                      sync.RWMutex
-	region                      string
-	prices                      map[string]map[string]float64
+	region string
+
+	muOnDemand     sync.RWMutex
+	onDemandPrices pricesStorage
+	muSpot         sync.RWMutex
+	spotPrices     pricesStorage
 }
 
 func NewDefaultProvider(ctx context.Context, region string) *DefaultProvider {
 	p := &DefaultProvider{
-		region: region,
-		prices: make(map[string]map[string]float64),
+		region:         region,
+		onDemandPrices: make(pricesStorage),
+		spotPrices:     make(pricesStorage),
 	}
 
 	if err := p.loadInitialPrices(); err != nil {
@@ -79,15 +86,28 @@ func (p *DefaultProvider) loadInitialPrices() error {
 	}
 
 	// Parse the JSON data
-	if err := json.Unmarshal(data, &p.prices); err != nil {
+	parsedJSON := make(map[string]pricesStorage)
+	if err := json.Unmarshal(data, &parsedJSON); err != nil {
 		return fmt.Errorf("parsing initial prices: %w", err)
 	}
 
-	klog.V(2).Infof("Loaded prices for %d regions", len(p.prices))
+	// Read prices for the region
+	p.onDemandPrices = parsedJSON[p.region]
+	if len(p.onDemandPrices) == 0 {
+		return fmt.Errorf("no initial prices found for region %s", p.region)
+	}
+
+	klog.V(2).Infof("Loaded prices for %d regions", len(p.onDemandPrices))
 	return nil
 }
 
 func (p *DefaultProvider) LivenessProbe(_ *http.Request) error {
+	// ensure we don't deadlock and nolint for the empty critical section
+	p.muOnDemand.Lock()
+	p.muSpot.Lock()
+	//nolint: staticcheck
+	p.muOnDemand.Unlock()
+	p.muSpot.Unlock()
 	return nil
 }
 
@@ -95,13 +115,8 @@ func (p *DefaultProvider) InstanceTypes() []string {
 	p.muOnDemand.RLock()
 	defer p.muOnDemand.RUnlock()
 
-	regionPrices, ok := p.prices[p.region]
-	if !ok {
-		return nil
-	}
-
-	types := make([]string, 0, len(regionPrices))
-	for t := range regionPrices {
+	types := make([]string, len(p.onDemandPrices))
+	for t := range p.onDemandPrices {
 		types = append(types, t)
 	}
 	return types
@@ -111,27 +126,106 @@ func (p *DefaultProvider) OnDemandPrice(instanceType string) (float64, bool) {
 	p.muOnDemand.RLock()
 	defer p.muOnDemand.RUnlock()
 
-	regionPrices, ok := p.prices[p.region]
-	if !ok {
-		fmt.Println(p.prices)
-		return 0, false
-	}
-
-	price, ok := regionPrices[instanceType]
+	price, ok := p.onDemandPrices[instanceType]
 	return price, ok
 }
 
+// Zone parameter is ignored, cause in GCP prices are regional
 func (p *DefaultProvider) SpotPrice(instanceType string, zone string) (float64, bool) {
-	// Currently, we don't have spot price information
-	return 0, false
+	p.muSpot.RLock()
+	defer p.muSpot.RUnlock()
+
+	price, ok := p.spotPrices[instanceType]
+	return price, ok
+}
+
+func (p *DefaultProvider) downloadCSV(ctx context.Context) ([][]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pricingCSVURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	// Download the CSV file
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("downloading CSV: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read all CSV data
+	reader := csv.NewReader(resp.Body)
+	reader.Comma = ','
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("reading CSV: %w", err)
+	}
+
+	if len(records) < 2 {
+		return nil, fmt.Errorf("CSV file is empty or has no data")
+	}
+
+	return records, nil
+}
+
+func (p *DefaultProvider) updatePrices(ctx context.Context, priceColumn string, storage *pricesStorage) error {
+	records, err := p.downloadCSV(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Find required columns
+	header := records[0]
+	var priceCol, regionCol, nameCol int
+	for i, col := range header {
+		switch col {
+		case priceColumn:
+			priceCol = i
+		case "region":
+			regionCol = i
+		case "name":
+			nameCol = i
+		}
+	}
+
+	// Process the data
+	newPrices := make(pricesStorage)
+
+	for _, record := range records[1:] {
+		// Skip records that don't match our region
+		if record[regionCol] != p.region {
+			continue
+		}
+
+		machineType := record[nameCol]
+		priceStr := record[priceCol]
+
+		price, err := strconv.ParseFloat(priceStr, 64)
+		if err != nil {
+			klog.Errorf("Error parsing price for %s: %v", machineType, err)
+			continue
+		}
+
+		newPrices[machineType] = price
+	}
+
+	if len(newPrices) == 0 {
+		return fmt.Errorf("no prices retrieved during update")
+	}
+
+	*storage = newPrices
+	return nil
 }
 
 func (p *DefaultProvider) UpdateOnDemandPricing(ctx context.Context) error {
-	// For now, we only use static pricing data
-	return nil
+	p.muOnDemand.Lock()
+	defer p.muOnDemand.Unlock()
+
+	return p.updatePrices(ctx, "hour", &p.onDemandPrices)
 }
 
 func (p *DefaultProvider) UpdateSpotPricing(ctx context.Context) error {
-	// Currently, we don't have spot price information
-	return nil
+	p.muSpot.Lock()
+	defer p.muSpot.Unlock()
+
+	return p.updatePrices(ctx, "hourSpot", &p.spotPrices)
 }
