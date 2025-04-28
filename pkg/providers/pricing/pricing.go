@@ -33,6 +33,7 @@ import (
 var initialOnDemandPricesData []byte
 
 const (
+	// TODO: Get rid of 3rd party API for pricing: https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/33
 	pricingCSVURL = "https://gcloud-compute.com/machine-types-regions.csv"
 )
 
