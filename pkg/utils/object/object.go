@@ -14,3 +14,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+package object
+
+import (
+	"encoding/json"
+	"reflect"
+
+	"github.com/samber/lo"
+	"sigs.k8s.io/yaml"
+)
+
+func New[T any]() T {
+	return reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T)
+}
+
+func JSONUnmarshal[T any](raw []byte) *T {
+	t := *new(T)
+	lo.Must0(json.Unmarshal(raw, &t))
+	return &t
+}
+
+func YAMLUnmarshal[T any](raw []byte) *T {
+	t := *new(T)
+	lo.Must0(yaml.Unmarshal(raw, &t))
+	return &t
+}

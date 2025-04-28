@@ -57,6 +57,7 @@ func main() {
 			op.ImagesProvider,
 			op.NodePoolTemplateProvider,
 			op.InstanceTypeProvider,
+			op.PricingProvider,
 		)...).
 		Start(ctx)
 }
