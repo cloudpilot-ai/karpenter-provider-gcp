@@ -25,16 +25,23 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 )
 
-var testInstanceTypes = []string{
-	"e2-standard-32",
-	"n2-standard-16",
-	"c2-standard-8",
-	"m1-ultramem-40",
-	"a2-highgpu-1g",
-}
+var (
+	testRegion        = "europe-west4"
+	testInstanceTypes = []string{
+		"e2-standard-32",
+		"n2-standard-16",
+		"c2-standard-8",
+		"m1-ultramem-40",
+		"a2-highgpu-1g",
+	}
+)
 
 func TestDefaultProvider_LivenessProbe(t *testing.T) {
-	provider := pricing.NewDefaultProvider(context.Background(), "europe-west4")
+	provider, err := pricing.NewDefaultProvider(context.Background(), testRegion)
+	if err != nil {
+		t.Errorf("NewDefaultProvider failed: %v", err)
+	}
+
 	if err := provider.LivenessProbe(&http.Request{}); err != nil {
 		t.Errorf("LivenessProbe failed: %v", err)
 	}
@@ -42,7 +49,10 @@ func TestDefaultProvider_LivenessProbe(t *testing.T) {
 
 func TestDefaultProvider_InitialPrices(t *testing.T) {
 	// Initialize the provider with europe-west4 region
-	provider := pricing.NewDefaultProvider(context.Background(), "europe-west4")
+	provider, err := pricing.NewDefaultProvider(context.Background(), testRegion)
+	if err != nil {
+		t.Errorf("NewDefaultProvider failed: %v", err)
+	}
 
 	// Get all instance types
 	instanceTypes := provider.InstanceTypes()
@@ -78,7 +88,10 @@ func TestDefaultProvider_InitialPrices(t *testing.T) {
 
 func TestDefaultProvider_OnDemandPrice(t *testing.T) {
 	// Initialize the provider with europe-west4 region
-	provider := pricing.NewDefaultProvider(context.Background(), "europe-west4")
+	provider, err := pricing.NewDefaultProvider(context.Background(), testRegion)
+	if err != nil {
+		t.Errorf("NewDefaultProvider failed: %v", err)
+	}
 
 	// Test price update
 	if err := provider.UpdateOnDemandPricing(context.Background()); err != nil {
@@ -103,7 +116,10 @@ func TestDefaultProvider_OnDemandPrice(t *testing.T) {
 
 func TestDefaultProvider_SpotPrice(t *testing.T) {
 	// Initialize the provider with europe-west4 region
-	provider := pricing.NewDefaultProvider(context.Background(), "europe-west4")
+	provider, err := pricing.NewDefaultProvider(context.Background(), testRegion)
+	if err != nil {
+		t.Errorf("NewDefaultProvider failed: %v", err)
+	}
 
 	// Test price update
 	if err := provider.UpdateSpotPricing(context.Background()); err != nil {
@@ -128,7 +144,10 @@ func TestDefaultProvider_SpotPrice(t *testing.T) {
 
 func TestDefaultProvider_InstanceTypes(t *testing.T) {
 	// Initialize the provider with europe-west4 region
-	provider := pricing.NewDefaultProvider(context.Background(), "europe-west4")
+	provider, err := pricing.NewDefaultProvider(context.Background(), testRegion)
+	if err != nil {
+		t.Errorf("NewDefaultProvider failed: %v", err)
+	}
 
 	// Updating prices to retrieve a instance types from runtime prices
 	if err := provider.UpdateOnDemandPricing(context.Background()); err != nil {

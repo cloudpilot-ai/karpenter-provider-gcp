@@ -18,22 +18,22 @@ package pricing
 
 import (
 	"context"
+	_ "embed"
 	"encoding/csv"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 
+	utilsobject "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/object"
 	"k8s.io/klog/v2"
 )
 
+//go:embed initial-on-demand-prices.json
+var initialOnDemandPricesData []byte
+
 const (
-	initialOnDemandPricesFile = "initial-on-demand-prices.json"
-	pricingCSVURL             = "https://gcloud-compute.com/machine-types-regions.csv"
+	pricingCSVURL = "https://gcloud-compute.com/machine-types-regions.csv"
 )
 
 type Provider interface {
@@ -56,43 +56,24 @@ type DefaultProvider struct {
 	spotPrices     pricesStorage
 }
 
-func NewDefaultProvider(ctx context.Context, region string) *DefaultProvider {
+func NewDefaultProvider(ctx context.Context, region string) (*DefaultProvider, error) {
 	p := &DefaultProvider{
 		region:         region,
 		onDemandPrices: make(pricesStorage),
 		spotPrices:     make(pricesStorage),
 	}
 
-	if err := p.loadInitialPrices(); err != nil {
-		klog.Errorf("Failed to load initial prices: %v", err)
-	}
-
-	return p
+	// sets the pricing data from the static default state for the provider
+	err := p.Reset()
+	return p, err
 }
 
-func (p *DefaultProvider) loadInitialPrices() error {
+func (p *DefaultProvider) Reset() error {
 	p.muOnDemand.Lock()
 	defer p.muOnDemand.Unlock()
 
-	// Get the directory of the current file
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return fmt.Errorf("failed to get current file path")
-	}
-	dir := filepath.Dir(filename)
-
-	// Read the JSON file
-	data, err := os.ReadFile(filepath.Join(dir, initialOnDemandPricesFile))
-	if err != nil {
-		return fmt.Errorf("reading initial prices file: %w", err)
-	}
-
 	// Parse the JSON data
-	parsedJSON := make(map[string]pricesStorage)
-	if err := json.Unmarshal(data, &parsedJSON); err != nil {
-		return fmt.Errorf("parsing initial prices: %w", err)
-	}
-
+	parsedJSON := *utilsobject.JSONUnmarshal[map[string]pricesStorage](initialOnDemandPricesData)
 	// Read prices for the region
 	p.onDemandPrices = parsedJSON[p.region]
 	if len(p.onDemandPrices) == 0 {
