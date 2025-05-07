@@ -13,7 +13,10 @@ spec:
       requirements:
         - key: "karpenter.sh/capacity-type"
           operator: In
-          values: ["on-demand"]
+          values: ["spot"]
+        - key: "karpenter.k8s.gcp/instance-family"
+          operator: In
+          values: ["n4", "n2"]
         - key: "kubernetes.io/arch"
           operator: In
           values: ["amd64"]
