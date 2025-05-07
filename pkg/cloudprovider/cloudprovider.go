@@ -120,15 +120,15 @@ func (c *CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 	}
 
 	var nodeClaims []*karpv1.NodeClaim
-	for i := range instances {
+	for _, instance := range instances {
 		log.FromContext(ctx).Info("resolving instance type")
-		instanceType, err := c.resolveInstanceTypeFromInstance(ctx, instances[i])
+		instanceType, err := c.resolveInstanceTypeFromInstance(ctx, instance)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve instance type")
 			return nil, fmt.Errorf("resolving instance type, %w", err)
 		}
 
-		nodeClaim := c.instanceToNodeClaim(instances[i], instanceType)
+		nodeClaim := c.instanceToNodeClaim(instance, instanceType)
 		log.FromContext(ctx).Info("converted instance to nodeclaim", "nodeClaimName", nodeClaim.Name)
 		nodeClaims = append(nodeClaims, nodeClaim)
 	}
@@ -159,8 +159,7 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context, ins
 }
 
 func (c *CloudProvider) resolveNodePoolFromInstance(ctx context.Context, instance *instance.Instance) (*karpv1.NodePool, error) {
-	sanitizedKey := utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)
-	nodePoolName := instance.Labels[sanitizedKey]
+	nodePoolName := instance.Labels[utils.LabelNodePoolKey]
 	if nodePoolName == "" {
 		return nil, fmt.Errorf("missing nodepool label")
 	}

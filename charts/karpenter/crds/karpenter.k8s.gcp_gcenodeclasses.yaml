@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.3
+    controller-gen.kubebuilder.io/version: v0.17.4
   name: gcenodeclasses.karpenter.k8s.gcp
 spec:
   group: karpenter.k8s.gcp
@@ -47,20 +47,33 @@ spec:
               This will contain the configuration necessary to launch instances in GCP.
             properties:
               disk:
-                description: Disk defines the boot disk to attach to the instance.
+                description: Disk defines the boot disk to attach to the provisioned
+                  instance.
                 properties:
+                  categories:
+                    description: The category of the system disk (e.g., pd-standard,
+                      pd-balanced, pd-ssd, pd-extreme).
+                    enum:
+                    - hyperdisk-balanced
+                    - hyperdisk-balanced-high-availability
+                    - hyperdisk-extreme
+                    - hyperdisk-ml
+                    - hyperdisk-throughput
+                    - local-ssd
+                    - pd-balanced
+                    - pd-extreme
+                    - pd-ssd
+                    - pd-standard
+                    items:
+                      type: string
+                    type: array
                   sizeGiB:
-                    description: SizeGiB is the size of the boot disk
+                    description: 'SizeGiB is the size of the system disk. Unit: GiB'
                     format: int32
-                    minimum: 10
                     type: integer
-                  type:
-                    description: Type of the disk (e.g., pd-standard, pd-balanced,
-                      pd-ssd)
-                    type: string
-                required:
-                - sizeGiB
-                - type
+                    x-kubernetes-validations:
+                    - message: size invalid
+                      rule: self >= 20
                 type: object
               imageSelectorTerms:
                 description: |-
@@ -224,21 +237,28 @@ spec:
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance
-                pattern: ^[^@]+@[^@]+\.iam\.gserviceaccount\.com$
+                pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
                 type: string
               subnetworkSelectorTerms:
                 description: SubnetworkSelectorTerms is a list of subnetwork selector
-                  terms. The terms are ORed.
+                  terms. The terms are ANDed.
                 items:
+                  description: |-
+                    SubnetSelectorTerm defines selection logic for a subnet used by Karpenter to launch nodes.
+                    If multiple fields are used for selection, the requirements are ANDed.
                   properties:
                     name:
-                      description: Name of the subnetwork (optional)
+                      description: Name of the subnetwork
                       type: string
                     tags:
                       additionalProperties:
                         type: string
                       description: Tags is a map of labels used to select subnetworks
+                      maxProperties: 20
                       type: object
+                      x-kubernetes-validations:
+                      - message: empty tag keys or values aren't supported
+                        rule: self.all(k, k != '' && self[k] != '')
                   type: object
                 maxItems: 30
                 minItems: 1

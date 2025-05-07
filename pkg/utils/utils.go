@@ -1,4 +1,6 @@
 /*
+Copyright 2025 The CloudPilot AI Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -15,9 +17,6 @@ limitations under the License.
 package utils
 
 import (
-	"regexp"
-	"strings"
-
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
@@ -37,12 +36,4 @@ func GetAllSingleValuedRequirementLabels(instanceType *cloudprovider.InstanceTyp
 		}
 	}
 	return labels
-}
-
-func SanitizeGCELabelValue(s string) string {
-	re := regexp.MustCompile("[^a-zA-Z0-9]+")
-	sanitized := re.ReplaceAllString(s, "-")
-
-	sanitized = strings.Trim(sanitized, "-")
-	return strings.ToLower(sanitized)
 }

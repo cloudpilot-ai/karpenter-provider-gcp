@@ -30,9 +30,9 @@ type GCENodeClassSpec struct {
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
 	ServiceAccount string `json:"serviceAccount"`
-	// Disk defines the boot disk to attach to the instance.
+	// Disk defines the boot disk to attach to the provisioned instance.
 	// +optional
-	Disk *DiskSpec `json:"disk,omitempty"`
+	SystemDisk *SystemDisk `json:"disk,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
 	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.all(x, has(x.alias))"
 	// Remove or adjust mutual exclusivity rules since there's only one field
@@ -48,7 +48,7 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	// +optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
-	// SubnetworkSelectorTerms is a list of subnetwork selector terms. The terms are ORed.
+	// SubnetworkSelectorTerms is a list of subnetwork selector terms. The terms are ANDed.
 	// +kubebuilder:validation:MinItems:=1
 	// +kubebuilder:validation:MaxItems:=30
 	SubnetworkSelectorTerms []SubnetworkSelectorTerm `json:"subnetworkSelectorTerms"`
@@ -147,19 +147,28 @@ type KubeletConfiguration struct {
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 }
 
+// SubnetSelectorTerm defines selection logic for a subnet used by Karpenter to launch nodes.
+// If multiple fields are used for selection, the requirements are ANDed.
 type SubnetworkSelectorTerm struct {
-	// Name of the subnetwork (optional)
+	// Name of the subnetwork
+	// +optional
 	Name string `json:"name,omitempty"`
 	// Tags is a map of labels used to select subnetworks
+	// +kubebuilder:validation:XValidation:message="empty tag keys or values aren't supported",rule="self.all(k, k != '' && self[k] != '')"
+	// +kubebuilder:validation:MaxProperties:=20
+	// +optional
 	Tags map[string]string `json:"tags,omitempty"`
 }
 
-type DiskSpec struct {
-	// SizeGiB is the size of the boot disk
-	// +kubebuilder:validation:Minimum=10
+type SystemDisk struct {
+	// SizeGiB is the size of the system disk. Unit: GiB
+	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 20"
+	// +optional
 	SizeGiB int32 `json:"sizeGiB"`
-	// Type of the disk (e.g., pd-standard, pd-balanced, pd-ssd)
-	Type string `json:"type"`
+	// The category of the system disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme).
+	// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
+	// +optional
+	Categories []string `json:"categories,omitempty"`
 }
 
 // GCENodeClass is the Schema for the GCENodeClass API
