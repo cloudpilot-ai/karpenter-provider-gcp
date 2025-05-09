@@ -32,7 +32,7 @@ type GCENodeClassSpec struct {
 	ServiceAccount string `json:"serviceAccount"`
 	// Disk defines the boot disk to attach to the provisioned instance.
 	// +optional
-	SystemDisk *SystemDisk `json:"disk,omitempty"`
+	Disks *Disk `json:"disk,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
 	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.all(x, has(x.alias))"
 	// Remove or adjust mutual exclusivity rules since there's only one field
@@ -48,10 +48,6 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	// +optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
-	// SubnetworkSelectorTerms is a list of subnetwork selector terms. The terms are ANDed.
-	// +kubebuilder:validation:MinItems:=1
-	// +kubebuilder:validation:MaxItems:=30
-	SubnetworkSelectorTerms []SubnetworkSelectorTerm `json:"subnetworkSelectorTerms"`
 	// Tags to be applied on gce resources like instances and launch templates.
 	// +kubebuilder:validation:XValidation:message="empty tag keys aren't supported",rule="self.all(k, k != '')"
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching gce:gce-cluster-name",rule="self.all(k, k !='gce:gce-cluster-name')"
@@ -147,28 +143,18 @@ type KubeletConfiguration struct {
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 }
 
-// SubnetSelectorTerm defines selection logic for a subnet used by Karpenter to launch nodes.
-// If multiple fields are used for selection, the requirements are ANDed.
-type SubnetworkSelectorTerm struct {
-	// Name of the subnetwork
-	// +optional
-	Name string `json:"name,omitempty"`
-	// Tags is a map of labels used to select subnetworks
-	// +kubebuilder:validation:XValidation:message="empty tag keys or values aren't supported",rule="self.all(k, k != '' && self[k] != '')"
-	// +kubebuilder:validation:MaxProperties:=20
-	// +optional
-	Tags map[string]string `json:"tags,omitempty"`
-}
-
-type SystemDisk struct {
+type Disk struct {
 	// SizeGiB is the size of the system disk. Unit: GiB
-	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 20"
+	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 10"
 	// +optional
 	SizeGiB int32 `json:"sizeGiB"`
 	// The category of the system disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme).
 	// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
 	// +optional
 	Categories []string `json:"categories,omitempty"`
+	// Indicates that this is a boot disk
+	// +optional
+	Boot bool `json:"boot"`
 }
 
 // GCENodeClass is the Schema for the GCENodeClass API

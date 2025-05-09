@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.4
+    controller-gen.kubebuilder.io/version: v0.16.3
   name: gcenodeclasses.karpenter.k8s.gcp
 spec:
   group: karpenter.k8s.gcp
@@ -50,6 +50,9 @@ spec:
                 description: Disk defines the boot disk to attach to the provisioned
                   instance.
                 properties:
+                  boot:
+                    description: Indicates that this is a boot disk
+                    type: boolean
                   categories:
                     description: The category of the system disk (e.g., pd-standard,
                       pd-balanced, pd-ssd, pd-extreme).
@@ -73,7 +76,7 @@ spec:
                     type: integer
                     x-kubernetes-validations:
                     - message: size invalid
-                      rule: self >= 20
+                      rule: self >= 10
                 type: object
               imageSelectorTerms:
                 description: |-
@@ -239,30 +242,6 @@ spec:
                   assign to the instance
                 pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
                 type: string
-              subnetworkSelectorTerms:
-                description: SubnetworkSelectorTerms is a list of subnetwork selector
-                  terms. The terms are ANDed.
-                items:
-                  description: |-
-                    SubnetSelectorTerm defines selection logic for a subnet used by Karpenter to launch nodes.
-                    If multiple fields are used for selection, the requirements are ANDed.
-                  properties:
-                    name:
-                      description: Name of the subnetwork
-                      type: string
-                    tags:
-                      additionalProperties:
-                        type: string
-                      description: Tags is a map of labels used to select subnetworks
-                      maxProperties: 20
-                      type: object
-                      x-kubernetes-validations:
-                      - message: empty tag keys or values aren't supported
-                        rule: self.all(k, k != '' && self[k] != '')
-                  type: object
-                maxItems: 30
-                minItems: 1
-                type: array
               tags:
                 additionalProperties:
                   type: string
@@ -285,7 +264,6 @@ spec:
             required:
             - imageSelectorTerms
             - serviceAccount
-            - subnetworkSelectorTerms
             type: object
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass
