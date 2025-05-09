@@ -132,9 +132,9 @@ func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string
 
 	var expectedLabelValue string
 	switch alias {
-	case "ContainerOptimizedOS":
+	case nodepooltemplate.KarpenterDefaultNodePoolTemplateAlias:
 		expectedLabelValue = nodepooltemplate.KarpenterDefaultNodePoolTemplate
-	case "Ubuntu":
+	case nodepooltemplate.KarpenterUbuntuNodePoolTemplateAlias:
 		expectedLabelValue = nodepooltemplate.KarpenterUbuntuNodePoolTemplate
 	default:
 		return nil, fmt.Errorf("unsupported image alias %q", alias)
@@ -190,8 +190,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	}
 
 	// set common Karpenter labels
-	instance.Labels[utils.LabelNodePoolKey] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
-	instance.Labels[utils.LabelGCENodeClassKey] = nodeClass.Name
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
 
 	return instance
 }
@@ -257,8 +257,9 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 	var instances []*Instance
 	filter := fmt.Sprintf(
 		"(labels.%s:* AND labels.%s:*)",
-		utils.LabelNodePoolKey,
-		utils.LabelGCENodeClassKey)
+		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey),
+		utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey),
+	)
 
 	zones, err := p.getZonesInRegion(ctx)
 	if err != nil {

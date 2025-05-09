@@ -159,7 +159,7 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context, ins
 }
 
 func (c *CloudProvider) resolveNodePoolFromInstance(ctx context.Context, instance *instance.Instance) (*karpv1.NodePool, error) {
-	nodePoolName := instance.Labels[utils.LabelNodePoolKey]
+	nodePoolName := instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)]
 	if nodePoolName == "" {
 		return nil, fmt.Errorf("missing nodepool label")
 	}

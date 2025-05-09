@@ -57,9 +57,11 @@ type ClusterInfo struct {
 const (
 	KarpenterDefaultNodePoolTemplate          = "karpenter-default"
 	KarpenterDefaultNodePoolTemplateImageType = "COS_CONTAINERD"
+	KarpenterDefaultNodePoolTemplateAlias     = "ContainerOptimizedOS"
 
 	KarpenterUbuntuNodePoolTemplate          = "karpenter-ubuntu"
 	KarpenterUbuntuNodePoolTemplateImageType = "UBUNTU_CONTAINERD"
+	KarpenterUbuntuNodePoolTemplateAlias     = "Ubuntu"
 )
 
 func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,

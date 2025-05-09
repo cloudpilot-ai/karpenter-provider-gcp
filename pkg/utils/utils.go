@@ -17,6 +17,9 @@ limitations under the License.
 package utils
 
 import (
+	"regexp"
+	"strings"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
@@ -36,4 +39,12 @@ func GetAllSingleValuedRequirementLabels(instanceType *cloudprovider.InstanceTyp
 		}
 	}
 	return labels
+}
+
+func SanitizeGCELabelValue(s string) string {
+	re := regexp.MustCompile("[^a-zA-Z0-9]+")
+	sanitized := re.ReplaceAllString(s, "-")
+
+	sanitized = strings.Trim(sanitized, "-")
+	return strings.ToLower(sanitized)
 }
