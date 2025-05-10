@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.16.3
   name: gcenodeclasses.karpenter.k8s.gcp
 spec:
   group: karpenter.k8s.gcp
@@ -46,9 +46,42 @@ spec:
               GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
               This will contain the configuration necessary to launch instances in GCP.
             properties:
+              disk:
+                description: Disk defines the boot disk to attach to the provisioned
+                  instance.
+                properties:
+                  boot:
+                    description: Indicates that this is a boot disk
+                    type: boolean
+                  categories:
+                    description: The category of the system disk (e.g., pd-standard,
+                      pd-balanced, pd-ssd, pd-extreme).
+                    enum:
+                    - hyperdisk-balanced
+                    - hyperdisk-balanced-high-availability
+                    - hyperdisk-extreme
+                    - hyperdisk-ml
+                    - hyperdisk-throughput
+                    - local-ssd
+                    - pd-balanced
+                    - pd-extreme
+                    - pd-ssd
+                    - pd-standard
+                    items:
+                      type: string
+                    type: array
+                  sizeGiB:
+                    description: 'SizeGiB is the size of the system disk. Unit: GiB'
+                    format: int32
+                    type: integer
+                    x-kubernetes-validations:
+                    - message: size invalid
+                      rule: self >= 10
+                type: object
               imageSelectorTerms:
-                description: ImageSelectorTerms is a list of or image selector terms.
-                  The terms are ORed.
+                description: |-
+                  ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
+                  Remove or adjust mutual exclusivity rules since there's only one field
                 items:
                   description: |-
                     ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
@@ -56,10 +89,8 @@ spec:
                   properties:
                     alias:
                       description: |-
-                        Alias specifies which ACK image to select.
-                        Each alias consists of a family and an image version, specified as "family@version".
+                        Alias specifies which GKE image to select.
                         Valid families include: ContainerOptimizedOS,Ubuntu
-                        Setting the version to latest will result in drift when a new Image is released. This is **not** recommended for production environments.
                       maxLength: 30
                       type: string
                       x-kubernetes-validations:
@@ -69,25 +100,14 @@ spec:
                       - message: 'family is not supported, must be one of the following:
                           ''ContainerOptimizedOS,Ubuntu'''
                         rule: self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']
-                    id:
-                      description: ID is the image id in ECS
-                      type: string
                   type: object
                 maxItems: 30
                 minItems: 1
                 type: array
                 x-kubernetes-validations:
-                - message: expected at least one, got none, ['id', 'alias']
-                  rule: self.all(x, has(x.id) || has(x.alias))
-                - message: '''id'' is mutually exclusive, cannot be set with a combination
-                    of other fields in imageSelectorTerms'
-                  rule: '!self.exists(x, has(x.id) && (has(x.alias)))'
-                - message: '''alias'' is mutually exclusive, cannot be set with a
-                    combination of other fields in imageSelectorTerms'
-                  rule: '!self.exists(x, has(x.alias) && (has(x.id)))'
-                - message: '''alias'' is mutually exclusive, cannot be set with a
-                    combination of other imageSelectorTerms'
-                  rule: '!(self.exists(x, has(x.alias)) && self.size() != 1)'
+                - message: '''alias'' is improperly formatted, must match the format
+                    ''family'''
+                  rule: self.all(x, has(x.alias))
               kubeletConfiguration:
                 description: |-
                   KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
@@ -211,6 +231,17 @@ spec:
                     evictionSoft
                   rule: has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e,
                     (e in self.evictionSoft)):true
+              metadata:
+                additionalProperties:
+                  type: string
+                description: Metadata contains key/value pairs to set as instance
+                  metadata
+                type: object
+              serviceAccount:
+                description: ServiceAccount is the GCP IAM service account email to
+                  assign to the instance
+                pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
+                type: string
               tags:
                 additionalProperties:
                   type: string
@@ -232,6 +263,7 @@ spec:
                   rule: self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')
             required:
             - imageSelectorTerms
+            - serviceAccount
             type: object
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass

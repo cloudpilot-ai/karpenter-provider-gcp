@@ -5,6 +5,7 @@ go 1.23.2
 require (
 	cloud.google.com/go/compute v1.23.3
 	github.com/awslabs/operatorpkg v0.0.0-20241205163410-0fff9f28d115
+	github.com/go-openapi/swag v0.23.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/samber/lo v1.49.1
@@ -13,8 +14,11 @@ require (
 	k8s.io/api v0.32.1
 	k8s.io/apimachinery v0.32.1
 	k8s.io/client-go v0.32.1
+	k8s.io/klog/v2 v2.130.1
+	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
 	sigs.k8s.io/controller-runtime v0.20.0
 	sigs.k8s.io/karpenter v1.2.0
+	sigs.k8s.io/yaml v1.4.0
 )
 
 require (
@@ -30,7 +34,6 @@ require (
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
-	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
@@ -83,10 +86,7 @@ require (
 	k8s.io/cloud-provider v0.32.1 // indirect
 	k8s.io/component-base v0.32.1 // indirect
 	k8s.io/csi-translation-lib v0.32.1 // indirect
-	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20241105132330-32ad38e42d3f // indirect
-	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.2 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
 )

@@ -3,6 +3,7 @@ kind: GCENodeClass
 metadata:
   name: default-example
 spec:
+  serviceAccount: "" # fill me
   imageSelectorTerms:
     - alias: ContainerOptimizedOS
   tags:
