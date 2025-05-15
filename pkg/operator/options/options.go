@@ -32,6 +32,7 @@ const (
 	regionFlagName           = "region"
 	gkeClusterNameEnvVarName = "CLUSTER_NAME"
 	gkeClusterFlagName       = "cluster-name"
+	gkeEnableInterruption    = "INTERRUPTION"
 )
 
 func init() {
@@ -41,15 +42,17 @@ func init() {
 type optionsKey struct{}
 
 type Options struct {
-	ProjectID   string
-	Region      string
-	ClusterName string
+	ProjectID    string
+	Region       string
+	ClusterName  string
+	Interruption bool
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.ProjectID, projectIDFlagName, env.WithDefaultString(projectIDEnvVarName, ""), "GCP project ID where the GKE cluster is running.")
 	fs.StringVar(&o.Region, regionFlagName, env.WithDefaultString(regionEnvVarName, ""), "GCP region of the GKE cluster. If not set, the controller will attempt to infer it.")
 	fs.StringVar(&o.ClusterName, gkeClusterFlagName, env.WithDefaultString(gkeClusterNameEnvVarName, ""), "Name of the GKE cluster that provisioned nodes should connect to.")
+	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }
 
 func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
