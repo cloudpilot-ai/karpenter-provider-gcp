@@ -18,14 +18,18 @@ package operator
 
 import (
 	"context"
+	"net/http"
 	"os"
 
+	computev1 "cloud.google.com/go/compute/apiv1"
+	"cloud.google.com/go/compute/metadata"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
@@ -41,11 +45,15 @@ func init() {
 type Operator struct {
 	*operator.Operator
 
-	ImagesProvider           imagefamily.Provider
-	NodePoolTemplateProvider nodepooltemplate.Provider
-	PricingProvider          pricing.Provider
-	InstanceTypeProvider     instancetype.Provider
-	InstanceProvider         instance.Provider
+	Credential                auth.Credential
+	UnavailableOfferingsCache *cache.UnavailableOfferings
+	MetadataClient            *metadata.Client
+	OperationClient           *computev1.RegionOperationsClient
+	ImagesProvider            imagefamily.Provider
+	NodePoolTemplateProvider  nodepooltemplate.Provider
+	PricingProvider           pricing.Provider
+	InstanceTypeProvider      instancetype.Provider
+	InstanceProvider          instance.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -89,12 +97,24 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeService,
 	)
 
+	unavailableOfferingsCache := cache.NewUnavailableOfferings()
+	metadataClient := metadata.NewClient(http.DefaultClient)
+	operationClient, err := computev1.NewRegionOperationsRESTClient(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to create operation client")
+		os.Exit(1)
+	}
+
 	return ctx, &Operator{
-		Operator:                 operator,
-		ImagesProvider:           imageProvider,
-		NodePoolTemplateProvider: nodeTemplateProvider,
-		PricingProvider:          pricingProvider,
-		InstanceTypeProvider:     instanceTypeProvider,
-		InstanceProvider:         instanceProvider,
+		Operator:                  operator,
+		Credential:                auth,
+		UnavailableOfferingsCache: unavailableOfferingsCache,
+		MetadataClient:            metadataClient,
+		OperationClient:           operationClient,
+		ImagesProvider:            imageProvider,
+		NodePoolTemplateProvider:  nodeTemplateProvider,
+		PricingProvider:           pricingProvider,
+		InstanceTypeProvider:      instanceTypeProvider,
+		InstanceProvider:          instanceProvider,
 	}
 }
