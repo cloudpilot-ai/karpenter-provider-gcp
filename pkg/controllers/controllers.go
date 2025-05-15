@@ -19,15 +19,22 @@ package controllers
 import (
 	"context"
 
+	computev1 "cloud.google.com/go/compute/apiv1"
+	"cloud.google.com/go/compute/metadata"
 	"github.com/awslabs/operatorpkg/controller"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/karpenter/pkg/events"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/csr"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption"
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/instancetype"
 	controllerspricing "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/pricing"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	providerinstancetype "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	providernodepooltemplate "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
@@ -38,6 +45,11 @@ func NewController(
 	ctx context.Context,
 	kubeClient client.Client,
 	kubernetesInterface kubernetes.Interface,
+	recorder events.Recorder,
+	unavailableOfferings *cache.UnavailableOfferings,
+	metadataClient *metadata.Client,
+	operationClient *computev1.RegionOperationsClient,
+	credential auth.Credential,
 	imageProvider imagefamily.Provider,
 	nodePoolTemplateProvider providernodepooltemplate.Provider,
 	instanceTypeProvider providerinstancetype.Provider,
@@ -48,6 +60,17 @@ func NewController(
 		instancetype.NewController(instanceTypeProvider),
 		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),
+	}
+
+	if options.FromContext(ctx).Interruption {
+		controllers = append(controllers, interruption.NewController(
+			kubeClient,
+			recorder,
+			unavailableOfferings,
+			metadataClient,
+			operationClient,
+			credential,
+		))
 	}
 
 	return controllers
