@@ -25,8 +25,9 @@ import (
 	"strconv"
 	"sync"
 
-	utilsobject "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/object"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	utilsobject "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/object"
 )
 
 //go:embed initial-on-demand-prices.json
