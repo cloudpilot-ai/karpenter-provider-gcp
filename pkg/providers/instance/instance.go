@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
@@ -37,7 +38,8 @@ import (
 )
 
 const (
-	instanceCacheExpiration = 15 * time.Second
+	maxInstanceTypes        = 20
+	instanceCacheExpiration = 5 * time.Minute // Cache expiration for instances
 )
 
 type Provider interface {
@@ -73,7 +75,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	// all code below must be adjusted with correct logic!
 	// lets always create e2-standard-2 in us-central1-c at least for now
-	instanceType, err := p.selectInstanceType(instanceTypes)
+	instanceType, err := p.selectInstanceType(nodeClaim, instanceTypes)
 	if err != nil {
 		return nil, err
 	}
@@ -114,14 +116,15 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	}, nil
 }
 
-// lets always create e2-standard-2 for now
-func (p *DefaultProvider) selectInstanceType(instanceTypes []*cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
-	for _, it := range instanceTypes {
-		if it.Name == "e2-standard-2" {
-			return it, nil
-		}
+func (p *DefaultProvider) selectInstanceType(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
+	schedulingRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	instanceTypes, err := cloudprovider.InstanceTypes(instanceTypes).Truncate(schedulingRequirements, maxInstanceTypes)
+	if err != nil {
+		return nil, fmt.Errorf("truncating instance types, %w", err)
 	}
-	return nil, fmt.Errorf("instance type e2-standard-2 not found")
+
+	// Choose first one as default instance type
+	return instanceTypes[0], nil
 }
 
 // zone should be based on the offering, for now lets return static zone from requirements
