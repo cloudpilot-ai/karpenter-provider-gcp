@@ -26,7 +26,7 @@ import (
 	"sync"
 
 	utilsobject "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/object"
-	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 //go:embed initial-on-demand-prices.json
@@ -81,7 +81,7 @@ func (p *DefaultProvider) Reset() error {
 		return fmt.Errorf("no initial prices found for region %s", p.region)
 	}
 
-	klog.V(2).Infof("Loaded prices for %d regions", len(p.onDemandPrices))
+	log.FromContext(context.TODO()).Info("Loaded initial on-demand prices", "region", p.region, "prices", p.onDemandPrices, "count", len(p.onDemandPrices))
 	return nil
 }
 
@@ -185,7 +185,7 @@ func (p *DefaultProvider) updatePrices(ctx context.Context, priceColumn string, 
 
 		price, err := strconv.ParseFloat(priceStr, 64)
 		if err != nil {
-			klog.Errorf("Error parsing price for %s: %v", machineType, err)
+			log.FromContext(ctx).Error(err, "Error parsing price", "machineType", machineType, "price", priceStr)
 			continue
 		}
 
