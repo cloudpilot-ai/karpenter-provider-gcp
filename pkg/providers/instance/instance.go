@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/utils/ptr"
@@ -35,6 +36,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
+const (
+	instanceCacheExpiration = 15 * time.Second
+)
+
 type Provider interface {
 	Create(context.Context, *v1alpha1.GCENodeClass, *karpv1.NodeClaim, []*cloudprovider.InstanceType) (*Instance, error)
 	Get(context.Context, string) (*Instance, error)
@@ -44,6 +49,9 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	// In current implementation, instanceID == InstanceName
+	instanceCache *cache.Cache
+
 	region         string
 	projectID      string
 	computeService *compute.Service
@@ -51,6 +59,7 @@ type DefaultProvider struct {
 
 func NewProvider(region, projectID string, computeService *compute.Service) *DefaultProvider {
 	return &DefaultProvider{
+		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
 		region:         region,
 		projectID:      projectID,
 		computeService: computeService,
@@ -202,6 +211,10 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance
 		return nil, fmt.Errorf("parsing provider ID: %w", err)
 	}
 
+	if instance, ok := p.instanceCache.Get(instanceName); ok {
+		return instance.(*Instance), nil
+	}
+
 	log := log.FromContext(ctx)
 	log.Info("Fetching instance", "project", project, "zone", zone, "instance", instanceName)
 
@@ -227,6 +240,8 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance
 		Tags:         resp.Labels,           // GCP doesn't have separate tags like AWS; labels suffice
 		Status:       InstanceStatusRunning, // consider deriving from resp.Status if needed
 	}
+
+	p.syncInstance(instance)
 
 	return instance, nil
 }
@@ -277,7 +292,7 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 			}
 
 			for _, inst := range page.Items {
-				instances = append(instances, &Instance{
+				instance := &Instance{
 					InstanceID:   inst.Name,
 					Name:         inst.Name,
 					Type:         inst.MachineType[strings.LastIndex(inst.MachineType, "/")+1:], // just for matching "e2-standard-2"
@@ -289,7 +304,9 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 					Labels:       inst.Labels,
 					Tags:         inst.Labels,
 					Status:       InstanceStatusRunning, // consider mapping from inst.Status
-				})
+				}
+				p.syncInstance(instance)
+				instances = append(instances, instance)
 			}
 			return nil
 		})
@@ -301,6 +318,7 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 	}
 
 	log.FromContext(ctx).Info("finished listing GCP instances", "total", len(instances))
+
 	return instances, nil
 }
 
@@ -340,8 +358,45 @@ func (p *DefaultProvider) Delete(ctx context.Context, providerID string) error {
 }
 
 func (p *DefaultProvider) CreateTags(ctx context.Context, providerID string, tags map[string]string) error {
-	// TODO: Implement me
-	return nil
+	projectID, zone, instanceName, err := parseGCEProviderID(providerID)
+	if err != nil {
+		return fmt.Errorf("failed to parse provider ID: %w", err)
+	}
+
+	instance, err := p.computeService.Instances.Get(projectID, zone, instanceName).Context(ctx).Do()
+	if err != nil {
+		if isInstanceNotFoundError(err) {
+			log.FromContext(ctx).Info("Instance not found", "instance", instanceName)
+			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
+		}
+		return fmt.Errorf("getting instance: %w", err)
+	}
+
+	newLabels := instance.Labels
+	if newLabels == nil {
+		newLabels = make(map[string]string)
+	}
+	for k, v := range tags {
+		newLabels[k] = v
+	}
+
+	req := &compute.InstancesSetLabelsRequest{
+		Labels:           newLabels,
+		LabelFingerprint: instance.LabelFingerprint,
+	}
+
+	_, err = p.computeService.Instances.SetLabels(projectID, zone, instanceName, req).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("setting labels: %w", err)
+	}
+
+	// List and sync instances to update the cache
+	_, err = p.List(ctx)
+	if err != nil {
+		return err
+	}
+
+	return err
 }
 
 func parseGCEProviderID(providerID string) (project, zone, instance string, err error) {
@@ -367,4 +422,8 @@ func isInstanceNotFoundError(err error) bool {
 		return apiErr.Code == 404
 	}
 	return false
+}
+
+func (p *DefaultProvider) syncInstance(instance *Instance) {
+	p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
 }
