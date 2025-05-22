@@ -234,7 +234,30 @@ func (c *CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 }
 
 func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftReason, error) {
-	return "", fmt.Errorf("not implemented")
+	// Not needed when GetInstanceTypes removes nodepool dependency
+	nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]
+	if !ok {
+		return "", nil
+	}
+	nodePool := &karpv1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		return "", client.IgnoreNotFound(err)
+	}
+	if nodePool.Spec.Template.Spec.NodeClassRef == nil {
+		return "", nil
+	}
+	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
+		}
+		return "", client.IgnoreNotFound(fmt.Errorf("resolving node class, %w", err))
+	}
+	driftReason, err := c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass)
+	if err != nil {
+		return "", err
+	}
+	return driftReason, nil
 }
 
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
