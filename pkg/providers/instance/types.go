@@ -33,6 +33,7 @@ const (
 	InstanceStatusSuspended    = "SUSPENDED"
 )
 
+// Instance is an internal data structure for GCE instances
 type Instance struct {
 	CapacityReservationID string            `json:"capacityReservationId"`
 	CapacityType          string            `json:"capacityType"`
