@@ -49,6 +49,7 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
 
 	region         string
@@ -210,6 +211,10 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance
 		return nil, fmt.Errorf("parsing provider ID: %w", err)
 	}
 
+	if instance, ok := p.instanceCache.Get(instanceName); ok {
+		return instance.(*Instance), nil
+	}
+
 	log := log.FromContext(ctx)
 	log.Info("Fetching instance", "project", project, "zone", zone, "instance", instanceName)
 
@@ -235,6 +240,8 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance
 		Tags:         resp.Labels,           // GCP doesn't have separate tags like AWS; labels suffice
 		Status:       InstanceStatusRunning, // consider deriving from resp.Status if needed
 	}
+
+	p.syncInstance(instance)
 
 	return instance, nil
 }
@@ -285,7 +292,7 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 			}
 
 			for _, inst := range page.Items {
-				instances = append(instances, &Instance{
+				instance := &Instance{
 					InstanceID:   inst.Name,
 					Name:         inst.Name,
 					Type:         inst.MachineType[strings.LastIndex(inst.MachineType, "/")+1:], // just for matching "e2-standard-2"
@@ -297,7 +304,9 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 					Labels:       inst.Labels,
 					Tags:         inst.Labels,
 					Status:       InstanceStatusRunning, // consider mapping from inst.Status
-				})
+				}
+				p.syncInstance(instance)
+				instances = append(instances, instance)
 			}
 			return nil
 		})
@@ -309,8 +318,6 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 	}
 
 	log.FromContext(ctx).Info("finished listing GCP instances", "total", len(instances))
-
-	p.syncAllInstances(instances)
 
 	return instances, nil
 }
@@ -358,7 +365,8 @@ func (p *DefaultProvider) CreateTags(ctx context.Context, providerID string, tag
 
 	instance, err := p.computeService.Instances.Get(projectID, zone, instanceName).Context(ctx).Do()
 	if err != nil {
-		if gErr, ok := err.(*googleapi.Error); ok && gErr.Code == 404 {
+		if isInstanceNotFoundError(err) {
+			log.FromContext(ctx).Info("Instance not found", "instance", instanceName)
 			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
 		}
 		return fmt.Errorf("getting instance: %w", err)
@@ -416,8 +424,6 @@ func isInstanceNotFoundError(err error) bool {
 	return false
 }
 
-func (p *DefaultProvider) syncAllInstances(instances []*Instance) {
-	for _, instance := range instances {
-		p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
-	}
+func (p *DefaultProvider) syncInstance(instance *Instance) {
+	p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
 }
