@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
@@ -46,7 +46,7 @@ type Operator struct {
 	*operator.Operator
 
 	Credential                auth.Credential
-	UnavailableOfferingsCache *cache.UnavailableOfferings
+	UnavailableOfferingsCache *pkgcache.UnavailableOfferings
 	MetadataClient            *metadata.Client
 	OperationClient           *computev1.RegionOperationsClient
 	ImagesProvider            imagefamily.Provider
@@ -89,7 +89,6 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		log.FromContext(ctx).Error(err, "Failed to create pricing provider")
 		os.Exit(1)
 	}
-	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth)
 
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).Region,
@@ -97,13 +96,15 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeService,
 	)
 
-	unavailableOfferingsCache := cache.NewUnavailableOfferings()
+	unavailableOfferingsCache := pkgcache.NewUnavailableOfferings()
 	metadataClient := metadata.NewClient(http.DefaultClient)
 	operationClient, err := computev1.NewRegionOperationsRESTClient(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create operation client")
 		os.Exit(1)
 	}
+
+	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, unavailableOfferingsCache)
 
 	return ctx, &Operator{
 		Operator:                  operator,
