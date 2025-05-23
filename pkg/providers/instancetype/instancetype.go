@@ -1,4 +1,6 @@
 /*
+Copyright 2024 The CloudPilot AI Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -31,12 +34,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 )
 
 const (
@@ -45,7 +50,15 @@ const (
 	oneMiB                = 1024 * 1024
 )
 
+// ZoneData contains information about a GCE zone and its availability
+type ZoneData struct {
+	ID            string
+	Available     bool
+	SpotAvailable bool
+}
+
 type Provider interface {
+	LivenessProbe(*http.Request) error
 	List(context.Context, *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error)
 	UpdateInstanceTypes(ctx context.Context) error
 	UpdateInstanceTypeOfferings(ctx context.Context) error
@@ -54,22 +67,32 @@ type Provider interface {
 type DefaultProvider struct {
 	authOptions        *auth.Credential
 	machineTypesClient *compute.MachineTypesClient
+	pricingProvider    pricing.Provider
 
-	muCache sync.Mutex
-	cache   *cache.Cache
+	muCache            sync.Mutex
+	instanceTypesCache *cache.Cache
+
+	unavailableOfferings *pkgcache.UnavailableOfferings
 }
 
-func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential) *DefaultProvider {
+func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, pricingProvider pricing.Provider,
+	unavailableOfferingsCache *pkgcache.UnavailableOfferings) *DefaultProvider {
 	machineTypesClient, err := compute.NewMachineTypesRESTClient(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
 		os.Exit(1)
 	}
 	return &DefaultProvider{
-		authOptions:        authOptions,
-		machineTypesClient: machineTypesClient,
-		cache:              cache.New(InstanceTypesCacheTTL, pkgcache.DefaultCleanupInterval),
+		authOptions:          authOptions,
+		machineTypesClient:   machineTypesClient,
+		pricingProvider:      pricingProvider,
+		instanceTypesCache:   cache.New(InstanceTypesCacheTTL, pkgcache.DefaultCleanupInterval),
+		unavailableOfferings: unavailableOfferingsCache,
 	}
+}
+
+func (p *DefaultProvider) LivenessProbe(req *http.Request) error {
+	return p.pricingProvider.LivenessProbe(req)
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
@@ -115,6 +138,55 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	return instanceTypes, nil
 }
 
+// createOfferings creates a set of mutually exclusive offerings for a given instance type. This provider maintains an
+// invariant that each offering is mutually exclusive. Specifically, there is an offering for each permutation of zone
+// and capacity type. ZoneID is also injected into the offering requirements, when available, but there is a 1-1
+// mapping between zone and zoneID so this does not change the number of offerings.
+//
+// Each requirement on the offering is guaranteed to have a single value. To get the value for a requirement on an
+// offering, you can do the following thanks to this invariant:
+//
+//	offering.Requirements.Get(v1.TopologyLabelZone).Any()
+func (p *DefaultProvider) createOfferings(_ context.Context, instanceType string, zones []ZoneData) []cloudprovider.Offering {
+	var offerings []cloudprovider.Offering
+	for _, zone := range zones {
+		if !zone.Available {
+			continue
+		}
+
+		odPrice, odOK := p.pricingProvider.OnDemandPrice(instanceType)
+		spotPrice, spotOK := p.pricingProvider.SpotPrice(instanceType, zone.ID)
+
+		if odOK {
+			isUnavailable := p.unavailableOfferings.IsUnavailable(instanceType, zone.ID, karpv1.CapacityTypeOnDemand)
+			offeringAvailable := !isUnavailable && zone.Available
+
+			offerings = append(offerings, p.createOffering(zone.ID, karpv1.CapacityTypeOnDemand, odPrice, offeringAvailable))
+		}
+
+		if spotOK && zone.SpotAvailable {
+			isUnavailable := p.unavailableOfferings.IsUnavailable(instanceType, zone.ID, karpv1.CapacityTypeSpot)
+			offeringAvailable := !isUnavailable && zone.Available
+
+			offerings = append(offerings, p.createOffering(zone.ID, karpv1.CapacityTypeSpot, spotPrice, offeringAvailable))
+		}
+	}
+
+	return offerings
+}
+
+func (p *DefaultProvider) createOffering(zone, capacityType string, price float64, available bool) cloudprovider.Offering {
+	return cloudprovider.Offering{
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+			scheduling.NewRequirement(v1alpha1.LabelTopologyZoneID, corev1.NodeSelectorOpIn, zone),
+		),
+		Price:     price,
+		Available: available,
+	}
+}
+
 func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
 	types, err := p.getInstanceTypes(ctx)
 	if err != nil {
@@ -134,7 +206,7 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 }
 
 func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.MachineType, error) {
-	if cached, ok := p.cache.Get(InstanceTypesCacheKey); ok {
+	if cached, ok := p.instanceTypesCache.Get(InstanceTypesCacheKey); ok {
 		return cached.([]*computepb.MachineType), nil
 	}
 
@@ -160,7 +232,7 @@ func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.Ma
 		vmTypes = append(vmTypes, resp.Value.MachineTypes...)
 	}
 
-	p.cache.SetDefault(InstanceTypesCacheKey, vmTypes)
+	p.instanceTypesCache.SetDefault(InstanceTypesCacheKey, vmTypes)
 	return vmTypes, nil
 }
 
