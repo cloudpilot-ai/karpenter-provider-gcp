@@ -102,9 +102,12 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	log.FromContext(ctx).Info("Created instance", "instanceName", op.Name)
 
 	return &Instance{
-		InstanceID:   instance.Name,
-		Name:         instance.Name,
-		Type:         instanceType.Name,
+		InstanceID: instance.Name,
+		Name:       instance.Name,
+		// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
+		// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
+		// Type:         instanceType.Name,
+		Type:         "e2-standard-2",
 		Location:     zone,
 		ProjectID:    p.projectID,
 		ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
@@ -124,6 +127,7 @@ func (p *DefaultProvider) selectInstanceType(nodeClaim *karpv1.NodeClaim, instan
 	}
 
 	// Choose first one as default instance type
+	// return instanceTypes[0], nil
 	return instanceTypes[0], nil
 }
 
