@@ -26,6 +26,7 @@ import (
 	computev1 "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"cloud.google.com/go/compute/metadata"
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/go-openapi/swag"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -75,7 +75,7 @@ func NewController(kubeClient client.Client, recorder events.Recorder,
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// Refer to https://cloud.google.com/compute/docs/instances/create-use-spot#detect-preemption
 	// We need to check if the instance is preempted and delete the nodeClaim from the operation event,
 	// In this stage, we only detect preempted operation here.
@@ -141,14 +141,8 @@ func extractInstanceName(targetLink string) (string, error) {
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("interruption").
-		WithEventFilter(predicate.NewTypedPredicateFuncs(func(obj client.Object) bool {
-			if label, ok := obj.GetLabels()[karpv1.CapacityTypeLabelKey]; !ok || label != karpv1.CapacityTypeSpot {
-				return false
-			}
-
-			return true
-		})).
-		Complete(c)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(c))
 }
 
 // deleteNodeClaim removes the NodeClaim from the api-server
