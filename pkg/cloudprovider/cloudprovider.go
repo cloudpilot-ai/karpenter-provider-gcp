@@ -191,7 +191,7 @@ func (c *CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.Nod
 }
 
 func (c *CloudProvider) LivenessProbe(req *http.Request) error {
-	return nil
+	return c.instanceTypeProvider.LivenessProbe(req)
 }
 
 // GetInstanceTypes returns all available InstanceTypes
