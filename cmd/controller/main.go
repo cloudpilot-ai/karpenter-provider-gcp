@@ -59,7 +59,7 @@ func main() {
 			op.EventRecorder,
 			op.UnavailableOfferingsCache,
 			op.MetadataClient,
-			op.OperationClient,
+			op.ZoneOperationClient,
 			op.Credential,
 			op.ImagesProvider,
 			op.NodePoolTemplateProvider,

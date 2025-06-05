@@ -30,6 +30,7 @@ import (
 	"github.com/go-openapi/swag"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -55,14 +56,14 @@ type Controller struct {
 
 	unavailableOfferingsCache *cache.UnavailableOfferings
 	metadataClient            *metadata.Client
-	operationClient           *computev1.RegionOperationsClient
+	zoneOperationClient       *computev1.ZoneOperationsClient
 	credential                auth.Credential
 }
 
 func NewController(kubeClient client.Client, recorder events.Recorder,
 	unavailableOfferingsCache *cache.UnavailableOfferings,
 	metadataClient *metadata.Client,
-	operationClient *computev1.RegionOperationsClient,
+	zoneOperationClient *computev1.ZoneOperationsClient,
 	credential auth.Credential) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
@@ -70,56 +71,93 @@ func NewController(kubeClient client.Client, recorder events.Recorder,
 
 		unavailableOfferingsCache: unavailableOfferingsCache,
 		metadataClient:            metadataClient,
-		operationClient:           operationClient,
+		zoneOperationClient:       zoneOperationClient,
 		credential:                credential,
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
-	// Refer to https://cloud.google.com/compute/docs/instances/create-use-spot#detect-preemption
-	// We need to check if the instance is preempted and delete the nodeClaim from the operation event,
-	// In this stage, we only detect preempted operation here.
-	it := c.operationClient.List(ctx, &computepb.ListRegionOperationsRequest{
-		Project: c.credential.ProjectID,
-		Region:  c.credential.Region,
-		Filter:  swag.String(OperationTypePreempted),
-	})
-
-	instanceNames := []string{}
-	for {
-		op, err := it.Next()
-		if err != nil {
-			log.FromContext(ctx).Error(err, "listing operations")
-			break
-		}
-		targetLink := op.GetTargetLink()
-		instanceName, err := extractInstanceName(targetLink)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "extracting instance name")
-			break
-		}
-		instanceNames = append(instanceNames, instanceName)
+// getZonesFromNodes lists all zones by inspecting node labels
+func getZonesFromNodes(ctx context.Context, kubeClient client.Client) ([]string, error) {
+	nodeList := &corev1.NodeList{}
+	if err := kubeClient.List(ctx, nodeList, &client.ListOptions{}); err != nil {
+		return nil, fmt.Errorf("listing nodes: %w", err)
 	}
 
-	errs := make([]error, len(instanceNames))
-	workqueue.ParallelizeUntil(ctx, 10, len(instanceNames), func(i int) {
-		instanceName := instanceNames[i]
-		nodeClaim, err := c.getNodeClaimByNodeName(ctx, instanceName)
-		if err != nil {
-			errs[i] = fmt.Errorf("getting node claim by node name: %w", err)
+	zoneSet := sets.Set[string]{}
+	for _, node := range nodeList.Items {
+		zone := node.Labels[corev1.LabelTopologyZone]
+		if zone == "" {
+			// fallback to legacy label
+			zone = node.Labels[corev1.LabelFailureDomainBetaZone]
 		}
-		zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-		instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
-		if zone != "" && instanceType != "" {
-			c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
+		if zone != "" {
+			zoneSet.Insert(zone)
+		}
+	}
+
+	// convert set to sorted slice
+	var zones []string
+	for zone := range zoneSet {
+		zones = append(zones, zone)
+	}
+
+	return zones, nil
+}
+
+func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+	// Get all zones from nodes
+	zones, err := getZonesFromNodes(ctx, c.kubeClient)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("getting zones: %w", err)
+	}
+
+	for _, zone := range zones {
+		// Refer to https://cloud.google.com/compute/docs/instances/create-use-spot#detect-preemption
+		// We need to check if the instance is preempted and delete the nodeClaim from the operation event,
+		// In this stage, we only detect preempted operation here.
+		it := c.zoneOperationClient.List(ctx, &computepb.ListZoneOperationsRequest{
+			Project: c.credential.ProjectID,
+			Zone:    zone,
+			Filter:  swag.String(fmt.Sprintf(`operationType="%s"`, OperationTypePreempted)),
+		})
+
+		instanceNames := []string{}
+		for {
+			op, err := it.Next()
+			if err != nil {
+				log.FromContext(ctx).Info("listing operations warning", err)
+				break
+			}
+			targetLink := op.GetTargetLink()
+			instanceName, err := extractInstanceName(targetLink)
+			if err != nil {
+				log.FromContext(ctx).Error(err, "extracting instance name")
+				break
+			}
+			instanceNames = append(instanceNames, instanceName)
 		}
 
-		if err := c.deleteNodeClaim(ctx, nodeClaim); err != nil {
-			errs[i] = fmt.Errorf("deleting node claim: %w", err)
+		errs := make([]error, len(instanceNames))
+		workqueue.ParallelizeUntil(ctx, 10, len(instanceNames), func(i int) {
+			instanceName := instanceNames[i]
+			nodeClaim, err := c.getNodeClaimByNodeName(ctx, instanceName)
+			if err != nil {
+				errs[i] = fmt.Errorf("getting node claim by node name: %w", err)
+				return
+			}
+			zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+			instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
+			if zone != "" && instanceType != "" {
+				c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
+			}
+
+			if err := c.deleteNodeClaim(ctx, nodeClaim); err != nil {
+				errs[i] = fmt.Errorf("deleting node claim: %w", err)
+			}
+		})
+		if err := multierr.Combine(errs...); err != nil {
+			return reconcile.Result{}, err
 		}
-	})
-	if err := multierr.Combine(errs...); err != nil {
-		return reconcile.Result{}, err
 	}
 
 	// Will requeue after 3 seconds and try again
