@@ -30,6 +30,7 @@ import (
 	"github.com/go-openapi/swag"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -82,15 +83,15 @@ func getZonesFromNodes(ctx context.Context, kubeClient client.Client) ([]string,
 		return nil, fmt.Errorf("listing nodes: %w", err)
 	}
 
-	zoneSet := make(map[string]struct{})
+	zoneSet := sets.Set[string]{}
 	for _, node := range nodeList.Items {
-		zone := node.Labels["topology.kubernetes.io/zone"]
+		zone := node.Labels[corev1.LabelTopologyZone]
 		if zone == "" {
 			// fallback to legacy label
-			zone = node.Labels["failure-domain.beta.kubernetes.io/zone"]
+			zone = node.Labels[corev1.LabelFailureDomainBetaZone]
 		}
 		if zone != "" {
-			zoneSet[zone] = struct{}{}
+			zoneSet.Insert(zone)
 		}
 	}
 
