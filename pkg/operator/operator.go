@@ -48,7 +48,7 @@ type Operator struct {
 	Credential                auth.Credential
 	UnavailableOfferingsCache *pkgcache.UnavailableOfferings
 	MetadataClient            *metadata.Client
-	OperationClient           *computev1.RegionOperationsClient
+	ZoneOperationClient       *computev1.ZoneOperationsClient
 	ImagesProvider            imagefamily.Provider
 	NodePoolTemplateProvider  nodepooltemplate.Provider
 	PricingProvider           pricing.Provider
@@ -98,9 +98,9 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 
 	unavailableOfferingsCache := pkgcache.NewUnavailableOfferings()
 	metadataClient := metadata.NewClient(http.DefaultClient)
-	operationClient, err := computev1.NewRegionOperationsRESTClient(ctx)
+	zoneOperationClient, err := computev1.NewZoneOperationsRESTClient(ctx)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "Failed to create operation client")
+		log.FromContext(ctx).Error(err, "Failed to create zone operation client")
 		os.Exit(1)
 	}
 
@@ -111,7 +111,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		Credential:                auth,
 		UnavailableOfferingsCache: unavailableOfferingsCache,
 		MetadataClient:            metadataClient,
-		OperationClient:           operationClient,
+		ZoneOperationClient:       zoneOperationClient,
 		ImagesProvider:            imageProvider,
 		NodePoolTemplateProvider:  nodeTemplateProvider,
 		PricingProvider:           pricingProvider,

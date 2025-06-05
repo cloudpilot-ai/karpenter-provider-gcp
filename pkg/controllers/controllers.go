@@ -48,7 +48,7 @@ func NewController(
 	recorder events.Recorder,
 	unavailableOfferings *cache.UnavailableOfferings,
 	metadataClient *metadata.Client,
-	operationClient *computev1.RegionOperationsClient,
+	zoneOperationClient *computev1.ZoneOperationsClient,
 	credential auth.Credential,
 	imageProvider imagefamily.Provider,
 	nodePoolTemplateProvider providernodepooltemplate.Provider,
@@ -68,7 +68,7 @@ func NewController(
 			recorder,
 			unavailableOfferings,
 			metadataClient,
-			operationClient,
+			zoneOperationClient,
 			credential,
 		))
 	}
