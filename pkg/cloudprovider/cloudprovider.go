@@ -37,6 +37,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	cloudproviderevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider/events"
+	gcperrors "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/errors"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -200,10 +201,9 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// If we can't resolve the NodeClass, then it's impossible for us to resolve the instance types
-			// c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
-			log.FromContext(ctx).Error(fmt.Errorf("failed to resolve node class"), "nodePool", nodePool)
-			return nil, nil
+			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
 		}
+		log.FromContext(ctx).Error(gcperrors.ErrResolveNodeClass, "nodePool", nodePool)
 		return nil, fmt.Errorf("resolving node class, %w", err)
 	}
 	// TODO, break this coupling
