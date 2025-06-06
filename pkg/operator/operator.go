@@ -57,6 +57,8 @@ type Operator struct {
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
+	os.Setenv(options.GCPAuth, options.FromContext(ctx).GCPAuth)
+
 	computeService, err := compute.NewService(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create compute service")

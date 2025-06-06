@@ -33,6 +33,7 @@ const (
 	gkeClusterNameEnvVarName = "CLUSTER_NAME"
 	gkeClusterFlagName       = "cluster-name"
 	gkeEnableInterruption    = "INTERRUPTION"
+	GCPAuth                  = "GOOGLE_APPLICATION_CREDENTIALS"
 )
 
 func init() {
@@ -42,9 +43,12 @@ func init() {
 type optionsKey struct{}
 
 type Options struct {
-	ProjectID    string
-	Region       string
-	ClusterName  string
+	ProjectID   string
+	Region      string
+	ClusterName string
+	// GCPAuth is the path to the Google Application Credentials JSON file.
+	// https://cloud.google.com/docs/authentication/application-default-credentials
+	GCPAuth      string
 	Interruption bool
 }
 
@@ -52,6 +56,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.ProjectID, projectIDFlagName, env.WithDefaultString(projectIDEnvVarName, ""), "GCP project ID where the GKE cluster is running.")
 	fs.StringVar(&o.Region, regionFlagName, env.WithDefaultString(regionEnvVarName, ""), "GCP region of the GKE cluster. If not set, the controller will attempt to infer it.")
 	fs.StringVar(&o.ClusterName, gkeClusterFlagName, env.WithDefaultString(gkeClusterNameEnvVarName, ""), "Name of the GKE cluster that provisioned nodes should connect to.")
+	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }
 
