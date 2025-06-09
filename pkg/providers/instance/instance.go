@@ -147,6 +147,7 @@ func (p *DefaultProvider) selectZone(nodeClaim *karpv1.NodeClaim) (string, error
 	return "", fmt.Errorf("no zone specified in nodeClaim requirements")
 }
 
+//nolint:gocyclo
 func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string) (*compute.InstanceTemplate, error) {
 	if alias == "" {
 		return nil, fmt.Errorf("alias not specified in ImageSelectorTerm")
@@ -169,7 +170,8 @@ func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string
 
 	for _, t := range instanceTemplates.Items {
 		if t.Properties != nil && t.Properties.Labels != nil {
-			// Need to check instanceTemplates in current cluster
+			// instanceTemplates are shared across clusters, so we need to check if the template belongs to the current cluster
+			// This is done by checking the metadata for the cluster name label.
 			if t.Properties.Metadata != nil {
 				metadataClusterNamemetadata, err := metadata.GetClusterName(t.Properties.Metadata)
 				if err != nil {
