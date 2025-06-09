@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
@@ -54,14 +55,16 @@ type DefaultProvider struct {
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
 
+	clusterName    string
 	region         string
 	projectID      string
 	computeService *compute.Service
 }
 
-func NewProvider(region, projectID string, computeService *compute.Service) *DefaultProvider {
+func NewProvider(clusterName, region, projectID string, computeService *compute.Service) *DefaultProvider {
 	return &DefaultProvider{
 		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
+		clusterName:    clusterName,
 		region:         region,
 		projectID:      projectID,
 		computeService: computeService,
@@ -89,6 +92,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	if err != nil {
 		return nil, err
 	}
+	log.FromContext(ctx).Info("Using instance template with findTemplateForAlias", "template", template)
 
 	instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, zone)
 
@@ -99,7 +103,9 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	// we could wait for the node to be present in kubernetes api via csr sign up
 	// should be done with watcher, for now implemented as a csr controller
-	log.FromContext(ctx).Info("Created instance", "instanceName", op.Name)
+	log.FromContext(ctx).Info("Created instance", "instanceName", op.Name, "instanceType", instanceType.Name,
+		"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
+		"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
 
 	return &Instance{
 		InstanceID: instance.Name,
@@ -163,6 +169,18 @@ func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string
 
 	for _, t := range instanceTemplates.Items {
 		if t.Properties != nil && t.Properties.Labels != nil {
+			// Need to check instanceTemplates in current cluster
+			if t.Properties.Metadata != nil {
+				metadataClusterNamemetadata, err := metadata.GetClusterName(t.Properties.Metadata)
+				if err != nil {
+					log.FromContext(ctx).Error(err, "failed to get cluster name from metadata", "instanceTemplate", t.Name)
+					continue
+				}
+				if metadataClusterNamemetadata != p.clusterName {
+					log.FromContext(ctx).Info("Skipping instance template from different cluster", "templateName", t.Name, "clusterName", p.clusterName)
+					continue
+				}
+			}
 			if val, ok := t.Properties.Labels["goog-k8s-node-pool-name"]; ok && val == expectedLabelValue {
 				return t, nil
 			}
@@ -180,6 +198,14 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	for _, ni := range template.Properties.NetworkInterfaces {
 		ni.AccessConfigs = nil
 	}
+
+	err := metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata)
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
+		return nil
+	}
+
+	log.FromContext(context.Background()).Info("removed GKE builtin labels from metadata", "metadata", template.Properties.Metadata)
 
 	instance := &compute.Instance{
 		Name:              fmt.Sprintf("karpenter-%s", nodeClaim.Name),
