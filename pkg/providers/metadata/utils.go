@@ -26,6 +26,9 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -66,4 +69,59 @@ func RemoveGKEBuiltinLabels(metadata *compute.Metadata) error {
 	}
 
 	return nil
+}
+
+func PatchUnregisteredTaints(metadata *compute.Metadata) error {
+	patchedDone := false
+
+	// Remove nodePoolLabelEntry from kube-labels and kube-env
+	for _, item := range metadata.Items {
+		if item.Key == "kube-env" {
+			kubeEnv := swag.StringValue(item.Value)
+
+			lines := strings.Split(kubeEnv, "\n")
+			for i, line := range lines {
+				if strings.HasPrefix(line, "KUBELET_ARGS:") {
+					if !strings.Contains(line, UnregisteredTaintArg) {
+						// Append the taint argument to the existing KUBELET_ARGS line
+						lines[i] = line + " " + UnregisteredTaintArg
+						patchedDone = true
+					}
+				}
+			}
+			// Rejoin the updated lines into a single string
+			item.Value = swag.String(strings.Join(lines, "\n"))
+		}
+	}
+
+	if !patchedDone {
+		return fmt.Errorf("failed to patch unregistered taints")
+	}
+
+	return nil
+}
+
+func AppendNodeclaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) error {
+	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			labels := getTags(nodeClass, nodeClaim)
+			labelString := make([]string, 0, len(labels))
+			for k, v := range labels {
+				// Append the nodeclaim label to kube-labels
+				labelString = append(labelString, fmt.Sprintf("%s=%s", k, v))
+			}
+			item.Value = swag.String(*item.Value + "," + strings.Join(labelString, ","))
+		}
+	}
+
+	return nil
+}
+
+func getTags(nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim) map[string]string {
+	staticTags := map[string]string{
+		karpv1.NodePoolLabelKey: nodeClaim.Labels[karpv1.NodePoolLabelKey],
+		v1alpha1.LabelNodeClass: nodeClass.Name,
+	}
+	return lo.Assign(nodeClass.Spec.Tags, staticTags)
 }
