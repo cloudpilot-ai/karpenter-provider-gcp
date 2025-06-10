@@ -93,6 +93,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	instanceProvider := instance.NewProvider(
+		options.FromContext(ctx).ClusterName,
 		options.FromContext(ctx).Region,
 		options.FromContext(ctx).ProjectID,
 		computeService,
