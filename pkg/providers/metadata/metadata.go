@@ -18,12 +18,7 @@ package metadata
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
 
-	"github.com/go-openapi/swag"
-	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
@@ -55,35 +50,11 @@ func (m *Metadata) ResolveMetadata(ctx context.Context) (map[string]*compute.Met
 
 	metadataMap := map[string]*compute.Metadata{}
 	for _, instanceTemplate := range instanceTemplates {
-		if err := m.removeGKEBuiltinLabels(instanceTemplate.Properties.Metadata); err != nil {
+		if err := RemoveGKEBuiltinLabels(instanceTemplate.Properties.Metadata); err != nil {
 			return nil, err
 		}
 		metadataMap[instanceTemplate.Name] = instanceTemplate.Properties.Metadata
 	}
 
 	return metadataMap, nil
-}
-
-func (m *Metadata) removeGKEBuiltinLabels(metadata *compute.Metadata) error {
-	// Get cluster name
-	clusterNameEntry := lo.Filter(metadata.Items, func(item *compute.MetadataItems, _ int) bool {
-		return item.Key == ClusterNameLabel
-	})
-	if len(clusterNameEntry) != 1 {
-		return errors.New("cluster name label not found")
-	}
-	clusterName := swag.StringValue(clusterNameEntry[0].Value)
-	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, clusterName)
-
-	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
-	for _, item := range metadata.Items {
-		if item.Key == "kube-labels" {
-			item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
-		}
-		if item.Key == "kube-env" {
-			item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
-		}
-	}
-
-	return nil
 }
