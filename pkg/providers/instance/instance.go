@@ -207,6 +207,18 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
+	err = metadata.PatchUnregisteredTaints(template.Properties.Metadata)
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "failed to append unregistered taint to kube-env")
+		return nil
+	}
+
+	err = metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, template.Properties.Metadata)
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "failed to append nodeclaim label to kube-env")
+		return nil
+	}
+
 	log.FromContext(context.Background()).Info("removed GKE builtin labels from metadata", "metadata", template.Properties.Metadata)
 
 	instance := &compute.Instance{
