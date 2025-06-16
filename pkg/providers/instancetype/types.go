@@ -72,7 +72,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(karpv1.CapacityTypeLabelKey).Any()
 		})...),
-		// Well Known to AlibabaCloud
+		// Well Known to Google Cloud
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, string(mt.GetGuestCpus())),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUModel, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, fmt.Sprintf("%dMb", mt.GetMemoryMb())),

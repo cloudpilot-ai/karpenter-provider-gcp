@@ -101,7 +101,7 @@ func PatchUnregisteredTaints(metadata *compute.Metadata) error {
 	return nil
 }
 
-func AppendNodeclaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) error {
+func AppendNodeclaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
 	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
 	for _, item := range metadata.Items {
 		if item.Key == "kube-labels" {
@@ -114,8 +114,15 @@ func AppendNodeclaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENo
 			item.Value = swag.String(*item.Value + "," + strings.Join(labelString, ","))
 		}
 	}
+}
 
-	return nil
+func AppendRegisteredLabel(metadata *compute.Metadata) {
+	// Add registered label in metadata
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			item.Value = swag.String(*item.Value + "," + RegisteredLabel)
+		}
+	}
 }
 
 func getTags(nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim) map[string]string {

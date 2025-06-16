@@ -213,11 +213,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
-	err = metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, template.Properties.Metadata)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to append nodeclaim label to kube-env")
-		return nil
-	}
+	metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, template.Properties.Metadata)
+	metadata.AppendRegisteredLabel(template.Properties.Metadata)
 
 	log.FromContext(context.Background()).Info("removed GKE builtin labels from metadata", "metadata", template.Properties.Metadata)
 
