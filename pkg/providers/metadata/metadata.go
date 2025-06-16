@@ -18,8 +18,10 @@ package metadata
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/api/compute/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 )
@@ -27,7 +29,11 @@ import (
 const (
 	ClusterNameLabel     = "cluster-name"
 	GKENodePoolLabel     = "cloud.google.com/gke-nodepool"
-	UnregisteredTaintArg = "--register-with-taints=karpenter.sh/unregistered=true:NoSchedule"
+	UnregisteredTaintArg = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
+)
+
+var (
+	RegisteredLabel = fmt.Sprintf("%s=%s", karpv1.NodeRegisteredLabelKey, "true")
 )
 
 type Metadata struct {
