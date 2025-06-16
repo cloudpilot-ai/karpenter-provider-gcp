@@ -331,6 +331,8 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 	// Set core labels
 	labels[corev1.LabelTopologyZone] = i.Location
 	labels[karpv1.CapacityTypeLabelKey] = i.CapacityType
+	// Add instance type label for gce nodeclaim
+	labels[corev1.LabelInstanceTypeStable] = i.Type
 
 	// Add node pool label if present
 	if v, ok := i.Labels[karpv1.NodePoolLabelKey]; ok {
