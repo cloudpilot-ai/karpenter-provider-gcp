@@ -30,9 +30,11 @@ import (
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	"google.golang.org/api/iterator"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -69,10 +71,15 @@ type DefaultProvider struct {
 	machineTypesClient *compute.MachineTypesClient
 	pricingProvider    pricing.Provider
 
-	muCache            sync.Mutex
+	muCache sync.RWMutex
+	// FIXME: use cache to speed up query.
 	instanceTypesCache *cache.Cache
 
-	unavailableOfferings *pkgcache.UnavailableOfferings
+	// We assume that all instance types with spot are available in all zones.
+	// Reference: https://cloud.google.com/compute/docs/instances/provisioning-models
+	instanceTypesOfferings map[string]sets.Set[string]
+	instanceTypesInfo      []*computepb.MachineType
+	unavailableOfferings   *pkgcache.UnavailableOfferings
 }
 
 func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, pricingProvider pricing.Provider,
@@ -83,11 +90,12 @@ func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, prici
 		os.Exit(1)
 	}
 	return &DefaultProvider{
-		authOptions:          authOptions,
-		machineTypesClient:   machineTypesClient,
-		pricingProvider:      pricingProvider,
-		instanceTypesCache:   cache.New(InstanceTypesCacheTTL, pkgcache.DefaultCleanupInterval),
-		unavailableOfferings: unavailableOfferingsCache,
+		authOptions:            authOptions,
+		machineTypesClient:     machineTypesClient,
+		pricingProvider:        pricingProvider,
+		instanceTypesCache:     cache.New(InstanceTypesCacheTTL, pkgcache.DefaultCleanupInterval),
+		instanceTypesOfferings: make(map[string]sets.Set[string]),
+		unavailableOfferings:   unavailableOfferingsCache,
 	}
 }
 
@@ -96,13 +104,16 @@ func (p *DefaultProvider) LivenessProbe(req *http.Request) error {
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
-	vmTypes, err := p.getInstanceTypes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing instance types: %w", err)
+	p.muCache.RLock()
+	defer p.muCache.RUnlock()
+
+	allZones := sets.New[string]()
+	for _, offeringZones := range p.instanceTypesOfferings {
+		allZones.Insert(offeringZones.UnsortedList()...)
 	}
 
 	instanceTypes := []*cloudprovider.InstanceType{}
-	for _, mt := range vmTypes {
+	for _, mt := range p.instanceTypesInfo {
 		if mt.Name == nil || mt.MemoryMb == nil || mt.GuestCpus == nil {
 			continue
 		}
@@ -123,6 +134,18 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			SystemReserved: corev1.ResourceList{},
 		}
 
+		// Make sure all zone is checked.
+		zoneData := lo.Map(allZones.UnsortedList(), func(zoneID string, _ int) ZoneData {
+			// We assume that all zones are available for all instance types in spot.
+			// Reference: https://cloud.google.com/compute/docs/instances/provisioning-models
+			ret := ZoneData{ID: zoneID, Available: true, SpotAvailable: true}
+			if !p.instanceTypesOfferings[*mt.Name].Has(zoneID) {
+				ret.Available = false
+			}
+			return ret
+		})
+
+		log.FromContext(ctx).Info("List instance types with name", "name", *mt.Name)
 		instanceTypes = append(instanceTypes, &cloudprovider.InstanceType{
 			Name: *mt.Name,
 			Capacity: corev1.ResourceList{
@@ -130,6 +153,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 				corev1.ResourceMemory: *resource.NewQuantity(memory, resource.BinarySI),
 			},
 			Overhead:     &overhead,
+			Offerings:    p.createOfferings(ctx, *mt.Name, zoneData),
 			Requirements: scheduling.NewRequirements(),
 		})
 	}
@@ -188,28 +212,47 @@ func (p *DefaultProvider) createOffering(zone, capacityType string, price float6
 }
 
 func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
+	p.muCache.Lock()
+	defer p.muCache.Unlock()
+
 	types, err := p.getInstanceTypes(ctx)
 	if err != nil {
 		return fmt.Errorf("getting instance type offerings: %w", err)
 	}
-	log.FromContext(ctx).WithValues("count", len(types)).Info("updated instance type offerings from aggregated list")
+
+	newInstanceTypesOfferings := make(map[string]sets.Set[string])
+	for _, mt := range types {
+		ofs, ok := newInstanceTypesOfferings[*mt.Name]
+		if !ok {
+			ofs = sets.New[string]()
+		}
+
+		newInstanceTypesOfferings[*mt.Name] = ofs.Insert(*mt.Zone)
+	}
+	p.instanceTypesOfferings = newInstanceTypesOfferings
+
+	log.FromContext(ctx).
+		WithValues("newInstanceTypesOfferings count", len(newInstanceTypesOfferings)).
+		Info("updated instance type offerings from aggregated list", "region", p.authOptions.Region)
 	return nil
 }
 
 func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
+	p.muCache.Lock()
+	defer p.muCache.Unlock()
+
 	types, err := p.getInstanceTypes(ctx)
 	if err != nil {
 		return fmt.Errorf("getting instance types: %w", err)
 	}
-	log.FromContext(ctx).WithValues("count", len(types)).Info("discovered GCE instance types")
+
+	p.instanceTypesInfo = types
+
+	log.FromContext(ctx).WithValues("newInstanceType count", len(types)).Info("discovered GCE instance types")
 	return nil
 }
 
 func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.MachineType, error) {
-	if cached, ok := p.instanceTypesCache.Get(InstanceTypesCacheKey); ok {
-		return cached.([]*computepb.MachineType), nil
-	}
-
 	vmFilter := fmt.Sprintf("(zone eq .*%s-.*)", p.authOptions.Region)
 	req := &computepb.AggregatedListMachineTypesRequest{
 		Project: p.authOptions.ProjectID,
@@ -232,7 +275,6 @@ func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.Ma
 		vmTypes = append(vmTypes, resp.Value.MachineTypes...)
 	}
 
-	p.instanceTypesCache.SetDefault(InstanceTypesCacheKey, vmTypes)
 	return vmTypes, nil
 }
 
