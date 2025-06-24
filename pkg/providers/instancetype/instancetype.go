@@ -39,6 +39,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
@@ -151,6 +152,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			Capacity: corev1.ResourceList{
 				corev1.ResourceCPU:    *resource.NewQuantity(cpu, resource.DecimalSI),
 				corev1.ResourceMemory: *resource.NewQuantity(memory, resource.BinarySI),
+				corev1.ResourcePods:   *resources.Quantity(fmt.Sprint(int(v1alpha1.KubeletMaxPods))),
 			},
 			Overhead:     &overhead,
 			Offerings:    p.createOfferings(ctx, *mt.Name, zoneData),
