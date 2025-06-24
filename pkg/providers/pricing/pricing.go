@@ -24,7 +24,9 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
+	"github.com/patrickmn/go-cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	utilsobject "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/object"
@@ -36,6 +38,10 @@ var initialOnDemandPricesData []byte
 const (
 	// TODO: Get rid of 3rd party API for pricing: https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/33
 	pricingCSVURL = "https://gcloud-compute.com/machine-types-regions.csv"
+	// Default timeout for downloading the CSV
+	pricingCSVTimeout = 24 * time.Hour
+	// Price cache key
+	pricingCSVCacheKey = "pricing-csv"
 )
 
 type Provider interface {
@@ -56,6 +62,8 @@ type DefaultProvider struct {
 	onDemandPrices pricesStorage
 	muSpot         sync.RWMutex
 	spotPrices     pricesStorage
+
+	priceCache *cache.Cache
 }
 
 func NewDefaultProvider(ctx context.Context, region string) (*DefaultProvider, error) {
@@ -63,6 +71,7 @@ func NewDefaultProvider(ctx context.Context, region string) (*DefaultProvider, e
 		region:         region,
 		onDemandPrices: make(pricesStorage),
 		spotPrices:     make(pricesStorage),
+		priceCache:     cache.New(pricingCSVTimeout, pricingCSVTimeout),
 	}
 
 	// sets the pricing data from the static default state for the provider
@@ -153,13 +162,19 @@ func (p *DefaultProvider) downloadCSV(ctx context.Context) ([][]string, error) {
 }
 
 func (p *DefaultProvider) updatePrices(ctx context.Context, priceColumn string, storage *pricesStorage) error {
-	records, err := p.downloadCSV(ctx)
-	if err != nil {
-		return err
+	records, ok := p.priceCache.Get(pricingCSVCacheKey)
+	if !ok {
+		newRecords, err := p.downloadCSV(ctx)
+		if err != nil {
+			return err
+		}
+		p.priceCache.SetDefault(pricingCSVCacheKey, records)
+		records = newRecords
 	}
+	recordArray := records.([][]string)
 
 	// Find required columns
-	header := records[0]
+	header := recordArray[0]
 	var priceCol, regionCol, nameCol int
 	for i, col := range header {
 		switch col {
@@ -175,7 +190,7 @@ func (p *DefaultProvider) updatePrices(ctx context.Context, priceColumn string, 
 	// Process the data
 	newPrices := make(pricesStorage)
 
-	for _, record := range records[1:] {
+	for _, record := range recordArray[1:] {
 		// Skip records that don't match our region
 		if record[regionCol] != p.region {
 			continue
