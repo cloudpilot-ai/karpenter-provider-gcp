@@ -26,6 +26,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -76,8 +77,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		return nil, fmt.Errorf("no instance types provided")
 	}
 
-	// all code below must be adjusted with correct logic!
-	// lets always create e2-standard-2 in us-central1-c at least for now
+	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
+
 	instanceType, err := p.selectInstanceType(nodeClaim, instanceTypes)
 	if err != nil {
 		return nil, err
@@ -113,16 +114,33 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
 		// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
 		// Type:         instanceType.Name,
-		Type:         "e2-standard-2",
+		Type:         instanceType.Name,
 		Location:     zone,
 		ProjectID:    p.projectID,
 		ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
 		CreationTime: time.Now(),
-		CapacityType: karpv1.CapacityTypeOnDemand,
+		CapacityType: capacityType,
 		Tags:         template.Properties.Labels,
 		Labels:       instance.Labels,
 		Status:       InstanceStatusProvisioning,
 	}, nil
+}
+
+// getCapacityType selects spot if both constraints are flexible and there is an
+// available offering.
+func (p *DefaultProvider) getCapacityType(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) string {
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	if requirements.Get(karpv1.CapacityTypeLabelKey).Has(karpv1.CapacityTypeSpot) {
+		requirements[karpv1.CapacityTypeLabelKey] = scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeSpot)
+		for _, instanceType := range instanceTypes {
+			for _, offering := range instanceType.Offerings.Available() {
+				if requirements.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+					return karpv1.CapacityTypeSpot
+				}
+			}
+		}
+	}
+	return karpv1.CapacityTypeOnDemand
 }
 
 func (p *DefaultProvider) selectInstanceType(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
@@ -132,7 +150,7 @@ func (p *DefaultProvider) selectInstanceType(nodeClaim *karpv1.NodeClaim, instan
 		return nil, fmt.Errorf("truncating instance types, %w", err)
 	}
 
-	// Choose first one as default instance type
+	// FIXME: Choose first one as default instance type
 	// return instanceTypes[0], nil
 	return instanceTypes[0], nil
 }
@@ -231,7 +249,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	}
 
 	// apply scheduling config for Spot capacity, for now lets do on demand only
-	capacityType := karpv1.CapacityTypeOnDemand
+	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
 	if instance.Scheduling == nil {
 		instance.Scheduling = &compute.Scheduling{}
 	}
