@@ -31,9 +31,8 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
-func NewInstanceType(mt *computepb.MachineType, kc *v1alpha1.KubeletConfiguration,
-	region string, disk *v1alpha1.Disk,
-	offerings cloudprovider.Offerings, clusterCNI string) *cloudprovider.InstanceType {
+func NewInstanceType(mt *computepb.MachineType, region string,
+	offerings cloudprovider.Offerings, overhead *cloudprovider.InstanceTypeOverhead) *cloudprovider.InstanceType {
 	if offerings == nil {
 		return nil
 	}
@@ -43,11 +42,7 @@ func NewInstanceType(mt *computepb.MachineType, kc *v1alpha1.KubeletConfiguratio
 		Requirements: computeRequirements(mt, offerings, region),
 		Offerings:    offerings,
 		Capacity:     computeCapacity(mt),
-		Overhead: &cloudprovider.InstanceTypeOverhead{
-			KubeReserved:      corev1.ResourceList{},
-			SystemReserved:    corev1.ResourceList{},
-			EvictionThreshold: corev1.ResourceList{},
-		},
+		Overhead:     overhead,
 	}
 
 	// TODO: update with reserved api.
