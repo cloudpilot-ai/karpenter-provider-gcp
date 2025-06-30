@@ -91,7 +91,7 @@ func (p *DefaultProvider) Reset() error {
 		return fmt.Errorf("no initial prices found for region %s", p.region)
 	}
 
-	log.FromContext(context.TODO()).Info("Loaded initial on-demand prices", "region", p.region, "prices", p.onDemandPrices, "count", len(p.onDemandPrices))
+	log.FromContext(context.TODO()).Info("Loaded initial on-demand prices", "region", p.region, "count", len(p.onDemandPrices))
 	return nil
 }
 
