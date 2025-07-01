@@ -146,7 +146,6 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			return ret
 		})
 
-		log.FromContext(ctx).Info("List instance types with name", "name", *mt.Name)
 		instanceTypes = append(instanceTypes, &cloudprovider.InstanceType{
 			Name: *mt.Name,
 			Capacity: corev1.ResourceList{
@@ -160,7 +159,6 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		})
 	}
 
-	log.FromContext(ctx).WithValues("count", len(instanceTypes)).Info("listed GCE instance types")
 	return instanceTypes, nil
 }
 
@@ -250,7 +248,6 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 
 	p.instanceTypesInfo = types
 
-	log.FromContext(ctx).WithValues("newInstanceType count", len(types)).Info("discovered GCE instance types")
 	return nil
 }
 

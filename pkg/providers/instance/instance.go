@@ -93,10 +93,9 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	if err != nil {
 		return nil, err
 	}
-	log.FromContext(ctx).Info("Using instance template with findTemplateForAlias", "template", template)
 
 	instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, zone)
-
+	log.FromContext(ctx).Info("debug1", "instance", instance.MachineType)
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("creating instance: %w", err)
@@ -233,8 +232,6 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 
 	metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, template.Properties.Metadata)
 	metadata.AppendRegisteredLabel(template.Properties.Metadata)
-
-	log.FromContext(context.Background()).Info("removed GKE builtin labels from metadata", "metadata", template.Properties.Metadata)
 
 	instance := &compute.Instance{
 		Name:              fmt.Sprintf("karpenter-%s", nodeClaim.Name),
@@ -378,8 +375,6 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 			return nil, fmt.Errorf("listing instances in zone %s: %w", zone, err)
 		}
 	}
-
-	log.FromContext(ctx).Info("finished listing GCP instances", "total", len(instances))
 
 	return instances, nil
 }
