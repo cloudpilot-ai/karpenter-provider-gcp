@@ -30,6 +30,7 @@ import (
 	"github.com/go-openapi/swag"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -60,8 +61,8 @@ type Controller struct {
 	credential                auth.Credential
 }
 
-func NewController(kubeClient client.Client, recorder events.Recorder,
-	unavailableOfferingsCache *cache.UnavailableOfferings,
+func NewController(kubeClient client.Client,
+	recorder events.Recorder, unavailableOfferingsCache *cache.UnavailableOfferings,
 	metadataClient *metadata.Client,
 	zoneOperationClient *computev1.ZoneOperationsClient,
 	credential auth.Credential) *Controller {
@@ -134,6 +135,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 				log.FromContext(ctx).Error(err, "extracting instance name")
 				break
 			}
+			// ignore the instance if the name is not found in the clter nodes
+			if !c.isInstanceInCluster(ctx, instanceName) {
+				continue
+			}
 			instanceNames = append(instanceNames, instanceName)
 		}
 
@@ -155,13 +160,24 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 				errs[i] = fmt.Errorf("deleting node claim: %w", err)
 			}
 		})
-		if err := multierr.Combine(errs...); err != nil {
-			return reconcile.Result{}, err
-		}
+		return reconcile.Result{}, multierr.Combine(errs...)
 	}
 
 	// Will requeue after 3 seconds and try again
 	return reconcile.Result{RequeueAfter: 3 * time.Second}, nil
+}
+
+func (c *Controller) isInstanceInCluster(ctx context.Context, instanceName string) bool {
+	var node corev1.Node
+	err := c.kubeClient.Get(ctx, client.ObjectKey{Name: instanceName}, &node)
+	if err == nil {
+		return true
+	}
+	if errors.IsNotFound(err) {
+		return false
+	}
+	log.FromContext(ctx).Error(err, "getting node", "node", instanceName)
+	return false
 }
 
 func extractInstanceName(targetLink string) (string, error) {
