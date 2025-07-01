@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -149,8 +150,16 @@ func (p *DefaultProvider) selectInstanceType(nodeClaim *karpv1.NodeClaim, instan
 		return nil, fmt.Errorf("truncating instance types, %w", err)
 	}
 
-	// FIXME: Choose first one as default instance type
-	// return instanceTypes[0], nil
+	if len(instanceTypes) == 0 {
+		return nil, fmt.Errorf("no instance types available after truncation")
+	}
+
+	// Sort instance types by max offerings
+	sort.Slice(instanceTypes, func(i, j int) bool {
+		return len(instanceTypes[i].Offerings) > len(instanceTypes[j].Offerings)
+	})
+
+	// Return the cheapest instance type
 	return instanceTypes[0], nil
 }
 
