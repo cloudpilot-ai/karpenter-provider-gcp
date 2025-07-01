@@ -33,6 +33,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -87,7 +88,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving NodeClass readiness, NodeClass is in Ready=Unknown, %s", nodeClassReady.Message), "NodeClassReadinessUnknown", "NodeClass is in Ready=Unknown")
 	}
 
-	instanceTypes, err := c.resolveInstanceTypes(ctx, nodeClass)
+	instanceTypes, err := c.resolveInstanceTypes(ctx, nodeClaim, nodeClass)
 	if err != nil {
 		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving instance types, %w", err), "InstanceTypeResolutionFailed", "Error resolving instance types")
 	}
@@ -122,7 +123,6 @@ func (c *CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 
 	var nodeClaims []*karpv1.NodeClaim
 	for _, instance := range instances {
-		log.FromContext(ctx).Info("resolving instance type")
 		instanceType, err := c.resolveInstanceTypeFromInstance(ctx, instance)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve instance type")
@@ -367,6 +367,16 @@ func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeC
 	return nodeClass, nil
 }
 
-func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
-	return c.instanceTypeProvider.List(ctx, nodeClass)
+func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
+	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	if err != nil {
+		return nil, err
+	}
+
+	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	return lo.Filter(instanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil &&
+			len(i.Offerings.Compatible(reqs).Available()) > 0 &&
+			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
+	}), nil
 }
