@@ -160,6 +160,8 @@ type Disk struct {
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:path=gcenodeclasses,scope=Cluster,categories=karpenter,shortName={gcenc,gcencs}
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
 // +kubebuilder:subresource:status
 type GCENodeClass struct {
 	metav1.TypeMeta   `json:",inline"`
