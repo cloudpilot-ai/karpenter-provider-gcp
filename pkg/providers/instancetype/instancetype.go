@@ -20,10 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -33,7 +31,6 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/api/iterator"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -103,9 +100,21 @@ func (p *DefaultProvider) LivenessProbe(req *http.Request) error {
 	return p.pricingProvider.LivenessProbe(req)
 }
 
+func (p *DefaultProvider) validateState() error {
+	if len(p.instanceTypesInfo) == 0 {
+		return fmt.Errorf("no instance types found")
+	}
+
+	return nil
+}
+
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
 	p.muCache.RLock()
 	defer p.muCache.RUnlock()
+
+	if err := p.validateState(); err != nil {
+		return nil, err
+	}
 
 	allZones := sets.New[string]()
 	for _, offeringZones := range p.instanceTypesOfferings {
@@ -118,22 +127,6 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			continue
 		}
 
-		memory := int64(*mt.MemoryMb) * 1024 * 1024 // MiB -> Bytes
-		cpu := int64(*mt.GuestCpus)
-		isSharedCore := strings.Contains(*mt.Name, "e2-micro") || strings.Contains(*mt.Name, "e2-small") || strings.Contains(*mt.Name, "e2-medium")
-
-		kubeMem, evictionMem := calculateMemoryOverheadBreakdown(memory)
-		overhead := cloudprovider.InstanceTypeOverhead{
-			KubeReserved: corev1.ResourceList{
-				corev1.ResourceCPU:    calculateCPUOverhead(cpu, isSharedCore),
-				corev1.ResourceMemory: kubeMem,
-			},
-			EvictionThreshold: corev1.ResourceList{
-				corev1.ResourceMemory: evictionMem,
-			},
-			SystemReserved: corev1.ResourceList{},
-		}
-
 		// Make sure all zone is checked.
 		zoneData := lo.Map(allZones.UnsortedList(), func(zoneID string, _ int) ZoneData {
 			// We assume that all zones are available for all instance types in spot.
@@ -144,12 +137,13 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			}
 			return ret
 		})
+		offerings := p.createOfferings(ctx, *mt.Name, zoneData)
+		if len(offerings) == 0 {
+			continue
+		}
 
-		instanceTypes = append(instanceTypes, NewInstanceType(
-			mt, p.authOptions.Region,
-			p.createOfferings(ctx, *mt.Name, zoneData),
-			&overhead,
-		))
+		addInstanceType := NewInstanceType(ctx, mt, p.authOptions.Region, offerings)
+		instanceTypes = append(instanceTypes, addInstanceType)
 	}
 
 	return instanceTypes, nil
@@ -268,70 +262,4 @@ func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.Ma
 	}
 
 	return vmTypes, nil
-}
-
-// calculated with https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#memory_reservations
-func calculateMemoryOverheadBreakdown(totalMemoryBytes int64) (kubeReserved, evictionThreshold resource.Quantity) {
-	mib := float64(totalMemoryBytes) / oneMiB
-	var reserved float64
-
-	if mib < 1024 {
-		reserved = 255
-	} else {
-		memLeft := mib
-
-		step := math.Min(memLeft, 4096)
-		reserved += step * 0.25
-		memLeft -= step
-
-		step = math.Min(memLeft, 4096)
-		reserved += step * 0.20
-		memLeft -= step
-
-		step = math.Min(memLeft, 8192)
-		reserved += step * 0.10
-		memLeft -= step
-
-		step = math.Min(memLeft, 114688)
-		reserved += step * 0.06
-		memLeft -= step
-
-		if memLeft > 0 {
-			reserved += memLeft * 0.02
-		}
-	}
-
-	return *resource.NewQuantity(int64(reserved*oneMiB), resource.BinarySI),
-		*resource.NewQuantity(100*oneMiB, resource.BinarySI)
-}
-
-// calculated with https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#cpu_reservations
-func calculateCPUOverhead(vcpus int64, isSharedCore bool) resource.Quantity {
-	if isSharedCore {
-		return resource.MustParse("1060m")
-	}
-
-	var reservedMillicores float64
-
-	if vcpus >= 1 {
-		// 6% of first core
-		reservedMillicores += 1000 * 0.06
-	}
-
-	if vcpus >= 2 {
-		// 1% of next core
-		reservedMillicores += 1000 * 0.01
-	}
-
-	if vcpus >= 4 {
-		// 0.5% of next 2 cores
-		reservedMillicores += 2000 * 0.005
-	}
-
-	if vcpus > 4 {
-		// 0.25% of remaining
-		reservedMillicores += float64(vcpus-4) * 1000 * 0.0025
-	}
-
-	return *resource.NewMilliQuantity(int64(reservedMillicores), resource.DecimalSI)
 }

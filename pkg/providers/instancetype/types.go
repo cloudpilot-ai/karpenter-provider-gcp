@@ -17,37 +17,61 @@ limitations under the License.
 package instancetype
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
-func NewInstanceType(mt *computepb.MachineType, region string,
-	offerings cloudprovider.Offerings, overhead *cloudprovider.InstanceTypeOverhead) *cloudprovider.InstanceType {
+func NewInstanceType(ctx context.Context, mt *computepb.MachineType,
+	region string, offerings cloudprovider.Offerings) *cloudprovider.InstanceType {
 	if offerings == nil {
 		return nil
 	}
 
-	it := &cloudprovider.InstanceType{
-		Name:         *mt.Name,
-		Requirements: computeRequirements(mt, offerings, region),
-		Offerings:    offerings,
-		Capacity:     computeCapacity(mt),
-		Overhead:     overhead,
+	reservedCPU, reservedMemory, evictionMemory := utils.ResolveReservedResource(aws.StringValue(mt.Name), int64(mt.GetGuestCpus()*1000), int64(mt.GetMemoryMb()))
+	overhead := cloudprovider.InstanceTypeOverhead{
+		KubeReserved: corev1.ResourceList{
+			corev1.ResourceCPU:    *resource.NewMilliQuantity(reservedCPU, resource.DecimalSI),
+			corev1.ResourceMemory: *resource.NewQuantity(reservedMemory*1024*1024, resource.BinarySI),
+		},
+		EvictionThreshold: corev1.ResourceList{
+			corev1.ResourceMemory: *resource.NewQuantity(evictionMemory*1024*1024, resource.BinarySI),
+		},
+		SystemReserved: corev1.ResourceList{},
 	}
 
-	// TODO: update with reserved api.
+	it := &cloudprovider.InstanceType{
+		Name:         aws.StringValue(mt.Name),
+		Requirements: computeRequirements(mt, offerings, region),
+		Offerings:    offerings,
+		Capacity:     computeCapacity(ctx, mt),
+		Overhead:     &overhead,
+	}
 
 	return it
+}
+
+func extractCategory(part string) string {
+	i := 0
+	for ; i < len(part); i++ {
+		if part[i] >= '0' && part[i] <= '9' {
+			break
+		}
+	}
+	return part[:i]
 }
 
 //nolint:gocyclo
@@ -56,7 +80,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, *mt.Name),
 		// TODO: fix this with available arch
-		// scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, v1alpha1.ArchitectureAMD64),
+		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
 		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
@@ -68,9 +92,9 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 			return o.Requirements.Get(karpv1.CapacityTypeLabelKey).Any()
 		})...),
 		// Well Known to Google Cloud
-		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, string(mt.GetGuestCpus())),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", mt.GetGuestCpus())),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUModel, corev1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, fmt.Sprintf("%dMb", mt.GetMemoryMb())),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", mt.GetMemoryMb())),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCategory, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGeneration, corev1.NodeSelectorOpDoesNotExist),
@@ -89,31 +113,32 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		requirements.Add(scheduling.NewRequirement(v1alpha1.LabelTopologyZoneID, corev1.NodeSelectorOpIn, zoneIDs...))
 	}
 
-	// TODO: Add Instance Type Labels
+	// The format looks like: n1-standard-1, the family is n1-standard, the category is n, the instance size is 1
+	instanceTypeParts := strings.Split(aws.StringValue(mt.Name), "-")
+	if len(instanceTypeParts) == 3 {
+		requirements.Get(v1alpha1.LabelInstanceCategory).Insert(extractCategory(instanceTypeParts[0]))
+		requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0] + "-" + instanceTypeParts[1])
+		requirements.Get(v1alpha1.LabelInstanceSize).Insert(instanceTypeParts[2])
+	}
 
 	return requirements
 }
 
-func computeCapacity(mt *computepb.MachineType) corev1.ResourceList {
+func computeCapacity(ctx context.Context, mt *computepb.MachineType) corev1.ResourceList {
 	resourceList := corev1.ResourceList{
 		corev1.ResourceCPU:    *cpu(mt),
-		corev1.ResourceMemory: *memory(mt),
+		corev1.ResourceMemory: *memory(ctx, mt),
+		corev1.ResourcePods:   *resource.NewQuantity(int64(v1alpha1.KubeletMaxPods), resource.DecimalSI),
 	}
 	return resourceList
 }
 
 func cpu(mt *computepb.MachineType) *resource.Quantity {
-	return resources.Quantity(fmt.Sprint(mt.GetGuestCpus()))
+	return resource.NewQuantity(int64(mt.GetGuestCpus()), resource.DecimalSI)
 }
 
-func extractMemory(mt *computepb.MachineType) *resource.Quantity {
-	return resources.Quantity(fmt.Sprintf("%dMb", mt.GetMemoryMb()))
-}
-
-func memory(mt *computepb.MachineType) *resource.Quantity {
-	mem := extractMemory(mt)
-	if mem.IsZero() {
-		return mem
-	}
-	return mem
+func memory(ctx context.Context, mt *computepb.MachineType) *resource.Quantity {
+	osReservedPercent := options.FromContext(ctx).VMMemoryOverheadPercent
+	totalQuantity := int64(mt.GetMemoryMb()) * 1024 * 1024
+	return resource.NewQuantity(totalQuantity-int64(float64(totalQuantity)*osReservedPercent), resource.DecimalSI)
 }

@@ -71,7 +71,6 @@ func New(kubeClient client.Client,
 
 // Create a NodeClaim given the constraints.
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*karpv1.NodeClaim, error) {
-	log.FromContext(ctx).Info("creating nodes", "nodeClaim", nodeClaim)
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
 		if errors.IsNotFound(err) {
