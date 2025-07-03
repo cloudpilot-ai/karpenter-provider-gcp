@@ -114,11 +114,19 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 	}
 
 	// The format looks like: n1-standard-1, the family is n1-standard, the category is n, the instance size is 1
+	// Also, there is something like e2-medium, the family is e2, the category is e, the instance size is medium
 	instanceTypeParts := strings.Split(aws.StringValue(mt.Name), "-")
-	if len(instanceTypeParts) == 3 {
+	if len(instanceTypeParts) >= 2 {
 		requirements.Get(v1alpha1.LabelInstanceCategory).Insert(extractCategory(instanceTypeParts[0]))
-		requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0] + "-" + instanceTypeParts[1])
-		requirements.Get(v1alpha1.LabelInstanceSize).Insert(instanceTypeParts[2])
+		requirements.Get(v1alpha1.LabelInstanceSize).Insert(instanceTypeParts[len(instanceTypeParts)-1])
+
+		if len(instanceTypeParts) == 2 {
+			requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0])
+		}
+		// If there are three parts, also insert the first two joined as family
+		if len(instanceTypeParts) == 3 {
+			requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0] + "-" + instanceTypeParts[1])
+		}
 	}
 
 	return requirements
