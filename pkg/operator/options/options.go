@@ -23,17 +23,21 @@ import (
 
 	coreoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
-	projectIDEnvVarName      = "PROJECT_ID"
-	projectIDFlagName        = "project-id"
-	regionEnvVarName         = "REGION"
-	regionFlagName           = "region"
-	gkeClusterNameEnvVarName = "CLUSTER_NAME"
-	gkeClusterFlagName       = "cluster-name"
-	gkeEnableInterruption    = "INTERRUPTION"
-	GCPAuth                  = "GOOGLE_APPLICATION_CREDENTIALS"
+	projectIDEnvVarName               = "PROJECT_ID"
+	projectIDFlagName                 = "project-id"
+	regionEnvVarName                  = "REGION"
+	regionFlagName                    = "region"
+	gkeClusterNameEnvVarName          = "CLUSTER_NAME"
+	gkeClusterFlagName                = "cluster-name"
+	vmMemoryOverheadPercentEnvVarName = "VM_MEMORY_OVERHEAD_PERCENT"
+	vmMemoryOverheadPercentFlagName   = "vm-memory-overhead-percent"
+	gkeEnableInterruption             = "INTERRUPTION"
+	GCPAuth                           = "GOOGLE_APPLICATION_CREDENTIALS"
 )
 
 func init() {
@@ -43,9 +47,10 @@ func init() {
 type optionsKey struct{}
 
 type Options struct {
-	ProjectID   string
-	Region      string
-	ClusterName string
+	ProjectID               string
+	Region                  string
+	ClusterName             string
+	VMMemoryOverheadPercent float64
 	// GCPAuth is the path to the Google Application Credentials JSON file.
 	// https://cloud.google.com/docs/authentication/application-default-credentials
 	GCPAuth      string
@@ -56,6 +61,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.ProjectID, projectIDFlagName, env.WithDefaultString(projectIDEnvVarName, ""), "GCP project ID where the GKE cluster is running.")
 	fs.StringVar(&o.Region, regionFlagName, env.WithDefaultString(regionEnvVarName, ""), "GCP region of the GKE cluster. If not set, the controller will attempt to infer it.")
 	fs.StringVar(&o.ClusterName, gkeClusterFlagName, env.WithDefaultString(gkeClusterNameEnvVarName, ""), "Name of the GKE cluster that provisioned nodes should connect to.")
+	fs.Float64Var(&o.VMMemoryOverheadPercent, vmMemoryOverheadPercentFlagName, utils.WithDefaultFloat64(vmMemoryOverheadPercentEnvVarName, 0.07), "Percentage of memory overhead for VM. If not set, the controller will use the default value 7%.")
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }

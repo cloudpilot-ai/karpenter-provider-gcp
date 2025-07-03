@@ -25,8 +25,10 @@ import (
 	"github.com/go-openapi/swag"
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
+	"gopkg.in/yaml.v3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
@@ -45,6 +47,48 @@ func GetClusterName(metadata *compute.Metadata) (string, error) {
 	}
 	log.FromContext(context.Background()).Info("retrieved cluster name from metadata", "clusterName", clusterName)
 	return clusterName, nil
+}
+
+func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloudprovider.InstanceType) error {
+	targetEntry, index, ok := lo.FindIndexOf(metaData.Items, func(item *compute.MetadataItems) bool {
+		return item.Key == KubeletConfigLabel
+	})
+	if !ok || index == -1 {
+		return errors.New("kubelet-config metadata not found")
+	}
+	cpuMilliCore := fmt.Sprintf("%dm", instanceType.Overhead.KubeReserved.Cpu().MilliValue())
+	memoryMB := fmt.Sprintf("%dMi", instanceType.Overhead.KubeReserved.Memory().Value()/(1024*1024))
+
+	configStr := swag.StringValue(targetEntry.Value)
+	if configStr == "" {
+		return errors.New("kubelet-config metadata is empty")
+	}
+
+	// Parse YAML
+	var config map[string]interface{}
+	if err := yaml.Unmarshal([]byte(configStr), &config); err != nil {
+		return fmt.Errorf("failed to parse kubelet-config YAML: %w", err)
+	}
+
+	// Update kubeReserved
+	kubeReserved, ok := config["kubeReserved"].(map[string]interface{})
+	if !ok {
+		kubeReserved = make(map[string]interface{})
+	}
+	kubeReserved["cpu"] = cpuMilliCore
+	kubeReserved["memory"] = memoryMB
+	config["kubeReserved"] = kubeReserved
+
+	// Marshal back to YAML
+	updatedYAML, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated kubelet-config YAML: %w", err)
+	}
+
+	targetEntry.Value = swag.String(string(updatedYAML))
+	metaData.Items[index] = targetEntry
+
+	return nil
 }
 
 func RemoveGKEBuiltinLabels(metadata *compute.Metadata) error {
