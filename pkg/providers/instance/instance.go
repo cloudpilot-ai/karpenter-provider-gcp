@@ -222,11 +222,6 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	disk := template.Properties.Disks[0]
 	disk.InitializeParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/pd-balanced", p.projectID, zone)
 
-	// disable public IPs
-	for _, ni := range template.Properties.NetworkInterfaces {
-		ni.AccessConfigs = nil
-	}
-
 	err := metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
