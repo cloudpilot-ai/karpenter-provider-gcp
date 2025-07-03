@@ -17,10 +17,8 @@ limitations under the License.
 package metadata
 
 import (
-	"context"
 	"fmt"
 
-	"google.golang.org/api/compute/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
@@ -30,6 +28,7 @@ const (
 	ClusterNameLabel     = "cluster-name"
 	GKENodePoolLabel     = "cloud.google.com/gke-nodepool"
 	UnregisteredTaintArg = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
+	KubeletConfigLabel   = "kubelet-config"
 )
 
 var (
@@ -44,24 +43,4 @@ func NewMetadata(nodePoolTemplateProvider nodepooltemplate.Provider) *Metadata {
 	return &Metadata{
 		nodePoolTemplateProvider: nodePoolTemplateProvider,
 	}
-}
-
-// ResolveMetadata resolves the metadata for the node pool template
-// In default nodepool, gke will create a default nodepool template with default custom metadata.
-// We need to make sure the label `cloud.google.com/gke-nodepool=cluster-name` in metadata is removed.
-func (m *Metadata) ResolveMetadata(ctx context.Context) (map[string]*compute.Metadata, error) {
-	instanceTemplates, err := m.nodePoolTemplateProvider.GetInstanceTemplates(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	metadataMap := map[string]*compute.Metadata{}
-	for _, instanceTemplate := range instanceTemplates {
-		if err := RemoveGKEBuiltinLabels(instanceTemplate.Properties.Metadata); err != nil {
-			return nil, err
-		}
-		metadataMap[instanceTemplate.Name] = instanceTemplate.Properties.Metadata
-	}
-
-	return metadataMap, nil
 }
