@@ -17,7 +17,6 @@ package cloudprovider
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -25,7 +24,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 )
 
 const (
@@ -56,12 +54,4 @@ func (c *CloudProvider) staticFieldsDrifted(nodeClaim *karpv1.NodeClaim, nodeCla
 		return ""
 	}
 	return lo.Ternary(nodeClassHash != nodeClaimHash, NodeClassDrift, "")
-}
-
-func (c *CloudProvider) getInstance(ctx context.Context, providerID string) (*instance.Instance, error) {
-	instance, err := c.instanceProvider.Get(ctx, providerID)
-	if err != nil {
-		return nil, fmt.Errorf("getting instance, %w", err)
-	}
-	return instance, nil
 }

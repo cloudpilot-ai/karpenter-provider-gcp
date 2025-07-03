@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
@@ -96,7 +97,6 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	}
 
 	instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, zone)
-	log.FromContext(ctx).Info("debug1", "instance", instance.MachineType)
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("creating instance: %w", err)
@@ -233,6 +233,12 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
+	err = metadata.RenderKubeletConfigMetadata(template.Properties.Metadata, instanceType)
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "failed to render kubelet config metadata")
+		return nil
+	}
+
 	err = metadata.PatchUnregisteredTaints(template.Properties.Metadata)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to append unregistered taint to kube-env")
@@ -269,6 +275,9 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// set common Karpenter labels
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
+	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
+		instance.Labels[entry.Key] = entry.Value
+	})
 
 	return instance
 }
