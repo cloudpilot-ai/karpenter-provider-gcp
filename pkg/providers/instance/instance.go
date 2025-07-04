@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -79,13 +80,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		return nil, fmt.Errorf("no instance types provided")
 	}
 
+	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
-
-	instanceType, err := p.selectInstanceType(nodeClaim, instanceTypes)
-	if err != nil {
-		return nil, err
-	}
-
 	zone, err := p.selectZone(nodeClaim)
 	if err != nil {
 		return nil, err
@@ -96,7 +92,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		return nil, err
 	}
 
-	instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, zone)
+	instance := p.buildInstance(nodeClaim, nodeClass, instanceTypes[0], template, zone)
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("creating instance: %w", err)
@@ -104,7 +100,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	// we could wait for the node to be present in kubernetes api via csr sign up
 	// should be done with watcher, for now implemented as a csr controller
-	log.FromContext(ctx).Info("Created instance", "instanceName", op.Name, "instanceType", instanceType.Name,
+	log.FromContext(ctx).Info("Created instance", "instanceName", op.Name, "instanceType", instanceTypes[0].Name,
 		"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
 		"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
 
@@ -114,7 +110,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
 		// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
 		// Type:         instanceType.Name,
-		Type:         instanceType.Name,
+		Type:         instanceTypes[0].Name,
 		Location:     zone,
 		ProjectID:    p.projectID,
 		ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
@@ -143,24 +139,23 @@ func (p *DefaultProvider) getCapacityType(nodeClaim *karpv1.NodeClaim, instanceT
 	return karpv1.CapacityTypeOnDemand
 }
 
-func (p *DefaultProvider) selectInstanceType(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
-	schedulingRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-	instanceTypes, err := cloudprovider.InstanceTypes(instanceTypes).Truncate(schedulingRequirements, maxInstanceTypes)
-	if err != nil {
-		return nil, fmt.Errorf("truncating instance types, %w", err)
-	}
-
-	if len(instanceTypes) == 0 {
-		return nil, fmt.Errorf("no instance types available after truncation")
-	}
-
-	// Sort instance types by max offerings
+func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements) []*cloudprovider.InstanceType {
+	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(instanceTypes, func(i, j int) bool {
-		return len(instanceTypes[i].Offerings) > len(instanceTypes[j].Offerings)
+		iPrice := math.MaxFloat64
+		jPrice := math.MaxFloat64
+		if len(instanceTypes[i].Offerings.Available().Compatible(requirements)) > 0 {
+			iPrice = instanceTypes[i].Offerings.Available().Compatible(requirements).Cheapest().Price
+		}
+		if len(instanceTypes[j].Offerings.Available().Compatible(requirements)) > 0 {
+			jPrice = instanceTypes[j].Offerings.Available().Compatible(requirements).Cheapest().Price
+		}
+		if iPrice == jPrice {
+			return instanceTypes[i].Name < instanceTypes[j].Name
+		}
+		return iPrice < jPrice
 	})
-
-	// Return the cheapest instance type
-	return instanceTypes[0], nil
+	return instanceTypes
 }
 
 // zone should be based on the offering, for now lets return static zone from requirements
@@ -297,7 +292,7 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance
 		return currentInstance.(*Instance), nil
 	}
 
-	return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
+	return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance(%s) not found ", providerID))
 }
 
 func parseCreationTime(ts string) time.Time {
@@ -324,7 +319,7 @@ func resolveCapacityType(sched *compute.Scheduling) string {
 
 func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 	if err := p.syncInstances(ctx); err != nil {
-		log.FromContext(ctx).Error(err, "syncing instances")
+		log.FromContext(ctx).Error(err, "syncing instances failed")
 		return nil, err
 	}
 
