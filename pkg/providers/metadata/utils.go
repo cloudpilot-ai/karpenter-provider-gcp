@@ -17,7 +17,6 @@ limitations under the License.
 package metadata
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -26,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 	"gopkg.in/yaml.v3"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
@@ -45,7 +43,6 @@ func GetClusterName(metadata *compute.Metadata) (string, error) {
 	if clusterName == "" {
 		return "", errors.New("cluster name label is empty")
 	}
-	log.FromContext(context.Background()).Info("retrieved cluster name from metadata", "clusterName", clusterName)
 	return clusterName, nil
 }
 
