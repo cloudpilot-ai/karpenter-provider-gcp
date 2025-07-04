@@ -43,7 +43,7 @@ import (
 
 const (
 	maxInstanceTypes        = 20
-	instanceCacheExpiration = 5 * time.Minute // Cache expiration for instances
+	instanceCacheExpiration = 15 * time.Second
 )
 
 type Provider interface {

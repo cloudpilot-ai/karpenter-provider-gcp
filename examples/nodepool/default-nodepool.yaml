@@ -16,7 +16,7 @@ spec:
           values: ["spot"]
         - key: "karpenter.k8s.gcp/instance-family"
           operator: In
-          values: ["n4", "n2"]
+          values: ["n4-standard", "n2-standard", "e2"]
         - key: "kubernetes.io/arch"
           operator: In
           values: ["amd64"]
