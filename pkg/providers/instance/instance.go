@@ -278,7 +278,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance, error) {
-	project, zone, instanceName, err := parseGCEProviderID(providerID)
+	_, _, instanceName, err := parseGCEProviderID(providerID)
 	if err != nil {
 		return nil, fmt.Errorf("parsing provider ID: %w", err)
 	}
@@ -287,35 +287,17 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance
 		return instance.(*Instance), nil
 	}
 
-	log := log.FromContext(ctx)
-	log.Info("Fetching instance", "project", project, "zone", zone, "instance", instanceName)
-
-	resp, err := p.computeService.Instances.Get(project, zone, instanceName).Context(ctx).Do()
-	if err != nil {
-		if isInstanceNotFoundError(err) {
-			return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
-		}
-		return nil, fmt.Errorf("getting instance: %w", err)
+	if err := p.syncInstances(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "syncing instances")
+		return nil, err
 	}
 
-	// Translate Compute API response into internal Instance struct
-	instance := &Instance{
-		InstanceID:   resp.Name,
-		Name:         resp.Name,
-		Type:         resp.MachineType[strings.LastIndex(resp.MachineType, "/")+1:], // extract type from full URI
-		Location:     zone,
-		ProjectID:    project,
-		ImageID:      getBootImageID(resp),
-		CreationTime: parseCreationTime(resp.CreationTimestamp),
-		CapacityType: resolveCapacityType(resp.Scheduling),
-		Labels:       resp.Labels,
-		Tags:         resp.Labels,           // GCP doesn't have separate tags like AWS; labels suffice
-		Status:       InstanceStatusRunning, // consider deriving from resp.Status if needed
+	currentInstance, ok := p.instanceCache.Get(instanceName)
+	if ok {
+		return currentInstance.(*Instance), nil
 	}
 
-	p.syncInstance(instance)
-
-	return instance, nil
+	return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
 }
 
 func parseCreationTime(ts string) time.Time {
@@ -341,52 +323,14 @@ func resolveCapacityType(sched *compute.Scheduling) string {
 }
 
 func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
-	var instances []*Instance
-	filter := fmt.Sprintf(
-		"(labels.%s:* AND labels.%s:*)",
-		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey),
-		utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey),
-	)
-
-	zones, err := p.getZonesInRegion(ctx)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "getting zones in region")
-		return nil, fmt.Errorf("listing zones, %w", err)
+	if err := p.syncInstances(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "syncing instances")
+		return nil, err
 	}
 
-	for _, zone := range zones {
-		req := p.computeService.Instances.List(p.projectID, zone).Filter(filter).Context(ctx)
-
-		err := req.Pages(ctx, func(page *compute.InstanceList) error {
-			if len(page.Items) == 0 {
-				log.FromContext(ctx).Info("No instances found in zone", "zone", zone)
-				return nil // empty page, continue
-			}
-
-			for _, inst := range page.Items {
-				instance := &Instance{
-					InstanceID:   inst.Name,
-					Name:         inst.Name,
-					Type:         inst.MachineType[strings.LastIndex(inst.MachineType, "/")+1:], // just for matching "e2-standard-2"
-					Location:     zone,
-					ProjectID:    p.projectID,
-					ImageID:      getBootImageID(inst),
-					CreationTime: parseCreationTime(inst.CreationTimestamp),
-					CapacityType: resolveCapacityType(inst.Scheduling),
-					Labels:       inst.Labels,
-					Tags:         inst.Labels,
-					Status:       InstanceStatusRunning, // consider mapping from inst.Status
-				}
-				p.syncInstance(instance)
-				instances = append(instances, instance)
-			}
-			return nil
-		})
-
-		if err != nil {
-			log.FromContext(ctx).Error(err, "error listing instances in zone", "zone", zone)
-			return nil, fmt.Errorf("listing instances in zone %s: %w", zone, err)
-		}
+	var instances []*Instance
+	for _, instance := range p.instanceCache.Items() {
+		instances = append(instances, instance.Object.(*Instance))
 	}
 
 	return instances, nil
@@ -494,6 +438,54 @@ func isInstanceNotFoundError(err error) bool {
 	return false
 }
 
-func (p *DefaultProvider) syncInstance(instance *Instance) {
-	p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
+func (p *DefaultProvider) syncInstances(ctx context.Context) error {
+	var instances []*Instance
+	filter := fmt.Sprintf(
+		"(labels.%s:* AND labels.%s:*)",
+		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey),
+		utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey),
+	)
+
+	zones, err := p.getZonesInRegion(ctx)
+	if err != nil {
+		return fmt.Errorf("listing zones, %w", err)
+	}
+
+	for _, zone := range zones {
+		req := p.computeService.Instances.List(p.projectID, zone).Filter(filter).Context(ctx)
+
+		err := req.Pages(ctx, func(page *compute.InstanceList) error {
+			if len(page.Items) == 0 {
+				log.FromContext(ctx).Info("No instances found in zone", "zone", zone)
+				return nil // empty page, continue
+			}
+
+			for _, inst := range page.Items {
+				instance := &Instance{
+					InstanceID:   inst.Name,
+					Name:         inst.Name,
+					Type:         inst.MachineType[strings.LastIndex(inst.MachineType, "/")+1:], // just for matching "e2-standard-2"
+					Location:     zone,
+					ProjectID:    p.projectID,
+					ImageID:      getBootImageID(inst),
+					CreationTime: parseCreationTime(inst.CreationTimestamp),
+					CapacityType: resolveCapacityType(inst.Scheduling),
+					Labels:       inst.Labels,
+					Tags:         inst.Labels,
+					Status:       InstanceStatusRunning, // consider mapping from inst.Status
+				}
+				instances = append(instances, instance)
+			}
+			return nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("listing instances in zone %s: %w", zone, err)
+		}
+	}
+
+	for _, instance := range instances {
+		p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
+	}
+	return nil
 }
