@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The CloudPilot AI Authors.
+Copyright 2025 The CloudPilot AI Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,9 +18,11 @@ package instance
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +32,7 @@ import (
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -37,6 +40,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -45,6 +50,10 @@ import (
 const (
 	maxInstanceTypes        = 20
 	instanceCacheExpiration = 15 * time.Second
+)
+
+var (
+	InsufficientCapacityErrorCodes = sets.NewString("ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", "ZONE_RESOURCE_POOL_EXHAUSTED")
 )
 
 type Provider interface {
@@ -56,6 +65,9 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	gkeProvider          gke.Provider
+	unavailableOfferings *pkgcache.UnavailableOfferings
+
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
 
@@ -65,14 +77,49 @@ type DefaultProvider struct {
 	computeService *compute.Service
 }
 
-func NewProvider(clusterName, region, projectID string, computeService *compute.Service) *DefaultProvider {
+func NewProvider(clusterName, region, projectID string, computeService *compute.Service, gkeProvider gke.Provider,
+	unavailableOfferings *pkgcache.UnavailableOfferings) Provider {
 	return &DefaultProvider{
-		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
-		clusterName:    clusterName,
-		region:         region,
-		projectID:      projectID,
-		computeService: computeService,
+		gkeProvider:          gkeProvider,
+		unavailableOfferings: unavailableOfferings,
+		instanceCache:        cache.New(instanceCacheExpiration, instanceCacheExpiration),
+		clusterName:          clusterName,
+		region:               region,
+		projectID:            projectID,
+		computeService:       computeService,
 	}
+}
+
+func (p *DefaultProvider) waitOperationDone(ctx context.Context,
+	instanceType, zone, capacityType, operationName string) error {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// TODO: Maybe add timeout operation
+		op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("getting operation: %w", err)
+		}
+
+		if op.Status == "DONE" {
+			if op.Error != nil {
+				capacityError, found := lo.Find(op.Error.Errors, func(e *compute.OperationErrorErrors) bool {
+					// Example in real environment:
+					// Error: ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS The zone 'projects/project-id/zones/us-west1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'.
+					return InsufficientCapacityErrorCodes.Has(e.Code)
+				})
+				if found {
+					p.unavailableOfferings.MarkUnavailable(ctx, capacityError.Message, instanceType, zone, capacityType)
+					return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone resource pool exhausted: %s", capacityError.Message))
+				}
+				return fmt.Errorf("operation failed: %v", op.Error.Errors)
+			}
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
@@ -82,7 +129,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
-	zone, err := p.selectZone(nodeClaim)
+
+	zone, err := p.selectZone(ctx, nodeClaim, instanceTypes[0], capacityType)
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +144,10 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("creating instance: %w", err)
+	}
+
+	if err := p.waitOperationDone(ctx, instanceTypes[0].Name, zone, capacityType, op.Name); err != nil {
+		return nil, err
 	}
 
 	// we could wait for the node to be present in kubernetes api via csr sign up
@@ -159,13 +211,46 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 }
 
 // zone should be based on the offering, for now lets return static zone from requirements
-func (p *DefaultProvider) selectZone(nodeClaim *karpv1.NodeClaim) (string, error) {
-	for _, req := range nodeClaim.Spec.Requirements {
-		if req.Key == "topology.kubernetes.io/zone" && len(req.Values) > 0 {
-			return req.Values[0], nil // always select us-central1-c for now
+func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.NodeClaim,
+	instanceType *cloudprovider.InstanceType, capacityType string) (string, error) {
+	zones, err := p.gkeProvider.ResolveClusterZones(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	cheapestZone := ""
+	cheapestPrice := math.MaxFloat64
+	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+
+	if capacityType == karpv1.CapacityTypeOnDemand {
+		// For on-demand, randomly select a zone
+		if len(zones) > 0 {
+			randomIndex, _ := rand.Int(rand.Reader, big.NewInt(int64(len(zones))))
+			return zones[randomIndex.Int64()], nil
 		}
 	}
-	return "", fmt.Errorf("no zone specified in nodeClaim requirements")
+
+	zonesSet := sets.NewString(zones...)
+	// For different AZ, the spot price may differ. So we need to get the cheapest vSwitch in the zone
+	for _, offering := range instanceType.Offerings {
+		if !offering.Available {
+			continue
+		}
+		if reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) != nil {
+			continue
+		}
+
+		ok := zonesSet.Has(offering.Requirements.Get(corev1.LabelTopologyZone).Any())
+		if !ok {
+			continue
+		}
+		if offering.Price < cheapestPrice {
+			cheapestZone = offering.Requirements.Get(corev1.LabelTopologyZone).Any()
+			cheapestPrice = offering.Price
+		}
+	}
+
+	return cheapestZone, nil
 }
 
 //nolint:gocyclo
