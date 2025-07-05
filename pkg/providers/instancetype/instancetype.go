@@ -27,6 +27,7 @@ import (
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"google.golang.org/api/iterator"
@@ -40,6 +41,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 )
 
@@ -67,6 +69,7 @@ type DefaultProvider struct {
 	authOptions        *auth.Credential
 	machineTypesClient *compute.MachineTypesClient
 	pricingProvider    pricing.Provider
+	gkeProvider        gke.Provider
 
 	muCache sync.RWMutex
 	// FIXME: use cache to speed up query.
@@ -80,7 +83,7 @@ type DefaultProvider struct {
 }
 
 func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, pricingProvider pricing.Provider,
-	unavailableOfferingsCache *pkgcache.UnavailableOfferings) *DefaultProvider {
+	gkeProvider gke.Provider, unavailableOfferingsCache *pkgcache.UnavailableOfferings) *DefaultProvider {
 	machineTypesClient, err := compute.NewMachineTypesRESTClient(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
@@ -90,6 +93,7 @@ func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, prici
 		authOptions:            authOptions,
 		machineTypesClient:     machineTypesClient,
 		pricingProvider:        pricingProvider,
+		gkeProvider:            gkeProvider,
 		instanceTypesCache:     cache.New(InstanceTypesCacheTTL, pkgcache.DefaultCleanupInterval),
 		instanceTypesOfferings: make(map[string]sets.Set[string]),
 		unavailableOfferings:   unavailableOfferingsCache,
@@ -116,28 +120,29 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		return nil, err
 	}
 
-	allZones := sets.New[string]()
-	for _, offeringZones := range p.instanceTypesOfferings {
-		allZones.Insert(offeringZones.UnsortedList()...)
+	zones, err := p.gkeProvider.ResolveClusterZones(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for _, mt := range p.instanceTypesInfo {
-		if mt.Name == nil || mt.MemoryMb == nil || mt.GuestCpus == nil {
+		instanceType := aws.StringValue(mt.Name)
+		if instanceType == "" || mt.MemoryMb == nil || mt.GuestCpus == nil {
 			continue
 		}
 
 		// Make sure all zone is checked.
-		zoneData := lo.Map(allZones.UnsortedList(), func(zoneID string, _ int) ZoneData {
+		zoneData := lo.Map(zones, func(zoneID string, _ int) ZoneData {
 			// We assume that all zones are available for all instance types in spot.
 			// Reference: https://cloud.google.com/compute/docs/instances/provisioning-models
 			ret := ZoneData{ID: zoneID, Available: true, SpotAvailable: true}
-			if !p.instanceTypesOfferings[*mt.Name].Has(zoneID) {
+			if !p.instanceTypesOfferings[instanceType].Has(zoneID) {
 				ret.Available = false
 			}
 			return ret
 		})
-		offerings := p.createOfferings(ctx, *mt.Name, zoneData)
+		offerings := p.createOfferings(ctx, instanceType, zoneData)
 		if len(offerings) == 0 {
 			continue
 		}
