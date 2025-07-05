@@ -5,6 +5,7 @@ go 1.23.2
 require (
 	cloud.google.com/go/compute v1.23.3
 	cloud.google.com/go/compute/metadata v0.3.0
+	cloud.google.com/go/container v1.29.0
 	github.com/aws/aws-sdk-go v1.55.7
 	github.com/awslabs/operatorpkg v0.0.0-20241205163410-0fff9f28d115
 	github.com/go-openapi/swag v0.23.0
