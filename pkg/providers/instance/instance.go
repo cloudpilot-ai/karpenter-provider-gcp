@@ -130,17 +130,20 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
 
+	var errs []error
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
 		zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
+			errs = append(errs, err)
 			continue
 		}
 
 		template, err := p.findTemplateForAlias(ctx, nodeClass.Spec.ImageSelectorTerms[0].Alias)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
+			errs = append(errs, err)
 			continue
 		}
 
@@ -148,11 +151,13 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+			errs = append(errs, err)
 			continue
 		}
 
 		if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
 			log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+			errs = append(errs, err)
 			continue
 		}
 
@@ -180,7 +185,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		}, nil
 	}
 
-	return nil, fmt.Errorf("no instance type available")
+	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
 }
 
 // getCapacityType selects spot if both constraints are flexible and there is an
@@ -307,11 +312,35 @@ func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string
 	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s for alias %q", expectedLabelValue, alias)
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, zone string) *compute.Instance {
+func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
+	nodeClass *v1alpha1.GCENodeClass, template *compute.InstanceTemplate, zone string) (*compute.AttachedDisk, error) {
 	disk := template.Properties.Disks[0]
 	disk.InitializeParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/pd-balanced", p.projectID, zone)
 
-	err := metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata)
+	requirements := instanceType.Requirements
+	if requirements.Get(corev1.LabelArchStable).Has("arm64") {
+		disk.InitializeParams.Architecture = "ARM64"
+		targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
+			reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
+			return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+		})
+		if !found {
+			return nil, fmt.Errorf("no ARM64 image found for node class %s", nodeClass.Name)
+		}
+		disk.InitializeParams.SourceImage = targetImage.SourceImage
+	}
+
+	return disk, nil
+}
+
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, zone string) *compute.Instance {
+	disk, err := p.renderDiskProperties(instanceType, nodeClass, template, zone)
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "failed to render disk properties")
+		return nil
+	}
+
+	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
 		return nil

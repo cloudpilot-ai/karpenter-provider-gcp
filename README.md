@@ -1,6 +1,6 @@
 <div style="text-align: center">
   <p align="center">
-    <img src="docs/images/banner.png" height="200">
+    <img src="./docs/images/banner.png" width="65%" alt="Karpenter Provider GCP Banner">
     <br><br>
     <i>Autoscale GKE cluster nodes efficiently and cost-effectively.</i>
   </p>
