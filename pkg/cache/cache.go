@@ -27,7 +27,7 @@ const (
 
 	// UnavailableOfferingsTTL is the time before offerings that were marked as unavailable
 	// are removed from the cache and are available for launch again
-	UnavailableOfferingsTTL = 3 * time.Minute
+	UnavailableOfferingsTTL = 30 * time.Minute
 	// UnavailableOfferingsCleanupInterval triggers cache cleanup (lazy eviction) at this interval.
 	// We drop the cleanup interval down for the ICE cache to get quicker reactivity to offerings
 	// that become available after they get evicted from the cache
