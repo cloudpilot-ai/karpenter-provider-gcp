@@ -130,48 +130,57 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
 
-	zone, err := p.selectZone(ctx, nodeClaim, instanceTypes[0], capacityType)
-	if err != nil {
-		return nil, err
+	// try all instance types, if one is available, use it
+	for _, instanceType := range instanceTypes {
+		zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
+			continue
+		}
+
+		template, err := p.findTemplateForAlias(ctx, nodeClass.Spec.ImageSelectorTerms[0].Alias)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
+			continue
+		}
+
+		instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, zone)
+		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+			continue
+		}
+
+		if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
+			log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+			continue
+		}
+
+		// we could wait for the node to be present in kubernetes api via csr sign up
+		// should be done with watcher, for now implemented as a csr controller
+		log.FromContext(ctx).Info("Created instance", "instanceName", op.Name, "instanceType", instanceType.Name,
+			"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
+			"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
+
+		return &Instance{
+			InstanceID: instance.Name,
+			Name:       instance.Name,
+			// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
+			// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
+			// Type:         instanceType.Name,
+			Type:         instanceType.Name,
+			Location:     zone,
+			ProjectID:    p.projectID,
+			ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
+			CreationTime: time.Now(),
+			CapacityType: capacityType,
+			Tags:         template.Properties.Labels,
+			Labels:       instance.Labels,
+			Status:       InstanceStatusProvisioning,
+		}, nil
 	}
 
-	template, err := p.findTemplateForAlias(ctx, nodeClass.Spec.ImageSelectorTerms[0].Alias)
-	if err != nil {
-		return nil, err
-	}
-
-	instance := p.buildInstance(nodeClaim, nodeClass, instanceTypes[0], template, zone)
-	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
-	if err != nil {
-		return nil, fmt.Errorf("creating instance: %w", err)
-	}
-
-	if err := p.waitOperationDone(ctx, instanceTypes[0].Name, zone, capacityType, op.Name); err != nil {
-		return nil, err
-	}
-
-	// we could wait for the node to be present in kubernetes api via csr sign up
-	// should be done with watcher, for now implemented as a csr controller
-	log.FromContext(ctx).Info("Created instance", "instanceName", op.Name, "instanceType", instanceTypes[0].Name,
-		"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
-		"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
-
-	return &Instance{
-		InstanceID: instance.Name,
-		Name:       instance.Name,
-		// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
-		// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
-		// Type:         instanceType.Name,
-		Type:         instanceTypes[0].Name,
-		Location:     zone,
-		ProjectID:    p.projectID,
-		ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
-		CreationTime: time.Now(),
-		CapacityType: capacityType,
-		Tags:         template.Properties.Labels,
-		Labels:       instance.Labels,
-		Status:       InstanceStatusProvisioning,
-	}, nil
+	return nil, fmt.Errorf("no instance type available")
 }
 
 // getCapacityType selects spot if both constraints are flexible and there is an

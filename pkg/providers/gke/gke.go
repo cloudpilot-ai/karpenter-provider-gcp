@@ -19,13 +19,22 @@ package gke
 import (
 	"context"
 	"fmt"
+	"time"
 
 	container "cloud.google.com/go/container/apiv1"
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
+)
+
+const (
+	zoneCacheExpiration      = 5 * time.Minute
+	zoneCacheCleanupInterval = 1 * time.Minute
+
+	zoneCacheKey = "zone-cache"
 )
 
 type Provider interface {
@@ -34,15 +43,23 @@ type Provider interface {
 
 type DefaultProvider struct {
 	gkeClient *container.ClusterManagerClient
+
+	zoneCache *cache.Cache
 }
 
 func NewDefaultProvider(gkeClient *container.ClusterManagerClient) Provider {
 	return &DefaultProvider{
 		gkeClient: gkeClient,
+		zoneCache: cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
 	}
 }
 
 func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, error) {
+	zone, ok := p.zoneCache.Get(zoneCacheKey)
+	if ok {
+		return zone.([]string), nil
+	}
+
 	projectID := options.FromContext(ctx).ProjectID
 	clusterName := options.FromContext(ctx).ClusterName
 	resp, err := p.gkeClient.ListClusters(ctx, &containerpb.ListClustersRequest{
@@ -60,6 +77,7 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 	if !ok {
 		return nil, fmt.Errorf("cluster %s not found", clusterName)
 	}
+	p.zoneCache.Set(zoneCacheKey, targetCluster.Locations, cache.DefaultExpiration)
 
 	return targetCluster.Locations, nil
 }
