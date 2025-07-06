@@ -24,6 +24,7 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	certv1 "k8s.io/api/certificates/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,7 +33,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-const KubeletClientSignerName = "kubernetes.io/kube-apiserver-client-kubelet"
+var (
+	KubeletClientSignerName = sets.NewString("kubernetes.io/kube-apiserver-client-kubelet", "kubernetes.io/kubelet-serving")
+)
 
 type Controller struct {
 	client     client.Client
@@ -60,7 +63,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			continue
 		}
 
-		if csr.Spec.SignerName != KubeletClientSignerName {
+		if !KubeletClientSignerName.Has(csr.Spec.SignerName) {
 			continue
 		}
 
@@ -102,7 +105,7 @@ func isApprovedOrDenied(csr *certv1.CertificateSigningRequest) bool {
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	c.client = m.GetClient()
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("csr").
-		WatchesRawSource(singleton.Source()).
+		Named("csr-controller").
+		For(&certv1.CertificateSigningRequest{}).
 		Complete(singleton.AsReconciler(c))
 }
