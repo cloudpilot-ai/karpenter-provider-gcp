@@ -79,18 +79,19 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, *mt.Name),
-		// TODO: fix this with available arch
-		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
 		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 		})...),
 		scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
 		scheduling.NewRequirement(corev1.LabelWindowsBuild, corev1.NodeSelectorOpDoesNotExist),
+
 		// Well Known to Karpenter
 		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(karpv1.CapacityTypeLabelKey).Any()
 		})...),
+
 		// Well Known to Google Cloud
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", mt.GetGuestCpus())),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUModel, corev1.NodeSelectorOpDoesNotExist),
@@ -127,9 +128,19 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		if len(instanceTypeParts) == 3 {
 			requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0] + "-" + instanceTypeParts[1])
 		}
+
+		requirements.Get(corev1.LabelArchStable).Insert(extractArch(instanceTypeParts[0]))
 	}
 
 	return requirements
+}
+
+func extractArch(instanceTypePrefix string) string {
+	// referring to https://cloud.google.com/compute/docs/instances/arm-on-compute
+	if instanceTypePrefix == "a4x" || instanceTypePrefix == "c4a" || instanceTypePrefix == "t2a" {
+		return "arm64"
+	}
+	return "amd64"
 }
 
 func computeCapacity(ctx context.Context, mt *computepb.MachineType) corev1.ResourceList {
