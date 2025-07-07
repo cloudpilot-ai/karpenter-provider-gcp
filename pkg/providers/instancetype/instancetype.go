@@ -23,11 +23,13 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"google.golang.org/api/iterator"
@@ -37,6 +39,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
@@ -71,15 +74,18 @@ type DefaultProvider struct {
 	pricingProvider    pricing.Provider
 	gkeProvider        gke.Provider
 
-	muCache sync.RWMutex
-	// FIXME: use cache to speed up query.
-	instanceTypesCache *cache.Cache
-
 	// We assume that all instance types with spot are available in all zones.
 	// Reference: https://cloud.google.com/compute/docs/instances/provisioning-models
-	instanceTypesOfferings map[string]sets.Set[string]
+
+	muInstanceTypesInfo    sync.RWMutex
 	instanceTypesInfo      []*computepb.MachineType
-	unavailableOfferings   *pkgcache.UnavailableOfferings
+	instanceTypesOfferings map[string]sets.Set[string]
+	instanceTypesSeqNum    uint64
+	cm                     *pretty.ChangeMonitor
+
+	unavailableOfferings *pkgcache.UnavailableOfferings
+	// FIXME: use cache to speed up query.
+	instanceTypesCache *cache.Cache
 }
 
 func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, pricingProvider pricing.Provider,
@@ -97,6 +103,8 @@ func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, prici
 		instanceTypesCache:     cache.New(InstanceTypesCacheTTL, pkgcache.DefaultCleanupInterval),
 		instanceTypesOfferings: make(map[string]sets.Set[string]),
 		unavailableOfferings:   unavailableOfferingsCache,
+		cm:                     pretty.NewChangeMonitor(),
+		instanceTypesSeqNum:    0,
 	}
 }
 
@@ -113,8 +121,8 @@ func (p *DefaultProvider) validateState() error {
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
-	p.muCache.RLock()
-	defer p.muCache.RUnlock()
+	p.muInstanceTypesInfo.RLock()
+	defer p.muInstanceTypesInfo.RUnlock()
 
 	if err := p.validateState(); err != nil {
 		return nil, err
@@ -123,6 +131,13 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	zones, err := p.gkeProvider.ResolveClusterZones(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	zonesHash, _ := hashstructure.Hash(zones, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
+	kcHash, _ := hashstructure.Hash(nodeClass.Spec.KubeletConfiguration, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
+	listKey := fmt.Sprintf("%d-%d-%d-%d", p.instanceTypesSeqNum, p.unavailableOfferings.SeqNum, zonesHash, kcHash)
+	if item, ok := p.instanceTypesCache.Get(listKey); ok {
+		return item.([]*cloudprovider.InstanceType), nil
 	}
 
 	instanceTypes := []*cloudprovider.InstanceType{}
@@ -150,6 +165,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		addInstanceType := NewInstanceType(ctx, mt, p.authOptions.Region, offerings)
 		instanceTypes = append(instanceTypes, addInstanceType)
 	}
+	p.instanceTypesCache.SetDefault(listKey, instanceTypes)
 
 	return instanceTypes, nil
 }
@@ -204,8 +220,8 @@ func (p *DefaultProvider) createOffering(zone, capacityType string, price float6
 }
 
 func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
-	p.muCache.Lock()
-	defer p.muCache.Unlock()
+	p.muInstanceTypesInfo.Lock()
+	defer p.muInstanceTypesInfo.Unlock()
 
 	types, err := p.getInstanceTypes(ctx)
 	if err != nil {
@@ -230,14 +246,16 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 }
 
 func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
-	p.muCache.Lock()
-	defer p.muCache.Unlock()
+	p.muInstanceTypesInfo.Lock()
+	defer p.muInstanceTypesInfo.Unlock()
 
 	types, err := p.getInstanceTypes(ctx)
 	if err != nil {
 		return fmt.Errorf("getting instance types: %w", err)
 	}
-
+	if p.cm.HasChanged("instance-types", types) {
+		atomic.AddUint64(&p.instanceTypesSeqNum, 1)
+	}
 	p.instanceTypesInfo = types
 
 	return nil
