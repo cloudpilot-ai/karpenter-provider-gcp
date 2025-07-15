@@ -590,7 +590,7 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 					CapacityType: resolveCapacityType(inst.Scheduling),
 					Labels:       inst.Labels,
 					Tags:         inst.Labels,
-					Status:       InstanceStatusRunning, // consider mapping from inst.Status
+					Status:       inst.Status,
 				}
 				instances = append(instances, instance)
 			}
