@@ -39,11 +39,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
+	instance "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
@@ -55,6 +58,8 @@ type Controller struct {
 	kubeClient client.Client
 	recorder   events.Recorder
 
+	instanceProvider instance.Provider
+
 	unavailableOfferingsCache *cache.UnavailableOfferings
 	metadataClient            *metadata.Client
 	zoneOperationClient       *computev1.ZoneOperationsClient
@@ -65,7 +70,8 @@ func NewController(kubeClient client.Client,
 	recorder events.Recorder, unavailableOfferingsCache *cache.UnavailableOfferings,
 	metadataClient *metadata.Client,
 	zoneOperationClient *computev1.ZoneOperationsClient,
-	credential auth.Credential) *Controller {
+	credential auth.Credential,
+	instanceProvider instance.Provider) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
 		recorder:   recorder,
@@ -74,6 +80,7 @@ func NewController(kubeClient client.Client,
 		metadataClient:            metadataClient,
 		zoneOperationClient:       zoneOperationClient,
 		credential:                credential,
+		instanceProvider:          instanceProvider,
 	}
 }
 
@@ -112,6 +119,55 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{}, fmt.Errorf("getting zones: %w", err)
 	}
 
+	if err := c.handleStoppedSpotInstances(ctx); err != nil {
+		return reconcile.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
+	}
+
+	if err := c.handleSpotInterruptionEvents(ctx, zones); err != nil {
+		return reconcile.Result{}, fmt.Errorf("handling spot interruption events: %w", err)
+	}
+
+	// Will requeue after 3 seconds and try again
+	return reconcile.Result{RequeueAfter: 3 * time.Second}, nil
+}
+
+func (c *Controller) handleStoppedSpotInstances(ctx context.Context) error {
+	nodes := &corev1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodes, &client.ListOptions{}); err != nil {
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+
+	for i := range nodes.Items {
+		node := nodes.Items[i]
+		if node.Labels == nil || node.Labels[utils.LabelNodePoolKey] == "" {
+			continue
+		}
+
+		providerID := node.Spec.ProviderID
+		if providerID == "" {
+			continue
+		}
+
+		ins, err := c.instanceProvider.Get(ctx, providerID)
+		if err != nil {
+			if cloudprovider.IsNodeClaimNotFoundError(err) {
+				continue
+			}
+
+			return fmt.Errorf("getting instance: %w", err)
+		}
+
+		if ins.Status == instance.InstanceStatusStopped || ins.Status == instance.InstanceStatusTerminated {
+			if err := c.cleanNodeClaimByInstanceName(ctx, ins.Name, false); err != nil {
+				return fmt.Errorf("cleaning node claim: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []string) error {
 	for _, zone := range zones {
 		// Refer to https://cloud.google.com/compute/docs/instances/create-use-spot#detect-preemption
 		// We need to check if the instance is preempted and delete the nodeClaim from the operation event,
@@ -145,26 +201,32 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		errs := make([]error, len(instanceNames))
 		workqueue.ParallelizeUntil(ctx, 10, len(instanceNames), func(i int) {
 			instanceName := instanceNames[i]
-			nodeClaim, err := c.getNodeClaimByNodeName(ctx, instanceName)
-			if err != nil {
-				errs[i] = fmt.Errorf("getting node claim by node name: %w", err)
-				return
-			}
-			zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-			instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
-			if zone != "" && instanceType != "" {
-				c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
-			}
-
-			if err := c.deleteNodeClaim(ctx, nodeClaim); err != nil {
+			if err := c.cleanNodeClaimByInstanceName(ctx, instanceName, true); err != nil {
 				errs[i] = fmt.Errorf("deleting node claim: %w", err)
 			}
 		})
-		return reconcile.Result{}, multierr.Combine(errs...)
+		return multierr.Combine(errs...)
 	}
 
-	// Will requeue after 3 seconds and try again
-	return reconcile.Result{RequeueAfter: 3 * time.Second}, nil
+	return nil
+}
+
+func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {
+	nodeClaim, err := c.getNodeClaimByNodeName(ctx, instanceName)
+	if err != nil {
+		return fmt.Errorf("getting node claim by node name: %w", err)
+	}
+	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+	instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
+	if markUnavailable && zone != "" && instanceType != "" {
+		c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
+	}
+
+	if err := c.deleteNodeClaim(ctx, nodeClaim); err != nil {
+		return fmt.Errorf("deleting node claim: %w", err)
+	}
+
+	return nil
 }
 
 func (c *Controller) isInstanceInCluster(ctx context.Context, instanceName string) bool {
