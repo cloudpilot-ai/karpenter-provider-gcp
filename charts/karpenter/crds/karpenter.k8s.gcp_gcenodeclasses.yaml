@@ -102,8 +102,8 @@ spec:
                       type: string
                       x-kubernetes-validations:
                       - message: '''alias'' is improperly formatted, must match the
-                          format ''family'''
-                        rule: self.matches('^[a-zA-Z0-9]*$')
+                          format ''family@version'''
+                        rule: self.matches('^[a-zA-Z0-9]+@.+$')
                       - message: 'family is not supported, must be one of the following:
                           ''ContainerOptimizedOS,Ubuntu'''
                         rule: self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']

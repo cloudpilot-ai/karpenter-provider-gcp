@@ -59,5 +59,6 @@ func getSourceImage(ctx context.Context, provider nodepooltemplate.Provider, nod
 	if err != nil {
 		return "", err
 	}
+
 	return sourceImage, nil
 }
