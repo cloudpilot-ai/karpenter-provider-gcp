@@ -75,6 +75,7 @@ var (
 
 	ImageFamilyUbuntu               = "Ubuntu"
 	ImageFamilyContainerOptimizedOS = "ContainerOptimizedOS"
+	ImageFamilyCustom               = "Custom"
 
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"

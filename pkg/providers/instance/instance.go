@@ -140,7 +140,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			continue
 		}
 
-		template, err := p.findTemplateForAlias(ctx, nodeClass.Spec.ImageSelectorTerms[0].Alias)
+		template, err := p.findTemplateForAlias(ctx, nodeClass.ImageFamily())
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
 			errs = append(errs, err)
@@ -275,9 +275,9 @@ func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string
 
 	var expectedLabelValue string
 	switch alias {
-	case nodepooltemplate.KarpenterDefaultNodePoolTemplateAlias:
+	case v1alpha1.ImageFamilyContainerOptimizedOS:
 		expectedLabelValue = nodepooltemplate.KarpenterDefaultNodePoolTemplate
-	case nodepooltemplate.KarpenterUbuntuNodePoolTemplateAlias:
+	case v1alpha1.ImageFamilyUbuntu:
 		expectedLabelValue = nodepooltemplate.KarpenterUbuntuNodePoolTemplate
 	default:
 		return nil, fmt.Errorf("unsupported image alias %q", alias)
