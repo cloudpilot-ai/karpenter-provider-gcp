@@ -98,7 +98,7 @@ spec:
                       description: |-
                         Alias specifies which GKE image to select.
                         Valid families include: ContainerOptimizedOS,Ubuntu
-                      maxLength: 30
+                      maxLength: 60
                       type: string
                       x-kubernetes-validations:
                       - message: '''alias'' is improperly formatted, must match the
