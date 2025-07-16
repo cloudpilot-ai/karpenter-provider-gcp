@@ -40,7 +40,26 @@ func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string
 		return nil, err
 	}
 
-	return c.resolveImages(sourceImage), nil
+	if version == "latest" {
+		return c.resolveImages(sourceImage), nil
+	}
+
+	// the original image is like:  projects/gke-node-images/global/images/gke-1324-gke1415000-cos-117-18613-263-14-c-pre
+	// we need to replace 117-18613-263-14 to the target version
+	versionRe := regexp.MustCompile(`cos-\d+-([\d-]+)-c-pre`)
+	targetVersion := renderVersion(version)
+	modifiedImage := versionRe.ReplaceAllString(sourceImage, "cos-"+targetVersion+"-c-pre")
+
+	return c.resolveImages(modifiedImage), nil
+}
+
+func renderVersion(version string) string {
+	targetVersion := version
+	// Remove leading 'v' if present and replace '.' with '-'
+	if strings.HasPrefix(version, "v") {
+		targetVersion = targetVersion[1:]
+	}
+	return strings.ReplaceAll(targetVersion, ".", "-")
 }
 
 var (

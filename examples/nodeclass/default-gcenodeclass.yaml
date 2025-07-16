@@ -5,6 +5,7 @@ metadata:
 spec:
   serviceAccount: "" # fill me
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS
+    - alias: ContainerOptimizedOS@v117-18613.263.14
+    # - alias: ContainerOptimizedOS@latest
   tags:
     env: dev
