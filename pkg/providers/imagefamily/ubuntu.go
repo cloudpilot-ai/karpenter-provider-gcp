@@ -32,13 +32,17 @@ type Ubuntu struct {
 	nodePoolTemplateProvider nodepooltemplate.Provider
 }
 
-func (u *Ubuntu) ResolveImages(ctx context.Context) (Images, error) {
+func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, error) {
 	sourceImage, err := getSourceImage(ctx, u.nodePoolTemplateProvider, nodepooltemplate.KarpenterUbuntuNodePoolTemplate)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to get source image")
 		return Images{}, err
 	}
 
+	if version != "latest" {
+		re := regexp.MustCompile(`v\d+$`)
+		sourceImage = re.ReplaceAllString(sourceImage, version)
+	}
 	return u.resolveImages(sourceImage), nil
 }
 

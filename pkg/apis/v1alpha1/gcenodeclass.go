@@ -18,6 +18,8 @@ package v1alpha1
 
 import (
 	"fmt"
+	"log"
+	"strings"
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
@@ -67,7 +69,7 @@ type GCENodeClassSpec struct {
 type ImageSelectorTerm struct {
 	// Alias specifies which GKE image to select.
 	// Valid families include: ContainerOptimizedOS,Ubuntu
-	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.matches('^[a-zA-Z0-9]*$')"
+	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family@version'",rule="self.matches('^[a-zA-Z0-9]+@.+$')"
 	// +kubebuilder:validation:XValidation:message="family is not supported, must be one of the following: 'ContainerOptimizedOS,Ubuntu'",rule="self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']"
 	// +kubebuilder:validation:MaxLength=30
 	// +optional
@@ -199,6 +201,54 @@ type GCENodeClassList struct {
 	Items           []GCENodeClass `json:"items"`
 }
 
-func ImageFamilyFromAlias(alias string) string {
-	return alias
+func (in *GCENodeClass) ImageFamily() string {
+	if alias := in.Alias(); alias != nil {
+		return alias.Family
+	}
+
+	// Unreachable: validation enforces that one of the above conditions must be met
+	return ImageFamilyCustom
+}
+
+type Alias struct {
+	Family  string
+	Version string
+}
+
+func (in *GCENodeClass) Alias() *Alias {
+	term, ok := lo.Find(in.Spec.ImageSelectorTerms, func(term ImageSelectorTerm) bool {
+		return term.Alias != ""
+	})
+	if !ok {
+		return nil
+	}
+	return &Alias{
+		Family:  imageFamilyFromAlias(term.Alias),
+		Version: imageVersionFromAlias(term.Alias),
+	}
+}
+
+func imageFamilyFromAlias(alias string) string {
+	components := strings.Split(alias, "@")
+	if len(components) != 2 {
+		log.Fatalf("failed to parse AMI alias %q, invalid format", alias)
+	}
+	family, ok := lo.Find([]string{
+		ImageFamilyUbuntu,
+		ImageFamilyContainerOptimizedOS,
+	}, func(family string) bool {
+		return family == components[0]
+	})
+	if !ok {
+		log.Fatalf("%q is an invalid alias family", components[0])
+	}
+	return family
+}
+
+func imageVersionFromAlias(alias string) string {
+	components := strings.Split(alias, "@")
+	if len(components) != 2 {
+		log.Fatalf("failed to parse image alias %q, invalid format", alias)
+	}
+	return components[1]
 }

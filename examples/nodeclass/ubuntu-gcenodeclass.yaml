@@ -3,7 +3,8 @@ kind: GCENodeClass
 metadata:
   name: default-ubuntu
 spec:
+  serviceAccount: "" # fill me
   imageSelectorTerms:
-    - alias: Ubuntu
+    - alias: Ubuntu@v20250520
   tags:
     env: dev

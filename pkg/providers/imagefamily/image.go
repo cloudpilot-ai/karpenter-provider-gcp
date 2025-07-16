@@ -70,20 +70,12 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	}
 
 	images := map[uint64]Image{}
-	for _, selectorTerm := range nodeClass.Spec.ImageSelectorTerms {
-		var ims Images
-		if selectorTerm.Alias != "" {
-			familyProvider := p.getImageFamilyProvider(selectorTerm.Alias)
-			if familyProvider == nil {
-				continue
-			}
-
-			ims, err = familyProvider.ResolveImages(ctx)
-			if err != nil {
-				return nil, err
-			}
+	if alias := nodeClass.Alias(); alias != nil {
+		familyProvider := p.getImageFamilyProvider(alias.Family)
+		ims, err := familyProvider.ResolveImages(ctx, alias.Version)
+		if err != nil {
+			return nil, err
 		}
-
 		for _, im := range ims {
 			reqsHash := lo.Must(hashstructure.Hash(im.Requirements.NodeSelectorRequirements(),
 				hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))

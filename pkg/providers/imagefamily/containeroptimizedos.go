@@ -33,7 +33,7 @@ type ContainerOptimizedOS struct {
 	nodePoolTemplateProvider nodepooltemplate.Provider
 }
 
-func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context) (Images, error) {
+func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
 	sourceImage, err := getSourceImage(ctx, c.nodePoolTemplateProvider, nodepooltemplate.KarpenterDefaultNodePoolTemplate)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "unable to get sourceImage")
