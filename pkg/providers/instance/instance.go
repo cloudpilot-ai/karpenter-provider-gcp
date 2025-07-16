@@ -320,15 +320,16 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	requirements := instanceType.Requirements
 	if requirements.Get(corev1.LabelArchStable).Has("arm64") {
 		disk.InitializeParams.Architecture = "ARM64"
-		targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
-			reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
-			return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
-		})
-		if !found {
-			return nil, fmt.Errorf("no ARM64 image found for node class %s", nodeClass.Name)
-		}
-		disk.InitializeParams.SourceImage = targetImage.SourceImage
 	}
+
+	targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
+		reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
+		return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+	})
+	if !found {
+		return nil, fmt.Errorf("no ARM64 image found for node class %s", nodeClass.Name)
+	}
+	disk.InitializeParams.SourceImage = targetImage.SourceImage
 
 	return disk, nil
 }
