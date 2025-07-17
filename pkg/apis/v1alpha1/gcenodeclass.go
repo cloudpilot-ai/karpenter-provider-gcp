@@ -36,12 +36,17 @@ type GCENodeClassSpec struct {
 	// +optional
 	Disks *Disk `json:"disk,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
-	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.all(x, has(x.alias))"
+	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.all(x, has(x.alias) || has(x.id))"
 	// Remove or adjust mutual exclusivity rules since there's only one field
 	// +kubebuilder:validation:MinItems:=1
 	// +kubebuilder:validation:MaxItems:=30
 	// +required
 	ImageSelectorTerms []ImageSelectorTerm `json:"imageSelectorTerms" hash:"ignore"`
+	// ImageFamily dictates the instance template used when generating launch templates.
+	// If no ImageSelectorTerms alias is specified, this field is required.
+	// +kubebuilder:validation:Enum:={Ubuntu,ContainerOptimizedOS}
+	// +optional
+	ImageFamily *string `json:"imageFamily,omitempty"`
 	// KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
 	// They are a vswitch of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
@@ -74,6 +79,11 @@ type ImageSelectorTerm struct {
 	// +kubebuilder:validation:MaxLength=60
 	// +optional
 	Alias string `json:"alias,omitempty"`
+	// ID specifies which GKE image to select.
+	// +kubebuilder:validation:XValidation:message="'id' is improperly formatted, must match the format 'id'",rule="self.matches('^.*$')"
+	// +kubebuilder:validation:MaxLength=160
+	// +optional
+	ID string `json:"id,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
@@ -202,6 +212,10 @@ type GCENodeClassList struct {
 }
 
 func (in *GCENodeClass) ImageFamily() string {
+	if in.Spec.ImageFamily != nil {
+		return *in.Spec.ImageFamily
+	}
+
 	if alias := in.Alias(); alias != nil {
 		return alias.Family
 	}
