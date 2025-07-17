@@ -49,7 +49,7 @@ update: tidy download ## Update go files header, CRD and generated code
 	hack/update-generated.sh
 
 verify: ## Verify code. Includes linting, formatting, etc
-	golangci-lint run
+	golangci-lint run --timeout=20m
 
 image: ## Build the Karpenter controller images using ko build
 	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KOCACHE=$(KOCACHE) KO_DOCKER_REPO="$(KO_DOCKER_REPO)" ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller))

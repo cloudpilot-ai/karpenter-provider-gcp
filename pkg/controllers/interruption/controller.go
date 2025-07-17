@@ -182,7 +182,7 @@ func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []s
 		for {
 			op, err := it.Next()
 			if err != nil {
-				log.FromContext(ctx).Info("listing operations warning", err)
+				log.FromContext(ctx).Info("listing operations warning", "zone", zone, "error", err)
 				break
 			}
 			targetLink := op.GetTargetLink()

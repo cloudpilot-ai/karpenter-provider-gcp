@@ -24,12 +24,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -61,6 +63,29 @@ type Command struct {
 	reason            v1.DisruptionReason // used for metrics
 	consolidationType string              // used for metrics
 	lastError         error
+}
+
+func (c *Command) LogValues() []any {
+	candidateNodes := lo.Map(c.candidates, func(candidate *state.StateNode, _ int) interface{} {
+		return map[string]interface{}{
+			"Node":      klog.KObj(candidate.Node),
+			"NodeClaim": klog.KObj(candidate.NodeClaim),
+		}
+	})
+	replacementNodes := lo.Map(c.Replacements, func(replacement Replacement, _ int) interface{} {
+		return map[string]interface{}{
+			"NodeClaim": klog.KRef("", replacement.name),
+		}
+	})
+	return []any{
+		"command-id", c.id,
+		"reason", c.reason,
+		"decision", c.Decision(),
+		"disrupted-node-count", len(candidateNodes),
+		"replacement-node-count", len(replacementNodes),
+		"disrupted-nodes", candidateNodes,
+		"replacement-nodes", replacementNodes,
+	}
 }
 
 // Replacement wraps a NodeClaim name with an initialized field to save on readiness checks and identify
@@ -106,7 +131,7 @@ func IsUnrecoverableError(err error) bool {
 }
 
 type Queue struct {
-	workqueue.RateLimitingInterface
+	workqueue.TypedRateLimitingInterface[*Command]
 
 	mu                  sync.RWMutex
 	providerIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
@@ -125,9 +150,9 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	queue := &Queue{
 		// nolint:staticcheck
 		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
-		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
-			workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay),
-			workqueue.RateLimitingQueueConfig{
+		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.NewTypedItemExponentialFailureRateLimiter[*Command](queueBaseDelay, queueMaxDelay),
+			workqueue.TypedRateLimitingQueueConfig[*Command]{
 				Name: "disruption.workqueue",
 			}),
 		providerIDToCommand: map[string]*Command{},
@@ -171,12 +196,11 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	}
 
 	// Get command from queue. This waits until queue is non-empty.
-	item, shutdown := q.RateLimitingInterface.Get()
+	cmd, shutdown := q.TypedRateLimitingInterface.Get()
 	if shutdown {
 		panic("unexpected failure, disruption queue has shut down")
 	}
-	cmd := item.(*Command)
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("command-id", string(cmd.id)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues(cmd.LogValues()...))
 
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
@@ -184,8 +208,8 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			// store the error that is causing us to fail, so we can bubble it up later if this times out.
 			cmd.lastError = err
 			// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
-			q.RateLimitingInterface.Done(cmd)
-			q.RateLimitingInterface.AddRateLimited(cmd)
+			q.TypedRateLimitingInterface.Done(cmd)
+			q.TypedRateLimitingInterface.AddRateLimited(cmd)
 			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 		}
 		// If the command failed, bail on the action.
@@ -198,7 +222,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          cmd.Decision(),
 			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.reason)),
-			consolidationTypeLabel: cmd.consolidationType,
+			ConsolidationTypeLabel: cmd.consolidationType,
 		})
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, cmd.candidates...))
@@ -220,7 +244,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 // nolint:gocyclo
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	if q.clock.Since(cmd.timeAdded) > maxRetryDuration {
-		return NewUnrecoverableError(fmt.Errorf("command reached timeout after %s", q.clock.Since(cmd.timeAdded)))
+		return NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout"), "duration", q.clock.Since(cmd.timeAdded)))
 	}
 	waitErrs := make([]error, len(cmd.Replacements))
 	for i := range cmd.Replacements {
@@ -246,7 +270,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		initializedStatus := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
-			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)
+			waitErrs[i] = serrors.Wrap(fmt.Errorf("nodeclaim not initialized"), "NodeClaim", klog.KRef("", nodeClaim.Name))
 			continue
 		}
 		cmd.Replacements[i].Initialized = true
@@ -298,7 +322,7 @@ func (q *Queue) Add(cmd *Command) error {
 		q.providerIDToCommand[candidate.ProviderID()] = cmd
 	}
 	q.mu.Unlock()
-	q.RateLimitingInterface.Add(cmd)
+	q.TypedRateLimitingInterface.Add(cmd)
 	return nil
 }
 
@@ -318,8 +342,8 @@ func (q *Queue) HasAny(ids ...string) bool {
 // Remove fully clears the queue of all references of a hash/command
 func (q *Queue) Remove(cmd *Command) {
 	// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
-	q.RateLimitingInterface.Done(cmd)
-	q.RateLimitingInterface.Forget(cmd)
+	q.TypedRateLimitingInterface.Done(cmd)
+	q.TypedRateLimitingInterface.Forget(cmd)
 	q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 	// Remove all candidates linked to the command
 	q.mu.Lock()

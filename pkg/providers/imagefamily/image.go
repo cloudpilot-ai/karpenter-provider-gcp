@@ -127,27 +127,30 @@ func (p *DefaultProvider) resolveImageFromID(ctx context.Context, nodeClass *v1a
 }
 
 func (p *DefaultProvider) resolveImageFromAlias(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, bool, error) {
+	alias := nodeClass.Alias()
+	if alias == nil {
+		return Images{}, false, nil
+	}
+
 	images := Images{}
-	if alias := nodeClass.Alias(); alias != nil {
-		familyProvider := p.getImageFamilyProvider(alias.Family)
-		ims, err := familyProvider.ResolveImages(ctx, alias.Version)
+	familyProvider := p.getImageFamilyProvider(alias.Family)
+	ims, err := familyProvider.ResolveImages(ctx, alias.Version)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Ensure the image exists in GCP
+	for _, im := range ims {
+		gceim, err := p.resolveImage(im.SourceImage)
 		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
 			return nil, false, err
 		}
-
-		// Ensure the image exists in GCP
-		for _, im := range ims {
-			gceim, err := p.resolveImage(im.SourceImage)
-			if err != nil {
-				log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
-				return nil, false, err
-			}
-			if gceim == nil {
-				continue
-			}
-
-			images = append(images, im)
+		if gceim == nil {
+			continue
 		}
+
+		images = append(images, im)
 	}
 
 	return images, true, nil

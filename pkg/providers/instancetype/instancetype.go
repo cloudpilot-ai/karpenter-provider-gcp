@@ -179,8 +179,8 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 // offering, you can do the following thanks to this invariant:
 //
 //	offering.Requirements.Get(v1.TopologyLabelZone).Any()
-func (p *DefaultProvider) createOfferings(_ context.Context, instanceType string, zones []ZoneData) []cloudprovider.Offering {
-	var offerings []cloudprovider.Offering
+func (p *DefaultProvider) createOfferings(_ context.Context, instanceType string, zones []ZoneData) []*cloudprovider.Offering {
+	var offerings []*cloudprovider.Offering
 	for _, zone := range zones {
 		if !zone.Available {
 			continue
@@ -207,8 +207,8 @@ func (p *DefaultProvider) createOfferings(_ context.Context, instanceType string
 	return offerings
 }
 
-func (p *DefaultProvider) createOffering(zone, capacityType string, price float64, available bool) cloudprovider.Offering {
-	return cloudprovider.Offering{
+func (p *DefaultProvider) createOffering(zone, capacityType string, price float64, available bool) *cloudprovider.Offering {
+	return &cloudprovider.Offering{
 		Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
 			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
