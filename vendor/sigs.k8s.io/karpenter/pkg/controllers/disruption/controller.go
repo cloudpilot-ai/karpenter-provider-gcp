@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -82,10 +83,10 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		methods: []Method{
-			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-			NewDrift(kubeClient, cluster, provisioner, recorder),
 			// Delete any empty NodeClaims as there is zero cost in terms of disruption.
 			NewEmptiness(c),
+			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
+			NewDrift(kubeClient, cluster, provisioner, recorder),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 			NewMultiNodeConsolidation(c),
 			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
@@ -117,7 +118,6 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
-		log.FromContext(ctx).V(1).Info("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
@@ -131,13 +131,13 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("removing taint %s from nodes, %w", pretty.Taint(v1.DisruptedNoScheduleTaint), err)
+		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
 	}
 	if err := state.ClearNodeClaimsCondition(ctx, c.kubeClient, v1.ConditionTypeDisruptionReason, outdatedNodes...); err != nil {
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("removing %s condition from nodeclaims, %w", v1.ConditionTypeDisruptionReason, err)
+		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
@@ -148,7 +148,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
-			return reconcile.Result{}, fmt.Errorf("disrupting via reason=%q, %w", strings.ToLower(string(m.Reason())), err)
+			return reconcile.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
 		}
 		if success {
 			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
@@ -162,7 +162,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
-		consolidationTypeLabel: disruption.ConsolidationType(),
+		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
 	if err != nil {
@@ -202,11 +202,11 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	commandID := uuid.NewUUID()
-	log.FromContext(ctx).WithValues("command-id", commandID, "reason", strings.ToLower(string(m.Reason()))).Info(fmt.Sprintf("disrupting nodeclaim(s) via %s", cmd))
+	log.FromContext(ctx).WithValues(append([]any{"command-id", string(commandID), "reason", strings.ToLower(string(m.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	if err := c.MarkDisrupted(ctx, m, cmd.candidates...); err != nil {
-		return fmt.Errorf("marking disrupted (command-id: %s), %w", commandID, err)
+		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", err), "command-id", commandID)
 	}
 
 	var nodeClaimNames []string
@@ -215,7 +215,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 		if nodeClaimNames, err = c.createReplacementNodeClaims(ctx, m, cmd); err != nil {
 			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
 			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return fmt.Errorf("launching replacement nodeclaim (command-id: %s), %w", commandID, err)
+			return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", commandID)
 		}
 	}
 
@@ -234,14 +234,14 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	if err := c.queue.Add(orchestration.NewCommand(nodeClaimNames, statenodes, commandID, m.Reason(), m.ConsolidationType())); err != nil {
 		providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 		c.cluster.UnmarkForDeletion(providerIDs...)
-		return fmt.Errorf("adding command to queue (command-id: %s), %w", commandID, err)
+		return serrors.Wrap(fmt.Errorf("adding command to queue, %w", err), "command-id", commandID)
 	}
 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
 		metrics.ReasonLabel:    strings.ToLower(string(m.Reason())),
-		consolidationTypeLabel: m.ConsolidationType(),
+		ConsolidationTypeLabel: m.ConsolidationType(),
 	})
 	return nil
 }
@@ -254,7 +254,7 @@ func (c *Controller) createReplacementNodeClaims(ctx context.Context, m Method, 
 	}
 	if len(nodeClaimNames) != len(cmd.replacements) {
 		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error
-		return nil, fmt.Errorf("expected %d replacements, got %d", len(cmd.replacements), len(nodeClaimNames))
+		return nil, serrors.Wrap(fmt.Errorf("expected replacement count did not equal actual replacement count"), "expected-count", len(cmd.replacements), "actual-count", len(nodeClaimNames))
 	}
 	return nodeClaimNames, nil
 }
@@ -264,7 +264,7 @@ func (c *Controller) MarkDisrupted(ctx context.Context, m Method, candidates ...
 		return c.StateNode
 	})
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...); err != nil {
-		return fmt.Errorf("tainting nodes with %s: %w", pretty.Taint(v1.DisruptedNoScheduleTaint), err)
+		return serrors.Wrap(fmt.Errorf("tainting nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
 	}
 
 	providerIDs := lo.Map(candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
@@ -278,7 +278,7 @@ func (c *Controller) MarkDisrupted(ctx context.Context, m Method, candidates ...
 			return client.IgnoreNotFound(err)
 		}
 		stored := nodeClaim.DeepCopy()
-		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, v1.ConditionTypeDisruptionReason, string(m.Reason()))
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(m.Reason()), string(m.Reason()))
 		return client.IgnoreNotFound(c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)))
 	})...)
 }
