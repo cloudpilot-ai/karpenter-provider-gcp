@@ -87,7 +87,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).Region,
 		options.FromContext(ctx).ProjectID,
 	)
-	imageProvider := imagefamily.NewDefaultProvider(versionProvider, nodeTemplateProvider)
+	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
 	pricingProvider, err := pricing.NewDefaultProvider(ctx, options.FromContext(ctx).Region)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create pricing provider")

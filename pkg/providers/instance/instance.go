@@ -42,6 +42,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -140,7 +141,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			continue
 		}
 
-		template, err := p.findTemplateForAlias(ctx, nodeClass.ImageFamily())
+		template, err := p.findTemplateByImageFamily(ctx, nodeClass.ImageFamily())
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
 			errs = append(errs, err)
@@ -268,24 +269,24 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 }
 
 //nolint:gocyclo
-func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string) (*compute.InstanceTemplate, error) {
-	if alias == "" {
-		return nil, fmt.Errorf("alias not specified in ImageSelectorTerm")
+func (p *DefaultProvider) findTemplateByImageFamily(ctx context.Context, imageFamily string) (*compute.InstanceTemplate, error) {
+	if imageFamily == "" {
+		return nil, fmt.Errorf("image family not specified in ImageSelectorTerm")
 	}
 
 	var expectedLabelValue string
-	switch alias {
+	switch imageFamily {
 	case v1alpha1.ImageFamilyContainerOptimizedOS:
 		expectedLabelValue = nodepooltemplate.KarpenterDefaultNodePoolTemplate
 	case v1alpha1.ImageFamilyUbuntu:
 		expectedLabelValue = nodepooltemplate.KarpenterUbuntuNodePoolTemplate
 	default:
-		return nil, fmt.Errorf("unsupported image alias %q", alias)
+		return nil, fmt.Errorf("unsupported image family %q", imageFamily)
 	}
 
 	instanceTemplates, err := p.computeService.RegionInstanceTemplates.List(p.projectID, p.region).Context(ctx).Do()
 	if err != nil {
-		return nil, fmt.Errorf("cannot list all instance templates for alias %q: %w", alias, err)
+		return nil, fmt.Errorf("cannot list all instance templates for image family %q: %w", imageFamily, err)
 	}
 
 	for _, t := range instanceTemplates.Items {
@@ -309,7 +310,7 @@ func (p *DefaultProvider) findTemplateForAlias(ctx context.Context, alias string
 		}
 	}
 
-	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s for alias %q", expectedLabelValue, alias)
+	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s for image family %q", expectedLabelValue, imageFamily)
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
@@ -318,8 +319,8 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	disk.InitializeParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/pd-balanced", p.projectID, zone)
 
 	requirements := instanceType.Requirements
-	if requirements.Get(corev1.LabelArchStable).Has("arm64") {
-		disk.InitializeParams.Architecture = "ARM64"
+	if requirements.Get(corev1.LabelArchStable).Has(imagefamily.OSArchARM64Requirement) {
+		disk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
 	}
 
 	targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
@@ -327,7 +328,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 		return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
 	})
 	if !found {
-		return nil, fmt.Errorf("no ARM64 image found for node class %s", nodeClass.Name)
+		return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
 	}
 	disk.InitializeParams.SourceImage = targetImage.SourceImage
 

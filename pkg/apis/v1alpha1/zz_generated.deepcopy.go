@@ -139,6 +139,11 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 		*out = make([]ImageSelectorTerm, len(*in))
 		copy(*out, *in)
 	}
+	if in.ImageFamily != nil {
+		in, out := &in.ImageFamily, &out.ImageFamily
+		*out = new(string)
+		**out = **in
+	}
 	if in.KubeletConfiguration != nil {
 		in, out := &in.KubeletConfiguration, &out.KubeletConfiguration
 		*out = new(KubeletConfiguration)
