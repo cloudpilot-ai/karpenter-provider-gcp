@@ -73,29 +73,33 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		return images.(Images), nil
 	}
 
-	images := Images{}
-	if alias := nodeClass.Alias(); alias != nil {
-		familyProvider := p.getImageFamilyProvider(alias.Family)
-		ims, err := familyProvider.ResolveImages(ctx, alias.Version)
-		if err != nil {
-			return nil, err
-		}
-
-		// Ensure the image exists in GCP
-		for _, im := range ims {
-			if _, err := p.resolveImage(im.SourceImage); err != nil {
-				log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
-				return nil, err
-			}
-			images = append(images, im)
-		}
+	images, ok, err := p.resolveImageFromAlias(ctx, nodeClass)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		p.cache.SetDefault(fmt.Sprintf("%d", hash), images)
+		return images, nil
 	}
 
+	images, _, err = p.resolveImageFromID(ctx, nodeClass)
+	if err != nil {
+		return nil, err
+	}
+	p.cache.SetDefault(fmt.Sprintf("%d", hash), images)
+	return images, nil
+}
+
+func (p *DefaultProvider) resolveImageFromID(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, bool, error) {
+	images := Images{}
 	for _, term := range nodeClass.Spec.ImageSelectorTerms {
 		image, err := p.resolveImage(term.ID)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", term.ID)
-			return nil, err
+			return nil, false, err
+		}
+		if image == nil {
+			continue
 		}
 
 		var requirements scheduling.Requirements
@@ -110,7 +114,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			)
 		default:
 			log.FromContext(ctx).Error(err, "unsupported architecture", "imageSource", term.ID)
-			return nil, fmt.Errorf("unsupported architecture: %s", image.Architecture)
+			return nil, false, fmt.Errorf("unsupported architecture: %s", image.Architecture)
 		}
 
 		images = append(images, Image{
@@ -119,8 +123,34 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		})
 	}
 
-	p.cache.SetDefault(fmt.Sprintf("%d", hash), images)
-	return images, nil
+	return images, true, nil
+}
+
+func (p *DefaultProvider) resolveImageFromAlias(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, bool, error) {
+	images := Images{}
+	if alias := nodeClass.Alias(); alias != nil {
+		familyProvider := p.getImageFamilyProvider(alias.Family)
+		ims, err := familyProvider.ResolveImages(ctx, alias.Version)
+		if err != nil {
+			return nil, false, err
+		}
+
+		// Ensure the image exists in GCP
+		for _, im := range ims {
+			gceim, err := p.resolveImage(im.SourceImage)
+			if err != nil {
+				log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
+				return nil, false, err
+			}
+			if gceim == nil {
+				continue
+			}
+
+			images = append(images, im)
+		}
+	}
+
+	return images, true, nil
 }
 
 func (p *DefaultProvider) resolveImage(sourceImage string) (*compute.Image, error) {
@@ -130,7 +160,7 @@ func (p *DefaultProvider) resolveImage(sourceImage string) (*compute.Image, erro
 	}
 
 	image, err := p.computeService.Images.Get(projectID, imageName).Do()
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "404") {
 		return nil, err
 	}
 
