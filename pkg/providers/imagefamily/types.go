@@ -33,3 +33,11 @@ type Images []Image
 type ImageFamily interface {
 	ResolveImages(ctx context.Context, version string) (Images, error)
 }
+
+const (
+	OSArchitectureX86 = "X86_64"
+	OSArchitectureARM = "ARM64"
+
+	OSArchAMD64Requirement = "amd64"
+	OSArchARM64Requirement = "arm64"
+)

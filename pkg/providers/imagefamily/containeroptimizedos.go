@@ -75,7 +75,7 @@ func (c *ContainerOptimizedOS) resolveImages(sourceImage string) Images {
 	ret = append(ret, Image{
 		SourceImage: sourceImage,
 		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
 			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpDoesNotExist)),
 	})
 
@@ -84,7 +84,7 @@ func (c *ContainerOptimizedOS) resolveImages(sourceImage string) Images {
 	ret = append(ret, Image{
 		SourceImage: arm64Image,
 		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, "arm64"),
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchARM64Requirement),
 			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpDoesNotExist)),
 	})
 
@@ -93,7 +93,7 @@ func (c *ContainerOptimizedOS) resolveImages(sourceImage string) Images {
 	ret = append(ret, Image{
 		SourceImage: gpuImages,
 		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
 			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpExists)),
 	})
 
