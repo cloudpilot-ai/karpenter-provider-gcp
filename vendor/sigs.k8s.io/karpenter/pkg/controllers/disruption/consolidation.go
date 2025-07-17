@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
@@ -104,15 +105,15 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("Node does not have label %q", corev1.LabelTopologyZone))...)
 		return false
 	}
-	if cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.nodePool.Name))...)
+	if cn.NodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.NodePool.Name))...)
 		return false
 	}
 	// If we don't have the "WhenEmptyOrUnderutilized" policy set, we should not do any of the consolidation methods, but
 	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
 	// is named "consolidationPolicy"
-	if cn.nodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenEmptyOrUnderutilized {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.nodePool.Name))...)
+	if cn.NodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenEmptyOrUnderutilized {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.NodePool.Name))...)
 		return false
 	}
 	// return true if consolidatable
@@ -122,7 +123,7 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 // sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result
 func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].disruptionCost < candidates[j].disruptionCost
+		return candidates[i].DisruptionCost < candidates[j].DisruptionCost
 	})
 	return candidates
 }
@@ -211,7 +212,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
 	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
 	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
-	// should fail and we'll just leave the node alone.
+	// should fail and we'll just leave the node alone. We don't need to do the same for reserved since the requirements
+	// are injected on by the scheduler.
 	ctReq := results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey)
 	if ctReq.Has(v1.CapacityTypeSpot) && ctReq.Has(v1.CapacityTypeOnDemand) {
 		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
@@ -307,9 +309,17 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {
-		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduling.NewLabelRequirements(c.StateNode.Labels()))
+		reqs := scheduling.NewLabelRequirements(c.StateNode.Labels())
+		compatibleOfferings := c.instanceType.Offerings.Compatible(reqs)
 		if len(compatibleOfferings) == 0 {
-			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
+			// It's expected that offerings may no longer exist for capacity reservations once a NodeClass stops selecting on
+			// them (or they are no longer considered for some other reason on by the cloudprovider). By definition though,
+			// reserved capacity is free. By modeling it as free, consolidation won't be able to succeed, but the node should be
+			// disrupted via drift regardless.
+			if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved) {
+				return 0.0, nil
+			}
+			return 0.0, serrors.Wrap(fmt.Errorf("unable to determine offering"), "instance-type", c.instanceType.Name, "capacity-type", c.capacityType, "zone", c.zone)
 		}
 		price += compatibleOfferings.Cheapest().Price
 	}

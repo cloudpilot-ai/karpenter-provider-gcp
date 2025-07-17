@@ -31,6 +31,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/csr"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption"
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
+	nodeclasstermination "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/termination"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/instancetype"
 	controllerspricing "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/pricing"
@@ -59,6 +60,7 @@ func NewController(
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
 		nodepooltemplate.NewController(nodePoolTemplateProvider),
+		nodeclasstermination.NewController(kubeClient),
 		instancetype.NewController(instanceTypeProvider),
 		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),

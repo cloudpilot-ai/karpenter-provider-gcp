@@ -1,66 +1,87 @@
-# See https://github.com/golangci/golangci-lint/blob/master/.golangci.example.yml
+version: "2"
 run:
   tests: true
-  timeout: 5m
 linters:
   enable:
     - asciicheck
     - bidichk
-    - errorlint
     - copyloopvar
+    - errorlint
+    - gocyclo
+    - goheader
     - gosec
+    - misspell
+    - nilerr
     - revive
-    - stylecheck
+    - staticcheck
     - tparallel
     - unconvert
     - unparam
-    - gocyclo
-    - govet
-    - goimports
-    - goheader
-    - misspell
-    - nilerr
-    - gci
   disable:
     - prealloc
     - unused
-linters-settings:
-  gocyclo:
-    min-complexity: 11
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  revive:
+  settings:
+    gocyclo:
+      min-complexity: 11
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: dot-imports
+          disabled: true
+    staticcheck:
+      dot-import-whitelist:
+        - github.com/onsi/ginkgo/v2
+        - github.com/onsi/gomega
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-    - name: dot-imports
-      disabled: true
-  stylecheck:
-    dot-import-whitelist:
-      - "github.com/onsi/ginkgo/v2"
-      - "github.com/onsi/gomega"
-  misspell:
-    locale: US
-    ignore-words: []
-  goimports:
-    local-prefixes: github.com/cloudpilot-ai/karpenter-provider-gcp
-  gci:
-    sections:
-      - standard # Standard section: captures all standard packages.
-      - default # Default section: contains all imports that could not be matched to another section type.
-      - localmodule # Local module section: contains all local packages. This section is not present unless explicitly enabled.
-    skip-generated: true
+      - linters:
+          - goheader
+        path: zz_(.+)\.go
+      - path: (.+)\.go$
+        text: declaration of "(err|ctx)" shadows declaration at
+    paths:
+      - tools
+      - website
+      - hack
+      - charts
+      - designs
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   fix: true
-  exclude: ['declaration of "(err|ctx)" shadows declaration at']
-  exclude-dirs:
-    - tools
-    - website
-    - hack
-    - charts
-    - designs
-  exclude-rules:
-  - linters:
-    - goheader
-    path: 'zz_(.+)\.go'
-
+formatters:
+  enable:
+    - gci
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule
+    goimports:
+      local-prefixes:
+        - github.com/cloudpilot-ai/karpenter-provider-gcp
+  exclusions:
+    generated: lax
+    paths:
+      - tools
+      - website
+      - hack
+      - charts
+      - designs
+      - third_party$
+      - builtin$
+      - examples$
