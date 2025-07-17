@@ -19,16 +19,20 @@ package imagefamily
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
-	"github.com/samber/lo"
+	"google.golang.org/api/compute/v1"
+	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
 type Provider interface {
@@ -37,17 +41,17 @@ type Provider interface {
 
 type DefaultProvider struct {
 	sync.Mutex
-	cache *cache.Cache
+	cache          *cache.Cache
+	computeService *compute.Service
 
-	versionProvider              version.Provider
 	containerOptimizedOSProvider *ContainerOptimizedOS
 	ubuntuOSProvider             *Ubuntu
 }
 
-func NewDefaultProvider(versionProvider version.Provider, nodePoolTemplateProvider nodepooltemplate.Provider) *DefaultProvider {
+func NewDefaultProvider(computeService *compute.Service, nodePoolTemplateProvider nodepooltemplate.Provider) *DefaultProvider {
 	return &DefaultProvider{
-		cache:           cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
-		versionProvider: versionProvider,
+		cache:          cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
+		computeService: computeService,
 		containerOptimizedOSProvider: &ContainerOptimizedOS{
 			nodePoolTemplateProvider: nodePoolTemplateProvider,
 		},
@@ -69,26 +73,97 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		return images.(Images), nil
 	}
 
-	images := map[uint64]Image{}
+	images := Images{}
 	if alias := nodeClass.Alias(); alias != nil {
 		familyProvider := p.getImageFamilyProvider(alias.Family)
 		ims, err := familyProvider.ResolveImages(ctx, alias.Version)
 		if err != nil {
 			return nil, err
 		}
+
+		// Ensure the image exists in GCP
 		for _, im := range ims {
-			reqsHash := lo.Must(hashstructure.Hash(im.Requirements.NodeSelectorRequirements(),
-				hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
-			// So, this means, the further ahead, the higher the priority.
-			if _, ok := images[reqsHash]; ok {
-				continue
+			if _, err := p.resolveImage(im.SourceImage); err != nil {
+				log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
+				return nil, err
 			}
-			images[reqsHash] = im
+			images = append(images, im)
 		}
 	}
 
-	p.cache.SetDefault(fmt.Sprintf("%d", hash), Images(lo.Values(images)))
-	return lo.Values(images), nil
+	for _, term := range nodeClass.Spec.ImageSelectorTerms {
+		image, err := p.resolveImage(term.ID)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", term.ID)
+			return nil, err
+		}
+
+		var requirements scheduling.Requirements
+		switch image.Architecture {
+		case OSArchitectureX86:
+			requirements = scheduling.NewRequirements(
+				scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
+			)
+		case OSArchitectureARM:
+			requirements = scheduling.NewRequirements(
+				scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchARM64Requirement),
+			)
+		default:
+			log.FromContext(ctx).Error(err, "unsupported architecture", "imageSource", term.ID)
+			return nil, fmt.Errorf("unsupported architecture: %s", image.Architecture)
+		}
+
+		images = append(images, Image{
+			SourceImage:  term.ID,
+			Requirements: requirements,
+		})
+	}
+
+	p.cache.SetDefault(fmt.Sprintf("%d", hash), images)
+	return images, nil
+}
+
+func (p *DefaultProvider) resolveImage(sourceImage string) (*compute.Image, error) {
+	projectID, imageName, err := parseImageSource(sourceImage)
+	if err != nil {
+		return nil, err
+	}
+
+	image, err := p.computeService.Images.Get(projectID, imageName).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return image, nil
+}
+
+// parseImageSource parses a GCP image source string
+// Supports formats like:
+// - projects/PROJECT_ID/global/images/IMAGE_NAME
+// - global/images/IMAGE_NAME (requires project context)
+// - IMAGE_NAME (requires project context)
+func parseImageSource(imageSource string) (projectID, imageName string, err error) {
+	// Remove any leading/trailing whitespace
+	imageSource = strings.TrimSpace(imageSource)
+
+	// Pattern: projects/PROJECT_ID/global/images/IMAGE_NAME
+	projectPattern := regexp.MustCompile(`^projects/([^/]+)/global/images/(.+)$`)
+	if matches := projectPattern.FindStringSubmatch(imageSource); matches != nil {
+		return matches[1], matches[2], nil
+	}
+
+	// Pattern: global/images/IMAGE_NAME
+	globalPattern := regexp.MustCompile(`^global/images/(.+)$`)
+	if matches := globalPattern.FindStringSubmatch(imageSource); matches != nil {
+		return "", "", fmt.Errorf("project ID required for global image reference: %s", imageSource)
+	}
+
+	// Pattern: IMAGE_NAME only
+	if !strings.Contains(imageSource, "/") {
+		return "", "", fmt.Errorf("project ID required for image name: %s", imageSource)
+	}
+
+	return "", "", fmt.Errorf("invalid image source format: %s", imageSource)
 }
 
 func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {

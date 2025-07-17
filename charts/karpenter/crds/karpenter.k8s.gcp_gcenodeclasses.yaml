@@ -85,6 +85,14 @@ spec:
                     - message: size invalid
                       rule: self >= 10
                 type: object
+              imageFamily:
+                description: |-
+                  ImageFamily dictates the instance template used when generating launch templates.
+                  If no ImageSelectorTerms alias is specified, this field is required.
+                enum:
+                - Ubuntu
+                - ContainerOptimizedOS
+                type: string
               imageSelectorTerms:
                 description: |-
                   ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
@@ -107,6 +115,14 @@ spec:
                       - message: 'family is not supported, must be one of the following:
                           ''ContainerOptimizedOS,Ubuntu'''
                         rule: self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']
+                    id:
+                      description: ID specifies which GKE image to select.
+                      maxLength: 160
+                      type: string
+                      x-kubernetes-validations:
+                      - message: '''id'' is improperly formatted, must match the format
+                          ''id'''
+                        rule: self.matches('^.*$')
                   type: object
                 maxItems: 30
                 minItems: 1
@@ -114,7 +130,7 @@ spec:
                 x-kubernetes-validations:
                 - message: '''alias'' is improperly formatted, must match the format
                     ''family'''
-                  rule: self.all(x, has(x.alias))
+                  rule: self.all(x, has(x.alias) || has(x.id))
               kubeletConfiguration:
                 description: |-
                   KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
