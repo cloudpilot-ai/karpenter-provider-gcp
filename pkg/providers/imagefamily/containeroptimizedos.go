@@ -89,7 +89,7 @@ func (c *ContainerOptimizedOS) resolveImages(sourceImage string) Images {
 	})
 
 	// gpu
-	gpuImages := strings.Replace(sourceImage, "-pre", "-nvda", -1)
+	gpuImages := strings.ReplaceAll(sourceImage, "-pre", "-nvda")
 	ret = append(ret, Image{
 		SourceImage: gpuImages,
 		Requirements: scheduling.NewRequirements(
