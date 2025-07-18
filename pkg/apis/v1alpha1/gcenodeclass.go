@@ -196,6 +196,7 @@ const (
 func (in *GCENodeClass) Hash() string {
 	return fmt.Sprint(lo.Must(hashstructure.Hash([]interface{}{
 		in.Spec,
+		in.ImageFamily(),
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,

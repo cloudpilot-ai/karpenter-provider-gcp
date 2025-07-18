@@ -136,7 +136,8 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	zonesHash, _ := hashstructure.Hash(zones, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	kcHash, _ := hashstructure.Hash(nodeClass.Spec.KubeletConfiguration, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	listKey := fmt.Sprintf("%d-%d-%d-%d", p.instanceTypesSeqNum, p.unavailableOfferings.SeqNum, zonesHash, kcHash)
-	if item, ok := p.instanceTypesCache.Get(listKey); ok {
+	item, ok := p.instanceTypesCache.Get(listKey)
+	if ok && len(item.([]*cloudprovider.InstanceType)) > 0 {
 		return item.([]*cloudprovider.InstanceType), nil
 	}
 

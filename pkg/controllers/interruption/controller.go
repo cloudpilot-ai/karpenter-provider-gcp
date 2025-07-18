@@ -18,6 +18,7 @@ package interruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -29,8 +30,9 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/go-openapi/swag"
 	"go.uber.org/multierr"
+	"google.golang.org/api/iterator"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -182,7 +184,9 @@ func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []s
 		for {
 			op, err := it.Next()
 			if err != nil {
-				log.FromContext(ctx).Info("listing operations warning", "zone", zone, "error", err)
+				if !errors.Is(err, iterator.Done) {
+					log.FromContext(ctx).Info("listing operations warning", "zone", zone, "error", err)
+				}
 				break
 			}
 			targetLink := op.GetTargetLink()
@@ -235,7 +239,7 @@ func (c *Controller) isInstanceInCluster(ctx context.Context, instanceName strin
 	if err == nil {
 		return true
 	}
-	if errors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
 		return false
 	}
 	log.FromContext(ctx).Error(err, "getting node", "node", instanceName)

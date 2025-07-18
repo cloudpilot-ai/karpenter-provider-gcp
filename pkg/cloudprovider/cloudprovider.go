@@ -113,7 +113,6 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 }
 
 func (c *CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
-	log.FromContext(ctx).Info("listing instances from instance provider")
 	instances, err := c.instanceProvider.List(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to list instances")
@@ -129,7 +128,6 @@ func (c *CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 		}
 
 		nodeClaim := c.instanceToNodeClaim(instance, instanceType)
-		log.FromContext(ctx).Info("converted instance to nodeclaim", "nodeClaimName", nodeClaim.Name)
 		nodeClaims = append(nodeClaims, nodeClaim)
 	}
 
@@ -251,11 +249,7 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 		}
 		return "", client.IgnoreNotFound(fmt.Errorf("resolving node class, %w", err))
 	}
-	driftReason, err := c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass)
-	if err != nil {
-		return "", err
-	}
-	return driftReason, nil
+	return c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass), nil
 }
 
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
