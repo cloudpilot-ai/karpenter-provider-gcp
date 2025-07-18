@@ -16,7 +16,6 @@ package cloudprovider
 
 import (
 	"context"
-	"errors"
 
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -28,19 +27,34 @@ import (
 
 const (
 	NodeClassDrift cloudprovider.DriftReason = "NodeClassDrift"
+	ImageDrift     cloudprovider.DriftReason = "ImageDrift"
 )
 
-func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, _ *karpv1.NodePool, nodeClass *v1alpha1.GCENodeClass) (cloudprovider.DriftReason, error) {
-	if drifted := c.staticFieldsDrifted(nodeClaim, nodeClass); drifted != "" {
-		err := errors.New("current node claim is drifted")
-		log.FromContext(ctx).Error(err, "drifted", drifted)
-		return drifted, err
+func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, _ *karpv1.NodePool, nodeClass *v1alpha1.GCENodeClass) cloudprovider.DriftReason {
+	if drifted := c.areStaticFieldsDrifted(nodeClaim, nodeClass); drifted != "" {
+		log.FromContext(ctx).Info("nodeclass drifted", "drifted", drifted)
+		return drifted
 	}
-	// TODO: wait for GCENodeClassStatus is ready
-	return "", nil
+
+	if drifted := c.isImageDrifted(nodeClaim, nodeClass); drifted != "" {
+		log.FromContext(ctx).Info("image drifted", "drifted", drifted)
+		return drifted
+	}
+
+	return ""
 }
 
-func (c *CloudProvider) staticFieldsDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) cloudprovider.DriftReason {
+func (c *CloudProvider) isImageDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) cloudprovider.DriftReason {
+	for _, im := range nodeClass.Status.Images {
+		if im.SourceImage == nodeClaim.Status.ImageID {
+			return ""
+		}
+	}
+
+	return ImageDrift
+}
+
+func (c *CloudProvider) areStaticFieldsDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) cloudprovider.DriftReason {
 	nodeClassHash, foundNodeClassHash := nodeClass.Annotations[v1alpha1.AnnotationGCENodeClassHash]
 	nodeClassHashVersion, foundNodeClassHashVersion := nodeClass.Annotations[v1alpha1.AnnotationGCENodeClassHashVersion]
 	nodeClaimHash, foundNodeClaimHash := nodeClaim.Annotations[v1alpha1.AnnotationGCENodeClassHash]

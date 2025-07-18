@@ -576,7 +576,6 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 
 		err := req.Pages(ctx, func(page *compute.InstanceList) error {
 			if len(page.Items) == 0 {
-				log.FromContext(ctx).Info("No instances found in zone", "zone", zone)
 				return nil // empty page, continue
 			}
 

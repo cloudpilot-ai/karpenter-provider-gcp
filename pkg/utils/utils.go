@@ -17,12 +17,16 @@ limitations under the License.
 package utils
 
 import (
+	"context"
 	"math"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
@@ -150,4 +154,16 @@ func WithDefaultFloat64(key string, def float64) float64 {
 		return def
 	}
 	return f
+}
+
+func ResolveNodePoolFromNodeClaim(ctx context.Context, kubeClient client.Client, nodeClaim *karpv1.NodeClaim) (*karpv1.NodePool, error) {
+	if nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]; ok {
+		nodePool := &karpv1.NodePool{}
+		if err := kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+			return nil, err
+		}
+		return nodePool, nil
+	}
+	// There will be no nodePool referenced inside the nodeClaim in case of standalone nodeClaims
+	return nil, nil
 }
