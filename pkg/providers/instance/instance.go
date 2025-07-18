@@ -96,14 +96,23 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		// TODO: Maybe add timeout operation
-		op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(ctx).Do()
-		if err != nil {
-			return fmt.Errorf("getting operation: %w", err)
-		}
+	timeout := time.NewTimer(10 * time.Second)
 
-		if op.Status == "DONE" {
+	for {
+		select {
+		case <-timeout.C:
+			// if the operation does not finish in 10s, it means there is enough resources and the creation will be successful
+			return nil
+		case <-ticker.C:
+			op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(ctx).Do()
+			if err != nil {
+				return fmt.Errorf("getting operation: %w", err)
+			}
+
+			if op.Status != "DONE" {
+				continue
+			}
+
 			if op.Error != nil {
 				capacityError, found := lo.Find(op.Error.Errors, func(e *compute.OperationErrorErrors) bool {
 					// Example in real environment:
@@ -119,8 +128,6 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 			return nil
 		}
 	}
-
-	return nil
 }
 
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
