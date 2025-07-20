@@ -78,7 +78,7 @@ func extractCategory(part string) string {
 func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offerings, region string) scheduling.Requirements {
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
-		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, *mt.Name),
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, aws.StringValue(mt.Name)),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
 		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
@@ -114,12 +114,20 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		requirements.Add(scheduling.NewRequirement(v1alpha1.LabelTopologyZoneID, corev1.NodeSelectorOpIn, zoneIDs...))
 	}
 
+	// GPU labels
+	if len(mt.GetAccelerators()) > 0 {
+		requirements.Get(v1alpha1.LabelInstanceGPUName).Insert(extractGPUName(mt))
+		requirements.Get(v1alpha1.LabelInstanceGPUCount).Insert(fmt.Sprintf("%d", len(mt.GetAccelerators())))
+	}
+
 	// The format looks like: n1-standard-1, the family is n1-standard, the category is n, the instance size is 1
 	// Also, there is something like e2-medium, the family is e2, the category is e, the instance size is medium
 	instanceTypeParts := strings.Split(aws.StringValue(mt.Name), "-")
 	if len(instanceTypeParts) >= 2 {
 		requirements.Get(v1alpha1.LabelInstanceCategory).Insert(extractCategory(instanceTypeParts[0]))
 		requirements.Get(v1alpha1.LabelInstanceSize).Insert(instanceTypeParts[len(instanceTypeParts)-1])
+		// The laster number of the first part is the generation
+		requirements.Get(v1alpha1.LabelInstanceGeneration).Insert(extractGeneration(instanceTypeParts[0]))
 
 		if len(instanceTypeParts) == 2 {
 			requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0])
@@ -133,6 +141,18 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 	}
 
 	return requirements
+}
+
+func extractGPUName(mt *computepb.MachineType) string {
+	if len(mt.GetAccelerators()) > 0 {
+		return mt.GetAccelerators()[0].GetGuestAcceleratorType()
+	}
+	return ""
+}
+
+func extractGeneration(instanceTypePrefix string) string {
+	// The laster number of the first part is the generation
+	return string(instanceTypePrefix[len(instanceTypePrefix)-1])
 }
 
 func extractArch(instanceTypePrefix string) string {
