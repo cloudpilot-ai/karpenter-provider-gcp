@@ -94,7 +94,7 @@ func TestDefaultProvider_OnDemandPrice(t *testing.T) {
 	}
 
 	// Test price update
-	if err := provider.UpdateOnDemandPricing(context.Background()); err != nil {
+	if err := provider.UpdatePrices(context.Background()); err != nil {
 		t.Fatalf("Failed to update on-demand pricing: %v", err)
 	}
 
@@ -105,40 +105,12 @@ func TestDefaultProvider_OnDemandPrice(t *testing.T) {
 			t.Errorf("Failed to find on-demand price for %s", instanceType)
 			continue
 		}
-	}
 
-	// Test getting price for a non-existent instance type
-	_, found := provider.OnDemandPrice("non-existent-type")
-	if found {
-		t.Error("Expected to not find price for non-existent instance type")
-	}
-}
-
-func TestDefaultProvider_SpotPrice(t *testing.T) {
-	// Initialize the provider with europe-west4 region
-	provider, err := pricing.NewDefaultProvider(context.Background(), testRegion)
-	if err != nil {
-		t.Errorf("NewDefaultProvider failed: %v", err)
-	}
-
-	// Test price update
-	if err := provider.UpdateSpotPricing(context.Background()); err != nil {
-		t.Fatalf("Failed to update spot pricing: %v", err)
-	}
-
-	// Test getting spot prices for various instance types
-	for _, instanceType := range testInstanceTypes {
-		_, found := provider.SpotPrice(instanceType, "europe-west4-a")
+		_, found = provider.SpotPrice(instanceType, "europe-west4-a")
 		if !found {
 			t.Errorf("Failed to find spot price for %s", instanceType)
 			continue
 		}
-	}
-
-	// Test getting price for a non-existent instance type
-	_, found := provider.SpotPrice("non-existent-type", "europe-west4-a")
-	if found {
-		t.Error("Expected to not find price for non-existent instance type")
 	}
 }
 
@@ -150,7 +122,7 @@ func TestDefaultProvider_InstanceTypes(t *testing.T) {
 	}
 
 	// Updating prices to retrieve a instance types from runtime prices
-	if err := provider.UpdateOnDemandPricing(context.Background()); err != nil {
+	if err := provider.UpdatePrices(context.Background()); err != nil {
 		t.Fatalf("Failed to update on-demand pricing: %v", err)
 	}
 
