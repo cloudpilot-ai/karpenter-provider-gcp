@@ -148,14 +148,20 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			continue
 		}
 
-		template, err := p.findTemplateByImageFamily(ctx, nodeClass.ImageFamily())
+		nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
+		if nodePoolName == "" {
+			log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
+			return nil, fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
+		}
+
+		template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
 			errs = append(errs, err)
 			continue
 		}
 
-		instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, zone)
+		instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone)
 		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
@@ -275,25 +281,26 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 	return cheapestZone, nil
 }
 
-//nolint:gocyclo
-func (p *DefaultProvider) findTemplateByImageFamily(ctx context.Context, imageFamily string) (*compute.InstanceTemplate, error) {
-	if imageFamily == "" {
-		return nil, fmt.Errorf("image family not specified in ImageSelectorTerm")
-	}
-
-	var expectedLabelValue string
+func resolveNodePoolName(imageFamily string) string {
 	switch imageFamily {
 	case v1alpha1.ImageFamilyContainerOptimizedOS:
-		expectedLabelValue = nodepooltemplate.KarpenterDefaultNodePoolTemplate
+		return nodepooltemplate.KarpenterDefaultNodePoolTemplate
 	case v1alpha1.ImageFamilyUbuntu:
-		expectedLabelValue = nodepooltemplate.KarpenterUbuntuNodePoolTemplate
-	default:
-		return nil, fmt.Errorf("unsupported image family %q", imageFamily)
+		return nodepooltemplate.KarpenterUbuntuNodePoolTemplate
+	}
+
+	return ""
+}
+
+//nolint:gocyclo
+func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePoolName string) (*compute.InstanceTemplate, error) {
+	if nodePoolName == "" {
+		return nil, fmt.Errorf("node pool name not specified in ImageSelectorTerm")
 	}
 
 	instanceTemplates, err := p.computeService.RegionInstanceTemplates.List(p.projectID, p.region).Context(ctx).Do()
 	if err != nil {
-		return nil, fmt.Errorf("cannot list all instance templates for image family %q: %w", imageFamily, err)
+		return nil, fmt.Errorf("cannot list all instance templates for node pool name %q: %w", nodePoolName, err)
 	}
 
 	for _, t := range instanceTemplates.Items {
@@ -311,13 +318,13 @@ func (p *DefaultProvider) findTemplateByImageFamily(ctx context.Context, imageFa
 					continue
 				}
 			}
-			if val, ok := t.Properties.Labels["goog-k8s-node-pool-name"]; ok && val == expectedLabelValue {
+			if val, ok := t.Properties.Labels["goog-k8s-node-pool-name"]; ok && val == nodePoolName {
 				return t, nil
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s for image family %q", expectedLabelValue, imageFamily)
+	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s", nodePoolName)
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
@@ -342,14 +349,14 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return disk, nil
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, zone string) *compute.Instance {
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone string) *compute.Instance {
 	disk, err := p.renderDiskProperties(instanceType, nodeClass, template, zone)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to render disk properties")
 		return nil
 	}
 
-	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata)
+	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata, nodePoolName)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
 		return nil
