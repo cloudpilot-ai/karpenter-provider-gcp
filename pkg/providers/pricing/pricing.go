@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/patrickmn/go-cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	utilsobject "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/object"
@@ -49,8 +48,7 @@ type Provider interface {
 	InstanceTypes() []string
 	OnDemandPrice(string) (float64, bool)
 	SpotPrice(string, string) (float64, bool)
-	UpdateOnDemandPricing(context.Context) error
-	UpdateSpotPricing(context.Context) error
+	UpdatePrices(context.Context) error
 }
 
 type pricesStorage = map[string]float64
@@ -62,8 +60,6 @@ type DefaultProvider struct {
 	onDemandPrices pricesStorage
 	muSpot         sync.RWMutex
 	spotPrices     pricesStorage
-
-	priceCache *cache.Cache
 }
 
 func NewDefaultProvider(ctx context.Context, region string) (*DefaultProvider, error) {
@@ -71,7 +67,6 @@ func NewDefaultProvider(ctx context.Context, region string) (*DefaultProvider, e
 		region:         region,
 		onDemandPrices: make(pricesStorage),
 		spotPrices:     make(pricesStorage),
-		priceCache:     cache.New(pricingCSVTimeout, pricingCSVTimeout),
 	}
 
 	// sets the pricing data from the static default state for the provider
@@ -161,25 +156,46 @@ func (p *DefaultProvider) downloadCSV(ctx context.Context) ([][]string, error) {
 	return records, nil
 }
 
-func (p *DefaultProvider) updatePrices(ctx context.Context, priceColumn string, storage *pricesStorage) error {
-	records, ok := p.priceCache.Get(pricingCSVCacheKey)
-	if !ok {
-		newRecords, err := p.downloadCSV(ctx)
-		if err != nil {
-			return err
-		}
-		p.priceCache.SetDefault(pricingCSVCacheKey, records)
-		records = newRecords
+func (p *DefaultProvider) UpdatePrices(ctx context.Context) error {
+	newRecords, err := p.downloadCSV(ctx)
+	if err != nil {
+		return err
 	}
-	recordArray := records.([][]string)
+	if len(newRecords) < 2 {
+		log.FromContext(ctx).Error(err, "CSV file is empty or has no data")
+		return fmt.Errorf("CSV file is empty or has no data")
+	}
 
+	onDemandPrices, spotPrices, err := resolvePrice(newRecords, p.region)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Error resolving prices")
+		return err
+	}
+
+	if len(onDemandPrices) == 0 {
+		return fmt.Errorf("no prices retrieved during update")
+	}
+
+	p.muOnDemand.Lock()
+	p.muSpot.Lock()
+	defer p.muOnDemand.Unlock()
+	defer p.muSpot.Unlock()
+
+	p.onDemandPrices = onDemandPrices
+	p.spotPrices = spotPrices
+	return nil
+}
+
+func resolvePrice(newRecords [][]string, region string) (pricesStorage, pricesStorage, error) {
 	// Find required columns
-	header := recordArray[0]
-	var priceCol, regionCol, nameCol int
+	header := newRecords[0]
+	var onDemandPriceColumn, spotPriceColumn, regionCol, nameCol int
 	for i, col := range header {
 		switch col {
-		case priceColumn:
-			priceCol = i
+		case "hour":
+			onDemandPriceColumn = i
+		case "hourSpot":
+			spotPriceColumn = i
 		case "region":
 			regionCol = i
 		case "name":
@@ -188,44 +204,32 @@ func (p *DefaultProvider) updatePrices(ctx context.Context, priceColumn string, 
 	}
 
 	// Process the data
-	newPrices := make(pricesStorage)
+	onDemandPrices := make(pricesStorage)
+	spotPrices := make(pricesStorage)
 
-	for _, record := range recordArray[1:] {
+	for _, record := range newRecords[1:] {
 		// Skip records that don't match our region
-		if record[regionCol] != p.region {
+		if record[regionCol] != region {
 			continue
 		}
 
 		machineType := record[nameCol]
-		priceStr := record[priceCol]
+		onDemandPriceStr := record[onDemandPriceColumn]
+		spotPriceStr := record[spotPriceColumn]
 
-		price, err := strconv.ParseFloat(priceStr, 64)
+		onDemandPrice, err := strconv.ParseFloat(onDemandPriceStr, 64)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "Error parsing price", "machineType", machineType, "price", priceStr)
-			continue
+			return nil, nil, fmt.Errorf("error parsing on-demand price: %w", err)
 		}
 
-		newPrices[machineType] = price
+		spotPrice, err := strconv.ParseFloat(spotPriceStr, 64)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error parsing spot price: %w", err)
+		}
+
+		onDemandPrices[machineType] = onDemandPrice
+		spotPrices[machineType] = spotPrice
 	}
 
-	if len(newPrices) == 0 {
-		return fmt.Errorf("no prices retrieved during update")
-	}
-
-	*storage = newPrices
-	return nil
-}
-
-func (p *DefaultProvider) UpdateOnDemandPricing(ctx context.Context) error {
-	p.muOnDemand.Lock()
-	defer p.muOnDemand.Unlock()
-
-	return p.updatePrices(ctx, "hour", &p.onDemandPrices)
-}
-
-func (p *DefaultProvider) UpdateSpotPricing(ctx context.Context) error {
-	p.muSpot.Lock()
-	defer p.muSpot.Unlock()
-
-	return p.updatePrices(ctx, "hourSpot", &p.spotPrices)
+	return onDemandPrices, spotPrices, nil
 }

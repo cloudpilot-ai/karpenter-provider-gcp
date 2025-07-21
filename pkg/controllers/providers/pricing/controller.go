@@ -46,8 +46,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "providers.pricing")
 
 	work := []func(ctx context.Context) error{
-		c.pricingProvider.UpdateSpotPricing,
-		c.pricingProvider.UpdateOnDemandPricing,
+		c.pricingProvider.UpdatePrices,
 	}
 	errs := make([]error, len(work))
 	lop.ForEach(work, func(f func(ctx context.Context) error, i int) {
