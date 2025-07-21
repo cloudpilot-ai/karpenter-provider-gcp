@@ -12,7 +12,7 @@
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
 
 > [!NOTE]  
-> It’s not available for use temporarily. We are diligently working on it, and it will be available shortly.
+> A preview version is now available. Please visit [the charts directory](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/charts) for more information.
 
 ## Introduction
 
