@@ -66,7 +66,7 @@ export CLUSTER_NAME=<gke-cluster-name>
 export REGION=<gke-region-name>
 ```
 
-Then install the chart with the following command:
+Then clone this repository and install the chart with the following command:
 
 ```sh
 helm upgrade karpenter charts/karpenter --install \
@@ -81,7 +81,7 @@ helm upgrade karpenter charts/karpenter --install \
 
 ### 1. Create NodeClass and NodePool
 
-Replace `<service_account_name_created_before>` with the name of the service account you created earlier:
+Replace `<service_account_email_created_before>` with the email of the service account you created earlier:
 
 ```sh
 cat > nodeclass.yaml <<EOF
@@ -90,7 +90,7 @@ kind: GCENodeClass
 metadata:
   name: default-example
 spec:
-  serviceAccount: "<service_account_name_created_before>"
+  serviceAccount: "<service_account_email_created_before>"
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
   tags:
