@@ -1,0 +1,39 @@
+name: Latest image build
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  latest-image-build-publish:
+    name:  Image publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.4'
+          cache: false
+
+      - name: Config env
+        run: |
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_AK }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SK }}" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
+
+      - name: AWS CLI Init
+        uses: unfor19/install-aws-cli-action@v1
+
+      - name: Config ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/cloudpilotai
+
+      - uses: ko-build/setup-ko@v0.6
+
+      - name: build and publish image
+        run: |
+          export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
+          ko build --bare github.com/cloudpilot-ai/cloudpilot/cmd/apiserver --tags v0.0.1
