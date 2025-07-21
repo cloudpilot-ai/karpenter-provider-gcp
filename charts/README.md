@@ -176,7 +176,7 @@ kubectl apply -f deployment.yaml
 Now, check the nodes to see those created by Karpenter:
 
 ```sh
-kubectl get node
+$ kubectl get node
 NAME                                       STATUS   ROLES    AGE     VERSION
 gke-cluster-1-test-default-1c921401-kzbh   Ready    <none>   17d     v1.32.4-gke.1415000
 gke-cluster-1-test-default-84243800-v30f   Ready    <none>   17d     v1.32.4-gke.1415000
