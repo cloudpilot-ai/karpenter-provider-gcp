@@ -88,27 +88,17 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	return nil
 }
 
-func RemoveGKEBuiltinLabels(metadata *compute.Metadata) error {
-	// Get cluster name
-	clusterNameEntry := lo.Filter(metadata.Items, func(item *compute.MetadataItems, _ int) bool {
-		return item.Key == ClusterNameLabel
-	})
-	if len(clusterNameEntry) != 1 {
-		return errors.New("cluster name label not found")
-	}
-	clusterName := swag.StringValue(clusterNameEntry[0].Value)
-	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, clusterName)
+func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) error {
+	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, nodePoolName)
 
 	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
 	for _, item := range metadata.Items {
-		if item.Key == "kube-labels" {
-			item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
+		if item.Key != "kube-labels" && item.Key != "kube-env" {
+			continue
 		}
-		if item.Key == "kube-env" {
-			item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
-		}
-	}
 
+		item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
+	}
 	return nil
 }
 
