@@ -4,6 +4,11 @@ metadata:
   name: default-nodepool
 spec:
   weight: 10
+  disruption:
+    budgets:
+    - nodes: "10"
+    consolidateAfter: 0s
+    consolidationPolicy: WhenEmptyOrUnderutilized
   template:
     spec:
       nodeClassRef:
@@ -13,10 +18,12 @@ spec:
       requirements:
         - key: "karpenter.sh/capacity-type"
           operator: In
-          values: ["spot"]
+          values: ["on-demand", "spot"]
         - key: "karpenter.k8s.gcp/instance-family"
           operator: In
           values: ["n4-standard", "n2-standard", "e2"]
+        # - key: "karpenter.k8s.gcp/instance-gpu-count"
+        #   operator: Exists
         - key: "kubernetes.io/arch"
           operator: In
           values: ["amd64"]
