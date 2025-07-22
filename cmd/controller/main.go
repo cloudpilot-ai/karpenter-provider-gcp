@@ -65,6 +65,7 @@ func main() {
 			op.NodePoolTemplateProvider,
 			op.InstanceTypeProvider,
 			op.InstanceProvider,
+			gcpCloudProvider,
 			op.PricingProvider,
 		)...).
 		Start(ctx)
