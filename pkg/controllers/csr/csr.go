@@ -49,12 +49,9 @@ func NewController(kubeClient kubernetes.Interface) *Controller {
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("reconciling CertificateSigningRequests")
-
 	var csrList certv1.CertificateSigningRequestList
 	if err := c.client.List(ctx, &csrList); err != nil {
-		logger.Error(err, "unable to list CSRs")
+		log.FromContext(ctx).Error(err, "unable to list CSRs")
 		return reconcile.Result{}, err
 	}
 
@@ -63,6 +60,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			continue
 		}
 
+		log.FromContext(ctx).Info("reconciling CSR", "name", csr.Name)
 		if !KubeletClientSignerName.Has(csr.Spec.SignerName) {
 			continue
 		}
@@ -75,8 +73,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			continue
 		}
 
-		logger.Info("approving bootstrap CSR", "name", csr.Name, "username", csr.Spec.Username)
-
+		log.FromContext(ctx).Info("approving bootstrap CSR", "name", csr.Name, "username", csr.Spec.Username)
 		csr.Status.Conditions = append(csr.Status.Conditions, certv1.CertificateSigningRequestCondition{
 			Type:           certv1.CertificateApproved,
 			Status:         "True",
@@ -86,7 +83,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		})
 
 		if _, err := c.kubeClient.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, csr.Name, &csr, metav1.UpdateOptions{}); err != nil {
-			logger.Error(err, "failed to approve CSR", "name", csr.Name)
+			log.FromContext(ctx).Error(err, "failed to approve CSR", "name", csr.Name)
 			continue
 		}
 	}
