@@ -43,7 +43,10 @@ controller:
   priorityClassName: gmp-critical
   terminationGracePeriodSeconds: 30
   env: []
-  resources: {}
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
   metrics:
     port: 8080
   healthProbe:
@@ -51,7 +54,13 @@ controller:
   featureGates:
     # Enable this will enable spot replacement consolidation for both single and multi-node consolidation.
     spotToSpotConsolidation: true
-  affinity: {}
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: karpenter
+          topologyKey: kubernetes.io/hostname
   tolerations: []
   settings:
     # -- The GCP project ID.
