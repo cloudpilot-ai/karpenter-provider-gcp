@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	computev1 "cloud.google.com/go/compute/apiv1"
@@ -121,12 +122,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{}, fmt.Errorf("getting zones: %w", err)
 	}
 
-	if err := c.handleStoppedSpotInstances(ctx); err != nil {
-		return reconcile.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
-	}
-
 	if err := c.handleSpotInterruptionEvents(ctx, zones); err != nil {
 		return reconcile.Result{}, fmt.Errorf("handling spot interruption events: %w", err)
+	}
+
+	if err := c.handleStoppedSpotInstances(ctx); err != nil {
+		return reconcile.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
 	}
 
 	// Will requeue after 3 seconds and try again
@@ -170,7 +171,9 @@ func (c *Controller) handleStoppedSpotInstances(ctx context.Context) error {
 }
 
 func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []string) error {
-	for _, zone := range zones {
+	instanceNames := []string{}
+	instanceNamesLock := sync.Mutex{}
+	handler := func(zone string) {
 		// Refer to https://cloud.google.com/compute/docs/instances/create-use-spot#detect-preemption
 		// We need to check if the instance is preempted and delete the nodeClaim from the operation event,
 		// In this stage, we only detect preempted operation here.
@@ -180,7 +183,6 @@ func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []s
 			Filter:  swag.String(fmt.Sprintf(`operationType="%s"`, OperationTypePreempted)),
 		})
 
-		instanceNames := []string{}
 		for {
 			op, err := it.Next()
 			if err != nil {
@@ -199,20 +201,25 @@ func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []s
 			if !c.isInstanceInCluster(ctx, instanceName) {
 				continue
 			}
-			instanceNames = append(instanceNames, instanceName)
-		}
 
-		errs := make([]error, len(instanceNames))
-		workqueue.ParallelizeUntil(ctx, 10, len(instanceNames), func(i int) {
-			instanceName := instanceNames[i]
-			if err := c.cleanNodeClaimByInstanceName(ctx, instanceName, true); err != nil {
-				errs[i] = fmt.Errorf("deleting node claim: %w", err)
-			}
-		})
-		return multierr.Combine(errs...)
+			instanceNamesLock.Lock()
+			instanceNames = append(instanceNames, instanceName)
+			instanceNamesLock.Unlock()
+		}
 	}
 
-	return nil
+	workqueue.ParallelizeUntil(ctx, 10, len(zones), func(zoneIndex int) {
+		handler(zones[zoneIndex])
+	})
+
+	errs := make([]error, len(instanceNames))
+	workqueue.ParallelizeUntil(ctx, 10, len(instanceNames), func(i int) {
+		instanceName := instanceNames[i]
+		if err := c.cleanNodeClaimByInstanceName(ctx, instanceName, true); err != nil {
+			errs[i] = fmt.Errorf("deleting node claim: %w", err)
+		}
+	})
+	return multierr.Combine(errs...)
 }
 
 func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {
