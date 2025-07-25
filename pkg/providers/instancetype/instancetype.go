@@ -50,8 +50,8 @@ import (
 
 const (
 	InstanceTypesCacheKey = "gce-instancetypes"
-	InstanceTypesCacheTTL = 23 * time.Hour
-	oneMiB                = 1024 * 1024
+	// InstanceTypesCacheTTL is the time before we refresh instance types and zones at GCE, not too long to avoid OOM
+	InstanceTypesCacheTTL = 30 * time.Hour
 )
 
 // ZoneData contains information about a GCE zone and its availability
