@@ -130,6 +130,17 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 	}
 }
 
+func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
+	instance, err := p.computeService.Instances.Get(p.projectID, zone, instanceName).Context(ctx).Do()
+	if err != nil {
+		if isInstanceNotFoundError(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to get instance: %w", err)
+	}
+	return instance, true, nil
+}
+
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
 	if len(instanceTypes) == 0 {
 		return nil, fmt.Errorf("no instance types provided")
@@ -161,23 +172,36 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			continue
 		}
 
-		instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone)
-		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+		instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
+		// We need to check it in the following scenario:
+		// 1. The instance is in the creation process.
+		// 2. The pod is terminated
+		// 3. The new pod will try to create the instance again, but it will fail because the instance is already in the creation process.
+		instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
-			errs = append(errs, err)
-			continue
+			log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
+			return nil, fmt.Errorf("failed to check if instance exists: %w", err)
 		}
 
-		if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
-			log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
-			errs = append(errs, err)
-			continue
+		if !exists {
+			instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
+			op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+			if err != nil {
+				log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+				errs = append(errs, err)
+				continue
+			}
+
+			if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
+				log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+				errs = append(errs, err)
+				continue
+			}
 		}
 
 		// we could wait for the node to be present in kubernetes api via csr sign up
 		// should be done with watcher, for now implemented as a csr controller
-		log.FromContext(ctx).Info("Created instance", "instanceName", op.Name, "instanceType", instanceType.Name,
+		log.FromContext(ctx).Info("Created instance", "instanceName", instance.Name, "instanceType", instanceType.Name,
 			"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
 			"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
 
@@ -314,11 +338,11 @@ func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePo
 					continue
 				}
 				if metadataClusterNamemetadata != p.clusterName {
-					log.FromContext(ctx).Info("Skipping instance template from different cluster", "templateName", t.Name, "clusterName", p.clusterName)
 					continue
 				}
 			}
 			if val, ok := t.Properties.Labels["goog-k8s-node-pool-name"]; ok && val == nodePoolName {
+				log.FromContext(ctx).Info("Found instance template", "templateName", t.Name, "clusterName", p.clusterName)
 				return t, nil
 			}
 		}
@@ -349,7 +373,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return disk, nil
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone string) *compute.Instance {
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string) *compute.Instance {
 	disk, err := p.renderDiskProperties(instanceType, nodeClass, template, zone)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to render disk properties")
@@ -378,7 +402,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	metadata.AppendRegisteredLabel(template.Properties.Metadata)
 
 	instance := &compute.Instance{
-		Name:              fmt.Sprintf("karpenter-%s", nodeClaim.Name),
+		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             []*compute.AttachedDisk{disk},
 		NetworkInterfaces: template.Properties.NetworkInterfaces,
