@@ -227,6 +227,9 @@ func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceN
 	if err != nil {
 		return fmt.Errorf("getting node claim by node name: %w", err)
 	}
+	if !nodeClaim.DeletionTimestamp.IsZero() {
+		return nil
+	}
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
 	instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
 	if markUnavailable && zone != "" && instanceType != "" {

@@ -60,11 +60,6 @@ func (u *UnavailableOfferings) IsUnavailable(instanceType, zone, capacityType st
 // MarkUnavailableWithTTL allows us to mark an offering unavailable with a custom TTL
 func (u *UnavailableOfferings) MarkUnavailableWithTTL(ctx context.Context, unavailableReason, instanceType, zone, capacityType string, ttl time.Duration) {
 	cacheKey := key(instanceType, zone, capacityType)
-	_, expirationTime, found := u.cache.GetWithExpiration(cacheKey)
-	if found && expirationTime.After(time.Now().Add(UnavailableOfferingsTTL/2)) {
-		return
-	}
-
 	// even if the key is already in the cache, we still need to call Set to extend the cached entry's TTL
 	log.FromContext(ctx).Info("Marking offering as unavailable",
 		"unavailable", unavailableReason,
