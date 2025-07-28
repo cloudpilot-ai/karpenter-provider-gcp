@@ -86,6 +86,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).ClusterName,
 		options.FromContext(ctx).Region,
 		options.FromContext(ctx).ProjectID,
+		options.FromContext(ctx).NodePoolServiceAccount,
 	)
 	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
 	pricingProvider, err := pricing.NewDefaultProvider(ctx, options.FromContext(ctx).Region)
