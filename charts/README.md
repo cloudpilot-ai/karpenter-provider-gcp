@@ -64,6 +64,8 @@ Set the required environment variables before installing the chart:
 export PROJECT_ID=<your-google-project-id>
 export CLUSTER_NAME=<gke-cluster-name>
 export REGION=<gke-region-name>
+# Optional: Set the GCP service account email if you want to use a custom service account for the default node pool templates
+export DEFAULT_NODEPOOL_SERVICE_ACCOUNT=<your-custom-service-account-email>
 ```
 
 Then clone this repository and install the chart with the following command:

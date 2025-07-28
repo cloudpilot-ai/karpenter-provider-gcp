@@ -40,11 +40,12 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
-	computeService   *compute.Service
-	containerService *container.Service
-	kubeClient       client.Client
-	versionProvider  version.Provider
-	ClusterInfo      ClusterInfo
+	computeService        *compute.Service
+	containerService      *container.Service
+	kubeClient            client.Client
+	versionProvider       version.Provider
+	ClusterInfo           ClusterInfo
+	defaultServiceAccount string
 }
 
 type ClusterInfo struct {
@@ -64,17 +65,18 @@ const (
 
 func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
 	containerService *container.Service, versionProvider version.Provider,
-	clusterName, region, projectID string) *DefaultProvider {
+	clusterName, region, projectID, serviceAccount string) *DefaultProvider {
 	zones, err := resolveZones(ctx, computeService, projectID, region)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
 		os.Exit(1)
 	}
 	return &DefaultProvider{
-		kubeClient:       kubeClient,
-		computeService:   computeService,
-		containerService: containerService,
-		versionProvider:  versionProvider,
+		kubeClient:            kubeClient,
+		computeService:        computeService,
+		containerService:      containerService,
+		versionProvider:       versionProvider,
+		defaultServiceAccount: serviceAccount,
 		ClusterInfo: ClusterInfo{
 			ProjectID: projectID,
 			Region:    region,
@@ -114,18 +116,18 @@ func resolveZones(ctx context.Context, computeService *compute.Service, projectI
 
 // creating both default nodepool templates could be run concurrently
 func (p *DefaultProvider) Create(ctx context.Context) error {
-	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterDefaultNodePoolTemplateImageType, KarpenterDefaultNodePoolTemplate); err != nil {
+	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterDefaultNodePoolTemplateImageType, KarpenterDefaultNodePoolTemplate, p.defaultServiceAccount); err != nil {
 		return err
 	}
 
-	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterUbuntuNodePoolTemplateImageType, KarpenterUbuntuNodePoolTemplate); err != nil {
+	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterUbuntuNodePoolTemplateImageType, KarpenterUbuntuNodePoolTemplate, p.defaultServiceAccount); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, imageType, nodePoolName string) error {
+func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, imageType, nodePoolName, serviceAccount string) error {
 	logger := log.FromContext(ctx)
 
 	// adding simple validation, because previous code was failing
@@ -167,7 +169,8 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 			InitialNodeCount: 0,
 			Locations:        p.ClusterInfo.Zones,
 			Config: &container.NodeConfig{
-				ImageType: imageType,
+				ImageType:      imageType,
+				ServiceAccount: serviceAccount,
 			},
 		},
 	}
