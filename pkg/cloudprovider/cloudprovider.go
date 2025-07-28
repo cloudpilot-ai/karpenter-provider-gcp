@@ -146,11 +146,11 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context, ins
 		return nil, client.IgnoreNotFound(fmt.Errorf("getting instance types, %w", err))
 	}
 
-	instanceType, _ := lo.Find(instanceTypes, func(i *cloudprovider.InstanceType) bool {
+	instanceType, ok := lo.Find(instanceTypes, func(i *cloudprovider.InstanceType) bool {
 		return i.Name == instance.Type
 	})
 
-	if instanceType == nil {
+	if !ok {
 		return nil, fmt.Errorf("instance type %s not found in offerings", instance.Type)
 	}
 	return instanceType, nil
