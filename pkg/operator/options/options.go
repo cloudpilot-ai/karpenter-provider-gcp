@@ -38,6 +38,8 @@ const (
 	vmMemoryOverheadPercentFlagName   = "vm-memory-overhead-percent"
 	gkeEnableInterruption             = "INTERRUPTION"
 	GCPAuth                           = "GOOGLE_APPLICATION_CREDENTIALS"
+	nodePoolServiceAccountEnvVarName  = "DEFAULT_NODEPOOL_SERVICE_ACCOUNT"
+	nodePoolServiceAccountFlagName    = "default-nodepool-service-account"
 )
 
 func init() {
@@ -53,8 +55,9 @@ type Options struct {
 	VMMemoryOverheadPercent float64
 	// GCPAuth is the path to the Google Application Credentials JSON file.
 	// https://cloud.google.com/docs/authentication/application-default-credentials
-	GCPAuth      string
-	Interruption bool
+	GCPAuth                string
+	NodePoolServiceAccount string
+	Interruption           bool
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -63,6 +66,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.ClusterName, gkeClusterFlagName, env.WithDefaultString(gkeClusterNameEnvVarName, ""), "Name of the GKE cluster that provisioned nodes should connect to.")
 	fs.Float64Var(&o.VMMemoryOverheadPercent, vmMemoryOverheadPercentFlagName, utils.WithDefaultFloat64(vmMemoryOverheadPercentEnvVarName, 0.07), "Percentage of memory overhead for VM. If not set, the controller will use the default value 7%.")
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
+	fs.StringVar(&o.NodePoolServiceAccount, nodePoolServiceAccountFlagName, env.WithDefaultString(nodePoolServiceAccountEnvVarName, ""), "Service account to use for default node pool templates. If not set, uses <project number>-compute@developer.gserviceaccount.com")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }
 
