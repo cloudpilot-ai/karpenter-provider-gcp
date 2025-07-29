@@ -428,6 +428,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// set common Karpenter labels
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
 	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
 		instance.Labels[entry.Key] = entry.Value
 	})
@@ -599,9 +600,11 @@ func isInstanceNotFoundError(err error) bool {
 func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 	var instances []*Instance
 	filter := fmt.Sprintf(
-		"(labels.%s:* AND labels.%s:*)",
+		"(labels.%s:* AND labels.%s:* AND labels.%s:%s)",
 		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey),
 		utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey),
+		utils.SanitizeGCELabelValue(utils.LabelClusterNameKey),
+		p.clusterName,
 	)
 
 	zones, err := p.getZonesInRegion(ctx)

@@ -33,6 +33,7 @@ import (
 const (
 	LabelNodePoolKey     string = "karpenter.sh/nodepool"
 	LabelGCENodeClassKey string = "karpenter.k8s.gcp/gcenodeclass"
+	LabelClusterNameKey  string = "goog-k8s-cluster-name"
 )
 
 func GetAllSingleValuedRequirementLabels(instanceType *cloudprovider.InstanceType) map[string]string {
