@@ -72,22 +72,24 @@ type DefaultProvider struct {
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
 
-	clusterName    string
-	region         string
-	projectID      string
-	computeService *compute.Service
+	clusterName           string
+	region                string
+	projectID             string
+	defaultServiceAccount string
+	computeService        *compute.Service
 }
 
-func NewProvider(clusterName, region, projectID string, computeService *compute.Service, gkeProvider gke.Provider,
+func NewProvider(clusterName, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
 	unavailableOfferings *pkgcache.UnavailableOfferings) Provider {
 	return &DefaultProvider{
-		gkeProvider:          gkeProvider,
-		unavailableOfferings: unavailableOfferings,
-		instanceCache:        cache.New(instanceCacheExpiration, instanceCacheExpiration),
-		clusterName:          clusterName,
-		region:               region,
-		projectID:            projectID,
-		computeService:       computeService,
+		gkeProvider:           gkeProvider,
+		unavailableOfferings:  unavailableOfferings,
+		instanceCache:         cache.New(instanceCacheExpiration, instanceCacheExpiration),
+		clusterName:           clusterName,
+		region:                region,
+		projectID:             projectID,
+		defaultServiceAccount: defaultServiceAccount,
+		computeService:        computeService,
 	}
 }
 
@@ -401,12 +403,33 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, template.Properties.Metadata)
 	metadata.AppendRegisteredLabel(template.Properties.Metadata)
 
+	serviceAccount := p.resolveServiceAccount(nodeClass)
+	serviceAccounts := template.Properties.ServiceAccounts
+
+	// If we have a specific service account to use (either from NodeClass or default config)
+	if serviceAccount != "" && len(serviceAccounts) > 0 {
+		// Create a copy and override the service account
+		serviceAccounts = make([]*compute.ServiceAccount, len(template.Properties.ServiceAccounts))
+		copy(serviceAccounts, template.Properties.ServiceAccounts)
+		serviceAccounts[0] = &compute.ServiceAccount{
+			Email: serviceAccount,
+		}
+		log.FromContext(context.Background()).Info("using service account for instance",
+			"serviceAccount", serviceAccount,
+			"source", lo.Ternary(nodeClass.Spec.ServiceAccount != "", "nodeclass", "default"),
+			"instanceName", instanceName)
+	} else if serviceAccount == "" {
+		log.FromContext(context.Background()).Info("no service account specified, using template default",
+			"instanceName", instanceName,
+			"templateServiceAccount", lo.Ternary(len(serviceAccounts) > 0, serviceAccounts[0].Email, "none"))
+	}
+
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             []*compute.AttachedDisk{disk},
 		NetworkInterfaces: template.Properties.NetworkInterfaces,
-		ServiceAccounts:   template.Properties.ServiceAccounts,
+		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            map[string]string{},
 		Scheduling:        template.Properties.Scheduling,
@@ -645,4 +668,14 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 		p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
 	}
 	return nil
+}
+
+// resolveServiceAccount returns the service account to use for the instance.
+// If the NodeClass specifies a service account, use that. Otherwise, use the default.
+// Returns empty string if neither is specified.
+func (p *DefaultProvider) resolveServiceAccount(nodeClass *v1alpha1.GCENodeClass) string {
+	if nodeClass.Spec.ServiceAccount != "" {
+		return nodeClass.Spec.ServiceAccount
+	}
+	return p.defaultServiceAccount
 }
