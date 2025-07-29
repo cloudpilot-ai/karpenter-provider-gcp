@@ -79,3 +79,15 @@ controller:
     # will be batched separately.
     batchIdleDuration: 1s
 
+# -- GCP credentials configuration
+credentials:
+  # -- Enable or disable the use of GCP credentials secret
+  # Set to true if you want to use a Kubernetes secret for GCP authentication
+  # Set to false to rely on other authentication methods (e.g., Workload Identity, instance metadata)
+  enabled: true
+  # -- Name of the existing secret containing GCP credentials
+  # If not specified, defaults to "<release-name>-gcp-credentials"
+  # This secret should contain a service account key file
+  secretName: ""
+  # -- Key within the secret that contains the service account JSON
+  secretKey: "key.json"
