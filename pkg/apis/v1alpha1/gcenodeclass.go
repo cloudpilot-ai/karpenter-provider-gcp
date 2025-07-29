@@ -31,7 +31,8 @@ import (
 type GCENodeClassSpec struct {
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
-	ServiceAccount string `json:"serviceAccount"`
+	// +optional
+	ServiceAccount string `json:"serviceAccount,omitempty"`
 	// Disk defines the boot disk to attach to the provisioned instance.
 	// +optional
 	Disks *Disk `json:"disk,omitempty"`

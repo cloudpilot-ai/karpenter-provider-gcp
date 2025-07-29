@@ -405,23 +405,12 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 
 	serviceAccount := p.resolveServiceAccount(nodeClass)
 	serviceAccounts := template.Properties.ServiceAccounts
-
-	// If we have a specific service account to use (either from NodeClass or default config)
-	if serviceAccount != "" && len(serviceAccounts) > 0 {
-		// Create a copy and override the service account
-		serviceAccounts = make([]*compute.ServiceAccount, len(template.Properties.ServiceAccounts))
-		copy(serviceAccounts, template.Properties.ServiceAccounts)
-		serviceAccounts[0] = &compute.ServiceAccount{
-			Email: serviceAccount,
+	if serviceAccount != "" {
+		serviceAccounts = []*compute.ServiceAccount{
+			&compute.ServiceAccount{
+				Email: serviceAccount,
+			},
 		}
-		log.FromContext(context.Background()).Info("using service account for instance",
-			"serviceAccount", serviceAccount,
-			"source", lo.Ternary(nodeClass.Spec.ServiceAccount != "", "nodeclass", "default"),
-			"instanceName", instanceName)
-	} else if serviceAccount == "" {
-		log.FromContext(context.Background()).Info("no service account specified, using template default",
-			"instanceName", instanceName,
-			"templateServiceAccount", lo.Ternary(len(serviceAccounts) > 0, serviceAccounts[0].Email, "none"))
 	}
 
 	instance := &compute.Instance{
