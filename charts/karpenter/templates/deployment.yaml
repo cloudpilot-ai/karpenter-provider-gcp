@@ -50,8 +50,10 @@ spec:
               value: {{ .Values.controller.settings.region }}
             - name: CLUSTER_NAME
               value: {{ .Values.controller.settings.clusterName }}
+            {{- if .Values.credentials.enabled }}
             - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: "/var/secrets/google/key.json"
+              value: "/var/secrets/google/{{ .Values.credentials.secretKey }}"
+            {{- end }}
             - name: KUBERNETES_MIN_VERSION
               value: "1.26.0"
             {{- with .Values.logLevel }}
@@ -98,6 +100,9 @@ spec:
               value: "{{ .Values.controller.metrics.port }}"
             - name: KARPENTER_SERVICE
               value: {{ include "karpenter.fullname" . }}
+            {{- with .Values.controller.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.controller.healthProbe.port }}
@@ -120,9 +125,11 @@ spec:
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           volumeMounts:
+          {{- if .Values.credentials.enabled }}
             - mountPath: "/var/secrets/google"
               readOnly: true
               name: gcp-secret
+          {{- end }}
       {{- with .Values.controller.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -131,10 +138,12 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.credentials.enabled }}
       volumes:
         - name: gcp-secret
           secret:
-            secretName: {{ include "karpenter.fullname" . }}-gcp-credentials
+            secretName: {{ .Values.credentials.secretName | default (printf "%s-gcp-credentials" (include "karpenter.fullname" .)) }}
             items:
-              - key: key.json
-                path: "key.json"
+              - key: {{ .Values.credentials.secretKey }}
+                path: {{ .Values.credentials.secretKey }}
+      {{- end }}
