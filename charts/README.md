@@ -100,6 +100,7 @@ helm upgrade karpenter charts/karpenter --install \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.region=${REGION}" \
   --set "controller.settings.clusterName=${CLUSTER_NAME}" \
+  --set "credentials.enabled=false" \
   --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=karpenter-gsa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --wait
 
