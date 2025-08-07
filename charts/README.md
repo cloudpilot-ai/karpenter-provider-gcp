@@ -14,6 +14,34 @@ gcloud services enable compute.googleapis.com
 gcloud services enable container.googleapis.com
 ```
 
+### Using GKE Workload Identity (Recommended)
+
+For Workload Identity setup, create a Google Service Account and bind it to the Kubernetes Service Account:
+
+```sh
+export PROJECT_ID=<your-google-project-id>
+export GSA_NAME=karpenter-gsa
+
+# Create Google Service Account
+gcloud iam service-accounts create $GSA_NAME --project=$PROJECT_ID
+
+# Add required IAM roles
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/compute.admin"
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/container.admin"
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/iam.serviceAccountUser"
+
+# Allow Kubernetes Service Account to impersonate Google Service Account
+gcloud iam service-accounts add-iam-policy-binding $GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com \
+    --role roles/iam.workloadIdentityUser \
+    --member "serviceAccount:$PROJECT_ID.svc.id.goog[karpenter-system/karpenter]"
+```
+
 ### Create Service Account and Download Keys
 
 Create a service account with the following roles: Compute Admin, Kubernetes Engine Admin, Monitoring Admin, and Service Account User. After creating the service account, download the key file and store it securely.
@@ -71,6 +99,17 @@ export DEFAULT_NODEPOOL_SERVICE_ACCOUNT=<your-custom-service-account-email>
 Then clone this repository and install the chart with the following command:
 
 ```sh
+# For Workload Identity
+helm upgrade karpenter charts/karpenter --install \
+  --namespace karpenter-system --create-namespace \
+  --set "controller.settings.projectID=${PROJECT_ID}" \
+  --set "controller.settings.region=${REGION}" \
+  --set "controller.settings.clusterName=${CLUSTER_NAME}" \
+  --set "credentials.enabled=false" \
+  --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=karpenter-gsa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --wait
+
+# For Service Account Keys
 helm upgrade karpenter charts/karpenter --install \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
