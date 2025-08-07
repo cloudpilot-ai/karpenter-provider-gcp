@@ -63,18 +63,18 @@ spec:
                   categories:
                     description: The category of the system disk (e.g., pd-standard,
                       pd-balanced, pd-ssd, pd-extreme).
-                    enum:
-                    - hyperdisk-balanced
-                    - hyperdisk-balanced-high-availability
-                    - hyperdisk-extreme
-                    - hyperdisk-ml
-                    - hyperdisk-throughput
-                    - local-ssd
-                    - pd-balanced
-                    - pd-extreme
-                    - pd-ssd
-                    - pd-standard
                     items:
+                      enum:
+                      - hyperdisk-balanced
+                      - hyperdisk-balanced-high-availability
+                      - hyperdisk-extreme
+                      - hyperdisk-ml
+                      - hyperdisk-throughput
+                      - local-ssd
+                      - pd-balanced
+                      - pd-extreme
+                      - pd-ssd
+                      - pd-standard
                       type: string
                     type: array
                   sizeGiB:
