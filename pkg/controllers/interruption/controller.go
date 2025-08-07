@@ -198,7 +198,7 @@ func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []s
 				break
 			}
 			// ignore the instance if the name is not found in the clter nodes
-			if !c.isInstanceInCluster(ctx, instanceName) {
+			if !c.isInstanceFromKarpenter(ctx, instanceName) {
 				continue
 			}
 
@@ -243,10 +243,14 @@ func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceN
 	return nil
 }
 
-func (c *Controller) isInstanceInCluster(ctx context.Context, instanceName string) bool {
+func (c *Controller) isInstanceFromKarpenter(ctx context.Context, instanceName string) bool {
 	var node corev1.Node
 	err := c.kubeClient.Get(ctx, client.ObjectKey{Name: instanceName}, &node)
 	if err == nil {
+		// The node is in the cluster, but does it have the karpenter label?
+		if node.Labels == nil || node.Labels[utils.LabelNodePoolKey] == "" {
+			return false
+		}
 		return true
 	}
 	if apierrors.IsNotFound(err) {
