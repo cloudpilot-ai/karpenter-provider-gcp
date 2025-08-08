@@ -94,18 +94,8 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	return nil
 }
 
-func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string, nodeClass *v1alpha1.GCENodeClass) error {
+func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) error {
 	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, nodePoolName)
-
-	setMaxPods := false
-	maxPodsPerNode := ""
-	maxPods := ""
-	if nodeClass.Spec.KubeletConfiguration != nil && nodeClass.Spec.KubeletConfiguration.MaxPods != nil {
-		maxPodsPerNode = fmt.Sprintf("max-pods-per-node=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
-		maxPods = fmt.Sprintf("max-pods=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
-		setMaxPods = true
-	}
-
 	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
 	for _, item := range metadata.Items {
 		if item.Key != "kube-labels" && item.Key != "kube-env" {
@@ -113,11 +103,26 @@ func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string, nod
 		}
 
 		item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
+	}
+	return nil
+}
 
-		if setMaxPods {
-			item.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*item.Value, maxPodsPerNode))
-			item.Value = swag.String(maxPodsRegex.ReplaceAllString(*item.Value, maxPods))
+func SetMaxPodsPerNode(metadata *compute.Metadata, numPods int32) error {
+	keys := []string{"kube-labels", "kube-env"}
+	maxPodsPerNode := fmt.Sprintf("max-pods-per-node=%d", numPods)
+	maxPods := fmt.Sprintf("max-pods=%d", numPods)
+
+	for _, key := range keys {
+		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
+			return item.Key == key
+		})
+		if !ok || index == -1 {
+			return errors.New(fmt.Sprintf("%s metadata not found", key))
 		}
+		targetEntry.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
+		targetEntry.Value = swag.String(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPods))
+
+		metadata.Items[index] = targetEntry
 	}
 	return nil
 }

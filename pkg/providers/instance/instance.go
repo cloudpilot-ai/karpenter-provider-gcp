@@ -382,10 +382,18 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
-	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata, nodePoolName, nodeClass)
+	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata, nodePoolName)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
 		return nil
+	}
+
+	if nodeClass.Spec.KubeletConfiguration != nil && nodeClass.Spec.KubeletConfiguration.MaxPods != nil {
+		err = metadata.SetMaxPodsPerNode(template.Properties.Metadata, *nodeClass.Spec.KubeletConfiguration.MaxPods)
+		if err != nil {
+			log.FromContext(context.Background()).Error(err, "failed to set max pods per node in metadata")
+			return nil
+		}
 	}
 
 	err = metadata.RenderKubeletConfigMetadata(template.Properties.Metadata, instanceType)
