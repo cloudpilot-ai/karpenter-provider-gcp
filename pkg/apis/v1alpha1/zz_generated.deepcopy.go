@@ -49,7 +49,7 @@ func (in *Disk) DeepCopyInto(out *Disk) {
 	*out = *in
 	if in.Categories != nil {
 		in, out := &in.Categories, &out.Categories
-		*out = make([]string, len(*in))
+		*out = make([]DiskCategory, len(*in))
 		copy(*out, *in)
 	}
 	return
