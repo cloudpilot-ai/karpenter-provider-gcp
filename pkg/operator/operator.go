@@ -24,9 +24,12 @@ import (
 	computev1 "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/metadata"
 	containerapiv1 "cloud.google.com/go/container/apiv1"
+	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
@@ -42,6 +45,7 @@ import (
 )
 
 func init() {
+	karpv1.NormalizedLabels = lo.Assign(karpv1.NormalizedLabels, map[string]string{"topology.gke.io/zone": corev1.LabelTopologyZone})
 }
 
 type Operator struct {
