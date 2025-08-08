@@ -19,6 +19,7 @@ package metadata
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/go-openapi/swag"
@@ -29,6 +30,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+)
+
+var (
+	maxPodsPerNodeRegex = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex        = regexp.MustCompile(`max-pods=\d+`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -90,7 +96,6 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 
 func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) error {
 	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, nodePoolName)
-
 	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
 	for _, item := range metadata.Items {
 		if item.Key != "kube-labels" && item.Key != "kube-env" {
@@ -98,6 +103,29 @@ func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) err
 		}
 
 		item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
+	}
+	return nil
+}
+
+func SetMaxPodsPerNode(metadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass) error {
+	if nodeClass.Spec.KubeletConfiguration == nil || nodeClass.Spec.KubeletConfiguration.MaxPods == nil {
+		return nil
+	}
+	keys := []string{"kube-labels", "kube-env"}
+	maxPodsPerNode := fmt.Sprintf("max-pods-per-node=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
+	maxPods := fmt.Sprintf("max-pods=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
+
+	for _, key := range keys {
+		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
+			return item.Key == key
+		})
+		if !ok || index == -1 {
+			return errors.New(fmt.Sprintf("%s metadata not found", key))
+		}
+		targetEntry.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
+		targetEntry.Value = swag.String(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPods))
+
+		metadata.Items[index] = targetEntry
 	}
 	return nil
 }
