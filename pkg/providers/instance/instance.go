@@ -382,7 +382,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
-	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata, nodePoolName)
+	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata, nodePoolName, nodeClass)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
 		return nil

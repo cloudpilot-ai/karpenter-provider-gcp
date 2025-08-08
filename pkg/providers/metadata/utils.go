@@ -19,6 +19,7 @@ package metadata
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/go-openapi/swag"
@@ -29,6 +30,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+)
+
+var (
+	maxPodsPerNodeRegex = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex        = regexp.MustCompile(`max-pods=\d+`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -88,8 +94,17 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	return nil
 }
 
-func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) error {
+func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string, nodeClass *v1alpha1.GCENodeClass) error {
 	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, nodePoolName)
+
+	setMaxPods := false
+	maxPodsPerNode := ""
+	maxPods := ""
+	if nodeClass.Spec.KubeletConfiguration != nil && nodeClass.Spec.KubeletConfiguration.MaxPods != nil {
+		maxPodsPerNode = fmt.Sprintf("max-pods-per-node=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
+		maxPods = fmt.Sprintf("max-pods=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
+		setMaxPods = true
+	}
 
 	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
 	for _, item := range metadata.Items {
@@ -98,6 +113,11 @@ func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) err
 		}
 
 		item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
+
+		if setMaxPods {
+			item.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*item.Value, maxPodsPerNode))
+			item.Value = swag.String(maxPodsRegex.ReplaceAllString(*item.Value, maxPods))
+		}
 	}
 	return nil
 }
