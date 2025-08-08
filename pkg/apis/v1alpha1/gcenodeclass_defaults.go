@@ -21,4 +21,3 @@ import (
 )
 
 func (in *GCENodeClass) SetDefaults(_ context.Context) {}
-

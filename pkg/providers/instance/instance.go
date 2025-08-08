@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -69,7 +68,6 @@ type Provider interface {
 type DefaultProvider struct {
 	gkeProvider          gke.Provider
 	unavailableOfferings *pkgcache.UnavailableOfferings
-	diskTypeCache        *cache.Cache
 
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
@@ -86,7 +84,6 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 	return &DefaultProvider{
 		gkeProvider:           gkeProvider,
 		unavailableOfferings:  unavailableOfferings,
-		diskTypeCache:         cache.New(5*time.Minute, 10*time.Minute),
 		instanceCache:         cache.New(instanceCacheExpiration, instanceCacheExpiration),
 		clusterName:           clusterName,
 		region:                region,
@@ -157,9 +154,9 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	var errs []error
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
-		zone, disk, err := p.selectZoneAndDisk(ctx, nodeClaim, instanceType, nodeClass, capacityType)
+		zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to select zone and disk for instance type", "instanceType", instanceType.Name)
+			log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
 			errs = append(errs, err)
 			continue
 		}
@@ -189,7 +186,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		}
 
 		if !exists {
-			instance = p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName, disk)
+			instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
 			op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 			if err != nil {
 				log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
@@ -267,74 +264,22 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 	return instanceTypes
 }
 
-func (p *DefaultProvider) selectZoneAndDisk(ctx context.Context, nodeClaim *karpv1.NodeClaim,
-	instanceType *cloudprovider.InstanceType, nodeClass *v1alpha1.GCENodeClass, capacityType string) (string, *v1alpha1.Disk, error) {
-	zones, err := p.getZones(ctx, nodeClaim, instanceType, capacityType)
-	if err != nil {
-		return "", nil, err
-	}
-
-	var wg sync.WaitGroup
-	var resultZone string
-	var resultDisk *v1alpha1.Disk
-	var once sync.Once
-
-	for _, zone := range zones {
-		if nodeClass.Spec.Disks != nil {
-			for _, category := range nodeClass.Spec.Disks.Categories {
-				wg.Add(1)
-				go func(zone string, category v1alpha1.DiskCategory) {
-					defer wg.Done()
-					cacheKey := fmt.Sprintf("%s/%s", zone, category)
-					if _, found := p.diskTypeCache.Get(cacheKey); found {
-						once.Do(func() {
-							resultZone = zone
-							resultDisk = nodeClass.Spec.Disks
-						})
-						return
-					}
-					_, err := p.computeService.DiskTypes.Get(p.projectID, zone, string(category)).Context(ctx).Do()
-					if err != nil {
-						if !googleapi.IsNotModified(err) {
-							log.FromContext(ctx).Error(err, "failed to get disk type", "diskType", category)
-							return
-						}
-					}
-					p.diskTypeCache.Set(cacheKey, true, cache.DefaultExpiration)
-					once.Do(func() {
-						resultZone = zone
-						resultDisk = nodeClass.Spec.Disks
-					})
-				}(zone, category)
-			}
-		}
-	}
-
-	wg.Wait()
-
-	if resultZone != "" {
-		return resultZone, resultDisk, nil
-	}
-
-	return "", nil, fmt.Errorf("no available zone or disk found for instance type %s", instanceType.Name)
-}
-
-func (p *DefaultProvider) getZones(ctx context.Context, nodeClaim *karpv1.NodeClaim,
-	instanceType *cloudprovider.InstanceType, capacityType string) ([]string, error) {
+// zone should be based on the offering, for now lets return static zone from requirements
+func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.NodeClaim,
+	instanceType *cloudprovider.InstanceType, capacityType string) (string, error) {
 	zones, err := p.gkeProvider.ResolveClusterZones(ctx)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	cheapestZone := ""
 	cheapestPrice := math.MaxFloat64
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-
 	if capacityType == karpv1.CapacityTypeOnDemand {
 		// For on-demand, randomly select a zone
 		if len(zones) > 0 {
 			randomIndex, _ := rand.Int(rand.Reader, big.NewInt(int64(len(zones))))
-			return []string{zones[randomIndex.Int64()]}, nil
+			return zones[randomIndex.Int64()], nil
 		}
 	}
 
@@ -347,7 +292,6 @@ func (p *DefaultProvider) getZones(ctx context.Context, nodeClaim *karpv1.NodeCl
 		if reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) != nil {
 			continue
 		}
-
 		ok := zonesSet.Has(offering.Requirements.Get(corev1.LabelTopologyZone).Any())
 		if !ok {
 			continue
@@ -358,7 +302,7 @@ func (p *DefaultProvider) getZones(ctx context.Context, nodeClaim *karpv1.NodeCl
 		}
 	}
 
-	return []string{cheapestZone}, nil
+	return cheapestZone, nil
 }
 
 func resolveNodePoolName(imageFamily string) string {
@@ -407,31 +351,49 @@ func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePo
 	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s", nodePoolName)
 }
 
-func (p *DefaultProvider) renderDiskProperties(ctx context.Context, instanceType *cloudprovider.InstanceType,
-	nodeClass *v1alpha1.GCENodeClass, template *compute.InstanceTemplate, zone string, disk *v1alpha1.Disk) (*compute.AttachedDisk, error) {
-	attachedDisk := template.Properties.Disks[0]
-	attachedDisk.InitializeParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Categories[0])
-	attachedDisk.InitializeParams.DiskSizeGb = int64(disk.SizeGiB)
-
-	requirements := instanceType.Requirements
-	if requirements.Get(corev1.LabelArchStable).Has(imagefamily.OSArchARM64Requirement) {
-		attachedDisk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
-	}
-
-	targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
-		reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
-		return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
+	nodeClass *v1alpha1.GCENodeClass, zone string) ([]*compute.AttachedDisk, error) {
+	disks := nodeClass.Spec.Disks
+	sort.Slice(disks, func(i, j int) bool {
+		return disks[i].Boot
 	})
-	if !found {
-		return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
-	}
-	attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
 
-	return attachedDisk, nil
+	attachedDisks := make([]*compute.AttachedDisk, len(disks))
+	for i, disk := range disks {
+		// Create a new disk configuration for each disk to avoid sharing references
+		attachedDisk := &compute.AttachedDisk{
+			AutoDelete: true,
+			Boot:       disk.Boot,
+			InitializeParams: &compute.AttachedDiskInitializeParams{
+				DiskType:   fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category),
+				DiskSizeGb: int64(disk.SizeGiB),
+			},
+		}
+
+		requirements := instanceType.Requirements
+		if requirements.Get(corev1.LabelArchStable).Has(imagefamily.OSArchARM64Requirement) {
+			attachedDisk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
+		}
+
+		if disk.Boot {
+			targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
+				reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
+				return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+			})
+			if !found {
+				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
+			}
+			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+		}
+
+		attachedDisks[i] = attachedDisk
+	}
+
+	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string, disk *v1alpha1.Disk) *compute.Instance {
-	attachedDisk, err := p.renderDiskProperties(ctx, instanceType, nodeClass, template, zone, disk)
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string) *compute.Instance {
+	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to render disk properties")
 		return nil
@@ -471,7 +433,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
-		Disks:             []*compute.AttachedDisk{attachedDisk},
+		Disks:             attachedDisks,
 		NetworkInterfaces: template.Properties.NetworkInterfaces,
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,

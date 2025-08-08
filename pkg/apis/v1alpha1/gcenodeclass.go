@@ -33,9 +33,10 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
 	// +optional
 	ServiceAccount string `json:"serviceAccount,omitempty"`
-	// Disk defines the boot disk to attach to the provisioned instance.
+	// Disk defines the disks to attach to the provisioned instance.
+	// +kubebuilder:validation:MaxItems=10
 	// +optional
-	Disks *Disk `json:"disk,omitempty"`
+	Disks []Disk `json:"disks,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
 	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.all(x, has(x.alias) || has(x.id))"
 	// Remove or adjust mutual exclusivity rules since there's only one field
@@ -157,14 +158,13 @@ type KubeletConfiguration struct {
 }
 
 type Disk struct {
-	// SizeGiB is the size of the system disk. Unit: GiB
+	// SizeGiB is the size of the disk. Unit: GiB
 	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 10"
 	// +optional
 	SizeGiB int32 `json:"sizeGiB"`
-	// The category of the system disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme).
-	// +kubebuilder:validation:MaxItems=10
+	// The category of the disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme).
 	// +optional
-	Categories []DiskCategory `json:"categories,omitempty"`
+	Category DiskCategory `json:"category,omitempty"`
 	// Indicates that this is a boot disk
 	// +optional
 	Boot bool `json:"boot"`
