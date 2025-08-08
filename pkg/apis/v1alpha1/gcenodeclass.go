@@ -162,13 +162,17 @@ type Disk struct {
 	// +optional
 	SizeGiB int32 `json:"sizeGiB"`
 	// The category of the system disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme).
-	// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
+	// +kubebuilder:validation:MaxItems=10
 	// +optional
-	Categories []string `json:"categories,omitempty"`
+	Categories []DiskCategory `json:"categories,omitempty"`
 	// Indicates that this is a boot disk
 	// +optional
 	Boot bool `json:"boot"`
 }
+
+// DiskCategory represents a disk category type
+// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
+type DiskCategory string
 
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
