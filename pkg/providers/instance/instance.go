@@ -388,12 +388,10 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
-	if nodeClass.Spec.KubeletConfiguration != nil && nodeClass.Spec.KubeletConfiguration.MaxPods != nil {
-		err = metadata.SetMaxPodsPerNode(template.Properties.Metadata, *nodeClass.Spec.KubeletConfiguration.MaxPods)
-		if err != nil {
-			log.FromContext(context.Background()).Error(err, "failed to set max pods per node in metadata")
-			return nil
-		}
+	err = metadata.SetMaxPodsPerNode(template.Properties.Metadata, nodeClass)
+	if err != nil {
+		log.FromContext(context.Background()).Error(err, "failed to set max pods per node in metadata")
+		return nil
 	}
 
 	err = metadata.RenderKubeletConfigMetadata(template.Properties.Metadata, instanceType)
