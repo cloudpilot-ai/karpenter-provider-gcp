@@ -107,10 +107,13 @@ func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) err
 	return nil
 }
 
-func SetMaxPodsPerNode(metadata *compute.Metadata, numPods int32) error {
+func SetMaxPodsPerNode(metadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass) error {
+	if nodeClass.Spec.KubeletConfiguration == nil || nodeClass.Spec.KubeletConfiguration.MaxPods == nil {
+		return nil
+	}
 	keys := []string{"kube-labels", "kube-env"}
-	maxPodsPerNode := fmt.Sprintf("max-pods-per-node=%d", numPods)
-	maxPods := fmt.Sprintf("max-pods=%d", numPods)
+	maxPodsPerNode := fmt.Sprintf("max-pods-per-node=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
+	maxPods := fmt.Sprintf("max-pods=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
 
 	for _, key := range keys {
 		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
