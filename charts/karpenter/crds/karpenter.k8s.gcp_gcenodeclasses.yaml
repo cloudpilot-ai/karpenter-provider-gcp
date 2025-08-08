@@ -64,6 +64,7 @@ spec:
                     description: The category of the system disk (e.g., pd-standard,
                       pd-balanced, pd-ssd, pd-extreme).
                     items:
+                      description: DiskCategory represents a disk category type
                       enum:
                       - hyperdisk-balanced
                       - hyperdisk-balanced-high-availability
@@ -76,6 +77,7 @@ spec:
                       - pd-ssd
                       - pd-standard
                       type: string
+                    maxItems: 10
                     type: array
                   sizeGiB:
                     description: 'SizeGiB is the size of the system disk. Unit: GiB'
