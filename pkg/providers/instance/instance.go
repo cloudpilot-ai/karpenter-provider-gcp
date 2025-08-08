@@ -358,6 +358,15 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	disk := template.Properties.Disks[0]
 	disk.InitializeParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/pd-balanced", p.projectID, zone)
 
+	if nodeClass.Spec.Disks != nil {
+		if len(nodeClass.Spec.Disks.Categories) > 0 {
+			disk.InitializeParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, nodeClass.Spec.Disks.Categories[0])
+		}
+		if nodeClass.Spec.Disks.SizeGiB != 0 {
+			disk.InitializeParams.DiskSizeGb = int64(nodeClass.Spec.Disks.SizeGiB)
+		}
+	}
+
 	requirements := instanceType.Requirements
 	if requirements.Get(corev1.LabelArchStable).Has(imagefamily.OSArchARM64Requirement) {
 		disk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
