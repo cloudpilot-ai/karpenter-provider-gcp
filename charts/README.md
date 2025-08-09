@@ -1,22 +1,31 @@
-# Karpenter
+# Karpenter Installation Guide
 
-A Helm chart for deploying Karpenter, an open-source Kubernetes node provisioning project.
-This documentation guides you through installing and configuring Karpenter on GKE using Helm.
+A comprehensive guide for deploying Karpenter on Google Kubernetes Engine (GKE) using Helm. Karpenter is an open-source Kubernetes node provisioning solution that automatically scales your cluster based on workload demands.
 
-## Prepare the GCP Credentials
+## Prerequisites
 
-### Enable Required APIs
+Before installing Karpenter, ensure you have the following:
+- `gcloud` CLI configured with appropriate permissions
+- `kubectl` configured to access your GKE cluster
+- `helm` installed
 
-Enable the necessary Google Cloud APIs for Karpenter to manage compute and Kubernetes resources:
-
+Enable the required Google Cloud APIs:
 ```sh
 gcloud services enable compute.googleapis.com
 gcloud services enable container.googleapis.com
 ```
 
-### Using GKE Workload Identity (Recommended)
+## Installation Methods
 
-For Workload Identity setup, create a Google Service Account and bind it to the Kubernetes Service Account:
+Choose one of the following installation methods based on your security requirements:
+
+### Method 1: Workload Identity (Recommended)
+
+Workload Identity provides secure access to Google Cloud services without storing service account keys in your cluster.
+
+#### 1. Create GCP Service Account
+
+Create a GCP Service Account with the necessary roles:
 
 ```sh
 export PROJECT_ID=<your-google-project-id>
@@ -35,21 +44,56 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/iam.serviceAccountUser"
+```
 
-# Allow Kubernetes Service Account to impersonate Google Service Account
+#### 2. Install Karpenter with Helm
+
+Set the required environment variables before installing the chart:
+
+```sh
+export PROJECT_ID=<your-google-project-id>
+export CLUSTER_NAME=<gke-cluster-name>
+export REGION=<gke-region-name>
+# Optional: Set the GCP service account email if you want to use a custom service account for the default node pool templates
+export DEFAULT_NODEPOOL_SERVICE_ACCOUNT=<your-custom-service-account-email>
+```
+
+Then clone this repository and install the chart with the following command:
+
+```sh
+# For Workload Identity
+helm upgrade karpenter charts/karpenter --install \
+  --namespace karpenter-system --create-namespace \
+  --set "controller.settings.projectID=${PROJECT_ID}" \
+  --set "controller.settings.region=${REGION}" \
+  --set "controller.settings.clusterName=${CLUSTER_NAME}" \
+  --set "credentials.enabled=false" \
+  --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=karpenter-gsa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --wait
+```
+
+#### 3. Configure Workload Identity Binding
+
+Allow the Kubernetes service account to impersonate the GCP service account:
+```sh
 gcloud iam service-accounts add-iam-policy-binding $GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com \
     --role roles/iam.workloadIdentityUser \
     --member "serviceAccount:$PROJECT_ID.svc.id.goog[karpenter-system/karpenter]"
 ```
 
-### Create Service Account and Download Keys
 
-Create a service account with the following roles: Compute Admin, Kubernetes Engine Admin, Monitoring Admin, and Service Account User. After creating the service account, download the key file and store it securely.
+### Method 2: Service Account Keys
+
+Note: This method is less secure as it stores credentials in the cluster. Use only if Workload Identity is not available.
+
+#### 1. Create Service Account and Generate Keys
+
+Create a service account with the following roles: `Compute Admin`, `Kubernetes Engine Admin`, `Monitoring Admin`, and `Service Account User`. After creating the service account, download the key file and store it securely.
 
 ![Service Account Creation](../docs/images/serviceaccount.png)
 ![Download Service Account Key](../docs/images/keys.png)
 
-### Create Cluster Secret
+#### 2. Create Cluster Secret
 
 Create a Kubernetes Secret to store your GCP service account credentials:
 
@@ -84,7 +128,7 @@ kubectl create ns karpenter-system
 kubectl apply -f karpenter-gcp-credentials.yaml
 ```
 
-## Installing the Chart
+#### 3. Install Karpenter with Helm
 
 Set the required environment variables before installing the chart:
 
@@ -99,16 +143,6 @@ export DEFAULT_NODEPOOL_SERVICE_ACCOUNT=<your-custom-service-account-email>
 Then clone this repository and install the chart with the following command:
 
 ```sh
-# For Workload Identity
-helm upgrade karpenter charts/karpenter --install \
-  --namespace karpenter-system --create-namespace \
-  --set "controller.settings.projectID=${PROJECT_ID}" \
-  --set "controller.settings.region=${REGION}" \
-  --set "controller.settings.clusterName=${CLUSTER_NAME}" \
-  --set "credentials.enabled=false" \
-  --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=karpenter-gsa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --wait
-
 # For Service Account Keys
 helm upgrade karpenter charts/karpenter --install \
   --namespace karpenter-system --create-namespace \
@@ -118,11 +152,19 @@ helm upgrade karpenter charts/karpenter --install \
   --wait
 ```
 
-## Testing Node Creation
+## Validation and Testing
 
-### 1. Create NodeClass and NodePool
+### 1. Verify Installation
 
-Replace `<service_account_email_created_before>` with the email of the service account you created earlier:
+Check that Karpenter pods are running:
+```
+kubectl get pods -n karpenter-system
+kubectl logs -n karpenter-system deployment/karpenter
+```
+
+### 2. Create NodePool and NodeClass 
+
+Run the following command to create one nodepool and nodeclass:
 
 ```sh
 cat > nodeclass.yaml <<EOF
@@ -131,11 +173,14 @@ kind: GCENodeClass
 metadata:
   name: default-example
 spec:
-  serviceAccount: "<service_account_email_created_before>"
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
   tags:
     env: dev
+  disks:
+    - category: pd-balanced
+      sizeGiB: 100
+      boot: true
 EOF
 
 kubectl apply -f nodeclass.yaml
@@ -171,8 +216,9 @@ EOF
 kubectl apply -f nodepool.yaml
 ```
 
-### 2. Create a Workload
+### 3. Deploy a Workload
 
+Create a test deployment to trigger node provisioning:
 ```sh
 cat > deployment.yaml <<EOF
 apiVersion: apps/v1
