@@ -179,7 +179,7 @@ spec:
     env: dev
   disks:
     - category: pd-balanced
-      sizeGiB: 100
+      sizeGiB: 60
       boot: true
 EOF
 

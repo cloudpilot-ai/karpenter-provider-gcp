@@ -9,3 +9,7 @@ spec:
     # - alias: Ubuntu@latest
   tags:
     env: dev
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true

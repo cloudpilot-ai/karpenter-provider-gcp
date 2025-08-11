@@ -3,9 +3,13 @@ kind: GCENodeClass
 metadata:
   name: default-example
 spec:
-  serviceAccount: "" # fill me
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@v117-18613.263.14
-    # - alias: ContainerOptimizedOS@latest
+    - alias: ContainerOptimizedOS@latest
   tags:
     env: dev
+  kubeletConfiguration:
+    maxPods: 50
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true
