@@ -275,7 +275,6 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 	cheapestZone := ""
 	cheapestPrice := math.MaxFloat64
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-
 	if capacityType == karpv1.CapacityTypeOnDemand {
 		// For on-demand, randomly select a zone
 		if len(zones) > 0 {
@@ -293,7 +292,6 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 		if reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) != nil {
 			continue
 		}
-
 		ok := zonesSet.Has(offering.Requirements.Get(corev1.LabelTopologyZone).Any())
 		if !ok {
 			continue
@@ -354,29 +352,48 @@ func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePo
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClass *v1alpha1.GCENodeClass, template *compute.InstanceTemplate, zone string) (*compute.AttachedDisk, error) {
-	disk := template.Properties.Disks[0]
-	disk.InitializeParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/pd-balanced", p.projectID, zone)
-
-	requirements := instanceType.Requirements
-	if requirements.Get(corev1.LabelArchStable).Has(imagefamily.OSArchARM64Requirement) {
-		disk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
-	}
-
-	targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
-		reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
-		return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+	nodeClass *v1alpha1.GCENodeClass, zone string) ([]*compute.AttachedDisk, error) {
+	disks := nodeClass.Spec.Disks
+	sort.Slice(disks, func(i, j int) bool {
+		return disks[i].Boot
 	})
-	if !found {
-		return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
-	}
-	disk.InitializeParams.SourceImage = targetImage.SourceImage
 
-	return disk, nil
+	attachedDisks := make([]*compute.AttachedDisk, len(disks))
+	for i, disk := range disks {
+		// Create a new disk configuration for each disk to avoid sharing references
+		attachedDisk := &compute.AttachedDisk{
+			AutoDelete: true,
+			Boot:       disk.Boot,
+			InitializeParams: &compute.AttachedDiskInitializeParams{
+				DiskType:   fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category),
+				DiskSizeGb: int64(disk.SizeGiB),
+			},
+		}
+
+		requirements := instanceType.Requirements
+		if requirements.Get(corev1.LabelArchStable).Has(imagefamily.OSArchARM64Requirement) {
+			attachedDisk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
+		}
+
+		if disk.Boot {
+			targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
+				reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
+				return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+			})
+			if !found {
+				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
+			}
+			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+		}
+
+		attachedDisks[i] = attachedDisk
+	}
+
+	return attachedDisks, nil
 }
 
 func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string) *compute.Instance {
-	disk, err := p.renderDiskProperties(instanceType, nodeClass, template, zone)
+	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to render disk properties")
 		return nil
@@ -422,7 +439,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
-		Disks:             []*compute.AttachedDisk{disk},
+		Disks:             attachedDisks,
 		NetworkInterfaces: template.Properties.NetworkInterfaces,
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
