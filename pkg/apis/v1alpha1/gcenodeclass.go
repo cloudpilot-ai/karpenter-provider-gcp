@@ -69,6 +69,9 @@ type GCENodeClassSpec struct {
 	// Metadata contains key/value pairs to set as instance metadata
 	// +optional
 	Metadata map[string]string `json:"metadata,omitempty"`
+	// NetworkTags is a list of network tags to apply to the node.
+	// +optional
+	NetworkTags []string `json:"networkTags,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
@@ -100,7 +103,8 @@ type KubeletConfiguration struct {
 	ClusterDNS []string `json:"clusterDNS,omitempty"`
 	// MaxPods is an override for the maximum number of pods that can run on
 	// a worker node instance.
-	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=256
 	// +optional
 	MaxPods *int32 `json:"maxPods,omitempty"`
 	// PodsPerCore is an override for the number of pods that can run on a worker node

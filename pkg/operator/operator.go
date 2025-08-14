@@ -121,6 +121,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeService,
 		gkeProvider,
 		unavailableOfferingsCache,
+		operator.GetClient(),
 	)
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache)
 

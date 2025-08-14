@@ -71,6 +71,10 @@ func New(kubeClient client.Client,
 
 // Create a NodeClaim given the constraints.
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*karpv1.NodeClaim, error) {
+	nodePool, err := c.resolveNodePoolFromNodeClaim(ctx, nodeClaim)
+	if err != nil {
+		return nil, fmt.Errorf("resolving nodepool, %w", err)
+	}
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -106,7 +110,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 
 	nc := c.instanceToNodeClaim(instance, instanceType)
 	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-		v1alpha1.AnnotationGCENodeClassHash:        nodeClass.Hash(),
+		v1alpha1.AnnotationGCENodeClassHash:        nodePool.Annotations[v1alpha1.AnnotationGCENodeClassHash],
 		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
 	})
 	return nc, nil
@@ -242,14 +246,18 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 	if nodePool.Spec.Template.Spec.NodeClassRef == nil {
 		return "", nil
 	}
-	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
-		}
-		return "", client.IgnoreNotFound(fmt.Errorf("resolving node class, %w", err))
+	// if the nodepooltemplate hash annotation is missing, the node is not drifted
+	if _, ok := nodePool.Annotations[v1alpha1.AnnotationGCENodeClassHash]; !ok {
+		return "", nil
 	}
-	return c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass), nil
+	// if the nodeclaim hash annotation is missing, the node is not drifted
+	if _, ok := nodeClaim.Annotations[v1alpha1.AnnotationGCENodeClassHash]; !ok {
+		return "", nil
+	}
+	if nodePool.Annotations[v1alpha1.AnnotationGCENodeClassHash] != nodeClaim.Annotations[v1alpha1.AnnotationGCENodeClassHash] {
+		return "GCENodeClassHashDrifted", nil
+	}
+	return "", nil
 }
 
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
@@ -357,6 +365,18 @@ func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeC
 		return nil, err
 	}
 	return nodeClass, nil
+}
+
+func (c *CloudProvider) resolveNodePoolFromNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*karpv1.NodePool, error) {
+	nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]
+	if !ok {
+		return nil, fmt.Errorf("nodeClaim missing NodePoolLabelKey")
+	}
+	nodePool := &karpv1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		return nil, err
+	}
+	return nodePool, nil
 }
 
 func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {

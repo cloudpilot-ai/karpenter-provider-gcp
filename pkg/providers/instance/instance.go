@@ -32,8 +32,10 @@ import (
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -44,7 +46,6 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -77,10 +78,11 @@ type DefaultProvider struct {
 	projectID             string
 	defaultServiceAccount string
 	computeService        *compute.Service
+	kubeClient            client.Client
 }
 
 func NewProvider(clusterName, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
-	unavailableOfferings *pkgcache.UnavailableOfferings) Provider {
+	unavailableOfferings *pkgcache.UnavailableOfferings, kubeClient client.Client) Provider {
 	return &DefaultProvider{
 		gkeProvider:           gkeProvider,
 		unavailableOfferings:  unavailableOfferings,
@@ -90,6 +92,7 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 		projectID:             projectID,
 		defaultServiceAccount: defaultServiceAccount,
 		computeService:        computeService,
+		kubeClient:            kubeClient,
 	}
 }
 
@@ -143,6 +146,75 @@ func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceNa
 	return instance, true, nil
 }
 
+func (p *DefaultProvider) launchInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, zone, instanceName, capacityType string) (*compute.Instance, error) {
+	instance := p.buildInstance(nodeClaim, nodeClass, instanceType, template, zone, instanceName)
+	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+		return nil, err
+	}
+
+	if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
+		log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+		return nil, err
+	}
+
+	nodeClaim.Status.ProviderID = fmt.Sprintf("gce://%s/%s/%s", p.projectID, zone, instanceName)
+	return instance, nil
+}
+
+func (p *DefaultProvider) createInstance(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, capacityType string) (*Instance, error) {
+	zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
+		return nil, err
+	}
+
+	nodePoolName := utils.ResolveNodePoolName(nodeClass.Name)
+	if nodePoolName == "" {
+		log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
+		return nil, fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
+	}
+
+	template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
+		return nil, err
+	}
+
+	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
+	instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
+		return nil, fmt.Errorf("failed to check if instance exists: %w", err)
+	}
+
+	if !exists {
+		instance, err = p.launchInstance(ctx, nodeClaim, nodeClass, instanceType, template, zone, instanceName, capacityType)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	log.FromContext(ctx).Info("Created instance", "instanceName", instance.Name, "instanceType", instanceType.Name,
+		"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
+		"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
+
+	return &Instance{
+		InstanceID:   instance.Name,
+		Name:         instance.Name,
+		Type:         instanceType.Name,
+		Location:     zone,
+		ProjectID:    p.projectID,
+		ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
+		CreationTime: time.Now(),
+		CapacityType: capacityType,
+		Tags:         template.Properties.Labels,
+		Labels:       instance.Labels,
+		Status:       InstanceStatusProvisioning,
+	}, nil
+}
+
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
 	if len(instanceTypes) == 0 {
 		return nil, fmt.Errorf("no instance types provided")
@@ -154,75 +226,12 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	var errs []error
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
-		zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
+		instance, err := p.createInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
 			errs = append(errs, err)
 			continue
 		}
-
-		nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
-		if nodePoolName == "" {
-			log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
-			return nil, fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
-		}
-
-		template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
-			errs = append(errs, err)
-			continue
-		}
-
-		instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
-		// We need to check it in the following scenario:
-		// 1. The instance is in the creation process.
-		// 2. The pod is terminated
-		// 3. The new pod will try to create the instance again, but it will fail because the instance is already in the creation process.
-		instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
-			return nil, fmt.Errorf("failed to check if instance exists: %w", err)
-		}
-
-		if !exists {
-			instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
-			op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
-			if err != nil {
-				log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
-				errs = append(errs, err)
-				continue
-			}
-
-			if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
-				log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
-				errs = append(errs, err)
-				continue
-			}
-		}
-
-		// we could wait for the node to be present in kubernetes api via csr sign up
-		// should be done with watcher, for now implemented as a csr controller
-		log.FromContext(ctx).Info("Created instance", "instanceName", instance.Name, "instanceType", instanceType.Name,
-			"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
-			"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
-
-		return &Instance{
-			InstanceID: instance.Name,
-			Name:       instance.Name,
-			// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
-			// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
-			// Type:         instanceType.Name,
-			Type:         instanceType.Name,
-			Location:     zone,
-			ProjectID:    p.projectID,
-			ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
-			CreationTime: time.Now(),
-			CapacityType: capacityType,
-			Tags:         template.Properties.Labels,
-			Labels:       instance.Labels,
-			Status:       InstanceStatusProvisioning,
-		}, nil
+		return instance, nil
 	}
 
 	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
@@ -305,17 +314,6 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 	return cheapestZone, nil
 }
 
-func resolveNodePoolName(imageFamily string) string {
-	switch imageFamily {
-	case v1alpha1.ImageFamilyContainerOptimizedOS:
-		return nodepooltemplate.KarpenterDefaultNodePoolTemplate
-	case v1alpha1.ImageFamilyUbuntu:
-		return nodepooltemplate.KarpenterUbuntuNodePoolTemplate
-	}
-
-	return ""
-}
-
 //nolint:gocyclo
 func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePoolName string) (*compute.InstanceTemplate, error) {
 	if nodePoolName == "" {
@@ -392,45 +390,73 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string) *compute.Instance {
+func (p *DefaultProvider) configureScheduling(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType) {
+	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
+	if instance.Scheduling == nil {
+		instance.Scheduling = &compute.Scheduling{}
+	}
+	if capacityType == karpv1.CapacityTypeSpot {
+		instance.Scheduling.ProvisioningModel = "SPOT"
+		instance.Scheduling.Preemptible = true
+		instance.Scheduling.AutomaticRestart = ptr.To(false)
+		instance.Scheduling.OnHostMaintenance = "TERMINATE"
+	}
+}
+
+func (p *DefaultProvider) configureLabelsAndTags(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType) {
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
+	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
+		instance.Labels[entry.Key] = entry.Value
+	})
+
+	if instance.Tags == nil {
+		instance.Tags = &compute.Tags{}
+	}
+	instance.Tags.Items = append(instance.Tags.Items, nodeClass.Spec.NetworkTags...)
+
+	if nodeClass.Spec.Tags != nil {
+		for k, v := range nodeClass.Spec.Tags {
+			instance.Labels[k] = v
+		}
+	}
+}
+
+func (p *DefaultProvider) configureMetadata(ctx context.Context, templateMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType) error {
+	if err := metadata.SetMaxPodsPerNode(templateMetadata, nodeClass); err != nil {
+		log.FromContext(ctx).Error(err, "failed to set max pods per node in metadata")
+		return err
+	}
+	if err := metadata.RenderKubeletConfigMetadata(templateMetadata, instanceType); err != nil {
+		log.FromContext(ctx).Error(err, "failed to render kubelet config metadata")
+		return err
+	}
+	if err := metadata.PatchUnregisteredTaints(templateMetadata); err != nil {
+		log.FromContext(ctx).Error(err, "failed to append unregistered taint to kube-env")
+		return err
+	}
+	metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, templateMetadata)
+	metadata.AppendRegisteredLabel(templateMetadata)
+	return nil
+}
+
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, zone, instanceName string) *compute.Instance {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to render disk properties")
 		return nil
 	}
 
-	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata, nodePoolName)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
+	if err := p.configureMetadata(context.Background(), template.Properties.Metadata, nodeClass, nodeClaim, instanceType); err != nil {
 		return nil
 	}
-
-	err = metadata.SetMaxPodsPerNode(template.Properties.Metadata, nodeClass)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to set max pods per node in metadata")
-		return nil
-	}
-
-	err = metadata.RenderKubeletConfigMetadata(template.Properties.Metadata, instanceType)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to render kubelet config metadata")
-		return nil
-	}
-
-	err = metadata.PatchUnregisteredTaints(template.Properties.Metadata)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to append unregistered taint to kube-env")
-		return nil
-	}
-
-	metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, template.Properties.Metadata)
-	metadata.AppendRegisteredLabel(template.Properties.Metadata)
 
 	serviceAccount := p.resolveServiceAccount(nodeClass)
 	serviceAccounts := template.Properties.ServiceAccounts
 	if serviceAccount != "" {
 		serviceAccounts = []*compute.ServiceAccount{
-			&compute.ServiceAccount{
+			{
 				Email: serviceAccount,
 			},
 		}
@@ -448,25 +474,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		Tags:              template.Properties.Tags,
 	}
 
-	// apply scheduling config for Spot capacity, for now lets do on demand only
-	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
-	if instance.Scheduling == nil {
-		instance.Scheduling = &compute.Scheduling{}
-	}
-	if capacityType == karpv1.CapacityTypeSpot {
-		instance.Scheduling.ProvisioningModel = "SPOT"
-		instance.Scheduling.Preemptible = true
-		instance.Scheduling.AutomaticRestart = ptr.To(false)
-		instance.Scheduling.OnHostMaintenance = "TERMINATE"
-	}
-
-	// set common Karpenter labels
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
-	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
-		instance.Labels[entry.Key] = entry.Value
-	})
+	p.configureScheduling(instance, nodeClaim, instanceType)
+	p.configureLabelsAndTags(instance, nodeClass, nodeClaim, instanceType)
 
 	return instance
 }
@@ -693,4 +702,33 @@ func (p *DefaultProvider) resolveServiceAccount(nodeClass *v1alpha1.GCENodeClass
 		return nodeClass.Spec.ServiceAccount
 	}
 	return p.defaultServiceAccount
+}
+
+func (p *DefaultProvider) waitForNodeReady(ctx context.Context, instanceName string) error {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	timeout := time.NewTimer(5 * time.Minute)
+	defer timeout.Stop()
+
+	for {
+		select {
+		case <-timeout.C:
+			return fmt.Errorf("timed out waiting for node to be ready")
+		case <-ticker.C:
+			var node corev1.Node
+			if err := p.kubeClient.Get(ctx, client.ObjectKey{Name: instanceName}, &node); err != nil {
+				if k8serrors.IsNotFound(err) {
+					continue
+				}
+				return fmt.Errorf("getting node: %w", err)
+			}
+
+			for _, condition := range node.Status.Conditions {
+				if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
+					return nil
+				}
+			}
+		}
+	}
 }

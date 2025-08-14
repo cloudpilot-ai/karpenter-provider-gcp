@@ -72,6 +72,7 @@ var (
 	ResourceNVIDIAGPU  corev1.ResourceName = "nvidia.com/gpu"
 	ResourceAMDGPU     corev1.ResourceName = "amd.com/gpu"
 	GCEClusterIDTagKey                     = "gce:gce-cluster-id"
+	GKENodePoolLabel                       = "cloud.google.com/gke-nodepool"
 
 	ImageFamilyUbuntu               = "Ubuntu"
 	ImageFamilyContainerOptimizedOS = "ContainerOptimizedOS"
