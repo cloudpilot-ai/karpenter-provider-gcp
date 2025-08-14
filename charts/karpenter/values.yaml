@@ -27,6 +27,9 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 
+imagePullSecrets: []
+#  - name: my-registry-secret
+
 podDisruptionBudget:
   minAvailable: 1
 
