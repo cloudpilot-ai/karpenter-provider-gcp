@@ -16,6 +16,7 @@ package cloudprovider
 
 import (
 	"context"
+	"strings"
 
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -46,7 +47,7 @@ func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv
 
 func (c *CloudProvider) isImageDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) cloudprovider.DriftReason {
 	for _, im := range nodeClass.Status.Images {
-		if im.SourceImage == nodeClaim.Status.ImageID {
+		if strings.HasSuffix(nodeClaim.Status.ImageID, im.SourceImage) {
 			return ""
 		}
 	}
