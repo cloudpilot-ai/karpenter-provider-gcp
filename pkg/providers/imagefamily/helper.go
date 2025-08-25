@@ -37,14 +37,13 @@ func resolveSourceImage(selfLink string) (string, error) {
 	return matches[1], nil
 }
 
-func getSourceImage(ctx context.Context, provider nodepooltemplate.Provider, nodePoolTemplateName string) (string, error) {
-	templates, err := provider.GetInstanceTemplates(ctx)
+func getSourceImage(ctx context.Context, provider nodepooltemplate.Provider, nodePoolName string) (string, error) {
+	defaultNodeTemplate, err := provider.GetInstanceTemplate(ctx, nodePoolName)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get default node template: %w", err)
 	}
-	defaultNodeTemplate, ok := templates[nodePoolTemplateName]
-	if !ok {
-		return "", fmt.Errorf("default node template not found")
+	if defaultNodeTemplate == nil {
+		return "", nil
 	}
 
 	systemDisk, ok := lo.Find(defaultNodeTemplate.Properties.Disks, func(item *compute.AttachedDisk) bool {

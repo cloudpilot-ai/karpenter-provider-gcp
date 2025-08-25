@@ -63,7 +63,7 @@ func NewController(
 	pricingProvider pricing.Provider) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
-		nodepooltemplate.NewController(nodePoolTemplateProvider),
+		nodepooltemplate.NewController(kubeClient, nodePoolTemplateProvider),
 		nodeclasstermination.NewController(kubeClient),
 		nodeclasshash.NewController(kubeClient),
 		instancetype.NewController(instanceTypeProvider),

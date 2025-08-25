@@ -94,33 +94,22 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	return nil
 }
 
-func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) error {
-	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, nodePoolName)
-	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
-	for _, item := range metadata.Items {
-		if item.Key != "kube-labels" && item.Key != "kube-env" {
-			continue
-		}
-
-		item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
-	}
-	return nil
-}
-
 func SetMaxPodsPerNode(metadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass) error {
-	if nodeClass.Spec.KubeletConfiguration == nil || nodeClass.Spec.KubeletConfiguration.MaxPods == nil {
-		return nil
+	maxPodsVal := v1alpha1.KubeletMaxPods
+	if nodeClass.Spec.KubeletConfiguration != nil && nodeClass.Spec.KubeletConfiguration.MaxPods != nil {
+		maxPodsVal = int(*nodeClass.Spec.KubeletConfiguration.MaxPods)
 	}
+
 	keys := []string{"kube-labels", "kube-env"}
-	maxPodsPerNode := fmt.Sprintf("max-pods-per-node=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
-	maxPods := fmt.Sprintf("max-pods=%d", *nodeClass.Spec.KubeletConfiguration.MaxPods)
+	maxPodsPerNode := fmt.Sprintf("max-pods-per-node=%d", maxPodsVal)
+	maxPods := fmt.Sprintf("max-pods=%d", maxPodsVal)
 
 	for _, key := range keys {
 		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
 			return item.Key == key
 		})
 		if !ok || index == -1 {
-			return errors.New(fmt.Sprintf("%s metadata not found", key))
+			return fmt.Errorf("%s metadata not found", key)
 		}
 		targetEntry.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
 		targetEntry.Value = swag.String(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPods))
