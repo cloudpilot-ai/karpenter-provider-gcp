@@ -432,6 +432,15 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		serviceAccounts = []*compute.ServiceAccount{
 			&compute.ServiceAccount{
 				Email: serviceAccount,
+				Scopes: []string{
+					// cloud-platform scope provides full access to all Google Cloud Platform APIs
+					// Note: This is a broad scope
+					// However, since GCENodeClass doesn't support custom OAuth scopes configuration,
+					// we use this as a compromise to ensure the instance has necessary permissions
+					// for basic operations like VM management, storage access, and container registry access.
+					// TODO: When NodeClass API supports custom OAuth scopes, replace with more restrictive scopes
+					"https://www.googleapis.com/auth/cloud-platform",
+				},
 			},
 		}
 	}
