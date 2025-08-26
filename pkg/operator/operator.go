@@ -91,6 +91,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).Region,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
+		options.FromContext(ctx).Zone,
 	)
 	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
 	pricingProvider, err := pricing.NewDefaultProvider(ctx, options.FromContext(ctx).Region)
