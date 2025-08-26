@@ -53,6 +53,7 @@ type ClusterInfo struct {
 	Region    string
 	Name      string
 	Zones     []string
+	isZonal   bool
 }
 
 const (
@@ -65,12 +66,26 @@ const (
 
 func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
 	containerService *container.Service, versionProvider version.Provider,
-	clusterName, region, projectID, serviceAccount string) *DefaultProvider {
-	zones, err := resolveZones(ctx, computeService, projectID, region)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
-		os.Exit(1)
+	clusterName, region, projectID, serviceAccount, zone string) *DefaultProvider {
+
+	var (
+		zones   []string
+		err     error
+		isZonal bool
+	)
+
+	if zone != "" {
+		log.FromContext(ctx).Info("is a zonal cluster, using zone from config, skipping resolving zones", "ProjectID", projectID, "Region", region)
+		isZonal = true
+		zones = append(zones, zone)
+	} else {
+		zones, err = resolveZones(ctx, computeService, projectID, region)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
+			os.Exit(1)
+		}
 	}
+
 	return &DefaultProvider{
 		kubeClient:            kubeClient,
 		computeService:        computeService,
@@ -82,6 +97,7 @@ func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeSe
 			Region:    region,
 			Name:      clusterName,
 			Zones:     zones,
+			isZonal:   isZonal,
 		},
 	}
 }
@@ -139,6 +155,11 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 		return fmt.Errorf("no zones provided for node pool %s", nodePoolName)
 	}
 
+	clusterLocation := p.ClusterInfo.Region
+	if p.ClusterInfo.isZonal {
+		clusterLocation = p.ClusterInfo.Zones[0]
+	}
+
 	logger.Info("ensuring node pool template exists",
 		"projectID", p.ClusterInfo.ProjectID,
 		"region", p.ClusterInfo.Region,
@@ -147,7 +168,7 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 		"zones", p.ClusterInfo.Zones)
 
 	nodePoolSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-		p.ClusterInfo.ProjectID, p.ClusterInfo.Region, p.ClusterInfo.Name, nodePoolName)
+		p.ClusterInfo.ProjectID, clusterLocation, p.ClusterInfo.Name, nodePoolName)
 
 	_, err := p.containerService.Projects.Locations.Clusters.NodePools.Get(nodePoolSelfLink).Context(ctx).Do()
 	if err == nil {
@@ -176,7 +197,7 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 	}
 
 	logger.Info("creating node pool", "name", nodePoolName)
-	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.ClusterInfo.ProjectID, p.ClusterInfo.Region, p.ClusterInfo.Name)
+	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.ClusterInfo.ProjectID, clusterLocation, p.ClusterInfo.Name)
 	_, err = p.containerService.Projects.Locations.Clusters.NodePools.Create(clusterSelfLink, nodePoolOpts).Context(ctx).Do()
 	if err != nil {
 		if errors.As(err, &gcpErr) && gcpErr.Code == http.StatusConflict {
@@ -213,8 +234,13 @@ func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]
 }
 
 func (p *DefaultProvider) getNodePool(ctx context.Context, nodePoolName string) (*container.NodePool, error) {
+	clusterLocation := p.ClusterInfo.Region
+	if p.ClusterInfo.isZonal {
+		clusterLocation = p.ClusterInfo.Zones[0]
+	}
+
 	nodePoolSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-		p.ClusterInfo.ProjectID, p.ClusterInfo.Region, p.ClusterInfo.Name, nodePoolName)
+		p.ClusterInfo.ProjectID, clusterLocation, p.ClusterInfo.Name, nodePoolName)
 	nodePool, err := p.containerService.Projects.Locations.Clusters.NodePools.Get(nodePoolSelfLink).Context(ctx).Do()
 	if err != nil {
 		log.FromContext(ctx).Error(err, "error getting node pool")
