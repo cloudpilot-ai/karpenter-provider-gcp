@@ -162,6 +162,9 @@ func determineRegion(ctx context.Context) (string, error) {
 			parts := strings.Split(options.FromContext(ctx).Location, "-")
 			return fmt.Sprintf("%s-%s", parts[0], parts[1]), nil
 		}
+		log.FromContext(ctx).Info("location is a region", "ProjectID", options.FromContext(ctx).ProjectID, "Location", options.FromContext(ctx).Location)
+		return options.FromContext(ctx).Location, nil
 	}
+	// backward compat until region is fully removed
 	return options.FromContext(ctx).Region, nil
 }
