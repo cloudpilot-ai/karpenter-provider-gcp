@@ -68,7 +68,7 @@ type Operator struct {
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	os.Setenv(options.GCPAuth, options.FromContext(ctx).GCPAuth)
 
-	region, err := determineRegion(ctx)
+	region, err := determineRegion(ctx, options.FromContext(ctx).ProjectID, options.FromContext(ctx).Location)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to determine region")
 		os.Exit(1)
@@ -148,23 +148,19 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 }
 
-func determineRegion(ctx context.Context) (string, error) {
-	if options.FromContext(ctx).Location != "" {
-		log.FromContext(ctx).Info("location set, attempting to determine if region or zone", "ProjectID", options.FromContext(ctx).ProjectID, "Location", options.FromContext(ctx).Location)
+func determineRegion(ctx context.Context, projectID, location string) (string, error) {
+	log.FromContext(ctx).Info("attempting to determine if location is a region or a zone", "ProjectID", projectID, "Location", location)
 
-		match, err := regexp.MatchString(`^[a-z]+-[a-z]+\d-[a-z]{1}$`, options.FromContext(ctx).Location)
-		if err != nil {
-			return "", err
-		}
-		if match {
-			log.FromContext(ctx).Info("location is a zone, extracting region", "ProjectID", options.FromContext(ctx).ProjectID, "Location", options.FromContext(ctx).Location)
-
-			parts := strings.Split(options.FromContext(ctx).Location, "-")
-			return fmt.Sprintf("%s-%s", parts[0], parts[1]), nil
-		}
-		log.FromContext(ctx).Info("location is a region", "ProjectID", options.FromContext(ctx).ProjectID, "Location", options.FromContext(ctx).Location)
-		return options.FromContext(ctx).Location, nil
+	match, err := regexp.MatchString(`^[a-z]+-[a-z]+\d-[a-z]{1}$`, location)
+	if err != nil {
+		return "", err
 	}
-	// backward compat until region is fully removed
-	return options.FromContext(ctx).Region, nil
+	if match {
+		log.FromContext(ctx).Info("location is a zone, extracting region", "ProjectID", projectID, "Location", location)
+
+		parts := strings.Split(location, "-")
+		return fmt.Sprintf("%s-%s", parts[0], parts[1]), nil
+	}
+	log.FromContext(ctx).Info("location is a region", "ProjectID", projectID, "Location", location)
+	return location, nil
 }

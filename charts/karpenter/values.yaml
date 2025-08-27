@@ -68,9 +68,6 @@ controller:
   settings:
     # -- The GCP project ID.
     projectID: ""
-    # -- DEPRECATED: use location insead
-    # -- The GCP region.
-    region: ""
     # -- The GCP cluster region or zone
     location: ""
     # -- The GCP cluster name.

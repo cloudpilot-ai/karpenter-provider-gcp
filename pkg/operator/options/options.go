@@ -30,8 +30,6 @@ import (
 const (
 	projectIDEnvVarName               = "PROJECT_ID"
 	projectIDFlagName                 = "project-id"
-	regionEnvVarName                  = "REGION"
-	regionFlagName                    = "region"
 	locationEnvVarName                = "LOCATION"
 	locationFlagName                  = "location"
 	gkeClusterNameEnvVarName          = "CLUSTER_NAME"
@@ -52,7 +50,6 @@ type optionsKey struct{}
 
 type Options struct {
 	ProjectID               string
-	Region                  string
 	Location                string
 	ClusterName             string
 	VMMemoryOverheadPercent float64
@@ -65,7 +62,6 @@ type Options struct {
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.ProjectID, projectIDFlagName, env.WithDefaultString(projectIDEnvVarName, ""), "GCP project ID where the GKE cluster is running.")
-	fs.StringVar(&o.Region, regionFlagName, env.WithDefaultString(regionEnvVarName, ""), "DEPRECATED - use location instead. GCP region of the GKE cluster. If not set, the controller will attempt to infer it.")
 	fs.StringVar(&o.Location, locationFlagName, env.WithDefaultString(locationEnvVarName, ""), "GCP region or zone of the GKE cluster.")
 	fs.StringVar(&o.ClusterName, gkeClusterFlagName, env.WithDefaultString(gkeClusterNameEnvVarName, ""), "Name of the GKE cluster that provisioned nodes should connect to.")
 	fs.Float64Var(&o.VMMemoryOverheadPercent, vmMemoryOverheadPercentFlagName, utils.WithDefaultFloat64(vmMemoryOverheadPercentEnvVarName, 0.07), "Percentage of memory overhead for VM. If not set, the controller will use the default value 7%.")
