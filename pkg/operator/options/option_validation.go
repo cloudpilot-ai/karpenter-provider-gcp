@@ -33,8 +33,11 @@ func (o *Options) validateRequiredFields() error {
 	if o.ClusterName == "" {
 		return fmt.Errorf("missing required flag %s or env var %s", gkeClusterFlagName, gkeClusterNameEnvVarName)
 	}
-	if o.Region == "" {
-		return fmt.Errorf("missing required flag %s or env var %s", regionFlagName, regionEnvVarName)
+	if o.Location == "" {
+		if o.Region == "" {
+			return fmt.Errorf("missing required flag, either location (%s flag or %s env var) or region - DEPRECATED (%s flag or %s env var) must be set", locationFlagName, locationEnvVarName, regionFlagName, regionEnvVarName)
+		}
+		return fmt.Errorf("missing required flag %s or env var %s", locationFlagName, locationEnvVarName)
 	}
 	return nil
 }
