@@ -68,10 +68,11 @@ controller:
   settings:
     # -- The GCP project ID.
     projectID: ""
+    # -- DEPRECATED: use location insead
     # -- The GCP region.
     region: ""
-    # -- The GCP cluster zone (if a zonal cluster)
-    zone: ""
+    # -- The GCP cluster region or zone
+    location: ""
     # -- The GCP cluster name.
     clusterName: ""
     # -- The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%.

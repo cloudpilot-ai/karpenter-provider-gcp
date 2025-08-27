@@ -52,8 +52,8 @@ spec:
               value: {{ .Values.controller.settings.projectID }}
             - name: REGION
               value: {{ .Values.controller.settings.region }}
-            - name: ZONE
-              value: {{ .Values.controller.settings.zone }}
+            - name: LOCATION
+              value: {{ .Values.controller.settings.location }}
             - name: CLUSTER_NAME
               value: {{ .Values.controller.settings.clusterName }}
             {{- if .Values.credentials.enabled }}

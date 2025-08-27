@@ -18,8 +18,11 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
+	"regexp"
+	"strings"
 
 	computev1 "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/metadata"
@@ -65,6 +68,12 @@ type Operator struct {
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	os.Setenv(options.GCPAuth, options.FromContext(ctx).GCPAuth)
 
+	region, err := determineRegion(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to determine region")
+		os.Exit(1)
+	}
+
 	computeService, err := compute.NewService(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create compute service")
@@ -77,7 +86,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 	auth := auth.Credential{
 		ProjectID: options.FromContext(ctx).ProjectID,
-		Region:    options.FromContext(ctx).Region,
+		Region:    region,
 	}
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
@@ -88,13 +97,13 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		containerService,
 		versionProvider,
 		options.FromContext(ctx).ClusterName,
-		options.FromContext(ctx).Region,
+		region,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
-		options.FromContext(ctx).Zone,
+		options.FromContext(ctx).Location,
 	)
 	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
-	pricingProvider, err := pricing.NewDefaultProvider(ctx, options.FromContext(ctx).Region)
+	pricingProvider, err := pricing.NewDefaultProvider(ctx, region)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create pricing provider")
 		os.Exit(1)
@@ -116,7 +125,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,
-		options.FromContext(ctx).Region,
+		region,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
 		computeService,
@@ -137,4 +146,22 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceTypeProvider:      instanceTypeProvider,
 		InstanceProvider:          instanceProvider,
 	}
+}
+
+func determineRegion(ctx context.Context) (string, error) {
+	if options.FromContext(ctx).Location != "" {
+		log.FromContext(ctx).Info("location set, attempting to determine if region or zone", "ProjectID", options.FromContext(ctx).ProjectID, "Location", options.FromContext(ctx).Location)
+
+		match, err := regexp.MatchString(`^[a-z]+-[a-z]+\d-[a-z]{1}$`, options.FromContext(ctx).Location)
+		if err != nil {
+			return "", err
+		}
+		if match {
+			log.FromContext(ctx).Info("location is a zone, extracting region", "ProjectID", options.FromContext(ctx).ProjectID, "Location", options.FromContext(ctx).Location)
+
+			parts := strings.Split(options.FromContext(ctx).Location, "-")
+			return fmt.Sprintf("%s-%s", parts[0], parts[1]), nil
+		}
+	}
+	return options.FromContext(ctx).Region, nil
 }
