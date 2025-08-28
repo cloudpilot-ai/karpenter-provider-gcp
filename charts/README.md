@@ -65,7 +65,7 @@ Then clone this repository and install the chart with the following command:
 helm upgrade karpenter charts/karpenter --install \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
-  --set "controller.settings.region=${REGION}" \
+  --set "controller.settings.location=${REGION}" \
   --set "controller.settings.clusterName=${CLUSTER_NAME}" \
   --set "credentials.enabled=false" \
   --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=karpenter-gsa@${PROJECT_ID}.iam.gserviceaccount.com" \
@@ -147,7 +147,7 @@ Then clone this repository and install the chart with the following command:
 helm upgrade karpenter charts/karpenter --install \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
-  --set "controller.settings.region=${REGION}" \
+  --set "controller.settings.location=${REGION}" \
   --set "controller.settings.clusterName=${CLUSTER_NAME}" \
   --wait
 ```
