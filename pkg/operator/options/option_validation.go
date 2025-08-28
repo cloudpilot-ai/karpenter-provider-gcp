@@ -33,8 +33,8 @@ func (o *Options) validateRequiredFields() error {
 	if o.ClusterName == "" {
 		return fmt.Errorf("missing required flag %s or env var %s", gkeClusterFlagName, gkeClusterNameEnvVarName)
 	}
-	if o.Region == "" {
-		return fmt.Errorf("missing required flag %s or env var %s", regionFlagName, regionEnvVarName)
+	if o.Location == "" {
+		return fmt.Errorf("missing required flag %s or env var %s", locationFlagName, locationEnvVarName)
 	}
 	return nil
 }
