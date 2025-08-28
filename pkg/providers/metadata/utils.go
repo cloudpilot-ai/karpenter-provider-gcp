@@ -120,7 +120,7 @@ func SetMaxPodsPerNode(metadata *compute.Metadata, nodeClass *v1alpha1.GCENodeCl
 			return item.Key == key
 		})
 		if !ok || index == -1 {
-			return errors.New(fmt.Sprintf("%s metadata not found", key))
+			return fmt.Errorf("%s metadata not found", key)
 		}
 		targetEntry.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
 		targetEntry.Value = swag.String(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPods))
