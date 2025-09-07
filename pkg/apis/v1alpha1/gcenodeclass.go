@@ -57,7 +57,7 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	// +optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
-	// Tags to be applied on gce resources like instances and launch templates.
+	// Labels to be applied on GCE VM instance.
 	// +kubebuilder:validation:XValidation:message="empty tag keys aren't supported",rule="self.all(k, k != '')"
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching gce:gce-cluster-name",rule="self.all(k, k !='gce:gce-cluster-name')"
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching kubernetes.io/cluster/",rule="self.all(k, !k.startsWith('kubernetes.io/cluster') )"
@@ -65,7 +65,7 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching karpenter.sh/nodeclaim",rule="self.all(k, k !='karpenter.sh/nodeclaim')"
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching karpenter.k8s.gcp/gcenodeclass",rule="self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')"
 	// +optional
-	Tags map[string]string `json:"tags,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
 	// Metadata contains key/value pairs to set as instance metadata
 	// +optional
 	Metadata map[string]string `json:"metadata,omitempty"`
