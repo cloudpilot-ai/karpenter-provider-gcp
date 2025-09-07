@@ -399,52 +399,16 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
-	err = metadata.RemoveGKEBuiltinLabels(template.Properties.Metadata, nodePoolName)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to remove GKE builtin labels from metadata")
+	// Setup metadata
+	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName); err != nil {
+		log.FromContext(context.Background()).Error(err, "failed to setup instance metadata")
 		return nil
 	}
 
-	err = metadata.SetMaxPodsPerNode(template.Properties.Metadata, nodeClass)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to set max pods per node in metadata")
-		return nil
-	}
+	// Setup service accounts
+	serviceAccounts := p.setupServiceAccounts(nodeClass, template.Properties.ServiceAccounts)
 
-	err = metadata.RenderKubeletConfigMetadata(template.Properties.Metadata, instanceType)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to render kubelet config metadata")
-		return nil
-	}
-
-	err = metadata.PatchUnregisteredTaints(template.Properties.Metadata)
-	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to append unregistered taint to kube-env")
-		return nil
-	}
-
-	metadata.AppendNodeclaimLabel(nodeClaim, nodeClass, template.Properties.Metadata)
-	metadata.AppendRegisteredLabel(template.Properties.Metadata)
-
-	serviceAccount := p.resolveServiceAccount(nodeClass)
-	serviceAccounts := template.Properties.ServiceAccounts
-	if serviceAccount != "" {
-		serviceAccounts = []*compute.ServiceAccount{
-			&compute.ServiceAccount{
-				Email: serviceAccount,
-				Scopes: []string{
-					// cloud-platform scope provides full access to all Google Cloud Platform APIs
-					// Note: This is a broad scope
-					// However, since GCENodeClass doesn't support custom OAuth scopes configuration,
-					// we use this as a compromise to ensure the instance has necessary permissions
-					// for basic operations like VM management, storage access, and container registry access.
-					// TODO: When NodeClass API supports custom OAuth scopes, replace with more restrictive scopes
-					"https://www.googleapis.com/auth/cloud-platform",
-				},
-			},
-		}
-	}
-
+	// Create instance
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
@@ -452,32 +416,102 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		NetworkInterfaces: template.Properties.NetworkInterfaces,
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
-		Labels:            map[string]string{},
+		Labels:            p.initializeInstanceLabels(nodeClass),
 		Scheduling:        template.Properties.Scheduling,
 		Tags:              template.Properties.Tags,
 	}
 
-	// apply scheduling config for Spot capacity, for now lets do on demand only
+	// Configure capacity provision
+	p.configureInstanceCapacityProvision(instance, nodeClaim, instanceType)
+
+	// Setup karpenter built-in labels
+	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
+
+	return instance
+}
+
+// setupInstanceMetadata configures all metadata-related settings for the instance
+func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string) error {
+	if err := metadata.RemoveGKEBuiltinLabels(instanceMetadata, nodePoolName); err != nil {
+		return fmt.Errorf("failed to remove GKE builtin labels from metadata: %w", err)
+	}
+
+	if err := metadata.SetMaxPodsPerNode(instanceMetadata, nodeClass); err != nil {
+		return fmt.Errorf("failed to set max pods per node in metadata: %w", err)
+	}
+
+	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType); err != nil {
+		return fmt.Errorf("failed to render kubelet config metadata: %w", err)
+	}
+
+	if err := metadata.PatchUnregisteredTaints(instanceMetadata); err != nil {
+		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
+	}
+
+	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
+	metadata.AppendRegisteredLabel(instanceMetadata)
+
+	return nil
+}
+
+// setupServiceAccounts configures service accounts for the instance
+func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass, defaultServiceAccounts []*compute.ServiceAccount) []*compute.ServiceAccount {
+	serviceAccount := p.resolveServiceAccount(nodeClass)
+	if serviceAccount == "" {
+		return defaultServiceAccounts
+	}
+
+	return []*compute.ServiceAccount{
+		{
+			Email: serviceAccount,
+			Scopes: []string{
+				// cloud-platform scope provides full access to all Google Cloud Platform APIs
+				// Note: This is a broad scope
+				// However, since GCENodeClass doesn't support custom OAuth scopes configuration,
+				// we use this as a compromise to ensure the instance has necessary permissions
+				// for basic operations like VM management, storage access, and container registry access.
+				// TODO: When NodeClass API supports custom OAuth scopes, replace with more restrictive scopes
+				"https://www.googleapis.com/auth/cloud-platform",
+			},
+		},
+	}
+}
+
+// initializeInstanceLabels initializes the instance labels map
+func (p *DefaultProvider) initializeInstanceLabels(nodeClass *v1alpha1.GCENodeClass) map[string]string {
+	labels := make(map[string]string)
+	for k, v := range nodeClass.Spec.Labels {
+		labels[k] = v
+	}
+	return labels
+}
+
+// configureInstanceCapacityProvision configures capacity provision settings for the instance
+func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType) {
 	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
 	if instance.Scheduling == nil {
 		instance.Scheduling = &compute.Scheduling{}
 	}
+
 	if capacityType == karpv1.CapacityTypeSpot {
 		instance.Scheduling.ProvisioningModel = "SPOT"
 		instance.Scheduling.Preemptible = true
 		instance.Scheduling.AutomaticRestart = ptr.To(false)
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
+}
 
-	// set common Karpenter labels
+// setupInstanceLabels configures all labels for the instance
+func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) {
+	// Set common Karpenter labels
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
+
+	// Add instance type requirement labels
 	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
 		instance.Labels[entry.Key] = entry.Value
 	})
-
-	return instance
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance, error) {
