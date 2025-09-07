@@ -160,11 +160,11 @@ func PatchUnregisteredTaints(metadata *compute.Metadata) error {
 	return nil
 }
 
-func AppendNodeclaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
+func AppendNodeClaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
 	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
 	for _, item := range metadata.Items {
 		if item.Key == "kube-labels" {
-			labels := getTags(nodeClass, nodeClaim)
+			labels := getNodeLabels(nodeClass, nodeClaim)
 			labelString := make([]string, 0, len(labels))
 			for k, v := range labels {
 				// Append the nodeclaim label to kube-labels
@@ -184,10 +184,10 @@ func AppendRegisteredLabel(metadata *compute.Metadata) {
 	}
 }
 
-func getTags(nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim) map[string]string {
+func getNodeLabels(nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim) map[string]string {
 	staticTags := map[string]string{
 		karpv1.NodePoolLabelKey: nodeClaim.Labels[karpv1.NodePoolLabelKey],
 		v1alpha1.LabelNodeClass: nodeClass.Name,
 	}
-	return lo.Assign(nodeClass.Spec.Tags, staticTags)
+	return staticTags
 }
