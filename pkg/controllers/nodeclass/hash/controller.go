@@ -48,12 +48,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
 	})
 
-	if !equality.Semantic.DeepEqual(nodeClass, nodeClassCopy) {
-		if err := c.kubeClient.Patch(ctx, nodeClassCopy, client.MergeFrom(nodeClass)); err != nil {
-			return reconcile.Result{}, err
-		}
+	if equality.Semantic.DeepEqual(nodeClass, nodeClassCopy) {
+		return reconcile.Result{}, nil
 	}
-	return reconcile.Result{}, nil
+
+	err := c.kubeClient.Patch(ctx, nodeClassCopy, client.MergeFrom(nodeClass))
+	return reconcile.Result{}, client.IgnoreNotFound(err)
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
