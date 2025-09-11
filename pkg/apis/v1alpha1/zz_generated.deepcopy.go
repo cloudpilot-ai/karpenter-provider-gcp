@@ -158,6 +158,11 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 			(*out)[key] = val
 		}
 	}
+	if in.NetworkTags != nil {
+		in, out := &in.NetworkTags, &out.NetworkTags
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

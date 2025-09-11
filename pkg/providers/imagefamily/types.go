@@ -31,7 +31,7 @@ type Images []Image
 
 // ImageFamily can be implemented to override the default logic for generating dynamic launch template parameters
 type ImageFamily interface {
-	ResolveImages(ctx context.Context, version string) (Images, error)
+	ResolveImages(ctx context.Context, nodePoolName, version string) (Images, error)
 }
 
 const (

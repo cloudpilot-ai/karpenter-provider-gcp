@@ -107,7 +107,8 @@ type KubeletConfiguration struct {
 	ClusterDNS []string `json:"clusterDNS,omitempty"`
 	// MaxPods is an override for the maximum number of pods that can run on
 	// a worker node instance.
-	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=256
 	// +optional
 	MaxPods *int32 `json:"maxPods,omitempty"`
 	// PodsPerCore is an override for the number of pods that can run on a worker node

@@ -33,6 +33,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 type Provider interface {
@@ -134,7 +135,7 @@ func (p *DefaultProvider) resolveImageFromAlias(ctx context.Context, nodeClass *
 
 	images := Images{}
 	familyProvider := p.getImageFamilyProvider(alias.Family)
-	ims, err := familyProvider.ResolveImages(ctx, alias.Version)
+	ims, err := familyProvider.ResolveImages(ctx, utils.ResolveNodePoolName(nodeClass.Name), alias.Version)
 	if err != nil {
 		return nil, false, err
 	}

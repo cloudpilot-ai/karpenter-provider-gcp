@@ -26,7 +26,6 @@ import (
 
 const (
 	ClusterNameLabel     = "cluster-name"
-	GKENodePoolLabel     = "cloud.google.com/gke-nodepool"
 	UnregisteredTaintArg = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
 	KubeletConfigLabel   = "kubelet-config"
 )

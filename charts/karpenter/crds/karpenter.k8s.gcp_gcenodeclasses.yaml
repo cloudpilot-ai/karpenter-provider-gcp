@@ -219,6 +219,7 @@ spec:
                       MaxPods is an override for the maximum number of pods that can run on
                       a worker node instance.
                     format: int32
+                    maximum: 256
                     minimum: 0
                     type: integer
                   podsPerCore:
@@ -279,10 +280,11 @@ spec:
                   metadata
                 type: object
               networkTags:
-                description: NetworkTags is a list of network tags to apply to the node.
+                description: |-
+                  NetworkTags is a list of network tags to apply to the node.
+                  Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
+                  lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
                 items:
-                  maxLength: 63
-                  pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
                   type: string
                 maxItems: 64
                 type: array

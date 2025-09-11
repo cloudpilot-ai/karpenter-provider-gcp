@@ -163,7 +163,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			continue
 		}
 
-		addInstanceType := NewInstanceType(ctx, mt, p.authOptions.Region, offerings)
+		addInstanceType := NewInstanceType(ctx, mt, nodeClass, p.authOptions.Region, offerings)
 		instanceTypes = append(instanceTypes, addInstanceType)
 	}
 	p.instanceTypesCache.SetDefault(listKey, instanceTypes)

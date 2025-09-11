@@ -18,6 +18,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"os"
 	"regexp"
@@ -167,4 +168,8 @@ func ResolveNodePoolFromNodeClaim(ctx context.Context, kubeClient client.Client,
 	}
 	// There will be no nodePool referenced inside the nodeClaim in case of standalone nodeClaims
 	return nil, nil
+}
+
+func ResolveNodePoolName(nodeClassName string) string {
+	return fmt.Sprintf("karpenter-%s", strings.ToLower(nodeClassName))
 }
