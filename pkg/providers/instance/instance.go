@@ -125,7 +125,11 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 					p.unavailableOfferings.MarkUnavailable(ctx, capacityError.Message, instanceType, zone, capacityType)
 					return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone resource pool exhausted: %s", capacityError.Message))
 				}
-				return fmt.Errorf("operation failed: %v", op.Error.Errors)
+
+				errorMsgs := lo.Map(op.Error.Errors, func(e *compute.OperationErrorErrors, _ int) string {
+					return e.Message
+				})
+				return fmt.Errorf("operation failed: %s", strings.Join(errorMsgs, "; "))
 			}
 			return nil
 		}
