@@ -422,7 +422,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
 		Scheduling:        template.Properties.Scheduling,
-		Tags:              template.Properties.Tags,
+		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
 	}
 
 	// Configure capacity provision
@@ -516,6 +516,49 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
 		instance.Labels[entry.Key] = entry.Value
 	})
+}
+
+func mergeInstanceTags(templateTags *compute.Tags, networkTags []string) *compute.Tags {
+	if (templateTags == nil || len(templateTags.Items) == 0) && len(networkTags) == 0 {
+		return nil
+	}
+
+	seen := sets.NewString()
+	baseLen := 0
+	if templateTags != nil {
+		baseLen = len(templateTags.Items)
+	}
+	merged := make([]string, 0, baseLen+len(networkTags))
+
+	if templateTags != nil {
+		for _, tag := range templateTags.Items {
+			if tag == "" || seen.Has(tag) {
+				continue
+			}
+			seen.Insert(tag)
+			merged = append(merged, tag)
+		}
+	}
+
+	for _, tag := range networkTags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" || seen.Has(trimmed) {
+			continue
+		}
+		seen.Insert(trimmed)
+		merged = append(merged, trimmed)
+	}
+
+	if len(merged) == 0 {
+		return nil
+	}
+
+	newTags := &compute.Tags{Items: merged}
+	if templateTags != nil {
+		newTags.Fingerprint = templateTags.Fingerprint
+	}
+
+	return newTags
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance, error) {
