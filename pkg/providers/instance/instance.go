@@ -50,6 +50,7 @@ import (
 
 const (
 	maxInstanceTypes        = 20
+	maxNodeCIDR             = 23
 	instanceCacheExpiration = 15 * time.Second
 )
 
@@ -412,12 +413,15 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// Setup service accounts
 	serviceAccounts := p.setupServiceAccounts(nodeClass, template.Properties.ServiceAccounts)
 
+	// setup network interfaces
+	networkInterfaces := p.setupNetworkInterfaces(template, nodeClass)
+
 	// Create instance
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
-		NetworkInterfaces: template.Properties.NetworkInterfaces,
+		NetworkInterfaces: networkInterfaces,
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
@@ -432,6 +436,67 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
 
 	return instance
+}
+
+// nolint:gocyclo
+func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTemplate, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
+	if nodeClass.Spec.KubeletConfiguration == nil || nodeClass.Spec.KubeletConfiguration.MaxPods == nil {
+		return template.Properties.NetworkInterfaces
+	}
+
+	// referring to: https://cloud.google.com/kubernetes-engine/docs/how-to/flexible-pod-cidr
+	maxPods := *nodeClass.Spec.KubeletConfiguration.MaxPods
+	targetRange := int32(maxNodeCIDR)
+	if maxPods <= 8 {
+		targetRange = 28
+	}
+	if maxPods >= 9 && maxPods <= 16 {
+		targetRange = 27
+	}
+	if maxPods >= 17 && maxPods <= 32 {
+		targetRange = 26
+	}
+	if maxPods >= 33 && maxPods <= 64 {
+		targetRange = 25
+	}
+	if maxPods >= 65 && maxPods <= 128 {
+		targetRange = 24
+	}
+	if maxPods >= 129 && maxPods <= 256 {
+		targetRange = 23
+	}
+
+	var networkInterfaces []*compute.NetworkInterface
+
+	for _, networkInterface := range template.Properties.NetworkInterfaces {
+		tmpNetworkInterface := &compute.NetworkInterface{
+			AccessConfigs:            networkInterface.AccessConfigs,
+			AliasIpRanges:            networkInterface.AliasIpRanges,
+			Fingerprint:              networkInterface.Fingerprint,
+			InternalIpv6PrefixLength: networkInterface.InternalIpv6PrefixLength,
+			Ipv6AccessConfigs:        networkInterface.Ipv6AccessConfigs,
+			Ipv6AccessType:           networkInterface.Ipv6AccessType,
+			Ipv6Address:              networkInterface.Ipv6Address,
+			Kind:                     networkInterface.Kind,
+			Name:                     networkInterface.Name,
+			Network:                  networkInterface.Network,
+			NetworkIP:                networkInterface.NetworkIP,
+			NicType:                  networkInterface.NicType,
+			QueueCount:               networkInterface.QueueCount,
+			StackType:                networkInterface.StackType,
+			Subnetwork:               networkInterface.Subnetwork,
+			ForceSendFields:          networkInterface.ForceSendFields,
+			NullFields:               networkInterface.NullFields,
+		}
+		for aliasIpRangeIndex := range networkInterface.AliasIpRanges {
+			// Set the IP CIDR range for the alias IP range based on the calculated targetRange
+			// TODO: Optionally, add validation to ensure the network interface supports this range if needed
+			tmpNetworkInterface.AliasIpRanges[aliasIpRangeIndex].IpCidrRange = fmt.Sprintf("/%d", targetRange)
+		}
+		networkInterfaces = append(networkInterfaces, tmpNetworkInterface)
+	}
+
+	return networkInterfaces
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance
