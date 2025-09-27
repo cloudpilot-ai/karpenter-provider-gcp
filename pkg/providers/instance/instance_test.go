@@ -10,10 +10,10 @@ import (
 func TestMergeInstanceTagsPreservesTemplateAndAddsNetworkTags(t *testing.T) {
 	base := &compute.Tags{Items: []string{"gke-default", "existing"}, Fingerprint: "fp"}
 
-	merged := mergeInstanceTags(base, []string{"existing", "custom", " custom-spaced "})
+	merged := mergeInstanceTags(base, []string{"existing", "custom"})
 
 	require.NotNil(t, merged)
-	require.Equal(t, []string{"gke-default", "existing", "custom", "custom-spaced"}, merged.Items)
+	require.Equal(t, []string{"gke-default", "existing", "existing", "custom"}, merged.Items)
 	require.Equal(t, "fp", merged.Fingerprint)
 	require.Equal(t, []string{"gke-default", "existing"}, base.Items, "base tags should not be mutated")
 	require.NotSame(t, base, merged)
@@ -27,17 +27,7 @@ func TestMergeInstanceTagsHandlesNilTemplate(t *testing.T) {
 	require.Empty(t, merged.Fingerprint)
 }
 
-func TestMergeInstanceTagsFiltersEmptyNetworkTags(t *testing.T) {
-	base := &compute.Tags{Items: []string{"base"}}
-
-	merged := mergeInstanceTags(base, []string{"", "   ", "extra"})
-
-	require.NotNil(t, merged)
-	require.Equal(t, []string{"base", "extra"}, merged.Items)
-}
-
 func TestMergeInstanceTagsReturnsNilWhenNoTags(t *testing.T) {
 	require.Nil(t, mergeInstanceTags(nil, nil))
 	require.Nil(t, mergeInstanceTags(&compute.Tags{}, nil))
-	require.Nil(t, mergeInstanceTags(nil, []string{"   "}))
 }

@@ -523,30 +523,19 @@ func mergeInstanceTags(templateTags *compute.Tags, networkTags []string) *comput
 		return nil
 	}
 
-	seen := sets.NewString()
-	baseLen := 0
+	templateLen := 0
 	if templateTags != nil {
-		baseLen = len(templateTags.Items)
-	}
-	merged := make([]string, 0, baseLen+len(networkTags))
-
-	if templateTags != nil {
-		for _, tag := range templateTags.Items {
-			if tag == "" || seen.Has(tag) {
-				continue
-			}
-			seen.Insert(tag)
-			merged = append(merged, tag)
-		}
+		templateLen = len(templateTags.Items)
 	}
 
-	for _, tag := range networkTags {
-		trimmed := strings.TrimSpace(tag)
-		if trimmed == "" || seen.Has(trimmed) {
-			continue
-		}
-		seen.Insert(trimmed)
-		merged = append(merged, trimmed)
+	merged := make([]string, 0, templateLen+len(networkTags))
+
+	if templateLen > 0 {
+		merged = append(merged, templateTags.Items...)
+	}
+
+	if len(networkTags) > 0 {
+		merged = append(merged, networkTags...)
 	}
 
 	if len(merged) == 0 {
