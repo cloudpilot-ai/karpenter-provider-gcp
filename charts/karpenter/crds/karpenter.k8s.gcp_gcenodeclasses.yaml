@@ -278,6 +278,17 @@ spec:
                 description: Metadata contains key/value pairs to set as instance
                   metadata
                 type: object
+              networkTags:
+                description: NetworkTags is a list of network tags to apply to the node.
+                items:
+                  maxLength: 63
+                  pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
+                  type: string
+                maxItems: 64
+                type: array
+                x-kubernetes-validations:
+                - message: network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
+                  rule: self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance

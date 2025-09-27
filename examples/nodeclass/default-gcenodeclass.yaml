@@ -7,6 +7,8 @@ spec:
     - alias: ContainerOptimizedOS@latest
   tags:
     env: dev
+  networkTags:
+    - karpenter-default
   kubeletConfiguration:
     maxPods: 50
   disks:
