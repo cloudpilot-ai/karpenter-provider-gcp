@@ -9,6 +9,8 @@ spec:
     # - alias: Ubuntu@latest
   tags:
     env: dev
+  networkTags:
+    - karpenter-ubuntu
   disks:
     - category: pd-balanced
       sizeGiB: 60
