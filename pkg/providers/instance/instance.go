@@ -440,12 +440,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 
 // nolint:gocyclo
 func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTemplate, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
-	if nodeClass.Spec.KubeletConfiguration == nil || nodeClass.Spec.KubeletConfiguration.MaxPods == nil {
-		return template.Properties.NetworkInterfaces
-	}
-
 	// referring to: https://cloud.google.com/kubernetes-engine/docs/how-to/flexible-pod-cidr
-	maxPods := *nodeClass.Spec.KubeletConfiguration.MaxPods
+	maxPods := nodeClass.GetMaxPods()
 	targetRange := int32(maxNodeCIDR)
 	if maxPods <= 8 {
 		targetRange = 28
