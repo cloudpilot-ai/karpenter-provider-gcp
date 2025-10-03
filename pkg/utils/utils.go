@@ -145,13 +145,15 @@ func ResolveReservedCPUMCore(instanceType string, cpuMCore int64) int64 {
 }
 
 func ResolveReservedEphemeralStorage(bootDiskGiB, totalSSDGiB, localSSDCount int64) (int64, int64) {
+	// referring to https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes
+	// order: cpu, memory, eviction memory, ephemeral eviction threshold, ephemeral system reservation
 	var evictionThreshold, systemReservation int64
-	
+
 	if localSSDCount > 0 && totalSSDGiB > 0 {
 		// Ephemeral storage backed by local SSDs
 		// Eviction threshold is 10% of total SSD capacity
 		evictionThreshold = int64(float64(totalSSDGiB) * 0.10)
-		
+
 		// System reservation based on number of SSDs
 		switch {
 		case localSSDCount == 1:
@@ -161,28 +163,28 @@ func ResolveReservedEphemeralStorage(bootDiskGiB, totalSSDGiB, localSSDCount int
 		default: // 3 or more
 			systemReservation = 100
 		}
-	} else {
-		// Ephemeral storage backed by boot disk
-		// Eviction threshold is 10% of boot disk capacity
-		evictionThreshold = int64(float64(bootDiskGiB) * 0.10)
-		
-		// System reservation is minimum of:
-		// - 50% of boot disk capacity
-		// - 35% of boot disk capacity + 6 GiB  
-		// - 100 GiB
-		option1 := int64(float64(bootDiskGiB) * 0.50)
-		option2 := int64(float64(bootDiskGiB)*0.35) + 6
-		option3 := int64(100)
-		
-		systemReservation = option1
-		if option2 < systemReservation {
-			systemReservation = option2
-		}
-		if option3 < systemReservation {
-			systemReservation = option3
-		}
+		return evictionThreshold, systemReservation
 	}
-	
+	// Ephemeral storage backed by boot disk
+	// Eviction threshold is 10% of boot disk capacity
+	evictionThreshold = int64(float64(bootDiskGiB) * 0.10)
+
+	// System reservation is minimum of:
+	// - 50% of boot disk capacity
+	// - 35% of boot disk capacity + 6 GiB
+	// - 100 GiB
+	option1 := int64(float64(bootDiskGiB) * 0.50)
+	option2 := int64(float64(bootDiskGiB)*0.35) + 6
+	option3 := int64(100)
+
+	systemReservation = option1
+	if option2 < systemReservation {
+		systemReservation = option2
+	}
+	if option3 < systemReservation {
+		systemReservation = option3
+	}
+
 	return evictionThreshold, systemReservation
 }
 

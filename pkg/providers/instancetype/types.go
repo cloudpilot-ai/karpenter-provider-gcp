@@ -189,7 +189,7 @@ func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *
 	resourceList := corev1.ResourceList{
 		corev1.ResourceCPU:              *cpu(mt),
 		corev1.ResourceMemory:           *memory(ctx, mt),
-		corev1.ResourcePods:             *resource.NewQuantity(int64(v1alpha1.KubeletMaxPods), resource.DecimalSI),
+		corev1.ResourcePods:             *resource.NewQuantity(int64(nodeClass.GetMaxPods()), resource.DecimalSI),
 		corev1.ResourceEphemeralStorage: *ephemeralStorage(mt, nodeClass),
 	}
 	return resourceList
