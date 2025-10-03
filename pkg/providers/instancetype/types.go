@@ -35,7 +35,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
-func NewInstanceType(ctx context.Context, mt *computepb.MachineType,
+func NewInstanceType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType,
 	region string, offerings cloudprovider.Offerings) *cloudprovider.InstanceType {
 	if offerings == nil {
 		return nil
@@ -57,7 +57,7 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType,
 		Name:         aws.StringValue(mt.Name),
 		Requirements: computeRequirements(mt, offerings, region),
 		Offerings:    offerings,
-		Capacity:     computeCapacity(ctx, mt),
+		Capacity:     computeCapacity(ctx, nodeClass, mt),
 		Overhead:     &overhead,
 	}
 
@@ -163,11 +163,11 @@ func extractArch(instanceTypePrefix string) string {
 	return "amd64"
 }
 
-func computeCapacity(ctx context.Context, mt *computepb.MachineType) corev1.ResourceList {
+func computeCapacity(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType) corev1.ResourceList {
 	resourceList := corev1.ResourceList{
 		corev1.ResourceCPU:    *cpu(mt),
 		corev1.ResourceMemory: *memory(ctx, mt),
-		corev1.ResourcePods:   *resource.NewQuantity(int64(v1alpha1.KubeletMaxPods), resource.DecimalSI),
+		corev1.ResourcePods:   *resource.NewQuantity(int64(nodeClass.GetMaxPods()), resource.DecimalSI),
 	}
 	return resourceList
 }
