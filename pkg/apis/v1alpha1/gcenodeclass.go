@@ -279,3 +279,10 @@ func imageVersionFromAlias(alias string) string {
 	}
 	return components[1]
 }
+
+func (in *GCENodeClass) GetMaxPods() int32 {
+	if in.Spec.KubeletConfiguration != nil && in.Spec.KubeletConfiguration.MaxPods != nil {
+		return *in.Spec.KubeletConfiguration.MaxPods
+	}
+	return KubeletMaxPods
+}
