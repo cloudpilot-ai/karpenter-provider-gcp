@@ -234,15 +234,15 @@ func calculateDiskConfiguration(nodeClass *v1alpha1.GCENodeClass, mt *computepb.
 				localSSDCount++
 			}
 		}
-	} else {
-		// Fallback to machine type scratch disks if no nodeClass disk config
-		for _, disk := range mt.GetScratchDisks() {
-			if disk.DiskGb != nil {
-				totalSSDGiB += int64(*disk.DiskGb)
-				localSSDCount++
-			}
-		}
+		return bootDiskGiB, totalSSDGiB, localSSDCount
 	}
 
+	// Fallback to machine type scratch disks if no nodeClass disk config
+	for _, disk := range mt.GetScratchDisks() {
+		if disk.DiskGb != nil {
+			totalSSDGiB += int64(*disk.DiskGb)
+			localSSDCount++
+		}
+	}
 	return bootDiskGiB, totalSSDGiB, localSSDCount
 }
