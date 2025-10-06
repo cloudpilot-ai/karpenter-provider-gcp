@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -35,20 +36,41 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
-func NewInstanceType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType,
+func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass,
 	region string, offerings cloudprovider.Offerings) *cloudprovider.InstanceType {
 	if offerings == nil {
 		return nil
 	}
 
-	reservedCPU, reservedMemory, evictionMemory := utils.ResolveReservedResource(aws.StringValue(mt.Name), int64(mt.GetGuestCpus()*1000), int64(mt.GetMemoryMb()))
+	// Calculate disk configuration from GCENodeClass
+	bootDiskGiB, totalSSDGiB, localSSDCount := calculateDiskConfiguration(nodeClass, mt)
+
+	reservedCPU, reservedMemory, evictionMemory, ephemeralEviction, ephemeralSystem := utils.ResolveReservedResource(
+		aws.StringValue(mt.Name),
+		int64(mt.GetGuestCpus()*1000),
+		int64(mt.GetMemoryMb()),
+		bootDiskGiB,
+		totalSSDGiB,
+		localSSDCount,
+	)
+
+	log.FromContext(ctx).V(1).Info("calculated ephemeral storage reservations",
+		"instanceType", aws.StringValue(mt.Name),
+		"bootDiskGiB", bootDiskGiB,
+		"totalSSDGiB", totalSSDGiB,
+		"localSSDCount", localSSDCount,
+		"ephemeralEviction", ephemeralEviction,
+		"ephemeralSystem", ephemeralSystem)
+
 	overhead := cloudprovider.InstanceTypeOverhead{
 		KubeReserved: corev1.ResourceList{
-			corev1.ResourceCPU:    *resource.NewMilliQuantity(reservedCPU, resource.DecimalSI),
-			corev1.ResourceMemory: *resource.NewQuantity(reservedMemory*1024*1024, resource.BinarySI),
+			corev1.ResourceCPU:              *resource.NewMilliQuantity(reservedCPU, resource.DecimalSI),
+			corev1.ResourceMemory:           *resource.NewQuantity(reservedMemory*1024*1024, resource.BinarySI),
+			corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralSystem*1024*1024*1024, resource.BinarySI),
 		},
 		EvictionThreshold: corev1.ResourceList{
-			corev1.ResourceMemory: *resource.NewQuantity(evictionMemory*1024*1024, resource.BinarySI),
+			corev1.ResourceMemory:           *resource.NewQuantity(evictionMemory*1024*1024, resource.BinarySI),
+			corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralEviction*1024*1024*1024, resource.BinarySI),
 		},
 		SystemReserved: corev1.ResourceList{},
 	}
@@ -57,7 +79,7 @@ func NewInstanceType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, mt *
 		Name:         aws.StringValue(mt.Name),
 		Requirements: computeRequirements(mt, offerings, region),
 		Offerings:    offerings,
-		Capacity:     computeCapacity(ctx, nodeClass, mt),
+		Capacity:     computeCapacity(ctx, mt, nodeClass),
 		Overhead:     &overhead,
 	}
 
@@ -163,11 +185,12 @@ func extractArch(instanceTypePrefix string) string {
 	return "amd64"
 }
 
-func computeCapacity(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType) corev1.ResourceList {
+func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass) corev1.ResourceList {
 	resourceList := corev1.ResourceList{
-		corev1.ResourceCPU:    *cpu(mt),
-		corev1.ResourceMemory: *memory(ctx, mt),
-		corev1.ResourcePods:   *resource.NewQuantity(int64(nodeClass.GetMaxPods()), resource.DecimalSI),
+		corev1.ResourceCPU:              *cpu(mt),
+		corev1.ResourceMemory:           *memory(ctx, mt),
+		corev1.ResourcePods:             *resource.NewQuantity(int64(nodeClass.GetMaxPods()), resource.DecimalSI),
+		corev1.ResourceEphemeralStorage: *ephemeralStorage(mt, nodeClass),
 	}
 	return resourceList
 }
@@ -180,4 +203,46 @@ func memory(ctx context.Context, mt *computepb.MachineType) *resource.Quantity {
 	osReservedPercent := options.FromContext(ctx).VMMemoryOverheadPercent
 	totalQuantity := int64(mt.GetMemoryMb()) * 1024 * 1024
 	return resource.NewQuantity(totalQuantity-int64(float64(totalQuantity)*osReservedPercent), resource.DecimalSI)
+}
+
+func ephemeralStorage(mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass) *resource.Quantity {
+	bootDiskGiB, totalSSDGiB, _ := calculateDiskConfiguration(nodeClass, mt)
+
+	// Total ephemeral storage is either local SSDs or boot disk
+	totalStorageGiB := totalSSDGiB
+	if totalSSDGiB == 0 {
+		totalStorageGiB = bootDiskGiB
+	}
+
+	return resource.NewQuantity(totalStorageGiB*1024*1024*1024, resource.BinarySI)
+}
+
+func calculateDiskConfiguration(nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType) (int64, int64, int64) {
+	bootDiskGiB := int64(100) // Default boot disk size
+	totalSSDGiB := int64(0)
+	localSSDCount := int64(0)
+
+	if nodeClass != nil && len(nodeClass.Spec.Disks) > 0 {
+		// Use disk configuration from GCENodeClass
+		for _, disk := range nodeClass.Spec.Disks {
+			if disk.Boot {
+				// Boot disk size from nodeClass
+				bootDiskGiB = int64(disk.SizeGiB)
+			} else if disk.Category == "local-ssd" {
+				// Local SSD from nodeClass
+				totalSSDGiB += int64(disk.SizeGiB)
+				localSSDCount++
+			}
+		}
+		return bootDiskGiB, totalSSDGiB, localSSDCount
+	}
+
+	// Fallback to machine type scratch disks if no nodeClass disk config
+	for _, disk := range mt.GetScratchDisks() {
+		if disk.DiskGb != nil {
+			totalSSDGiB += int64(*disk.DiskGb)
+			localSSDCount++
+		}
+	}
+	return bootDiskGiB, totalSSDGiB, localSSDCount
 }

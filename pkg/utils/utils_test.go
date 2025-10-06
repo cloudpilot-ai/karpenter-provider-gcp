@@ -125,3 +125,132 @@ func TestResolveReservedMemoryMiB(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveReservedEphemeralStorage(t *testing.T) {
+	tests := []struct {
+		name             string
+		bootDiskGiB      int64
+		totalSSDGiB      int64
+		localSSDCount    int64
+		expectedEviction int64
+		expectedSystem   int64
+	}{
+		// Boot disk scenarios
+		{
+			name:             "100GB boot disk only",
+			bootDiskGiB:      100,
+			totalSSDGiB:      0,
+			localSSDCount:    0,
+			expectedEviction: 10,  // 10% of 100GB
+			expectedSystem:   41,  // min(50, 35+6, 100) = min(50, 41, 100) = 41
+		},
+		{
+			name:             "200GB boot disk only",
+			bootDiskGiB:      200,
+			totalSSDGiB:      0,
+			localSSDCount:    0,
+			expectedEviction: 20,  // 10% of 200GB
+			expectedSystem:   76,  // min(100, 70+6, 100) = 76
+		},
+		{
+			name:             "500GB boot disk only",
+			bootDiskGiB:      500,
+			totalSSDGiB:      0,
+			localSSDCount:    0,
+			expectedEviction: 50,  // 10% of 500GB
+			expectedSystem:   100, // min(250, 175+6, 100) = 100
+		},
+		// Local SSD scenarios
+		{
+			name:             "1 SSD - 375GB",
+			bootDiskGiB:      100,
+			totalSSDGiB:      375,
+			localSSDCount:    1,
+			expectedEviction: 37,  // 10% of 375GB (rounded down)
+			expectedSystem:   50,  // 1 SSD = 50GB
+		},
+		{
+			name:             "2 SSDs - 750GB",
+			bootDiskGiB:      100,
+			totalSSDGiB:      750,
+			localSSDCount:    2,
+			expectedEviction: 75,  // 10% of 750GB
+			expectedSystem:   75,  // 2 SSDs = 75GB
+		},
+		{
+			name:             "4 SSDs - 1500GB",
+			bootDiskGiB:      100,
+			totalSSDGiB:      1500,
+			localSSDCount:    4,
+			expectedEviction: 150, // 10% of 1500GB
+			expectedSystem:   100, // 3+ SSDs = 100GB
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eviction, system := ResolveReservedEphemeralStorage(tt.bootDiskGiB, tt.totalSSDGiB, tt.localSSDCount)
+			assert.Equal(t, tt.expectedEviction, eviction, "eviction threshold mismatch")
+			assert.Equal(t, tt.expectedSystem, system, "system reservation mismatch")
+		})
+	}
+}
+
+func TestResolveReservedResource(t *testing.T) {
+	tests := []struct {
+		name             string
+		instanceType     string
+		cpuMCore         int64
+		memoryMiB        int64
+		bootDiskGiB      int64
+		totalSSDGiB      int64
+		localSSDCount    int64
+		expectedCPU      int64
+		expectedMemory   int64
+		expectedEvict    int64
+		expectedEphEvict int64
+		expectedEphSys   int64
+	}{
+		{
+			name:             "e2-micro with boot disk",
+			instanceType:     "e2-micro",
+			cpuMCore:         1000,
+			memoryMiB:        1024,
+			bootDiskGiB:      100,
+			totalSSDGiB:      0,
+			localSSDCount:    0,
+			expectedCPU:      1060,
+			expectedMemory:   255,
+			expectedEvict:    100,
+			expectedEphEvict: 10,
+			expectedEphSys:   41, // min(50, 35+6, 100) = 41
+		},
+		{
+			name:             "n2-standard-4 with 1 SSD",
+			instanceType:     "n2-standard-4",
+			cpuMCore:         4000,
+			memoryMiB:        16384,
+			bootDiskGiB:      100,
+			totalSSDGiB:      375,
+			localSSDCount:    1,
+			expectedCPU:      80,
+			expectedMemory:   2662,
+			expectedEvict:    100,
+			expectedEphEvict: 37,
+			expectedEphSys:   50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpu, memory, evict, ephEvict, ephSys := ResolveReservedResource(
+				tt.instanceType, tt.cpuMCore, tt.memoryMiB, tt.bootDiskGiB, tt.totalSSDGiB, tt.localSSDCount)
+			
+			assert.Equal(t, tt.expectedCPU, cpu, "CPU reservation mismatch")
+			assert.Equal(t, tt.expectedMemory, memory, "Memory reservation mismatch")
+			assert.Equal(t, tt.expectedEvict, evict, "Memory eviction mismatch")
+			assert.Equal(t, tt.expectedEphEvict, ephEvict, "Ephemeral eviction mismatch")
+			assert.Equal(t, tt.expectedEphSys, ephSys, "Ephemeral system mismatch")
+		})
+	}
+}
