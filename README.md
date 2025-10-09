@@ -15,6 +15,8 @@
 > A preview version is now available. Please visit [the charts directory](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/charts) for more information.
 > 
 > **Feedback welcome!** Join our [Slack](https://join.slack.com/t/cloudpilotaicommunity/shared_invite/zt-37rwpf8k7-Rx4BjrhuWtk9U0MXBKYL7A) or [Discord](https://discord.gg/WxFWc87QWr) to share your ideas, ask questions, and discuss with the community.
+> 
+> Need enterprise support? [Get in touch](https://www.cloudpilot.ai/en/contact/)
 
 ## Introduction
 
