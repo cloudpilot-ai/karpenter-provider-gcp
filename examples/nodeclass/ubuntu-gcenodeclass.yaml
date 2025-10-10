@@ -7,7 +7,7 @@ spec:
   imageSelectorTerms:
     - alias: Ubuntu@v20250106
     # - alias: Ubuntu@latest
-  tags:
+  labels:
     env: dev
   networkTags:
     - karpenter-ubuntu
