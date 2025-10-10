@@ -5,7 +5,7 @@ metadata:
 spec:
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
-  tags:
+  labels:
     env: dev
   networkTags:
     - karpenter-default
