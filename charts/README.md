@@ -175,7 +175,7 @@ metadata:
 spec:
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
-  tags:
+  labels:
     env: dev
   disks:
     - category: pd-balanced
