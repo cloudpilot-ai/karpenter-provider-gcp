@@ -61,6 +61,7 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	}
 	cpuMilliCore := fmt.Sprintf("%dm", instanceType.Overhead.KubeReserved.Cpu().MilliValue())
 	memoryMB := fmt.Sprintf("%dMi", instanceType.Overhead.KubeReserved.Memory().Value()/(1024*1024))
+	ephemeralStorage := instanceType.Overhead.KubeReserved.StorageEphemeral().String()
 
 	configStr := swag.StringValue(targetEntry.Value)
 	if configStr == "" {
@@ -80,6 +81,7 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	}
 	kubeReserved["cpu"] = cpuMilliCore
 	kubeReserved["memory"] = memoryMB
+	kubeReserved["ephemeral-storage"] = ephemeralStorage
 	config["kubeReserved"] = kubeReserved
 
 	// Marshal back to YAML
