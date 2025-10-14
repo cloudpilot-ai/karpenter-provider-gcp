@@ -189,3 +189,44 @@ func getNodeLabels(nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim
 	}
 	return staticTags
 }
+
+func AppendSecondaryBootDisks(projectID string, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
+	for _, disk := range nodeClass.Spec.Disks {
+		if disk.Boot || disk.Image == "" || disk.Mode == "MODE_UNSPECIFIED" {
+			continue
+		}
+
+		name := GetSecondaryDiskImageName(disk.Image)
+		deviceName := GetSecondaryDiskImageDeviceName(disk.Image)
+		for _, item := range metadata.Items {
+			if item.Key == "kube-env" {
+				// Add SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/DISK_IMAGE_NAME
+				kubeEnv := swag.StringValue(item.Value)
+				lines := strings.Split(kubeEnv, "\n")
+				lines = append(lines, fmt.Sprintf("SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/%s", deviceName))
+				item.Value = swag.String(strings.Join(lines, "\n"))
+			}
+			if item.Key == "kube-labels" {
+				item.Value = swag.String(*item.Value + "," + secondaryBootDiskLabel(name, projectID, disk.Mode))
+			}
+		}
+	}
+}
+
+// GetSecondaryDiskImageDeviceName returns the conventional device name for GKE
+// secondary disks from the source image.
+func GetSecondaryDiskImageDeviceName(image string) string {
+	return fmt.Sprintf("gke-%s-disk", GetSecondaryDiskImageName(image))
+}
+
+// GetSecondaryDiskImageName extracts the name of the image from either:
+// - global/images/DISK_IMAGE_NAME
+// - projects/PROJECT_ID/global/images/DISK_IMAGE_NAME
+func GetSecondaryDiskImageName(image string) string {
+	parts := strings.Split(image, "/")
+	return parts[len(parts)-1]
+}
+
+func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootDiskMode) string {
+	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
+}

@@ -389,6 +389,9 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
 			}
 			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+		} else {
+			attachedDisk.DeviceName = metadata.GetSecondaryDiskImageDeviceName(disk.Image)
+			attachedDisk.InitializeParams.SourceImage = disk.Image
 		}
 
 		attachedDisks[i] = attachedDisk
@@ -515,6 +518,7 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 
 	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
 	metadata.AppendRegisteredLabel(instanceMetadata)
+	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
 
 	return nil
 }
