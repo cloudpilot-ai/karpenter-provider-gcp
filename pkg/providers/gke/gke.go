@@ -63,8 +63,7 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 	projectID := options.FromContext(ctx).ProjectID
 	clusterName := options.FromContext(ctx).ClusterName
 	resp, err := p.gkeClient.ListClusters(ctx, &containerpb.ListClustersRequest{
-		ProjectId: projectID,
-		Zone:      "-", // "-" means all zones
+		Parent: fmt.Sprintf("projects/%s/locations/-", projectID),
 	})
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to list clusters")
