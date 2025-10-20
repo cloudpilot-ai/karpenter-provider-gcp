@@ -33,8 +33,9 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex        = regexp.MustCompile(`max-pods=\d+`)
+	maxPodsPerNodeRegex  = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex         = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex = regexp.MustCompile(`gke-provisioning=\w+`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -124,6 +125,24 @@ func SetMaxPodsPerNode(metadata *compute.Metadata, nodeClass *v1alpha1.GCENodeCl
 		}
 		targetEntry.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
 		targetEntry.Value = swag.String(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPodsStr))
+
+		metadata.Items[index] = targetEntry
+	}
+	return nil
+}
+
+func SetProvisioningModel(metadata *compute.Metadata, model string) error {
+	keys := []string{"kube-labels", "kube-env"}
+	gkeProvisioning := fmt.Sprintf("gke-provisioning=%s", model)
+
+	for _, key := range keys {
+		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
+			return item.Key == key
+		})
+		if !ok || index == -1 {
+			return fmt.Errorf("%s metadata not found", key)
+		}
+		targetEntry.Value = swag.String(gkeProvisioningRegex.ReplaceAllString(*targetEntry.Value, gkeProvisioning))
 
 		metadata.Items[index] = targetEntry
 	}
