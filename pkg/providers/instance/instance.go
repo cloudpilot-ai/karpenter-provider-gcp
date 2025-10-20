@@ -513,6 +513,13 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
 	}
 
+	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
+	if capacityType == karpv1.CapacityTypeSpot {
+		if err := metadata.SetProvisioningModel(instanceMetadata, capacityType); err != nil {
+			return fmt.Errorf("failed to set provisioning model in metadata: %w", err)
+		}
+	}
+
 	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
 	metadata.AppendRegisteredLabel(instanceMetadata)
 
