@@ -404,8 +404,10 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil
 	}
 
+	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
+
 	// Setup metadata
-	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName); err != nil {
+	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType); err != nil {
 		log.FromContext(context.Background()).Error(err, "failed to setup instance metadata")
 		return nil
 	}
@@ -430,7 +432,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	}
 
 	// Configure capacity provision
-	p.configureInstanceCapacityProvision(instance, nodeClaim, instanceType)
+	p.configureInstanceCapacityProvision(instance, capacityType)
 
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
@@ -496,7 +498,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance
-func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string) error {
+func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string, capacityType string) error {
 	if err := metadata.RemoveGKEBuiltinLabels(instanceMetadata, nodePoolName); err != nil {
 		return fmt.Errorf("failed to remove GKE builtin labels from metadata: %w", err)
 	}
@@ -511,6 +513,12 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 
 	if err := metadata.PatchUnregisteredTaints(instanceMetadata); err != nil {
 		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
+	}
+
+	if capacityType == karpv1.CapacityTypeSpot {
+		if err := metadata.SetProvisioningModel(instanceMetadata, capacityType); err != nil {
+			return fmt.Errorf("failed to set provisioning model in metadata: %w", err)
+		}
 	}
 
 	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
@@ -552,8 +560,7 @@ func (p *DefaultProvider) initializeInstanceLabels(nodeClass *v1alpha1.GCENodeCl
 }
 
 // configureInstanceCapacityProvision configures capacity provision settings for the instance
-func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType) {
-	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
+func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.Instance, capacityType string) {
 	if instance.Scheduling == nil {
 		instance.Scheduling = &compute.Scheduling{}
 	}
