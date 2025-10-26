@@ -49,7 +49,8 @@ func NewController(kubeClient client.Client) *Controller {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (reconcile.Result, error) {
-	if !controllerutil.ContainsFinalizer(nodeClass, v1alpha1.TerminationFinalizer) {
+	// Only reconcile if the resource is being deleted
+	if nodeClass.DeletionTimestamp.IsZero() || !controllerutil.ContainsFinalizer(nodeClass, v1alpha1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
 
