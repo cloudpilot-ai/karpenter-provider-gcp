@@ -49,13 +49,20 @@ import (
 )
 
 const (
-	maxInstanceTypes        = 20
-	maxNodeCIDR             = 23
-	instanceCacheExpiration = 15 * time.Second
+	maxInstanceTypes            = 20
+	maxNodeCIDR                 = 23
+	instanceCacheExpiration     = 15 * time.Second
+	zoneOperationPollInterval   = 1 * time.Second
+	defaultZoneOperationTimeout = 2 * time.Minute
 )
 
 var (
-	InsufficientCapacityErrorCodes = sets.NewString("ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", "ZONE_RESOURCE_POOL_EXHAUSTED")
+	InsufficientCapacityErrorCodes = sets.NewString(
+		"ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+		"ZONE_RESOURCE_POOL_EXHAUSTED",
+		"IP_SPACE_EXHAUSTED_WITH_DETAILS",
+		"IP_SPACE_EXHAUSTED",
+	)
 )
 
 type Provider interface {
@@ -96,45 +103,91 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 
 func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 	instanceType, zone, capacityType, operationName string) error {
-	ticker := time.NewTicker(1 * time.Second)
+	waitCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		waitCtx, cancel = context.WithTimeout(ctx, defaultZoneOperationTimeout)
+	}
+	defer cancel()
+
+	ticker := time.NewTicker(zoneOperationPollInterval)
 	defer ticker.Stop()
 
-	timeout := time.NewTimer(10 * time.Second)
-
 	for {
-		select {
-		case <-timeout.C:
-			// if the operation does not finish in 10s, it means there is enough resources and the creation will be successful
-			return nil
-		case <-ticker.C:
-			op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(ctx).Do()
-			if err != nil {
-				return fmt.Errorf("getting operation: %w", err)
+		op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(waitCtx).Do()
+		if err != nil {
+			if waitCtx.Err() != nil {
+				return fmt.Errorf("waiting for operation %s: %w", operationName, waitCtx.Err())
 			}
+			return fmt.Errorf("getting operation: %w", err)
+		}
 
-			if op.Status != "DONE" {
-				continue
-			}
-
+		if op.Status == "DONE" {
 			if op.Error != nil {
-				capacityError, found := lo.Find(op.Error.Errors, func(e *compute.OperationErrorErrors) bool {
-					// Example in real environment:
-					// Error: ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS The zone 'projects/project-id/zones/us-west1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'.
-					return InsufficientCapacityErrorCodes.Has(e.Code)
-				})
-				if found {
-					p.unavailableOfferings.MarkUnavailable(ctx, capacityError.Message, instanceType, zone, capacityType)
-					return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone resource pool exhausted: %s", capacityError.Message))
-				}
-
-				errorMsgs := lo.Map(op.Error.Errors, func(e *compute.OperationErrorErrors, _ int) string {
-					return e.Message
-				})
-				return fmt.Errorf("operation failed: %s", strings.Join(errorMsgs, "; "))
+				return p.handleZoneOperationError(waitCtx, op, instanceType, zone, capacityType)
 			}
 			return nil
 		}
+
+		if err := waitForNextTick(waitCtx, ticker); err != nil {
+			return fmt.Errorf("waiting for operation %s: %w", operationName, err)
+		}
 	}
+}
+
+func waitForNextTick(ctx context.Context, ticker *time.Ticker) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-ticker.C:
+		return nil
+	}
+}
+
+func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *compute.Operation, instanceType, zone, capacityType string) error {
+	capacityError, found := lo.Find(op.Error.Errors, func(e *compute.OperationErrorErrors) bool {
+		return isInsufficientCapacityError(e)
+	})
+	if found {
+		reason := capacityError.Message
+		if reason == "" {
+			reason = capacityError.Code
+		}
+		p.unavailableOfferings.MarkUnavailable(ctx, reason, instanceType, zone, capacityType)
+		return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+	}
+
+	errorMsgs := lo.Map(op.Error.Errors, func(e *compute.OperationErrorErrors, _ int) string {
+		return e.Message
+	})
+	return fmt.Errorf("operation failed: %s", strings.Join(errorMsgs, "; "))
+}
+
+func isInsufficientCapacityError(operationError *compute.OperationErrorErrors) bool {
+	if operationError == nil {
+		return false
+	}
+
+	return InsufficientCapacityErrorCodes.Has(operationError.Code)
+}
+
+func extractInsertInsufficientCapacityReason(err error) (string, bool) {
+	var apiError *googleapi.Error
+	if !errors.As(err, &apiError) {
+		return "", false
+	}
+
+	for _, detail := range apiError.Errors {
+		if InsufficientCapacityErrorCodes.Has(detail.Reason) {
+			reason := detail.Message
+			if reason == "" {
+				reason = detail.Reason
+			}
+			return reason, true
+		}
+	}
+
+	return "", false
 }
 
 func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
@@ -194,6 +247,14 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
 			op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 			if err != nil {
+				reason, insufficient := extractInsertInsufficientCapacityReason(err)
+				if insufficient {
+					if reason == "" {
+						reason = "insufficient capacity"
+					}
+					p.unavailableOfferings.MarkUnavailable(ctx, reason, instanceType.Name, zone, capacityType)
+					err = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+				}
 				log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
 				errs = append(errs, err)
 				continue
@@ -230,7 +291,16 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		}, nil
 	}
 
-	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
+	if len(errs) == 0 {
+		return nil, fmt.Errorf("failed to create instance after trying all instance types: unknown error")
+	}
+
+	joined := errors.Join(errs...)
+	if lo.SomeBy(errs, func(err error) bool { return cloudprovider.IsInsufficientCapacityError(err) }) {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("failed to create instance after trying all instance types: %w", joined))
+	}
+
+	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
 }
 
 // getCapacityType selects spot if both constraints are flexible and there is an
