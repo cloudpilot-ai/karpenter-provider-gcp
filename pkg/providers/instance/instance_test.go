@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/googleapi"
 )
 
 func TestMergeInstanceTagsPreservesTemplateAndAddsNetworkTags(t *testing.T) {
@@ -30,4 +31,58 @@ func TestMergeInstanceTagsHandlesNilTemplate(t *testing.T) {
 func TestMergeInstanceTagsReturnsNilWhenNoTags(t *testing.T) {
 	require.Nil(t, mergeInstanceTags(nil, nil))
 	require.Nil(t, mergeInstanceTags(&compute.Tags{}, nil))
+}
+
+func TestIsInsufficientCapacityErrorMatchesCode(t *testing.T) {
+	t.Parallel()
+
+	entry := &compute.OperationErrorErrors{Code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}
+
+	require.True(t, isInsufficientCapacityError(entry))
+}
+
+func TestIsInsufficientCapacityErrorIgnoresMessageOnly(t *testing.T) {
+	t.Parallel()
+
+	entry := &compute.OperationErrorErrors{Message: "some failure IP_SPACE_EXHAUSTED_WITH_DETAILS for range"}
+
+	require.False(t, isInsufficientCapacityError(entry))
+}
+
+func TestIsInsufficientCapacityErrorNonMatching(t *testing.T) {
+	t.Parallel()
+
+	entry := &compute.OperationErrorErrors{Code: "UNKNOWN", Message: "other issue"}
+
+	require.False(t, isInsufficientCapacityError(entry))
+}
+
+func TestExtractInsertInsufficientCapacityReasonMatchesReason(t *testing.T) {
+	t.Parallel()
+
+	reason, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{
+		Errors: []googleapi.ErrorItem{{Reason: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}},
+	})
+
+	require.True(t, ok)
+	require.Equal(t, "IP_SPACE_EXHAUSTED_WITH_DETAILS", reason)
+}
+
+func TestExtractInsertInsufficientCapacityReasonRequiresStructuredReason(t *testing.T) {
+	t.Parallel()
+
+	reason, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{
+		Message: "some failure IP_SPACE_EXHAUSTED for range",
+	})
+
+	require.False(t, ok)
+	require.Empty(t, reason)
+}
+
+func TestExtractInsertInsufficientCapacityReasonNonMatching(t *testing.T) {
+	t.Parallel()
+
+	_, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{Message: "some other issue"})
+
+	require.False(t, ok)
 }
