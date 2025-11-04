@@ -209,25 +209,30 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
 
+	nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
+	if nodePoolName == "" {
+		err := fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
+		log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
+		return nil, err
+	}
+
+	alias := ""
+	if len(nodeClass.Spec.ImageSelectorTerms) > 0 {
+		alias = nodeClass.Spec.ImageSelectorTerms[0].Alias
+	}
+
+	template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", alias)
+		return nil, fmt.Errorf("failed to find template for alias %q: %w", alias, err)
+	}
+
 	var errs []error
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
 		zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
-			errs = append(errs, err)
-			continue
-		}
-
-		nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
-		if nodePoolName == "" {
-			log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
-			return nil, fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
-		}
-
-		template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
 			errs = append(errs, err)
 			continue
 		}
