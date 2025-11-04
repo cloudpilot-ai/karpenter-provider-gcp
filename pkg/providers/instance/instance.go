@@ -209,24 +209,6 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
 
-	nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
-	if nodePoolName == "" {
-		err := fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
-		log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
-		return nil, err
-	}
-
-	alias := ""
-	if len(nodeClass.Spec.ImageSelectorTerms) > 0 {
-		alias = nodeClass.Spec.ImageSelectorTerms[0].Alias
-	}
-
-	template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", alias)
-		return nil, fmt.Errorf("failed to find template for alias %q: %w", alias, err)
-	}
-
 	var errs []error
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
@@ -237,39 +219,26 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			continue
 		}
 
-		instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
-		// We need to check it in the following scenario:
-		// 1. The instance is in the creation process.
-		// 2. The pod is terminated
-		// 3. The new pod will try to create the instance again, but it will fail because the instance is already in the creation process.
-		instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
-			return nil, fmt.Errorf("failed to check if instance exists: %w", err)
+		nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
+		if nodePoolName == "" {
+			log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
+			return nil, fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
 		}
 
-		if !exists {
-			instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
-			op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
-			if err != nil {
-				reason, insufficient := extractInsertInsufficientCapacityReason(err)
-				if insufficient {
-					if reason == "" {
-						reason = "insufficient capacity"
-					}
-					p.unavailableOfferings.MarkUnavailable(ctx, reason, instanceType.Name, zone, capacityType)
-					err = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
-				}
-				log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
-				errs = append(errs, err)
-				continue
-			}
+		template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
+			errs = append(errs, err)
+			continue
+		}
 
-			if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
-				log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+		instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, capacityType)
+		if err != nil {
+			if retryable {
 				errs = append(errs, err)
 				continue
 			}
+			return nil, err
 		}
 
 		// we could wait for the node to be present in kubernetes api via csr sign up
@@ -306,6 +275,41 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	}
 
 	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
+}
+
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, capacityType string) (*compute.Instance, bool, error) {
+	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
+	instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
+		return nil, false, fmt.Errorf("failed to check if instance exists: %w", err)
+	}
+
+	if exists {
+		return instance, false, nil
+	}
+
+	instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
+	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+	if err != nil {
+		reason, insufficient := extractInsertInsufficientCapacityReason(err)
+		if insufficient {
+			if reason == "" {
+				reason = "insufficient capacity"
+			}
+			p.unavailableOfferings.MarkUnavailable(ctx, reason, instanceType.Name, zone, capacityType)
+			err = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+		}
+		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+		return nil, true, err
+	}
+
+	if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
+		log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+		return nil, true, err
+	}
+
+	return instance, false, nil
 }
 
 // getCapacityType selects spot if both constraints are flexible and there is an
