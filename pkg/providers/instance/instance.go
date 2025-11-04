@@ -49,11 +49,12 @@ import (
 )
 
 const (
-	maxInstanceTypes            = 20
-	maxNodeCIDR                 = 23
-	instanceCacheExpiration     = 15 * time.Second
-	zoneOperationPollInterval   = 1 * time.Second
-	defaultZoneOperationTimeout = 2 * time.Minute
+	maxInstanceTypes                = 20
+	maxNodeCIDR                     = 23
+	instanceCacheExpiration         = 15 * time.Second
+	zoneOperationPollInterval       = 1 * time.Second
+	defaultZoneOperationTimeout     = 2 * time.Minute
+	ipSpaceInsufficientCapacityTTL  = 30 * time.Second
 )
 
 var (
@@ -153,7 +154,8 @@ func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *comp
 		if reason == "" {
 			reason = capacityError.Code
 		}
-		p.unavailableOfferings.MarkUnavailable(ctx, reason, instanceType, zone, capacityType)
+		ttl := insufficientCapacityBackoffTTL(capacityError.Code)
+		p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType, zone, capacityType, ttl)
 		return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
 	}
 
@@ -171,10 +173,10 @@ func isInsufficientCapacityError(operationError *compute.OperationErrorErrors) b
 	return InsufficientCapacityErrorCodes.Has(operationError.Code)
 }
 
-func extractInsertInsufficientCapacityReason(err error) (string, bool) {
+func extractInsertInsufficientCapacityReason(err error) (string, string, bool) {
 	var apiError *googleapi.Error
 	if !errors.As(err, &apiError) {
-		return "", false
+		return "", "", false
 	}
 
 	for _, detail := range apiError.Errors {
@@ -183,11 +185,19 @@ func extractInsertInsufficientCapacityReason(err error) (string, bool) {
 			if reason == "" {
 				reason = detail.Reason
 			}
-			return reason, true
+			return reason, detail.Reason, true
 		}
 	}
 
-	return "", false
+	return "", "", false
+}
+
+func insufficientCapacityBackoffTTL(reasonCode string) time.Duration {
+	if reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS" || reasonCode == "IP_SPACE_EXHAUSTED" {
+		return ipSpaceInsufficientCapacityTTL
+	}
+
+	return pkgcache.UnavailableOfferingsTTL
 }
 
 func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
@@ -292,12 +302,13 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 	instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
-		reason, insufficient := extractInsertInsufficientCapacityReason(err)
+		reason, reasonCode, insufficient := extractInsertInsufficientCapacityReason(err)
 		if insufficient {
 			if reason == "" {
 				reason = "insufficient capacity"
 			}
-			p.unavailableOfferings.MarkUnavailable(ctx, reason, instanceType.Name, zone, capacityType)
+			ttl := insufficientCapacityBackoffTTL(reasonCode)
+			p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType.Name, zone, capacityType, ttl)
 			err = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
 		}
 		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
