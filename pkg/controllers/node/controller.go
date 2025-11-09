@@ -52,7 +52,8 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	if !ok || readyCond.Status != corev1.ConditionTrue {
 		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 	}
-	if time.Since(readyCond.LastTransitionTime.Time) < 30*time.Second {
+
+	if time.Since(readyCond.LastTransitionTime.Time) < 3*time.Minute {
 		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
