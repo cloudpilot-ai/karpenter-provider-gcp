@@ -390,8 +390,8 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 			}
 			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
 		} else {
-			attachedDisk.DeviceName = metadata.GetSecondaryDiskImageDeviceName(disk.Image)
-			attachedDisk.InitializeParams.SourceImage = disk.Image
+			attachedDisk.DeviceName = metadata.GetSecondaryDiskImageDeviceName(disk.SecondaryImage)
+			attachedDisk.InitializeParams.SourceImage = disk.SecondaryImage
 		}
 
 		attachedDisks[i] = attachedDisk

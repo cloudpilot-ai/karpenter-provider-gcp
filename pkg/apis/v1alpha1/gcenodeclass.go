@@ -175,12 +175,12 @@ type Disk struct {
 	// Indicates that this is a boot disk.
 	// +optional
 	Boot bool `json:"boot"`
-	// Image is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME).
+	// SecondaryImage is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME).
 	// +optional
-	Image string `json:"image,omitempty"`
-	// Mode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE).
+	SecondaryImage string `json:"secondaryImage,omitempty"`
+	// SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE).
 	// +optional
-	Mode SecondaryBootDiskMode `json:"mode,omitempty"`
+	SecondaryBootMode SecondaryBootDiskMode `json:"secondaryBootMode,omitempty"`
 }
 
 // DiskCategory represents a disk category type
