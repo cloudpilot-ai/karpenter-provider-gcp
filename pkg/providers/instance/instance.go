@@ -468,7 +468,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 
 	for _, networkInterface := range template.Properties.NetworkInterfaces {
 		tmpNetworkInterface := &compute.NetworkInterface{
-			AccessConfigs:            networkInterface.AccessConfigs,
+			AccessConfigs:            p.resolveAccessConfigs(networkInterface.AccessConfigs, nodeClass),
 			AliasIpRanges:            networkInterface.AliasIpRanges,
 			Fingerprint:              networkInterface.Fingerprint,
 			InternalIpv6PrefixLength: networkInterface.InternalIpv6PrefixLength,
@@ -482,7 +482,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 			NicType:                  networkInterface.NicType,
 			QueueCount:               networkInterface.QueueCount,
 			StackType:                networkInterface.StackType,
-			Subnetwork:               networkInterface.Subnetwork,
+			Subnetwork:               p.resolveSubnetwork(networkInterface.Subnetwork, nodeClass),
 			ForceSendFields:          networkInterface.ForceSendFields,
 			NullFields:               networkInterface.NullFields,
 		}
@@ -495,6 +495,34 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 	}
 
 	return networkInterfaces
+}
+
+// resolveAccessConfigs determines whether to include AccessConfigs (external IP)
+func (p *DefaultProvider) resolveAccessConfigs(templateAccessConfigs []*compute.AccessConfig, nodeClass *v1alpha1.GCENodeClass) []*compute.AccessConfig {
+	// If NetworkConfig not specified, use default behavior (with external IP)
+	if nodeClass.Spec.NetworkConfig == nil {
+		return templateAccessConfigs
+	}
+
+	// If EnableExternalIPAccess not specified, use default (true)
+	if nodeClass.Spec.NetworkConfig.EnableExternalIPAccess == nil {
+		return templateAccessConfigs
+	}
+
+	// If explicitly false, return nil (no external IP = private node)
+	if !*nodeClass.Spec.NetworkConfig.EnableExternalIPAccess {
+		return nil
+	}
+
+	return templateAccessConfigs
+}
+
+// resolveSubnetwork determines which subnetwork to use
+func (p *DefaultProvider) resolveSubnetwork(templateSubnetwork string, nodeClass *v1alpha1.GCENodeClass) string {
+	if nodeClass.Spec.NetworkConfig != nil && nodeClass.Spec.NetworkConfig.Subnetwork != "" {
+		return nodeClass.Spec.NetworkConfig.Subnetwork
+	}
+	return templateSubnetwork
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance

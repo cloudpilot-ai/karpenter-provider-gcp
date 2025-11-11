@@ -1,0 +1,21 @@
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: custom-subnet
+spec:
+  # Configure nodes with custom subnet and no external IP
+  networkConfig:
+    enableExternalIPAccess: false
+    subnetwork: projects/my-project/regions/us-central1/subnetworks/my-private-subnet
+  
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  
+  labels:
+    env: production
+  
+  disks:
+    - category: pd-balanced
+      sizeGiB: 100
+      boot: true
+
