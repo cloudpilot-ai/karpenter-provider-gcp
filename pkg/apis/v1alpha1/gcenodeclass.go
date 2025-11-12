@@ -76,6 +76,23 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",rule="self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))"
 	// +optional
 	NetworkTags []string `json:"networkTags,omitempty"`
+	// NetworkConfig specifies network configuration for instances
+	// +optional
+	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
+}
+
+// NetworkConfig defines network configuration for instances
+type NetworkConfig struct {
+	// EnableExternalIPAccess specifies whether instances should have external IP addresses
+	// If false, instances will only have internal IP addresses (private nodes)
+	// +kubebuilder:default=true
+	// +optional
+	EnableExternalIPAccess *bool `json:"enableExternalIPAccess,omitempty"`
+
+	// Subnetwork is the subnet to use for the instance
+	// Format: projects/PROJECT_ID/regions/REGION/subnetworks/SUBNETWORK_NAME
+	// +optional
+	Subnetwork string `json:"subnetwork,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.

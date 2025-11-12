@@ -1,0 +1,23 @@
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: private-nodes
+spec:
+  # Configure nodes without external IP addresses (private nodes)
+  networkConfig:
+    enableExternalIPAccess: false
+  
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  
+  labels:
+    node-type: private
+  
+  networkTags:
+    - private-nodes
+  
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true
+
