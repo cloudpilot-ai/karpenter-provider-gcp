@@ -25,10 +25,11 @@ import (
 )
 
 const (
-	ClusterNameLabel     = "cluster-name"
-	GKENodePoolLabel     = "cloud.google.com/gke-nodepool"
-	UnregisteredTaintArg = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
-	KubeletConfigLabel   = "kubelet-config"
+	ClusterNameLabel                = "cluster-name"
+	GKENodePoolLabel                = "cloud.google.com/gke-nodepool"
+	UnregisteredTaintArg            = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
+	KubeletConfigLabel              = "kubelet-config"
+	GKESecondaryBootDiskLabelPrefix = "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk-"
 )
 
 var (
