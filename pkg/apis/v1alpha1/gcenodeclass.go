@@ -172,14 +172,24 @@ type Disk struct {
 	// The category of the disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme).
 	// +optional
 	Category DiskCategory `json:"category,omitempty"`
-	// Indicates that this is a boot disk
+	// Indicates that this is a boot disk.
 	// +optional
 	Boot bool `json:"boot"`
+	// SecondaryBootImage is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME).
+	// +optional
+	SecondaryBootImage string `json:"secondaryBootImage,omitempty"`
+	// SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE).
+	// +optional
+	SecondaryBootMode SecondaryBootDiskMode `json:"secondaryBootMode,omitempty"`
 }
 
 // DiskCategory represents a disk category type
 // +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
 type DiskCategory string
+
+// SecondaryBootDiskMode is the mode of the secondary boot disk.
+// +kubebuilder:validation:Enum=MODE_UNSPECIFIED;CONTAINER_IMAGE_CACHE
+type SecondaryBootDiskMode string
 
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

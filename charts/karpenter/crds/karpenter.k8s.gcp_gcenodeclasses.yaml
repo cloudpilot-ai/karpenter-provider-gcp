@@ -58,7 +58,7 @@ spec:
                 items:
                   properties:
                     boot:
-                      description: Indicates that this is a boot disk
+                      description: Indicates that this is a boot disk.
                       type: boolean
                     category:
                       description: The category of the disk (e.g., pd-standard, pd-balanced,
@@ -74,6 +74,17 @@ spec:
                       - pd-extreme
                       - pd-ssd
                       - pd-standard
+                      type: string
+                    secondaryBootMode:
+                      description: SecondaryBootMode is the secondary boot disk mode
+                        (e.g. CONTAINER_IMAGE_CACHE).
+                      enum:
+                      - MODE_UNSPECIFIED
+                      - CONTAINER_IMAGE_CACHE
+                      type: string
+                    secondaryBootImage:
+                      description: SecondaryBootImage is the secondary boot disk image
+                        name (e.g. global/images/DISK_IMAGE_NAME).
                       type: string
                     sizeGiB:
                       description: 'SizeGiB is the size of the disk. Unit: GiB'
