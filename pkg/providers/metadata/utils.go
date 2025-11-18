@@ -192,12 +192,12 @@ func getNodeLabels(nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim
 
 func AppendSecondaryBootDisks(projectID string, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
 	for _, disk := range nodeClass.Spec.Disks {
-		if disk.Boot || disk.SecondaryImage == "" || disk.SecondaryBootMode == "MODE_UNSPECIFIED" {
+		if disk.Boot || disk.SecondaryBootImage == "" || disk.SecondaryBootMode == "MODE_UNSPECIFIED" {
 			continue
 		}
 
-		name := GetSecondaryDiskImageName(disk.SecondaryImage)
-		deviceName := GetSecondaryDiskImageDeviceName(disk.SecondaryImage)
+		name := GetSecondaryDiskImageName(disk.SecondaryBootImage)
+		deviceName := GetSecondaryDiskImageDeviceName(disk.SecondaryBootImage)
 		for _, item := range metadata.Items {
 			if item.Key == "kube-env" {
 				// Add SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/DISK_IMAGE_NAME

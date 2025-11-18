@@ -82,8 +82,8 @@ spec:
                       - MODE_UNSPECIFIED
                       - CONTAINER_IMAGE_CACHE
                       type: string
-                    secondaryImage:
-                      description: SecondaryImage is the secondary boot disk image
+                    secondaryBootImage:
+                      description: SecondaryBootImage is the secondary boot disk image
                         name (e.g. global/images/DISK_IMAGE_NAME).
                       type: string
                     sizeGiB:
