@@ -221,7 +221,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			Type:         instanceType.Name,
 			Location:     zone,
 			ProjectID:    p.projectID,
-			ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
+			ImageID:      resolveInstanceImage(instance),
 			CreationTime: time.Now(),
 			CapacityType: capacityType,
 			Tags:         template.Properties.Labels,
@@ -231,6 +231,16 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	}
 
 	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
+}
+
+func resolveInstanceImage(instance *compute.Instance) string {
+	image, ok := lo.Find(instance.Disks, func(disk *compute.AttachedDisk) bool {
+		return disk.Boot
+	})
+	if !ok {
+		return ""
+	}
+	return image.InitializeParams.SourceImage
 }
 
 // getCapacityType selects spot if both constraints are flexible and there is an
@@ -432,6 +442,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		Labels:            p.initializeInstanceLabels(nodeClass),
 		Scheduling:        template.Properties.Scheduling,
 		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
+		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
 
 	// Configure capacity provision
