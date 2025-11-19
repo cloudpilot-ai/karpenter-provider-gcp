@@ -191,6 +191,7 @@ func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *
 		corev1.ResourceMemory:           *memory(ctx, mt),
 		corev1.ResourcePods:             *resource.NewQuantity(int64(nodeClass.GetMaxPods()), resource.DecimalSI),
 		corev1.ResourceEphemeralStorage: *ephemeralStorage(mt, nodeClass),
+		v1alpha1.ResourceNVIDIAGPU:      *resource.NewQuantity(int64(len(mt.GetAccelerators())), resource.DecimalSI),
 	}
 	return resourceList
 }
