@@ -52,6 +52,8 @@ const (
 	maxInstanceTypes        = 20
 	maxNodeCIDR             = 23
 	instanceCacheExpiration = 15 * time.Second
+
+	instanceTerminationActionDelete = "DELETE"
 )
 
 var (
@@ -431,6 +433,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// setup network interfaces
 	networkInterfaces := p.setupNetworkInterfaces(template, nodeClass)
 
+	sched := p.setupScheduling(template)
+
 	// Create instance
 	instance := &compute.Instance{
 		Name:              instanceName,
@@ -440,7 +444,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
-		Scheduling:        template.Properties.Scheduling,
+		Scheduling:        sched,
 		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
 		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
@@ -521,7 +525,7 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 		return fmt.Errorf("failed to set max pods per node in metadata: %w", err)
 	}
 
-	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType); err != nil {
+	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType, capacityType); err != nil {
 		return fmt.Errorf("failed to render kubelet config metadata: %w", err)
 	}
 
@@ -563,6 +567,16 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass,
 			},
 		},
 	}
+}
+
+// setupScheduling configures scheduling for the instance
+func (p *DefaultProvider) setupScheduling(template *compute.InstanceTemplate) *compute.Scheduling {
+	sched := template.Properties.Scheduling
+	if sched == nil {
+		sched = &compute.Scheduling{}
+	}
+	sched.InstanceTerminationAction = instanceTerminationActionDelete
+	return sched
 }
 
 // initializeInstanceLabels initializes the instance labels map

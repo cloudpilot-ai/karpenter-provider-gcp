@@ -53,7 +53,7 @@ func GetClusterName(metadata *compute.Metadata) (string, error) {
 	return clusterName, nil
 }
 
-func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloudprovider.InstanceType) error {
+func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloudprovider.InstanceType, capacityType string) error {
 	targetEntry, index, ok := lo.FindIndexOf(metaData.Items, func(item *compute.MetadataItems) bool {
 		return item.Key == KubeletConfigLabel
 	})
@@ -84,6 +84,17 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	kubeReserved["memory"] = memoryMB
 	kubeReserved["ephemeral-storage"] = ephemeralStorage
 	config["kubeReserved"] = kubeReserved
+
+	if capacityType == karpv1.CapacityTypeSpot {
+		featureGates, ok := config["featureGates"].(map[string]interface{})
+		if !ok {
+			featureGates = make(map[string]interface{})
+		}
+		featureGates["GracefulNodeShutdown"] = true
+		config["featureGates"] = featureGates
+		config["shutdownGracePeriod"] = "30s"
+		config["shutdownGracePeriodCriticalPods"] = "15s"
+	}
 
 	// Marshal back to YAML
 	updatedYAML, err := yaml.Marshal(config)
