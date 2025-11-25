@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"iter"
 	"maps"
 	"sync"
 	"sync/atomic"
@@ -64,6 +65,8 @@ type Cluster struct {
 	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
+	NodePoolState *NodePoolState
+
 	podAcks                         sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
 	podsSchedulingAttempted         sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
 	podsSchedulableTimes            sync.Map // pod namespaced name -> time when it was first marked as able to fit to a node
@@ -95,6 +98,8 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
 		nodePoolResources:         map[string]corev1.ResourceList{},
+
+		NodePoolState: NewNodePoolState(),
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -156,13 +161,17 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 
 	// If we haven't synced before, then we need to make sure that our internal cache is fully hydrated
 	// before we start doing operations against the state
-	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
+	// Because we get so many NodeClaims from this response, we are not DeepCopying the cached data here
+	// DO NOT MUTATE NodeClaims in this function as this will affect the underlying cached NodeClaim
+	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider, client.UnsafeDisableDeepCopy)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
 	nodeList := &corev1.NodeList{}
-	if err := c.kubeClient.List(ctx, nodeList); err != nil {
+	// Because we get so many Nodes from this response, we are not DeepCopying the cached data here
+	// DO NOT MUTATE Nodes in this function as this will affect the underlying cached Node
+	if err := c.kubeClient.List(ctx, nodeList, client.UnsafeDisableDeepCopy); err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
@@ -221,22 +230,23 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node)
 	})
 }
 
-// ForEachNode calls the supplied function once per node object that is being tracked. It is not safe to store the
-// state.StateNode object, it should be only accessed from within the function provided to this method.
-func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	for _, node := range c.nodes {
-		if !f(node) {
-			return
+// Nodes returns an iterator which iterates over the state nodes in the cluster under a read-lock. It is not safe to
+// store the state.StateNode object and it should only be accessed while the iterator is active.
+func (c *Cluster) Nodes() iter.Seq[*StateNode] {
+	return func(yield func(*StateNode) bool) {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		for _, node := range c.nodes {
+			if !yield(node) {
+				return
+			}
 		}
 	}
 }
 
-// Nodes creates a DeepCopy of all state nodes.
+// DeepCopyNodes creates a DeepCopy of all state nodes.
 // NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
-func (c *Cluster) Nodes() StateNodes {
+func (c *Cluster) DeepCopyNodes() StateNodes {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -277,6 +287,9 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 			oldNode := n.ShallowCopy()
 			n.markedForDeletion = false
 			c.updateNodePoolResources(oldNode, n)
+			if n.NodeClaim != nil && n.NodeClaim.DeletionTimestamp.IsZero() {
+				c.NodePoolState.MarkNodeClaimActive(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+			}
 		}
 	}
 }
@@ -291,6 +304,9 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 			oldNode := n.ShallowCopy()
 			n.markedForDeletion = true
 			c.updateNodePoolResources(oldNode, n)
+			if n.NodeClaim != nil {
+				c.NodePoolState.MarkNodeClaimDeleting(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+			}
 		}
 	}
 }
@@ -306,6 +322,14 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 		n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 		c.nodes[nodeClaim.Status.ProviderID] = n
 	}
+
+	// Update nodepool state with NodeClaim
+	markedForDel := false
+	if n, ok := c.nodes[nodeClaim.Status.ProviderID]; ok {
+		markedForDel = n.MarkedForDeletion()
+	}
+	c.NodePoolState.UpdateNodeClaim(nodeClaim, markedForDel)
+
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
@@ -369,6 +393,14 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	return err
 }
 
+func (c *Cluster) NodeClaimExists(nodeClaimName string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	_, ok := c.nodeClaimNameToProviderID[nodeClaimName]
+	return ok
+}
+
 // AckPods marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
 func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	now := c.clock.Now()
@@ -409,7 +441,10 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 	}
 	for nodePoolName, pods := range npPods {
 		nodePool := &v1.NodePool{}
-		err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool)
+		if nodePoolName != "" {
+			// Swallow errors if we can't get the nodepool
+			_ = c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool)
+		}
 		for _, p := range pods {
 			nn := client.ObjectKeyFromObject(p)
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
@@ -421,16 +456,14 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 					PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime).Seconds(), nil)
 				}
 			}
-			if err == nil {
-				// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
-				// then mark the time when we thought it can schedule to now.
-				if nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
-					c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
-				} else {
-					// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
-					// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
-					c.podHealthyNodePoolScheduledTime.Delete(nn)
-				}
+			// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
+			// then mark the time when we thought it can schedule to now.
+			if nodePoolName != "" && nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
+			} else {
+				// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
+				// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
+				c.podHealthyNodePoolScheduledTime.Delete(nn)
 			}
 		}
 	}
@@ -547,6 +580,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
+	c.NodePoolState = NewNodePoolState()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
@@ -639,6 +673,9 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 	// yet. This ensures that if a nodeClaim is created and then deleted before it was able to launch that
 	// this is cleaned up.
 	delete(c.nodeClaimNameToProviderID, name)
+
+	// Delete the NodeClaim that is tracked in NodePoolState
+	c.NodePoolState.Cleanup(name)
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNode *StateNode) (*StateNode, error) {
