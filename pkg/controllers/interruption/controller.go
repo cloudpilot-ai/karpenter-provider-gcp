@@ -19,17 +19,11 @@ package interruption
 import (
 	"context"
 	"fmt"
-	"sigs.k8s.io/karpenter/pkg/utils/node"
 	"time"
 
 	computev1 "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/metadata"
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
-	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -40,6 +34,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/utils/node"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
