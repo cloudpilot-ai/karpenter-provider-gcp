@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -40,7 +42,9 @@ const (
 
 // Drift is a nodeclaim sub-controller that adds or removes status conditions on drifted nodeclaims
 type Drift struct {
-	cloudProvider cloudprovider.CloudProvider
+	clock                          clock.Clock
+	cloudProvider                  cloudprovider.CloudProvider
+	instanceTypeNotFoundCheckCache *cache.Cache
 }
 
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -84,13 +88,20 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	}); reason != "" {
 		return reason, nil
 	}
-	// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
-	its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
-	if err != nil {
-		return "", err
-	}
-	if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
-		return reason, nil
+	// To reduce the amount of GetInstanceTypes() calls that we make per-NodeClaim, only check this for a NodeClaim once every 30m and don't start checking it until 1h after creation
+	// It's alright to be more delayed with instance type drift since this is a cloudprovider-generated set of options rather than a user-defined field
+	if _, ok := d.instanceTypeNotFoundCheckCache.Get(string(nodeClaim.UID)); !ok && d.clock.Since(nodeClaim.CreationTimestamp.Time) > time.Hour {
+		// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
+		its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
+		if err != nil {
+			return "", err
+		}
+		if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
+			return reason, nil
+		}
+		// Only add a cache entry once we've validated that an instance type exists. We only cache a successful check rather
+		// that the result to ensure we respond quickly to transient abnormalities in the GetInstanceTypes response.
+		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
 	}
 	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
@@ -126,7 +137,9 @@ func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeC
 	// reason we don't compare against the reservation ID and leave that to the provider to implement.
 	if nodeClaim.Labels[v1.CapacityTypeLabelKey] == v1.CapacityTypeReserved {
 		reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
-		delete(reqs, cloudprovider.ReservationIDLabel)
+		for label := range cloudprovider.ReservedCapacityLabels {
+			delete(reqs, label)
+		}
 	}
 	if !it.Offerings.HasCompatible(reqs) {
 		return InstanceTypeNotFound
