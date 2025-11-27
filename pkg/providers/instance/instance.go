@@ -49,12 +49,13 @@ import (
 )
 
 const (
-	maxInstanceTypes               = 20
-	maxNodeCIDR                    = 23
-	instanceCacheExpiration        = 15 * time.Second
-	zoneOperationPollInterval      = 1 * time.Second
-	defaultZoneOperationTimeout    = 2 * time.Minute
-	ipSpaceInsufficientCapacityTTL = 30 * time.Second
+	maxInstanceTypes                = 20
+	maxNodeCIDR                     = 23
+	instanceCacheExpiration         = 15 * time.Second
+	zoneOperationPollInterval       = 1 * time.Second
+	defaultZoneOperationTimeout     = 2 * time.Minute
+	ipSpaceInsufficientCapacityTTL  = 30 * time.Second
+	instanceTerminationActionDelete = "DELETE"
 )
 
 var (
@@ -266,7 +267,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			Type:         instanceType.Name,
 			Location:     zone,
 			ProjectID:    p.projectID,
-			ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
+			ImageID:      resolveInstanceImage(instance),
 			CreationTime: time.Now(),
 			CapacityType: capacityType,
 			Tags:         template.Properties.Labels,
@@ -327,6 +328,16 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 	}
 
 	return instance, false, nil
+}
+
+func resolveInstanceImage(instance *compute.Instance) string {
+	image, ok := lo.Find(instance.Disks, func(disk *compute.AttachedDisk) bool {
+		return disk.Boot
+	})
+	if !ok {
+		return ""
+	}
+	return image.InitializeParams.SourceImage
 }
 
 // getCapacityType selects spot if both constraints are flexible and there is an
@@ -485,6 +496,9 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
 			}
 			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+		} else {
+			attachedDisk.DeviceName = metadata.GetSecondaryDiskImageDeviceName(disk.SecondaryBootImage)
+			attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
 		}
 
 		attachedDisks[i] = attachedDisk
@@ -514,6 +528,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// setup network interfaces
 	networkInterfaces := p.setupNetworkInterfaces(template, nodeClass)
 
+	sched := p.setupScheduling(template, capacityType)
+
 	// Create instance
 	instance := &compute.Instance{
 		Name:              instanceName,
@@ -523,8 +539,9 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
-		Scheduling:        template.Properties.Scheduling,
+		Scheduling:        sched,
 		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
+		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
 
 	// Configure capacity provision
@@ -603,7 +620,7 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 		return fmt.Errorf("failed to set max pods per node in metadata: %w", err)
 	}
 
-	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType); err != nil {
+	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType, capacityType); err != nil {
 		return fmt.Errorf("failed to render kubelet config metadata: %w", err)
 	}
 
@@ -619,6 +636,7 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 
 	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
 	metadata.AppendRegisteredLabel(instanceMetadata)
+	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
 
 	return nil
 }
@@ -644,6 +662,18 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass,
 			},
 		},
 	}
+}
+
+// setupScheduling configures scheduling for the instance
+func (p *DefaultProvider) setupScheduling(template *compute.InstanceTemplate, capacityType string) *compute.Scheduling {
+	sched := template.Properties.Scheduling
+	if sched == nil {
+		sched = &compute.Scheduling{}
+	}
+	if capacityType == karpv1.CapacityTypeSpot {
+		sched.InstanceTerminationAction = instanceTerminationActionDelete
+	}
+	return sched
 }
 
 // initializeInstanceLabels initializes the instance labels map
