@@ -49,12 +49,12 @@ import (
 )
 
 const (
-	maxInstanceTypes                = 20
-	maxNodeCIDR                     = 23
-	instanceCacheExpiration         = 15 * time.Second
-	zoneOperationPollInterval       = 1 * time.Second
-	defaultZoneOperationTimeout     = 2 * time.Minute
-	ipSpaceInsufficientCapacityTTL  = 30 * time.Second
+	maxInstanceTypes               = 20
+	maxNodeCIDR                    = 23
+	instanceCacheExpiration        = 15 * time.Second
+	zoneOperationPollInterval      = 1 * time.Second
+	defaultZoneOperationTimeout    = 2 * time.Minute
+	ipSpaceInsufficientCapacityTTL = 30 * time.Second
 )
 
 var (
@@ -310,6 +310,12 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 			ttl := insufficientCapacityBackoffTTL(reasonCode)
 			p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType.Name, zone, capacityType, ttl)
 			err = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+
+			// If IP space is exhausted, trying other instance types won't help as they share the same subnet.
+			// We should fail fast to avoid unnecessary API calls and noise.
+			if reasonCode == "IP_SPACE_EXHAUSTED" || reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS" {
+				return nil, false, err
+			}
 		}
 		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
 		return nil, true, err
