@@ -12,7 +12,7 @@ main() {
 tools() {
     go install github.com/google/go-licenses@v1.6.0
     go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-    go install github.com/google/ko@v0.16.0
+    go install github.com/google/ko@v0.17.0
     go install github.com/mikefarah/yq/v4@v4.44.3
     go install github.com/norwoodj/helm-docs/cmd/helm-docs@v1.14.2
     go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest

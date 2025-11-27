@@ -18,42 +18,36 @@ package interruption
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/url"
-	"strings"
-	"sync"
 	"time"
 
 	computev1 "cloud.google.com/go/compute/apiv1"
-	"cloud.google.com/go/compute/apiv1/computepb"
 	"cloud.google.com/go/compute/metadata"
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/go-openapi/swag"
-	"go.uber.org/multierr"
-	"google.golang.org/api/iterator"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/utils/node"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
-	instance "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
 	OperationTypePreempted = "compute.instances.preempted"
+
+	NodeConditionReasonKubeletNotReady = "KubeletNotReady"
+	NodeConditionMessageShuttingDown   = "node is shutting down"
 )
 
 // Controller is an GCP interruption controller.
@@ -74,7 +68,8 @@ func NewController(kubeClient client.Client,
 	metadataClient *metadata.Client,
 	zoneOperationClient *computev1.ZoneOperationsClient,
 	credential auth.Credential,
-	instanceProvider instance.Provider) *Controller {
+	instanceProvider instance.Provider,
+) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
 		recorder:   recorder,
@@ -115,111 +110,36 @@ func getZonesFromNodes(ctx context.Context, kubeClient client.Client) ([]string,
 	return zones, nil
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
-	// Get all zones from nodes
-	zones, err := getZonesFromNodes(ctx, c.kubeClient)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting zones: %w", err)
+func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
+	if err := c.handleStoppingSpotInstances(ctx); err != nil {
+		return reconciler.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
 	}
 
-	if err := c.handleSpotInterruptionEvents(ctx, zones); err != nil {
-		return reconcile.Result{}, fmt.Errorf("handling spot interruption events: %w", err)
-	}
-
-	if err := c.handleStoppedSpotInstances(ctx); err != nil {
-		return reconcile.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
-	}
-
-	// Will requeue after 3 seconds and try again
-	return reconcile.Result{RequeueAfter: 3 * time.Second}, nil
+	// Will requeue after 1 second and try again
+	return reconciler.Result{RequeueAfter: 1 * time.Second}, nil
 }
 
-func (c *Controller) handleStoppedSpotInstances(ctx context.Context) error {
+func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 	nodes := &corev1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodes, &client.ListOptions{}); err != nil {
 		return fmt.Errorf("listing nodes: %w", err)
 	}
 
 	for i := range nodes.Items {
-		node := nodes.Items[i]
-		if node.Labels == nil || node.Labels[utils.LabelNodePoolKey] == "" {
+		currentNode := nodes.Items[i]
+		if currentNode.Labels == nil || currentNode.Labels[utils.LabelNodePoolKey] == "" {
 			continue
 		}
 
-		providerID := node.Spec.ProviderID
-		if providerID == "" {
-			continue
-		}
-
-		ins, err := c.instanceProvider.Get(ctx, providerID)
-		if err != nil {
-			if cloudprovider.IsNodeClaimNotFoundError(err) {
-				continue
-			}
-
-			return fmt.Errorf("getting instance: %w", err)
-		}
-
-		if ins.Status == instance.InstanceStatusStopped || ins.Status == instance.InstanceStatusTerminated {
-			if err := c.cleanNodeClaimByInstanceName(ctx, ins.Name, false); err != nil {
+		condition := node.GetCondition(&currentNode, corev1.NodeReady)
+		if condition.Status != corev1.ConditionTrue && condition.Reason == NodeConditionReasonKubeletNotReady && condition.Message == NodeConditionMessageShuttingDown {
+			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, false); err != nil {
 				return fmt.Errorf("cleaning node claim: %w", err)
 			}
 		}
 	}
 
 	return nil
-}
-
-func (c *Controller) handleSpotInterruptionEvents(ctx context.Context, zones []string) error {
-	instanceNames := []string{}
-	instanceNamesLock := sync.Mutex{}
-	handler := func(zone string) {
-		// Refer to https://cloud.google.com/compute/docs/instances/create-use-spot#detect-preemption
-		// We need to check if the instance is preempted and delete the nodeClaim from the operation event,
-		// In this stage, we only detect preempted operation here.
-		it := c.zoneOperationClient.List(ctx, &computepb.ListZoneOperationsRequest{
-			Project: c.credential.ProjectID,
-			Zone:    zone,
-			Filter:  swag.String(fmt.Sprintf(`operationType="%s"`, OperationTypePreempted)),
-		})
-
-		for {
-			op, err := it.Next()
-			if err != nil {
-				if !errors.Is(err, iterator.Done) {
-					log.FromContext(ctx).Info("listing operations warning", "zone", zone, "error", err)
-				}
-				break
-			}
-			targetLink := op.GetTargetLink()
-			instanceName, err := extractInstanceName(targetLink)
-			if err != nil {
-				log.FromContext(ctx).Error(err, "extracting instance name")
-				break
-			}
-			// ignore the instance if the name is not found in the clter nodes
-			if !c.isInstanceFromKarpenter(ctx, instanceName) {
-				continue
-			}
-
-			instanceNamesLock.Lock()
-			instanceNames = append(instanceNames, instanceName)
-			instanceNamesLock.Unlock()
-		}
-	}
-
-	workqueue.ParallelizeUntil(ctx, 10, len(zones), func(zoneIndex int) {
-		handler(zones[zoneIndex])
-	})
-
-	errs := make([]error, len(instanceNames))
-	workqueue.ParallelizeUntil(ctx, 10, len(instanceNames), func(i int) {
-		instanceName := instanceNames[i]
-		if err := c.cleanNodeClaimByInstanceName(ctx, instanceName, true); err != nil {
-			errs[i] = fmt.Errorf("deleting node claim: %w", err)
-		}
-	})
-	return multierr.Combine(errs...)
 }
 
 func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {
@@ -260,18 +180,6 @@ func (c *Controller) isInstanceFromKarpenter(ctx context.Context, instanceName s
 	return false
 }
 
-func extractInstanceName(targetLink string) (string, error) {
-	parsedURL, err := url.Parse(targetLink)
-	if err != nil {
-		return "", err
-	}
-	segments := strings.Split(parsedURL.Path, "/")
-	if len(segments) < 1 {
-		return "", fmt.Errorf("invalid targetLink: %s", targetLink)
-	}
-	return segments[len(segments)-1], nil
-}
-
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("interruption").
@@ -287,7 +195,7 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *karpv1.Node
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("deleting the node on interruption message, %w", err))
 	}
-	log.FromContext(ctx).Info("initiating delete from interruption message")
+	log.FromContext(ctx).Info("initiating delete from interruption message", "nodeClaim", nodeClaim.Name)
 	c.recorder.Publish(interruptionevents.TerminatingOnInterruption(nodeClaim)...)
 	return nil
 }

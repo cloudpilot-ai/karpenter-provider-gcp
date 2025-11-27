@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	certv1 "k8s.io/api/certificates/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 var (
@@ -48,11 +48,11 @@ func NewController(kubeClient kubernetes.Interface) *Controller {
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	var csrList certv1.CertificateSigningRequestList
 	if err := c.client.List(ctx, &csrList); err != nil {
 		log.FromContext(ctx).Error(err, "unable to list CSRs")
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
 
 	for _, csr := range csrList.Items {
@@ -87,7 +87,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			continue
 		}
 	}
-	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+	return reconciler.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 func isApprovedOrDenied(csr *certv1.CertificateSigningRequest) bool {
