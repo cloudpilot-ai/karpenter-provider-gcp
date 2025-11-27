@@ -41,7 +41,7 @@ run: ## Run Karpenter controller binary against your local cluster
 		PROJECT_ID=${PROJECT_ID} \
 		LOCATION=${REGION} \
 		INTERRUPTION_QUEUE=${CLUSTER_NAME} \
-		FEATURE_GATES="SpotToSpotConsolidation=true" \
+		FEATURE_GATES="SpotToSpotConsolidation=true,NodeOverlay=true" \
 		go run ./cmd/controller/main.go
 
 update: tidy download ## Update go files header, CRD and generated code

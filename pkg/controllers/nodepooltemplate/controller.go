@@ -20,10 +20,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
@@ -39,12 +39,12 @@ func NewController(nodePooltemplateProvider nodepooltemplate.Provider) *Controll
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepooltemplate")
 	if err := c.nodePoolTemplateProvider.Create(ctx); err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
-	return reconcile.Result{RequeueAfter: 12 * time.Minute}, nil
+	return reconciler.Result{RequeueAfter: 12 * time.Minute}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
