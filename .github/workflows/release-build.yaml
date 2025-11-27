@@ -1,0 +1,57 @@
+name: Release image build
+
+on:
+  # Trigger on workflow_dispatch (manual trigger)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v1.0.0)'
+        required: false
+  # Trigger on push for new tags
+  push:
+    tags:
+      - '*'
+
+jobs:
+  image-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set tag from inputs or Git tag
+        id: set-tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "No valid trigger for building an image."
+            exit 1
+          fi
+        shell: bash
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: false
+
+      - name: Config DockerHub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: ko-build/setup-ko@v0.6
+
+      - name: Build and publish image
+        run: |
+          git fetch --tags
+          git checkout ${{ env.tag }}
+
+          export KO_DOCKER_REPO=docker.io/cloudpilotai/karpenter-provider-gcp
+          export IMAGE_TAG=${{ env.tag }}
+          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller -t $IMAGE_TAG
