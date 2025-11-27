@@ -35,23 +35,25 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24.6'
           cache: false
 
-      - name: Config DockerHub
-        uses: docker/login-action@v3
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Config env
+        run: |
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_AK }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SK }}" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
+
+      - name: AWS CLI Init
+        uses: unfor19/install-aws-cli-action@v1
+
+      - name: Config ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/cloudpilotai
 
       - uses: ko-build/setup-ko@v0.6
 
-      - name: Build and publish image
+      - name: build and publish image
         run: |
-          git fetch --tags
-          git checkout ${{ env.tag }}
-
-          export KO_DOCKER_REPO=docker.io/cloudpilotai/karpenter-provider-gcp
-          export IMAGE_TAG=${{ env.tag }}
-          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller -t $IMAGE_TAG
+          export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
+          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags ${{ env.tag }}
