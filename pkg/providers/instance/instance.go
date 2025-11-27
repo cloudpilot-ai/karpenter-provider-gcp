@@ -433,7 +433,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// setup network interfaces
 	networkInterfaces := p.setupNetworkInterfaces(template, nodeClass)
 
-	sched := p.setupScheduling(template)
+	sched := p.setupScheduling(template, capacityType)
 
 	// Create instance
 	instance := &compute.Instance{
@@ -570,12 +570,14 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass,
 }
 
 // setupScheduling configures scheduling for the instance
-func (p *DefaultProvider) setupScheduling(template *compute.InstanceTemplate) *compute.Scheduling {
+func (p *DefaultProvider) setupScheduling(template *compute.InstanceTemplate, capacityType string) *compute.Scheduling {
 	sched := template.Properties.Scheduling
 	if sched == nil {
 		sched = &compute.Scheduling{}
 	}
-	sched.InstanceTerminationAction = instanceTerminationActionDelete
+	if capacityType == karpv1.CapacityTypeSpot {
+		sched.InstanceTerminationAction = instanceTerminationActionDelete
+	}
 	return sched
 }
 
