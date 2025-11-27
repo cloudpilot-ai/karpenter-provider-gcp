@@ -23,6 +23,7 @@ import (
 
 	computev1 "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/metadata"
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/utils/node"
@@ -68,7 +68,8 @@ func NewController(kubeClient client.Client,
 	metadataClient *metadata.Client,
 	zoneOperationClient *computev1.ZoneOperationsClient,
 	credential auth.Credential,
-	instanceProvider instance.Provider) *Controller {
+	instanceProvider instance.Provider,
+) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
 		recorder:   recorder,
@@ -109,13 +110,13 @@ func getZonesFromNodes(ctx context.Context, kubeClient client.Client) ([]string,
 	return zones, nil
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err := c.handleStoppingSpotInstances(ctx); err != nil {
-		return reconcile.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
+		return reconciler.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
 	}
 
 	// Will requeue after 1 second and try again
-	return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	return reconciler.Result{RequeueAfter: 1 * time.Second}, nil
 }
 
 func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {

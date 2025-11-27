@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 const (
@@ -211,7 +212,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	pod := &corev1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
-			c.pendingPods.Delete(req.NamespacedName.String())
+			c.pendingPods.Delete(req.String())
 			// Delete the unstarted metric since the pod is deleted
 			PodUnstartedTimeSeconds.Delete(map[string]string{
 				podName:      req.Name,
@@ -221,7 +222,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
-			c.unscheduledPods.Delete(req.NamespacedName.String())
+			c.unscheduledPods.Delete(req.String())
 			// Delete the unbound metric since the pod is deleted
 			PodUnboundTimeSeconds.Delete(map[string]string{
 				podName:      req.Name,
@@ -235,7 +236,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
-			c.metricStore.Delete(req.NamespacedName.String())
+			c.metricStore.Delete(req.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -304,28 +305,11 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 		c.pendingPods.Insert(key)
 		return
 	}
-	cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
-		return c.Type == corev1.PodReady
+	cond, ready := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue
 	})
 	if c.pendingPods.Has(key) {
-		if !ok || cond.Status != corev1.ConditionTrue {
-			PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
-				podName:      pod.Name,
-				podNamespace: pod.Namespace,
-			})
-			if !schedulableTime.IsZero() {
-				PodProvisioningUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
-					podName:      pod.Name,
-					podNamespace: pod.Namespace,
-				})
-			} else {
-				// Idempotently delete the unstarted_time_seconds metric if the schedulable time is zero
-				PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
-					podName:      pod.Name,
-					podNamespace: pod.Namespace,
-				})
-			}
-		} else {
+		if ready {
 			// Delete the unstarted metric since the pod is now started
 			PodUnstartedTimeSeconds.Delete(map[string]string{
 				podName:      pod.Name,
@@ -342,6 +326,39 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 			c.pendingPods.Delete(key)
 			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
 			c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
+		} else if podutils.IsTerminal(pod) {
+			// We do not emit the startup duration metric for pods that are terminal because such pods will have
+			// Ready status condition set to False which will cause the metric to take negative values.
+
+			// Delete the unstarted metric since the pod is now started
+			PodUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
+			PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
+			c.pendingPods.Delete(key)
+			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
+			c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
+		} else {
+			PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
+			if !schedulableTime.IsZero() {
+				PodProvisioningUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+					podName:      pod.Name,
+					podNamespace: pod.Namespace,
+				})
+			} else {
+				// Idempotently delete the unstarted_time_seconds metric if the schedulable time is zero
+				PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
+					podName:      pod.Name,
+					podNamespace: pod.Namespace,
+				})
+			}
 		}
 	}
 }
