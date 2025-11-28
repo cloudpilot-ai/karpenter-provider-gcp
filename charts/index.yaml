@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  karpenter:
+  - apiVersion: v2
+    appVersion: v0.1.0-rc.0
+    created: "2025-11-27T23:57:05.229182+02:00"
+    description: A Helm chart for Kubernetes
+    digest: 6e89a07b4688dfed0d43c81d0ee92e54e9f9d6ef4c8ea5c2acd503521a6dda46
+    name: karpenter
+    type: application
+    urls:
+    - karpenter-v0.1.0-rc.0.tgz
+    version: v0.1.0-rc.0
+generated: "2025-11-27T23:57:05.22795+02:00"
