@@ -542,6 +542,7 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
 	metadata.AppendRegisteredLabel(instanceMetadata)
 	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
+	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
 
 	return nil
 }

@@ -262,3 +262,36 @@ func GetSecondaryDiskImageName(image string) string {
 func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootDiskMode) string {
 	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
 }
+
+// ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.
+// If a metadata key already exists, it appends the value with comma separator.
+// Otherwise, it creates a new metadata item.
+// Limitation: only add comma separated values to existing metadata keys. Need to improve this in the future.
+func ApplyCustomMetadata(metadata *compute.Metadata, customMetadata map[string]string) {
+	if len(customMetadata) == 0 {
+		return
+	}
+
+	for key, value := range customMetadata {
+		if value == "" {
+			continue
+		}
+
+		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
+			return item.Key == key
+		})
+
+		if ok && index != -1 {
+			// Key exists, append the value with comma separator
+			targetEntry.Value = swag.String(*targetEntry.Value + "," + value)
+			metadata.Items[index] = targetEntry
+		} else {
+			// Key doesn't exist, create a new metadata item
+			newItem := &compute.MetadataItems{
+				Key:   key,
+				Value: swag.String(value),
+			}
+			metadata.Items = append(metadata.Items, newItem)
+		}
+	}
+}
