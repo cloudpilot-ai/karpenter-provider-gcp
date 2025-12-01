@@ -72,7 +72,8 @@ type GCENodeClassSpec struct {
 	// NetworkTags is a list of network tags to apply to the node.
 	// Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
 	// lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
-	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:XValidation:message="network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",rule="self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))"
 	// +optional
 	NetworkTags []string `json:"networkTags,omitempty"`
@@ -119,23 +120,28 @@ type KubeletConfiguration struct {
 	// SystemReserved contains resources reserved for OS system daemons and kernel memory.
 	// +kubebuilder:validation:XValidation:message="valid keys for systemReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="systemReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	SystemReserved map[string]string `json:"systemReserved,omitempty"`
 	// KubeReserved contains resources reserved for Kubernetes system components.
 	// +kubebuilder:validation:XValidation:message="valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="kubeReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	KubeReserved map[string]string `json:"kubeReserved,omitempty"`
 	// EvictionHard is the map of signal names to quantities that define hard eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionHard map[string]string `json:"evictionHard,omitempty"`
 	// EvictionSoft is the map of signal names to quantities that define soft eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionSoft map[string]string `json:"evictionSoft,omitempty"`
 	// EvictionSoftGracePeriod is the map of signal names to quantities that define grace periods for each eviction signal
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoftGracePeriod are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionSoftGracePeriod map[string]metav1.Duration `json:"evictionSoftGracePeriod,omitempty"`
 	// EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in
