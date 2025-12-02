@@ -75,16 +75,16 @@ spec:
                       - pd-ssd
                       - pd-standard
                       type: string
+                    secondaryBootImage:
+                      description: SecondaryBootImage is the secondary boot disk image
+                        name (e.g. global/images/DISK_IMAGE_NAME).
+                      type: string
                     secondaryBootMode:
                       description: SecondaryBootMode is the secondary boot disk mode
                         (e.g. CONTAINER_IMAGE_CACHE).
                       enum:
                       - MODE_UNSPECIFIED
                       - CONTAINER_IMAGE_CACHE
-                      type: string
-                    secondaryBootImage:
-                      description: SecondaryBootImage is the secondary boot disk image
-                        name (e.g. global/images/DISK_IMAGE_NAME).
                       type: string
                     sizeGiB:
                       description: 'SizeGiB is the size of the disk. Unit: GiB'
@@ -164,6 +164,7 @@ spec:
                       type: string
                     description: EvictionHard is the map of signal names to quantities
                       that define hard eviction thresholds
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
@@ -179,6 +180,7 @@ spec:
                       type: string
                     description: EvictionSoft is the map of signal names to quantities
                       that define soft eviction thresholds
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
@@ -188,6 +190,7 @@ spec:
                       type: string
                     description: EvictionSoftGracePeriod is the map of signal names
                       to quantities that define grace periods for each eviction signal
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for evictionSoftGracePeriod are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
@@ -218,6 +221,7 @@ spec:
                       type: string
                     description: KubeReserved contains resources reserved for Kubernetes
                       system components.
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']
@@ -245,6 +249,7 @@ spec:
                       type: string
                     description: SystemReserved contains resources reserved for OS
                       system daemons and kernel memory.
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for systemReserved are ['cpu','memory','ephemeral-storage','pid']
@@ -296,7 +301,7 @@ spec:
                   lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
                 items:
                   type: string
-                maxItems: 64
+                maxItems: 20
                 type: array
                 x-kubernetes-validations:
                 - message: network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
