@@ -73,7 +73,6 @@ type GCENodeClassSpec struct {
 	// Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
 	// lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
 	// +kubebuilder:validation:MaxItems=20
-	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:XValidation:message="network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",rule="self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))"
 	// +optional
 	NetworkTags []string `json:"networkTags,omitempty"`
