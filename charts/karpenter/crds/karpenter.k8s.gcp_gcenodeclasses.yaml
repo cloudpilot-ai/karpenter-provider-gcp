@@ -75,16 +75,16 @@ spec:
                       - pd-ssd
                       - pd-standard
                       type: string
+                    secondaryBootImage:
+                      description: SecondaryBootImage is the secondary boot disk image
+                        name (e.g. global/images/DISK_IMAGE_NAME).
+                      type: string
                     secondaryBootMode:
                       description: SecondaryBootMode is the secondary boot disk mode
                         (e.g. CONTAINER_IMAGE_CACHE).
                       enum:
                       - MODE_UNSPECIFIED
                       - CONTAINER_IMAGE_CACHE
-                      type: string
-                    secondaryBootImage:
-                      description: SecondaryBootImage is the secondary boot disk image
-                        name (e.g. global/images/DISK_IMAGE_NAME).
                       type: string
                     sizeGiB:
                       description: 'SizeGiB is the size of the disk. Unit: GiB'
@@ -301,7 +301,6 @@ spec:
                   lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
                 items:
                   type: string
-                  maxLength: 63
                 maxItems: 20
                 type: array
                 x-kubernetes-validations:
@@ -430,4 +429,3 @@ spec:
     storage: true
     subresources:
       status: {}
-
