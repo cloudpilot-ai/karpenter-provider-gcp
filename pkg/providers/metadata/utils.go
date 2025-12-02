@@ -285,13 +285,13 @@ func ApplyCustomMetadata(metadata *compute.Metadata, customMetadata map[string]s
 			// Key exists, append the value with comma separator
 			targetEntry.Value = swag.String(*targetEntry.Value + "," + value)
 			metadata.Items[index] = targetEntry
-		} else {
-			// Key doesn't exist, create a new metadata item
-			newItem := &compute.MetadataItems{
-				Key:   key,
-				Value: swag.String(value),
-			}
-			metadata.Items = append(metadata.Items, newItem)
+			continue
 		}
+		// Key doesn't exist, create a new metadata item
+		newItem := &compute.MetadataItems{
+			Key:   key,
+			Value: swag.String(value),
+		}
+		metadata.Items = append(metadata.Items, newItem)
 	}
 }
