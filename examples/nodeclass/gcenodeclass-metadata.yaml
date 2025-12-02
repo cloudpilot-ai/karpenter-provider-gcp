@@ -1,0 +1,19 @@
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: default-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  labels:
+    env: dev
+  metadata:
+    kube-labels: "cloud.google.com/gke-gpu-driver-version=latest"
+  networkTags:
+    - karpenter-default
+  kubeletConfiguration:
+    maxPods: 50
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true
