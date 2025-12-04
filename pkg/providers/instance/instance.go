@@ -452,6 +452,16 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
 
+	// Configure GPU on-host maintenance to TERMINATE if:
+	// 1. GPU is attached via template (GuestAccelerators like T4/P4/V100), or
+	// 2. Machine type has built-in GPUs (e.g., A2, A3, G2 series)
+	// GPU instances do not support live migration, so OnHostMaintenance must be TERMINATE.
+	hasAttachedGPU := len(instance.GuestAccelerators) > 0
+	hasBuiltInGPU := instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
+	if hasAttachedGPU || hasBuiltInGPU {
+		instance.Scheduling.OnHostMaintenance = "TERMINATE"
+	}
+
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
 
