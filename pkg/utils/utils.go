@@ -18,6 +18,8 @@ package utils
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"math"
 	"os"
 	"regexp"
@@ -155,10 +157,10 @@ func ResolveReservedEphemeralStorage(bootDiskGiB, totalSSDGiB, localSSDCount int
 		evictionThreshold = int64(float64(totalSSDGiB) * 0.10)
 
 		// System reservation based on number of SSDs
-		switch {
-		case localSSDCount == 1:
+		switch localSSDCount {
+		case 1:
 			systemReservation = 50
-		case localSSDCount == 2:
+		case 2:
 			systemReservation = 75
 		default: // 3 or more
 			systemReservation = 100
@@ -212,4 +214,8 @@ func ResolveNodePoolFromNodeClaim(ctx context.Context, kubeClient client.Client,
 	}
 	// There will be no nodePool referenced inside the nodeClaim in case of standalone nodeClaims
 	return nil, nil
+}
+
+func Hash(str string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(str)))
 }
