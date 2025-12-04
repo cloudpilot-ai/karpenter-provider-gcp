@@ -58,6 +58,8 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "/var/secrets/google/{{ .Values.credentials.secretKey }}"
             {{- end }}
+            - name: TELEMETRY_SHARE
+              value: "{{ .Values.controller.settings.telemetryShare }}"
             - name: KUBERNETES_MIN_VERSION
               value: "1.26.0"
             {{- with .Values.logLevel }}

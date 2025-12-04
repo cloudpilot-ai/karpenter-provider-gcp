@@ -58,6 +58,7 @@ type Options struct {
 	GCPAuth                string
 	NodePoolServiceAccount string
 	Interruption           bool
+	TelemetryShare         bool
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -68,6 +69,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
 	fs.StringVar(&o.NodePoolServiceAccount, nodePoolServiceAccountFlagName, env.WithDefaultString(nodePoolServiceAccountEnvVarName, ""), "Service account to use for default node pool templates. If not set, uses <project number>-compute@developer.gserviceaccount.com")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
+	fs.BoolVar(&o.TelemetryShare, "telemetry-share", env.WithDefaultBool("TELEMETRY_SHARE", true), "Enable telemetry sharing.")
 }
 
 func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
