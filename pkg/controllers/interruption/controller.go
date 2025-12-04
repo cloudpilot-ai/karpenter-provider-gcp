@@ -131,8 +131,7 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 			continue
 		}
 
-		condition := node.GetCondition(&currentNode, corev1.NodeReady)
-		if condition.Status != corev1.ConditionTrue && condition.Reason == NodeConditionReasonKubeletNotReady && condition.Message == NodeConditionMessageShuttingDown {
+		if IsNodeInterrupted(&currentNode) {
 			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, false); err != nil {
 				return fmt.Errorf("cleaning node claim: %w", err)
 			}
@@ -140,6 +139,18 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func IsNodeInterrupted(currentNode *corev1.Node) bool {
+	if currentNode == nil || currentNode.Labels == nil {
+		return false
+	}
+
+	condition := node.GetCondition(currentNode, corev1.NodeReady)
+
+	return condition.Status != corev1.ConditionTrue &&
+		condition.Reason == NodeConditionReasonKubeletNotReady &&
+		condition.Message == NodeConditionMessageShuttingDown
 }
 
 func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {
