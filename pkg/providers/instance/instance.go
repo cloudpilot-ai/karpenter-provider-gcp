@@ -56,9 +56,7 @@ const (
 	instanceTerminationActionDelete = "DELETE"
 )
 
-var (
-	InsufficientCapacityErrorCodes = sets.NewString("ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", "ZONE_RESOURCE_POOL_EXHAUSTED")
-)
+var InsufficientCapacityErrorCodes = sets.NewString("ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", "ZONE_RESOURCE_POOL_EXHAUSTED")
 
 type Provider interface {
 	Create(context.Context, *v1alpha1.GCENodeClass, *karpv1.NodeClaim, []*cloudprovider.InstanceType) (*Instance, error)
@@ -83,7 +81,8 @@ type DefaultProvider struct {
 }
 
 func NewProvider(clusterName, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
-	unavailableOfferings *pkgcache.UnavailableOfferings) Provider {
+	unavailableOfferings *pkgcache.UnavailableOfferings,
+) Provider {
 	return &DefaultProvider{
 		gkeProvider:           gkeProvider,
 		unavailableOfferings:  unavailableOfferings,
@@ -97,7 +96,8 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 }
 
 func (p *DefaultProvider) waitOperationDone(ctx context.Context,
-	instanceType, zone, capacityType, operationName string) error {
+	instanceType, zone, capacityType, operationName string,
+) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -283,7 +283,8 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 
 // zone should be based on the offering, for now lets return static zone from requirements
 func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.NodeClaim,
-	instanceType *cloudprovider.InstanceType, capacityType string) (string, error) {
+	instanceType *cloudprovider.InstanceType, capacityType string,
+) (string, error) {
 	zones, err := p.gkeProvider.ResolveClusterZones(ctx)
 	if err != nil {
 		return "", err
@@ -369,7 +370,8 @@ func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePo
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClass *v1alpha1.GCENodeClass, zone string) ([]*compute.AttachedDisk, error) {
+	nodeClass *v1alpha1.GCENodeClass, zone string,
+) ([]*compute.AttachedDisk, error) {
 	disks := nodeClass.Spec.Disks
 	sort.Slice(disks, func(i, j int) bool {
 		return disks[i].Boot
@@ -628,7 +630,7 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	})
 }
 
-func mergeInstanceTags(templateTags *compute.Tags, networkTags []string) *compute.Tags {
+func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
 	if (templateTags == nil || len(templateTags.Items) == 0) && len(networkTags) == 0 {
 		return nil
 	}
@@ -645,7 +647,11 @@ func mergeInstanceTags(templateTags *compute.Tags, networkTags []string) *comput
 	}
 
 	if len(networkTags) > 0 {
-		merged = append(merged, networkTags...)
+		tags := lo.Map(networkTags, func(tag v1alpha1.NetworkTag, _ int) string {
+			return string(tag)
+		})
+
+		merged = append(merged, tags...)
 	}
 
 	if len(merged) == 0 {
@@ -862,7 +868,6 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return fmt.Errorf("listing instances in zone %s: %w", zone, err)
 		}

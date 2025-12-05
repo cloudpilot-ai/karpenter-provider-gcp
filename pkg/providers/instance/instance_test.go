@@ -21,12 +21,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 func TestMergeInstanceTagsPreservesTemplateAndAddsNetworkTags(t *testing.T) {
 	base := &compute.Tags{Items: []string{"gke-default", "existing"}, Fingerprint: "fp"}
 
-	merged := mergeInstanceTags(base, []string{"existing", "custom"})
+	merged := mergeInstanceTags(base, []v1alpha1.NetworkTag{"existing", "custom"})
 
 	require.NotNil(t, merged)
 	require.Equal(t, []string{"gke-default", "existing", "existing", "custom"}, merged.Items)
@@ -36,7 +38,7 @@ func TestMergeInstanceTagsPreservesTemplateAndAddsNetworkTags(t *testing.T) {
 }
 
 func TestMergeInstanceTagsHandlesNilTemplate(t *testing.T) {
-	merged := mergeInstanceTags(nil, []string{"tag-one", "tag-two"})
+	merged := mergeInstanceTags(nil, []v1alpha1.NetworkTag{"tag-one", "tag-two"})
 
 	require.NotNil(t, merged)
 	require.Equal(t, []string{"tag-one", "tag-two"}, merged.Items)
