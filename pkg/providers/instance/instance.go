@@ -96,17 +96,22 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 }
 
 func (p *DefaultProvider) waitOperationDone(ctx context.Context,
-	instanceType, zone, capacityType, operationName string,
+	instanceType, zone, capacityType, operationName string, isGPU bool,
 ) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	timeout := time.NewTimer(10 * time.Second)
+	var timeout *time.Timer
+	if isGPU {
+		timeout = time.NewTimer(2 * time.Minute)
+	} else {
+		timeout = time.NewTimer(10 * time.Second)
+	}
 
 	for {
 		select {
 		case <-timeout.C:
-			// if the operation does not finish in 10s, it means there is enough resources and the creation will be successful
+			// if the operation does not finish in time, it means there is enough resources and the creation will be successful
 			return nil
 		case <-ticker.C:
 			op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(ctx).Do()
@@ -201,7 +206,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 				continue
 			}
 
-			if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
+			isGPU := len(template.Properties.GuestAccelerators) > 0 || instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
+			if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name, isGPU); err != nil {
 				log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
 				errs = append(errs, err)
 				continue
