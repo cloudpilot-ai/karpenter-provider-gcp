@@ -101,12 +101,12 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	timeout := time.NewTimer(10 * time.Second)
+	timeout := time.NewTimer(2 * time.Minute)
 
 	for {
 		select {
 		case <-timeout.C:
-			// if the operation does not finish in 10s, it means there is enough resources and the creation will be successful
+			// if the operation does not finish in 2mins, it means there is enough resources and the creation will be successful
 			return nil
 		case <-ticker.C:
 			op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(ctx).Do()
