@@ -56,6 +56,7 @@ func main() {
 		)...).
 		WithControllers(ctx, controllers.NewController(
 			ctx,
+			op.GetConfig(),
 			op.GetClient(),
 			op.KubernetesInterface,
 			op.EventRecorder,
