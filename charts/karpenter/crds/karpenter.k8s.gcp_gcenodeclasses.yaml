@@ -75,6 +75,19 @@ spec:
                       - pd-ssd
                       - pd-standard
                       type: string
+                    kmsKeyName:
+                      description: |-
+                        KMSKeyName is the Cloud KMS key to use for disk encryption.
+                        Format: projects/{project}/locations/{region}/keyRings/{keyring}/cryptoKeys/{key}
+                        Optionally, you can specify a version: projects/{project}/locations/{region}/keyRings/{keyring}/cryptoKeys/{key}/cryptoKeyVersions/{version}
+                      pattern: ^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+(/cryptoKeyVersions/[^/]+)?$
+                      type: string
+                    kmsKeyServiceAccount:
+                      description: |-
+                        KMSKeyServiceAccount is the service account to use for accessing the KMS key.
+                        If not specified, the Compute Engine default service account will be used.
+                      pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
+                      type: string
                     secondaryBootImage:
                       description: SecondaryBootImage is the secondary boot disk image
                         name (e.g. global/images/DISK_IMAGE_NAME).
