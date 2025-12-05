@@ -70,12 +70,9 @@ type GCENodeClassSpec struct {
 	// +optional
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// NetworkTags is a list of network tags to apply to the node.
-	// Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
-	// lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
 	// +kubebuilder:validation:MaxItems=20
-	// +kubebuilder:validation:XValidation:message="network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",rule="self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))"
 	// +optional
-	NetworkTags []string `json:"networkTags,omitempty"`
+	NetworkTags []NetworkTag `json:"networkTags,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
@@ -195,6 +192,14 @@ type DiskCategory string
 // SecondaryBootDiskMode is the mode of the secondary boot disk.
 // +kubebuilder:validation:Enum=MODE_UNSPECIFIED;CONTAINER_IMAGE_CACHE
 type SecondaryBootDiskMode string
+
+// NetworkTag represents a single GCE network tag value.
+// Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
+// lowercase letters, digits, and hyphens.
+// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
+// +kubebuilder:validation:MinLength=1
+// +kubebuilder:validation:MaxLength=63
+type NetworkTag string
 
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

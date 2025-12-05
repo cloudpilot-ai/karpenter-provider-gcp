@@ -295,17 +295,19 @@ spec:
                   metadata
                 type: object
               networkTags:
-                description: |-
-                  NetworkTags is a list of network tags to apply to the node.
-                  Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
-                  lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
+                description: NetworkTags is a list of network tags to apply to the
+                  node.
                 items:
+                  description: |-
+                    NetworkTag represents a single GCE network tag value.
+                    Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
+                    lowercase letters, digits, and hyphens.
+                  maxLength: 63
+                  minLength: 1
+                  pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
                   type: string
                 maxItems: 20
                 type: array
-                x-kubernetes-validations:
-                - message: network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
-                  rule: self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance
