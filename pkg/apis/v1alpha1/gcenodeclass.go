@@ -70,12 +70,9 @@ type GCENodeClassSpec struct {
 	// +optional
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// NetworkTags is a list of network tags to apply to the node.
-	// Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
-	// lowercase letters, digits, and hyphens. They must be between 1 and 63 characters long.
-	// +kubebuilder:validation:MaxItems=64
-	// +kubebuilder:validation:XValidation:message="network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",rule="self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))"
+	// +kubebuilder:validation:MaxItems=20
 	// +optional
-	NetworkTags []string `json:"networkTags,omitempty"`
+	NetworkTags []NetworkTag `json:"networkTags,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
@@ -119,23 +116,28 @@ type KubeletConfiguration struct {
 	// SystemReserved contains resources reserved for OS system daemons and kernel memory.
 	// +kubebuilder:validation:XValidation:message="valid keys for systemReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="systemReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	SystemReserved map[string]string `json:"systemReserved,omitempty"`
 	// KubeReserved contains resources reserved for Kubernetes system components.
 	// +kubebuilder:validation:XValidation:message="valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="kubeReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	KubeReserved map[string]string `json:"kubeReserved,omitempty"`
 	// EvictionHard is the map of signal names to quantities that define hard eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionHard map[string]string `json:"evictionHard,omitempty"`
 	// EvictionSoft is the map of signal names to quantities that define soft eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionSoft map[string]string `json:"evictionSoft,omitempty"`
 	// EvictionSoftGracePeriod is the map of signal names to quantities that define grace periods for each eviction signal
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoftGracePeriod are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionSoftGracePeriod map[string]metav1.Duration `json:"evictionSoftGracePeriod,omitempty"`
 	// EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in
@@ -172,14 +174,32 @@ type Disk struct {
 	// The category of the disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme).
 	// +optional
 	Category DiskCategory `json:"category,omitempty"`
-	// Indicates that this is a boot disk
+	// Indicates that this is a boot disk.
 	// +optional
 	Boot bool `json:"boot"`
+	// SecondaryBootImage is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME).
+	// +optional
+	SecondaryBootImage string `json:"secondaryBootImage,omitempty"`
+	// SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE).
+	// +optional
+	SecondaryBootMode SecondaryBootDiskMode `json:"secondaryBootMode,omitempty"`
 }
 
 // DiskCategory represents a disk category type
 // +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
 type DiskCategory string
+
+// SecondaryBootDiskMode is the mode of the secondary boot disk.
+// +kubebuilder:validation:Enum=MODE_UNSPECIFIED;CONTAINER_IMAGE_CACHE
+type SecondaryBootDiskMode string
+
+// NetworkTag represents a single GCE network tag value.
+// Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
+// lowercase letters, digits, and hyphens.
+// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
+// +kubebuilder:validation:MinLength=1
+// +kubebuilder:validation:MaxLength=63
+type NetworkTag string
 
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

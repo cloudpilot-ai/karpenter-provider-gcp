@@ -1,0 +1,59 @@
+name: Release image build
+
+on:
+  # Trigger on workflow_dispatch (manual trigger)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v1.0.0)'
+        required: false
+  # Trigger on push for new tags
+  push:
+    tags:
+      - '*'
+
+jobs:
+  image-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set tag from inputs or Git tag
+        id: set-tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "No valid trigger for building an image."
+            exit 1
+          fi
+        shell: bash
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.6'
+          cache: false
+
+      - name: Config env
+        run: |
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_AK }}" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SK }}" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
+
+      - name: AWS CLI Init
+        uses: unfor19/install-aws-cli-action@v1
+
+      - name: Config ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/cloudpilotai
+
+      - uses: ko-build/setup-ko@v0.6
+
+      - name: build and publish image
+        run: |
+          export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
+          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags ${{ env.tag }}

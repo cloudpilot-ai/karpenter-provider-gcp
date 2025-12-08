@@ -218,8 +218,8 @@ type NodeClaimTemplateSpec struct {
 func (in *NodeClaimTemplate) ToNodeClaim() *NodeClaim {
 	return &NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:      in.ObjectMeta.Labels,
-			Annotations: in.ObjectMeta.Annotations,
+			Labels:      in.Labels,
+			Annotations: in.Annotations,
 		},
 		Spec: NodeClaimSpec{
 			Taints:                 in.Spec.Taints,
@@ -359,7 +359,7 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
-		return false, serrors.Wrap(fmt.Errorf("invariant violated, invalid cron"), "cron", schedule)
+		return false, serrors.Wrap(fmt.Errorf("invariant violated, invalid cron, %w", err), "cron", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
 	checkPoint := c.Now().UTC().Add(-lo.FromPtr(in.Duration).Duration)

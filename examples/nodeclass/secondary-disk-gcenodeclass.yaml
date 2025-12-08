@@ -1,0 +1,16 @@
+# Example which demonstrates how to use secondary boot disks with Karpenter:
+# https://cloud.google.com/kubernetes-engine/docs/how-to/data-container-image-preloading
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: secondary-boot-disk-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true
+    - category: pd-balanced
+      secondaryImage: global/images/my-secondary-disk
+      secondaryBootMode: CONTAINER_IMAGE_CACHE
