@@ -101,11 +101,9 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	var timeout *time.Timer
+	timeout := time.NewTimer(10 * time.Second)
 	if isGPU {
 		timeout = time.NewTimer(2 * time.Minute)
-	} else {
-		timeout = time.NewTimer(10 * time.Second)
 	}
 
 	for {
