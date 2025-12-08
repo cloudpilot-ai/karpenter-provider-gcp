@@ -50,7 +50,9 @@ func main() {
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,
+			gcpCloudProvider,
 			clusterState,
+			op.InstanceTypeStore,
 		)...).
 		WithControllers(ctx, controllers.NewController(
 			ctx,

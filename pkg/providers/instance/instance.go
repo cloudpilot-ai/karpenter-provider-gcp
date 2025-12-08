@@ -55,6 +55,8 @@ const (
 	zoneOperationPollInterval      = 1 * time.Second
 	defaultZoneOperationTimeout    = 2 * time.Minute
 	ipSpaceInsufficientCapacityTTL = 30 * time.Second
+
+	instanceTerminationActionDelete = "DELETE"
 )
 
 var (
@@ -89,7 +91,8 @@ type DefaultProvider struct {
 }
 
 func NewProvider(clusterName, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
-	unavailableOfferings *pkgcache.UnavailableOfferings) Provider {
+	unavailableOfferings *pkgcache.UnavailableOfferings,
+) Provider {
 	return &DefaultProvider{
 		gkeProvider:           gkeProvider,
 		unavailableOfferings:  unavailableOfferings,
@@ -103,7 +106,8 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 }
 
 func (p *DefaultProvider) waitOperationDone(ctx context.Context,
-	instanceType, zone, capacityType, operationName string) error {
+	instanceType, zone, capacityType, operationName string,
+) error {
 	waitCtx := ctx
 	cancel := func() {}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -266,7 +270,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			Type:         instanceType.Name,
 			Location:     zone,
 			ProjectID:    p.projectID,
-			ImageID:      template.Properties.Disks[0].InitializeParams.SourceImage,
+			ImageID:      resolveInstanceImage(instance),
 			CreationTime: time.Now(),
 			CapacityType: capacityType,
 			Tags:         template.Properties.Labels,
@@ -329,6 +333,16 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 	return instance, false, nil
 }
 
+func resolveInstanceImage(instance *compute.Instance) string {
+	image, ok := lo.Find(instance.Disks, func(disk *compute.AttachedDisk) bool {
+		return disk.Boot
+	})
+	if !ok {
+		return ""
+	}
+	return image.InitializeParams.SourceImage
+}
+
 // getCapacityType selects spot if both constraints are flexible and there is an
 // available offering.
 func (p *DefaultProvider) getCapacityType(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) string {
@@ -367,7 +381,8 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 
 // zone should be based on the offering, for now lets return static zone from requirements
 func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.NodeClaim,
-	instanceType *cloudprovider.InstanceType, capacityType string) (string, error) {
+	instanceType *cloudprovider.InstanceType, capacityType string,
+) (string, error) {
 	zones, err := p.gkeProvider.ResolveClusterZones(ctx)
 	if err != nil {
 		return "", err
@@ -453,7 +468,8 @@ func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePo
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClass *v1alpha1.GCENodeClass, zone string) ([]*compute.AttachedDisk, error) {
+	nodeClass *v1alpha1.GCENodeClass, zone string,
+) ([]*compute.AttachedDisk, error) {
 	disks := nodeClass.Spec.Disks
 	sort.Slice(disks, func(i, j int) bool {
 		return disks[i].Boot
@@ -485,6 +501,9 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
 			}
 			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+		} else {
+			attachedDisk.DeviceName = metadata.GetSecondaryDiskImageDeviceName(disk.SecondaryBootImage)
+			attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
 		}
 
 		attachedDisks[i] = attachedDisk
@@ -514,6 +533,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// setup network interfaces
 	networkInterfaces := p.setupNetworkInterfaces(template, nodeClass)
 
+	sched := p.setupScheduling(template, capacityType)
+
 	// Create instance
 	instance := &compute.Instance{
 		Name:              instanceName,
@@ -523,12 +544,23 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
-		Scheduling:        template.Properties.Scheduling,
+		Scheduling:        sched,
 		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
+		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
 
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
+
+	// Configure GPU on-host maintenance to TERMINATE if:
+	// 1. GPU is attached via template (GuestAccelerators like T4/P4/V100), or
+	// 2. Machine type has built-in GPUs (e.g., A2, A3, G2 series)
+	// GPU instances do not support live migration, so OnHostMaintenance must be TERMINATE.
+	hasAttachedGPU := len(instance.GuestAccelerators) > 0
+	hasBuiltInGPU := instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
+	if hasAttachedGPU || hasBuiltInGPU {
+		instance.Scheduling.OnHostMaintenance = "TERMINATE"
+	}
 
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
@@ -603,7 +635,7 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 		return fmt.Errorf("failed to set max pods per node in metadata: %w", err)
 	}
 
-	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType); err != nil {
+	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType, capacityType); err != nil {
 		return fmt.Errorf("failed to render kubelet config metadata: %w", err)
 	}
 
@@ -619,6 +651,8 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 
 	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
 	metadata.AppendRegisteredLabel(instanceMetadata)
+	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
+	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
 
 	return nil
 }
@@ -644,6 +678,18 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass,
 			},
 		},
 	}
+}
+
+// setupScheduling configures scheduling for the instance
+func (p *DefaultProvider) setupScheduling(template *compute.InstanceTemplate, capacityType string) *compute.Scheduling {
+	sched := template.Properties.Scheduling
+	if sched == nil {
+		sched = &compute.Scheduling{}
+	}
+	if capacityType == karpv1.CapacityTypeSpot {
+		sched.InstanceTerminationAction = instanceTerminationActionDelete
+	}
+	return sched
 }
 
 // initializeInstanceLabels initializes the instance labels map
@@ -682,7 +728,7 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	})
 }
 
-func mergeInstanceTags(templateTags *compute.Tags, networkTags []string) *compute.Tags {
+func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
 	if (templateTags == nil || len(templateTags.Items) == 0) && len(networkTags) == 0 {
 		return nil
 	}
@@ -699,7 +745,11 @@ func mergeInstanceTags(templateTags *compute.Tags, networkTags []string) *comput
 	}
 
 	if len(networkTags) > 0 {
-		merged = append(merged, networkTags...)
+		tags := lo.Map(networkTags, func(tag v1alpha1.NetworkTag, _ int) string {
+			return string(tag)
+		})
+
+		merged = append(merged, tags...)
 	}
 
 	if len(merged) == 0 {
@@ -916,7 +966,6 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return fmt.Errorf("listing instances in zone %s: %w", zone, err)
 		}

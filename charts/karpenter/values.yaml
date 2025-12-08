@@ -41,7 +41,7 @@ controller:
       maxUnavailable: 1
   image:
     repository: "public.ecr.aws/cloudpilotai/gcp/karpenter"
-    tag: "v0.0.1"
+    tag: "v0.1.0-rc.0"
     pullPolicy: IfNotPresent
   priorityClassName: gmp-critical
   terminationGracePeriodSeconds: 30
@@ -57,6 +57,9 @@ controller:
   featureGates:
     # Enable this will enable spot replacement consolidation for both single and multi-node consolidation.
     spotToSpotConsolidation: true
+    # -- nodeOverlay is ALPHA and is disabled by default.
+    # Setting this will allow the use of node overlay to impact scheduling decisions
+    nodeOverlay: false
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

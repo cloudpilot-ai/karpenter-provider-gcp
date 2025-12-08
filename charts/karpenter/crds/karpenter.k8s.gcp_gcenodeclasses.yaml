@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.4
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: gcenodeclasses.karpenter.k8s.gcp
 spec:
   group: karpenter.k8s.gcp
@@ -58,7 +58,7 @@ spec:
                 items:
                   properties:
                     boot:
-                      description: Indicates that this is a boot disk
+                      description: Indicates that this is a boot disk.
                       type: boolean
                     category:
                       description: The category of the disk (e.g., pd-standard, pd-balanced,
@@ -74,6 +74,17 @@ spec:
                       - pd-extreme
                       - pd-ssd
                       - pd-standard
+                      type: string
+                    secondaryBootImage:
+                      description: SecondaryBootImage is the secondary boot disk image
+                        name (e.g. global/images/DISK_IMAGE_NAME).
+                      type: string
+                    secondaryBootMode:
+                      description: SecondaryBootMode is the secondary boot disk mode
+                        (e.g. CONTAINER_IMAGE_CACHE).
+                      enum:
+                      - MODE_UNSPECIFIED
+                      - CONTAINER_IMAGE_CACHE
                       type: string
                     sizeGiB:
                       description: 'SizeGiB is the size of the disk. Unit: GiB'
@@ -153,6 +164,7 @@ spec:
                       type: string
                     description: EvictionHard is the map of signal names to quantities
                       that define hard eviction thresholds
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
@@ -168,6 +180,7 @@ spec:
                       type: string
                     description: EvictionSoft is the map of signal names to quantities
                       that define soft eviction thresholds
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
@@ -177,6 +190,7 @@ spec:
                       type: string
                     description: EvictionSoftGracePeriod is the map of signal names
                       to quantities that define grace periods for each eviction signal
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for evictionSoftGracePeriod are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
@@ -207,6 +221,7 @@ spec:
                       type: string
                     description: KubeReserved contains resources reserved for Kubernetes
                       system components.
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']
@@ -234,6 +249,7 @@ spec:
                       type: string
                     description: SystemReserved contains resources reserved for OS
                       system daemons and kernel memory.
+                    maxProperties: 10
                     type: object
                     x-kubernetes-validations:
                     - message: valid keys for systemReserved are ['cpu','memory','ephemeral-storage','pid']
@@ -279,16 +295,19 @@ spec:
                   metadata
                 type: object
               networkTags:
-                description: NetworkTags is a list of network tags to apply to the node.
+                description: NetworkTags is a list of network tags to apply to the
+                  node.
                 items:
+                  description: |-
+                    NetworkTag represents a single GCE network tag value.
+                    Network tags must be RFC1035 compliant, start with a lowercase letter, and contain only
+                    lowercase letters, digits, and hyphens.
                   maxLength: 63
+                  minLength: 1
                   pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
                   type: string
-                maxItems: 64
+                maxItems: 20
                 type: array
-                x-kubernetes-validations:
-                - message: network tag must match ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
-                  rule: self.all(x, x.matches('^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'))
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance
