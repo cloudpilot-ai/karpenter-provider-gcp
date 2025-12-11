@@ -183,6 +183,17 @@ type Disk struct {
 	// SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE).
 	// +optional
 	SecondaryBootMode SecondaryBootDiskMode `json:"secondaryBootMode,omitempty"`
+	// KMSKeyName is the Cloud KMS key to use for disk encryption.
+	// Format: projects/{project}/locations/{region}/keyRings/{keyring}/cryptoKeys/{key}
+	// Optionally, you can specify a version: projects/{project}/locations/{region}/keyRings/{keyring}/cryptoKeys/{key}/cryptoKeyVersions/{version}
+	// +kubebuilder:validation:Pattern=`^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+(/cryptoKeyVersions/[^/]+)?$`
+	// +optional
+	KMSKeyName string `json:"kmsKeyName,omitempty"`
+	// KMSKeyServiceAccount is the service account to use for accessing the KMS key.
+	// If not specified, the Compute Engine default service account will be used.
+	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
+	// +optional
+	KMSKeyServiceAccount string `json:"kmsKeyServiceAccount,omitempty"`
 }
 
 // DiskCategory represents a disk category type
