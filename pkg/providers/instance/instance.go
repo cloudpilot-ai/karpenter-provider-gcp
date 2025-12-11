@@ -412,6 +412,14 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 			attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
 		}
 
+		// Add disk encryption key if specified
+		if disk.KMSKeyName != "" {
+			attachedDisk.DiskEncryptionKey = &compute.CustomerEncryptionKey{
+				KmsKeyName:           disk.KMSKeyName,
+				KmsKeyServiceAccount: disk.KMSKeyServiceAccount,
+			}
+		}
+
 		attachedDisks[i] = attachedDisk
 	}
 
