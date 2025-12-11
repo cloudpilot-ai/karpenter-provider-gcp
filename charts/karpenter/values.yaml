@@ -84,6 +84,8 @@ controller:
     # faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods
     # will be batched separately.
     batchIdleDuration: 1s
+    # Enable telemetry sharing
+    telemetryShare: "true"
 
 # -- GCP credentials configuration
 credentials:
