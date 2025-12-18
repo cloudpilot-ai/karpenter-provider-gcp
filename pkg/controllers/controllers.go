@@ -23,6 +23,8 @@ import (
 	"cloud.google.com/go/compute/metadata"
 	"github.com/awslabs/operatorpkg/controller"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/events"
 
@@ -38,6 +40,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/instancetype"
 	controllerspricing "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/pricing"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/telemetry"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
@@ -48,6 +51,7 @@ import (
 
 func NewController(
 	ctx context.Context,
+	restConfig *rest.Config,
 	kubeClient client.Client,
 	kubernetesInterface kubernetes.Interface,
 	recorder events.Recorder,
@@ -60,7 +64,8 @@ func NewController(
 	instanceTypeProvider providerinstancetype.Provider,
 	instanceProvider instance.Provider,
 	cloudProvider *cloudprovider.CloudProvider,
-	pricingProvider pricing.Provider) []controller.Controller {
+	pricingProvider pricing.Provider,
+) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
 		nodepooltemplate.NewController(nodePoolTemplateProvider),
@@ -83,6 +88,11 @@ func NewController(
 			instanceProvider,
 		))
 	}
+
+	controllers = append(controllers, telemetry.NewController(
+		kubeClient,
+		metricsclientset.NewForConfigOrDie(restConfig),
+	))
 
 	return controllers
 }
