@@ -141,16 +141,16 @@ func TestResolveReservedEphemeralStorage(t *testing.T) {
 			bootDiskGiB:      100,
 			totalSSDGiB:      0,
 			localSSDCount:    0,
-			expectedEviction: 10,  // 10% of 100GB
-			expectedSystem:   41,  // min(50, 35+6, 100) = min(50, 41, 100) = 41
+			expectedEviction: 10, // 10% of 100GB
+			expectedSystem:   41, // min(50, 35+6, 100) = min(50, 41, 100) = 41
 		},
 		{
 			name:             "200GB boot disk only",
 			bootDiskGiB:      200,
 			totalSSDGiB:      0,
 			localSSDCount:    0,
-			expectedEviction: 20,  // 10% of 200GB
-			expectedSystem:   76,  // min(100, 70+6, 100) = 76
+			expectedEviction: 20, // 10% of 200GB
+			expectedSystem:   76, // min(100, 70+6, 100) = 76
 		},
 		{
 			name:             "500GB boot disk only",
@@ -166,16 +166,16 @@ func TestResolveReservedEphemeralStorage(t *testing.T) {
 			bootDiskGiB:      100,
 			totalSSDGiB:      375,
 			localSSDCount:    1,
-			expectedEviction: 37,  // 10% of 375GB (rounded down)
-			expectedSystem:   50,  // 1 SSD = 50GB
+			expectedEviction: 37, // 10% of 375GB (rounded down)
+			expectedSystem:   50, // 1 SSD = 50GB
 		},
 		{
 			name:             "2 SSDs - 750GB",
 			bootDiskGiB:      100,
 			totalSSDGiB:      750,
 			localSSDCount:    2,
-			expectedEviction: 75,  // 10% of 750GB
-			expectedSystem:   75,  // 2 SSDs = 75GB
+			expectedEviction: 75, // 10% of 750GB
+			expectedSystem:   75, // 2 SSDs = 75GB
 		},
 		{
 			name:             "4 SSDs - 1500GB",
@@ -245,7 +245,7 @@ func TestResolveReservedResource(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cpu, memory, evict, ephEvict, ephSys := ResolveReservedResource(
 				tt.instanceType, tt.cpuMCore, tt.memoryMiB, tt.bootDiskGiB, tt.totalSSDGiB, tt.localSSDCount)
-			
+
 			assert.Equal(t, tt.expectedCPU, cpu, "CPU reservation mismatch")
 			assert.Equal(t, tt.expectedMemory, memory, "Memory reservation mismatch")
 			assert.Equal(t, tt.expectedEvict, evict, "Memory eviction mismatch")
