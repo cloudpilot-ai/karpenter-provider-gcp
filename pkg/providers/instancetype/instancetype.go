@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -153,7 +154,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			// We assume that all zones are available for all instance types in spot.
 			// Reference: https://cloud.google.com/compute/docs/instances/provisioning-models
 			ret := ZoneData{ID: zoneID, Available: true, SpotAvailable: true}
-			if !p.instanceTypesOfferings[instanceType].Has(zoneID) {
+			if ofs, ok := p.instanceTypesOfferings[instanceType]; !ok || !ofs.Has(zoneID) {
 				ret.Available = false
 			}
 			return ret
@@ -236,7 +237,11 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 			ofs = sets.New[string]()
 		}
 
-		newInstanceTypesOfferings[*mt.Name] = ofs.Insert(*mt.Zone)
+		zone := *mt.Zone
+		if lastSlash := strings.LastIndex(zone, "/"); lastSlash != -1 {
+			zone = zone[lastSlash+1:]
+		}
+		newInstanceTypesOfferings[*mt.Name] = ofs.Insert(zone)
 	}
 	p.instanceTypesOfferings = newInstanceTypesOfferings
 
