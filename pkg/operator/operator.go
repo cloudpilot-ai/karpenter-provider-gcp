@@ -85,8 +85,9 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 	auth := auth.Credential{
-		ProjectID: options.FromContext(ctx).ProjectID,
-		Region:    region,
+		ProjectID:       options.FromContext(ctx).ProjectID,
+		Region:          region,
+		ClusterLocation: options.FromContext(ctx).ClusterLocation,
 	}
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
@@ -101,6 +102,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
 		options.FromContext(ctx).Location,
+		options.FromContext(ctx).ClusterLocation,
 	)
 	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
 	pricingProvider, err := pricing.NewDefaultProvider(ctx, region)
@@ -121,7 +123,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		log.FromContext(ctx).Error(err, "failed to create gke client")
 		os.Exit(1)
 	}
-	gkeProvider := gke.NewDefaultProvider(gkeClient)
+	gkeProvider := gke.NewDefaultProvider(gkeClient, computeService)
 
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,
