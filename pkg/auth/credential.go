@@ -21,5 +21,6 @@ import "google.golang.org/api/option"
 type Credential struct {
 	ProjectID         string
 	Region            string
+	ClusterLocation   string
 	CredentialOptions option.ClientOption
 }
