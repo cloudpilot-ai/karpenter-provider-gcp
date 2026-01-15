@@ -52,6 +52,10 @@ spec:
               value: {{ .Values.controller.settings.projectID }}
             - name: LOCATION
               value: {{ .Values.controller.settings.location }}
+            {{- if .Values.controller.settings.clusterLocation }}
+            - name: CLUSTER_LOCATION
+              value: {{ .Values.controller.settings.clusterLocation }}
+            {{- end }}
             - name: CLUSTER_NAME
               value: {{ .Values.controller.settings.clusterName }}
             {{- if .Values.credentials.enabled }}
