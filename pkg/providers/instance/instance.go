@@ -246,6 +246,9 @@ func resolveInstanceImage(instance *compute.Instance) string {
 	if !ok {
 		return ""
 	}
+	if image.InitializeParams == nil {
+		return ""
+	}
 	return image.InitializeParams.SourceImage
 }
 
