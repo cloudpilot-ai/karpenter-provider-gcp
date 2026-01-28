@@ -50,8 +50,8 @@ type DefaultProvider struct {
 
 type ClusterInfo struct {
 	ProjectID       string
-	Location        string
 	ClusterLocation string
+	NodeLocation    string
 	Region          string
 	Name            string
 	Zones           []string
@@ -67,7 +67,7 @@ const (
 
 func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
 	containerService *container.Service, versionProvider version.Provider,
-	clusterName, region, projectID, serviceAccount, location, clusterLocation string) *DefaultProvider {
+	clusterName, region, projectID, serviceAccount, clusterLocation, nodeLocation string) *DefaultProvider {
 
 	zones, err := resolveZones(ctx, computeService, projectID, region)
 	if err != nil {
@@ -83,8 +83,8 @@ func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeSe
 		defaultServiceAccount: serviceAccount,
 		ClusterInfo: ClusterInfo{
 			ProjectID:       projectID,
-			Location:        location,
 			ClusterLocation: clusterLocation,
+			NodeLocation:    nodeLocation,
 			Region:          region,
 			Name:            clusterName,
 			Zones:           zones,
@@ -153,7 +153,7 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 		"zones", p.ClusterInfo.Zones)
 
 	nodePoolSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-		p.ClusterInfo.ProjectID, p.ClusterInfo.ClusterLocation, p.ClusterInfo.Name, nodePoolName)
+		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name, nodePoolName)
 
 	_, err := p.containerService.Projects.Locations.Clusters.NodePools.Get(nodePoolSelfLink).Context(ctx).Do()
 	if err == nil {
@@ -182,7 +182,7 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 	}
 
 	logger.Info("creating node pool", "name", nodePoolName)
-	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.ClusterInfo.ProjectID, p.ClusterInfo.ClusterLocation, p.ClusterInfo.Name)
+	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
 	_, err = p.containerService.Projects.Locations.Clusters.NodePools.Create(clusterSelfLink, nodePoolOpts).Context(ctx).Do()
 	if err != nil {
 		if errors.As(err, &gcpErr) && gcpErr.Code == http.StatusConflict {
@@ -220,7 +220,7 @@ func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]
 
 func (p *DefaultProvider) getNodePool(ctx context.Context, nodePoolName string) (*container.NodePool, error) {
 	nodePoolSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-		p.ClusterInfo.ProjectID, p.ClusterInfo.ClusterLocation, p.ClusterInfo.Name, nodePoolName)
+		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name, nodePoolName)
 	nodePool, err := p.containerService.Projects.Locations.Clusters.NodePools.Get(nodePoolSelfLink).Context(ctx).Do()
 	if err != nil {
 		log.FromContext(ctx).Error(err, "error getting node pool")
