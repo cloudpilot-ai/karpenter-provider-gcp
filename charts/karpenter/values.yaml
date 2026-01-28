@@ -71,8 +71,11 @@ controller:
   settings:
     # -- The GCP project ID.
     projectID: ""
-    # -- The GCP cluster region or zone
-    location: ""
+    # -- The GCP region for instance type discovery (e.g., us-central1)
+    clusterLocation: ""
+    # -- The exact GCP cluster location for GKE API calls (e.g., us-central1-a for zonal, us-central1 for regional).
+    # If not set, defaults to 'clusterLocation' for backward compatibility.
+    nodeLocation: ""
     # -- The GCP cluster name.
     clusterName: ""
     # -- The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%.
