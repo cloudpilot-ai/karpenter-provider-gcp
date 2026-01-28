@@ -30,8 +30,10 @@ import (
 const (
 	projectIDEnvVarName               = "PROJECT_ID"
 	projectIDFlagName                 = "project-id"
-	locationEnvVarName                = "LOCATION"
-	locationFlagName                  = "location"
+	clusterLocationEnvVarName         = "CLUSTER_LOCATION"
+	clusterLocationFlagName           = "cluster-location"
+	nodeLocationEnvVarName            = "NODE_LOCATION"
+	nodeLocationFlagName              = "node-location"
 	gkeClusterNameEnvVarName          = "CLUSTER_NAME"
 	gkeClusterFlagName                = "cluster-name"
 	vmMemoryOverheadPercentEnvVarName = "VM_MEMORY_OVERHEAD_PERCENT"
@@ -50,7 +52,8 @@ type optionsKey struct{}
 
 type Options struct {
 	ProjectID               string
-	Location                string
+	ClusterLocation         string
+	NodeLocation            string
 	ClusterName             string
 	VMMemoryOverheadPercent float64
 	// GCPAuth is the path to the Google Application Credentials JSON file.
@@ -62,7 +65,8 @@ type Options struct {
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.ProjectID, projectIDFlagName, env.WithDefaultString(projectIDEnvVarName, ""), "GCP project ID where the GKE cluster is running.")
-	fs.StringVar(&o.Location, locationFlagName, env.WithDefaultString(locationEnvVarName, ""), "GCP region or zone of the GKE cluster.")
+	fs.StringVar(&o.ClusterLocation, clusterLocationFlagName, env.WithDefaultString(clusterLocationEnvVarName, ""), "GCP region for instance type discovery (e.g., us-central1).")
+	fs.StringVar(&o.NodeLocation, nodeLocationFlagName, env.WithDefaultString(nodeLocationEnvVarName, ""), "Exact GCP location of the GKE cluster for API calls (e.g., us-central1-a for zonal, us-central1 for regional). Defaults to 'clusterLocation' if not set.")
 	fs.StringVar(&o.ClusterName, gkeClusterFlagName, env.WithDefaultString(gkeClusterNameEnvVarName, ""), "Name of the GKE cluster that provisioned nodes should connect to.")
 	fs.Float64Var(&o.VMMemoryOverheadPercent, vmMemoryOverheadPercentFlagName, utils.WithDefaultFloat64(vmMemoryOverheadPercentEnvVarName, 0.07), "Percentage of memory overhead for VM. If not set, the controller will use the default value 7%.")
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
@@ -77,6 +81,12 @@ func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
 		}
 		return fmt.Errorf("parsing flags, %w", err)
 	}
+
+	// Backward compatibility: if NodeLocation not set, default to ClusterLocation
+	if o.NodeLocation == "" {
+		o.NodeLocation = o.ClusterLocation
+	}
+
 	if err := o.Validate(); err != nil {
 		return fmt.Errorf("validating options, %w", err)
 	}

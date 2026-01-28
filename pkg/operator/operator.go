@@ -68,7 +68,7 @@ type Operator struct {
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	os.Setenv(options.GCPAuth, options.FromContext(ctx).GCPAuth)
 
-	region, err := determineRegion(ctx, options.FromContext(ctx).ProjectID, options.FromContext(ctx).Location)
+	region, err := determineRegion(ctx, options.FromContext(ctx).ProjectID, options.FromContext(ctx).ClusterLocation)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to determine region")
 		os.Exit(1)
@@ -85,8 +85,9 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 	auth := auth.Credential{
-		ProjectID: options.FromContext(ctx).ProjectID,
-		Region:    region,
+		ProjectID:    options.FromContext(ctx).ProjectID,
+		Region:       region,
+		NodeLocation: options.FromContext(ctx).NodeLocation,
 	}
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
@@ -100,7 +101,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		region,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
-		options.FromContext(ctx).Location,
+		options.FromContext(ctx).ClusterLocation,
+		options.FromContext(ctx).NodeLocation,
 	)
 	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
 	pricingProvider, err := pricing.NewDefaultProvider(ctx, region)
@@ -121,7 +123,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		log.FromContext(ctx).Error(err, "failed to create gke client")
 		os.Exit(1)
 	}
-	gkeProvider := gke.NewDefaultProvider(gkeClient)
+	gkeProvider := gke.NewDefaultProvider(gkeClient, computeService)
 
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,

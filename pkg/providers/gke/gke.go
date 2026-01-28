@@ -19,12 +19,12 @@ package gke
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	container "cloud.google.com/go/container/apiv1"
-	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 	"github.com/patrickmn/go-cache"
-	"github.com/samber/lo"
+	"google.golang.org/api/compute/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
@@ -42,15 +42,17 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
-	gkeClient *container.ClusterManagerClient
+	gkeClient      *container.ClusterManagerClient
+	computeService *compute.Service
 
 	zoneCache *cache.Cache
 }
 
-func NewDefaultProvider(gkeClient *container.ClusterManagerClient) Provider {
+func NewDefaultProvider(gkeClient *container.ClusterManagerClient, computeService *compute.Service) Provider {
 	return &DefaultProvider{
-		gkeClient: gkeClient,
-		zoneCache: cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
+		gkeClient:      gkeClient,
+		computeService: computeService,
+		zoneCache:      cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
 	}
 }
 
@@ -61,22 +63,33 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 	}
 
 	projectID := options.FromContext(ctx).ProjectID
-	clusterName := options.FromContext(ctx).ClusterName
-	resp, err := p.gkeClient.ListClusters(ctx, &containerpb.ListClustersRequest{
-		Parent: fmt.Sprintf("projects/%s/locations/-", projectID),
+	clusterLocation := options.FromContext(ctx).ClusterLocation
+
+	region := clusterLocation
+	if strings.Count(clusterLocation, "-") == 2 {
+		parts := strings.Split(clusterLocation, "-")
+		region = strings.Join(parts[:2], "-")
+	}
+
+	var zones []string
+	prefix := region + "-"
+	err := p.computeService.Zones.List(projectID).Pages(ctx, func(page *compute.ZoneList) error {
+		for _, z := range page.Items {
+			if strings.HasPrefix(z.Name, prefix) {
+				zones = append(zones, z.Name)
+			}
+		}
+		return nil
 	})
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to list clusters")
+		log.FromContext(ctx).Error(err, "error listing zones from GCP")
 		return nil, err
 	}
 
-	targetCluster, ok := lo.Find(resp.Clusters, func(cluster *containerpb.Cluster) bool {
-		return cluster.Name == clusterName
-	})
-	if !ok {
-		return nil, fmt.Errorf("cluster %s not found", clusterName)
+	if len(zones) == 0 {
+		return nil, fmt.Errorf("no zones found for region: %s", region)
 	}
-	p.zoneCache.Set(zoneCacheKey, targetCluster.Locations, cache.DefaultExpiration)
 
-	return targetCluster.Locations, nil
+	p.zoneCache.Set(zoneCacheKey, zones, cache.DefaultExpiration)
+	return zones, nil
 }
