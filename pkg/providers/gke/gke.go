@@ -63,11 +63,11 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 	}
 
 	projectID := options.FromContext(ctx).ProjectID
-	location := options.FromContext(ctx).Location
+	clusterLocation := options.FromContext(ctx).ClusterLocation
 
-	region := location
-	if strings.Count(location, "-") == 2 {
-		parts := strings.Split(location, "-")
+	region := clusterLocation
+	if strings.Count(clusterLocation, "-") == 2 {
+		parts := strings.Split(clusterLocation, "-")
 		region = strings.Join(parts[:2], "-")
 	}
 
