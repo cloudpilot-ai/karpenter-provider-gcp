@@ -36,4 +36,4 @@ jobs:
       - name: build and publish image
         run: |
           export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
-          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags v0.0.1
+          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags latest
