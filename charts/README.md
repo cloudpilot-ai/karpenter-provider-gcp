@@ -58,10 +58,12 @@ export REGION=<gke-region-name>
 export DEFAULT_NODEPOOL_SERVICE_ACCOUNT=<your-custom-service-account-email>
 ```
 
-Then clone this repository and install the chart with the following command:
+Then install the chart with the following command:
 
 ```sh
 # For Workload Identity
+helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
+
 helm upgrade karpenter charts/karpenter --install \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
@@ -140,9 +142,11 @@ export REGION=<gke-region-name>
 export DEFAULT_NODEPOOL_SERVICE_ACCOUNT=<your-custom-service-account-email>
 ```
 
-Then clone this repository and install the chart with the following command:
+Then install the chart with the following command:
 
 ```sh
+helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
+
 # For Service Account Keys
 helm upgrade karpenter charts/karpenter --install \
   --namespace karpenter-system --create-namespace \
