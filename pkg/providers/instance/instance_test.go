@@ -21,8 +21,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/googleapi"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 )
 
 func TestMergeInstanceTagsPreservesTemplateAndAddsNetworkTags(t *testing.T) {
@@ -48,4 +50,76 @@ func TestMergeInstanceTagsHandlesNilTemplate(t *testing.T) {
 func TestMergeInstanceTagsReturnsNilWhenNoTags(t *testing.T) {
 	require.Nil(t, mergeInstanceTags(nil, nil))
 	require.Nil(t, mergeInstanceTags(&compute.Tags{}, nil))
+}
+
+func TestIsInsufficientCapacityErrorMatchesCode(t *testing.T) {
+	t.Parallel()
+
+	entry := &compute.OperationErrorErrors{Code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}
+
+	require.True(t, isInsufficientCapacityError(entry))
+}
+
+func TestIsInsufficientCapacityErrorIgnoresMessageOnly(t *testing.T) {
+	t.Parallel()
+
+	entry := &compute.OperationErrorErrors{Message: "some failure IP_SPACE_EXHAUSTED_WITH_DETAILS for range"}
+
+	require.False(t, isInsufficientCapacityError(entry))
+}
+
+func TestIsInsufficientCapacityErrorNonMatching(t *testing.T) {
+	t.Parallel()
+
+	entry := &compute.OperationErrorErrors{Code: "UNKNOWN", Message: "other issue"}
+
+	require.False(t, isInsufficientCapacityError(entry))
+}
+
+func TestExtractInsertInsufficientCapacityReasonMatchesReason(t *testing.T) {
+	t.Parallel()
+
+	reason, code, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{
+		Errors: []googleapi.ErrorItem{{Reason: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}},
+	})
+
+	require.True(t, ok)
+	require.Equal(t, "IP_SPACE_EXHAUSTED_WITH_DETAILS", reason)
+	require.Equal(t, "IP_SPACE_EXHAUSTED_WITH_DETAILS", code)
+}
+
+func TestExtractInsertInsufficientCapacityReasonRequiresStructuredReason(t *testing.T) {
+	t.Parallel()
+
+	reason, code, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{
+		Message: "some failure IP_SPACE_EXHAUSTED for range",
+	})
+
+	require.False(t, ok)
+	require.Empty(t, reason)
+	require.Empty(t, code)
+}
+
+func TestExtractInsertInsufficientCapacityReasonNonMatching(t *testing.T) {
+	t.Parallel()
+
+	_, _, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{Message: "some other issue"})
+
+	require.False(t, ok)
+}
+
+func TestInsufficientCapacityBackoffTTLForIPSpace(t *testing.T) {
+	t.Parallel()
+
+	ttl := insufficientCapacityBackoffTTL("IP_SPACE_EXHAUSTED")
+
+	require.Equal(t, ipSpaceInsufficientCapacityTTL, ttl)
+}
+
+func TestInsufficientCapacityBackoffTTLForOtherReasons(t *testing.T) {
+	t.Parallel()
+
+	ttl := insufficientCapacityBackoffTTL("ZONE_RESOURCE_POOL_EXHAUSTED")
+
+	require.Equal(t, pkgcache.UnavailableOfferingsTTL, ttl)
 }

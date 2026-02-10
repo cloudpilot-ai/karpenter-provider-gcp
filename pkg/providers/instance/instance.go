@@ -49,14 +49,24 @@ import (
 )
 
 const (
-	maxInstanceTypes        = 20
-	maxNodeCIDR             = 23
-	instanceCacheExpiration = 15 * time.Second
+	maxInstanceTypes               = 20
+	maxNodeCIDR                    = 23
+	instanceCacheExpiration        = 15 * time.Second
+	zoneOperationPollInterval      = 1 * time.Second
+	defaultZoneOperationTimeout    = 2 * time.Minute
+	ipSpaceInsufficientCapacityTTL = 30 * time.Second
 
 	instanceTerminationActionDelete = "DELETE"
 )
 
-var InsufficientCapacityErrorCodes = sets.NewString("ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", "ZONE_RESOURCE_POOL_EXHAUSTED")
+var (
+	InsufficientCapacityErrorCodes = sets.NewString(
+		"ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+		"ZONE_RESOURCE_POOL_EXHAUSTED",
+		"IP_SPACE_EXHAUSTED_WITH_DETAILS",
+		"IP_SPACE_EXHAUSTED",
+	)
+)
 
 type Provider interface {
 	Create(context.Context, *v1alpha1.GCENodeClass, *karpv1.NodeClaim, []*cloudprovider.InstanceType) (*Instance, error)
@@ -96,50 +106,102 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 }
 
 func (p *DefaultProvider) waitOperationDone(ctx context.Context,
-	instanceType, zone, capacityType, operationName string, isGPU bool,
+	instanceType, zone, capacityType, operationName string,
 ) error {
-	ticker := time.NewTicker(1 * time.Second)
+	waitCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		waitCtx, cancel = context.WithTimeout(ctx, defaultZoneOperationTimeout)
+	}
+	defer cancel()
+
+	ticker := time.NewTicker(zoneOperationPollInterval)
 	defer ticker.Stop()
 
-	timeout := time.NewTimer(10 * time.Second)
-	if isGPU {
-		timeout = time.NewTimer(2 * time.Minute)
-	}
-
 	for {
-		select {
-		case <-timeout.C:
-			// if the operation does not finish in time, it means there is enough resources and the creation will be successful
-			return nil
-		case <-ticker.C:
-			op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(ctx).Do()
-			if err != nil {
-				return fmt.Errorf("getting operation: %w", err)
+		op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(waitCtx).Do()
+		if err != nil {
+			if waitCtx.Err() != nil {
+				return fmt.Errorf("waiting for operation %s: %w", operationName, waitCtx.Err())
 			}
+			return fmt.Errorf("getting operation: %w", err)
+		}
 
-			if op.Status != "DONE" {
-				continue
-			}
-
+		if op.Status == "DONE" {
 			if op.Error != nil {
-				capacityError, found := lo.Find(op.Error.Errors, func(e *compute.OperationErrorErrors) bool {
-					// Example in real environment:
-					// Error: ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS The zone 'projects/project-id/zones/us-west1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'.
-					return InsufficientCapacityErrorCodes.Has(e.Code)
-				})
-				if found {
-					p.unavailableOfferings.MarkUnavailable(ctx, capacityError.Message, instanceType, zone, capacityType)
-					return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone resource pool exhausted: %s", capacityError.Message))
-				}
-
-				errorMsgs := lo.Map(op.Error.Errors, func(e *compute.OperationErrorErrors, _ int) string {
-					return e.Message
-				})
-				return fmt.Errorf("operation failed: %s", strings.Join(errorMsgs, "; "))
+				return p.handleZoneOperationError(waitCtx, op, instanceType, zone, capacityType)
 			}
 			return nil
 		}
+
+		if err := waitForNextTick(waitCtx, ticker); err != nil {
+			return fmt.Errorf("waiting for operation %s: %w", operationName, err)
+		}
 	}
+}
+
+func waitForNextTick(ctx context.Context, ticker *time.Ticker) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-ticker.C:
+		return nil
+	}
+}
+
+func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *compute.Operation, instanceType, zone, capacityType string) error {
+	capacityError, found := lo.Find(op.Error.Errors, func(e *compute.OperationErrorErrors) bool {
+		return isInsufficientCapacityError(e)
+	})
+	if found {
+		reason := capacityError.Message
+		if reason == "" {
+			reason = capacityError.Code
+		}
+		ttl := insufficientCapacityBackoffTTL(capacityError.Code)
+		p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType, zone, capacityType, ttl)
+		return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+	}
+
+	errorMsgs := lo.Map(op.Error.Errors, func(e *compute.OperationErrorErrors, _ int) string {
+		return e.Message
+	})
+	return fmt.Errorf("operation failed: %s", strings.Join(errorMsgs, "; "))
+}
+
+func isInsufficientCapacityError(operationError *compute.OperationErrorErrors) bool {
+	if operationError == nil {
+		return false
+	}
+
+	return InsufficientCapacityErrorCodes.Has(operationError.Code)
+}
+
+func extractInsertInsufficientCapacityReason(err error) (string, string, bool) {
+	var apiError *googleapi.Error
+	if !errors.As(err, &apiError) {
+		return "", "", false
+	}
+
+	for _, detail := range apiError.Errors {
+		if InsufficientCapacityErrorCodes.Has(detail.Reason) {
+			reason := detail.Message
+			if reason == "" {
+				reason = detail.Reason
+			}
+			return reason, detail.Reason, true
+		}
+	}
+
+	return "", "", false
+}
+
+func insufficientCapacityBackoffTTL(reasonCode string) time.Duration {
+	if reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS" || reasonCode == "IP_SPACE_EXHAUSTED" {
+		return ipSpaceInsufficientCapacityTTL
+	}
+
+	return pkgcache.UnavailableOfferingsTTL
 }
 
 func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
@@ -184,32 +246,13 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			continue
 		}
 
-		instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
-		// We need to check it in the following scenario:
-		// 1. The instance is in the creation process.
-		// 2. The pod is terminated
-		// 3. The new pod will try to create the instance again, but it will fail because the instance is already in the creation process.
-		instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
+		instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, capacityType)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
-			return nil, fmt.Errorf("failed to check if instance exists: %w", err)
-		}
-
-		if !exists {
-			instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
-			op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
-			if err != nil {
-				log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+			if retryable {
 				errs = append(errs, err)
 				continue
 			}
-
-			isGPU := len(template.Properties.GuestAccelerators) > 0 || instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
-			if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name, isGPU); err != nil {
-				log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
-				errs = append(errs, err)
-				continue
-			}
+			return nil, err
 		}
 
 		// we could wait for the node to be present in kubernetes api via csr sign up
@@ -236,7 +279,58 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		}, nil
 	}
 
-	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
+	if len(errs) == 0 {
+		return nil, fmt.Errorf("failed to create instance after trying all instance types: unknown error")
+	}
+
+	joined := errors.Join(errs...)
+	if lo.SomeBy(errs, func(err error) bool { return cloudprovider.IsInsufficientCapacityError(err) }) {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("failed to create instance after trying all instance types: %w", joined))
+	}
+
+	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
+}
+
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, capacityType string) (*compute.Instance, bool, error) {
+	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
+	instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
+		return nil, false, fmt.Errorf("failed to check if instance exists: %w", err)
+	}
+
+	if exists {
+		return instance, false, nil
+	}
+
+	instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
+	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+	if err != nil {
+		reason, reasonCode, insufficient := extractInsertInsufficientCapacityReason(err)
+		if insufficient {
+			if reason == "" {
+				reason = "insufficient capacity"
+			}
+			ttl := insufficientCapacityBackoffTTL(reasonCode)
+			p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType.Name, zone, capacityType, ttl)
+			err = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+
+			// If IP space is exhausted, trying other instance types won't help as they share the same subnet.
+			// We should fail fast to avoid unnecessary API calls and noise.
+			if reasonCode == "IP_SPACE_EXHAUSTED" || reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS" {
+				return nil, false, err
+			}
+		}
+		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+		return nil, true, err
+	}
+
+	if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
+		log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+		return nil, true, err
+	}
+
+	return instance, false, nil
 }
 
 func resolveInstanceImage(instance *compute.Instance) string {
