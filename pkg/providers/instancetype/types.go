@@ -120,6 +120,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", mt.GetMemoryMb())),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCategory, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceShape, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGeneration, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceSize, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUName, corev1.NodeSelectorOpDoesNotExist),
@@ -147,17 +148,15 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 	instanceTypeParts := strings.Split(aws.StringValue(mt.Name), "-")
 	if len(instanceTypeParts) >= 2 {
 		requirements.Get(v1alpha1.LabelInstanceCategory).Insert(extractCategory(instanceTypeParts[0]))
-		requirements.Get(v1alpha1.LabelInstanceSize).Insert(instanceTypeParts[len(instanceTypeParts)-1])
+		sizeOffset := 1
+		if len(instanceTypeParts) > 3 {
+			sizeOffset = 2
+		}
+		requirements.Get(v1alpha1.LabelInstanceSize).Insert(instanceTypeParts[len(instanceTypeParts)-sizeOffset])
 		// The laster number of the first part is the generation
 		requirements.Get(v1alpha1.LabelInstanceGeneration).Insert(extractGeneration(instanceTypeParts[0]))
-
-		if len(instanceTypeParts) == 2 {
-			requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0])
-		}
-		// If there are three parts, also insert the first two joined as family
-		if len(instanceTypeParts) == 3 {
-			requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0] + "-" + instanceTypeParts[1])
-		}
+		requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0])
+		requirements.Get(v1alpha1.LabelInstanceShape).Insert(instanceTypeParts[1])
 
 		requirements.Get(corev1.LabelArchStable).Insert(extractArch(instanceTypeParts[0]))
 	}
@@ -173,8 +172,11 @@ func extractGPUName(mt *computepb.MachineType) string {
 }
 
 func extractGeneration(instanceTypePrefix string) string {
-	// The laster number of the first part is the generation
-	return string(instanceTypePrefix[len(instanceTypePrefix)-1])
+	offset := 1
+	if len(instanceTypePrefix) == 3 {
+		offset = 2
+	}
+	return string(instanceTypePrefix[len(instanceTypePrefix)-offset])
 }
 
 func extractArch(instanceTypePrefix string) string {
