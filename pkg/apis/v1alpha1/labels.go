@@ -81,6 +81,7 @@ var (
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
 	LabelInstanceCategory                    = apis.Group + "/instance-category"
 	LabelInstanceFamily                      = apis.Group + "/instance-family"
+	LabelInstanceShape                       = apis.Group + "/instance-shape"
 	LabelInstanceGeneration                  = apis.Group + "/instance-generation"
 	LabelInstanceSize                        = apis.Group + "/instance-size"
 	LabelInstanceCPU                         = apis.Group + "/instance-cpu"
