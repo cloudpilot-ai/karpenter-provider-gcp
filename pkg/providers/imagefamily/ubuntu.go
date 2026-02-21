@@ -47,7 +47,7 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 }
 
 var (
-	ubuntuArm64Pattern     = `(projects\/ubuntu-os-gke-cloud\/global\/images\/ubuntu-gke-\d+-\d+-\d+)-v(\d+)`
+	ubuntuArm64Pattern     = `(projects\/ubuntu-os-gke-cloud\/global\/images\/ubuntu-gke-.*?)(?:-amd64)?-v(\d+)`
 	ubuntuArm64Replacement = `$1-arm64-$2`
 	ubuntuArm64Re          = regexp.MustCompile(ubuntuArm64Pattern)
 )

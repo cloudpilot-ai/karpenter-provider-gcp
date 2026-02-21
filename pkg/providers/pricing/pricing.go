@@ -120,12 +120,18 @@ func (p *DefaultProvider) OnDemandPrice(instanceType string) (float64, bool) {
 }
 
 // Zone parameter is ignored, cause in GCP prices are regional
-func (p *DefaultProvider) SpotPrice(instanceType string, zone string) (float64, bool) {
+func (p *DefaultProvider) SpotPrice(instanceType string, _ string) (float64, bool) {
 	p.muSpot.RLock()
-	defer p.muSpot.RUnlock()
-
 	price, ok := p.spotPrices[instanceType]
-	return price, ok
+	p.muSpot.RUnlock()
+	if ok {
+		return price, true
+	}
+	// Fallback to on-demand price with a default spot discount (e.g., 60%) if spot price is unknown
+	if odPrice, ok := p.OnDemandPrice(instanceType); ok {
+		return odPrice * 0.4, true
+	}
+	return 0, false
 }
 
 func (p *DefaultProvider) downloadCSV(ctx context.Context) ([][]string, error) {
