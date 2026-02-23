@@ -70,12 +70,16 @@ func TestDefaultProvider_InitialPrices(t *testing.T) {
 	}
 
 	// Test getting spot prices for various instance types
-	// Should fail, cause initial prices doesn't contain spot prices
+	// Initial state does not contain spot prices, so provider should return fallback (40% of on-demand).
 	for _, instanceType := range testInstanceTypes {
-		_, found := provider.SpotPrice(instanceType, "europe-west4-a")
-		if found {
-			t.Errorf("Expected to not find spot price for %s instance type, while prices wasn't updated", instanceType)
+		onDemandPrice, _ := provider.OnDemandPrice(instanceType)
+		spotPrice, found := provider.SpotPrice(instanceType, "europe-west4-a")
+		if !found {
+			t.Errorf("Expected to find fallback spot price for %s instance type", instanceType)
 			continue
+		}
+		if spotPrice != onDemandPrice*0.4 {
+			t.Errorf("Expected fallback spot price %f for %s, got %f", onDemandPrice*0.4, instanceType, spotPrice)
 		}
 	}
 
@@ -83,6 +87,11 @@ func TestDefaultProvider_InitialPrices(t *testing.T) {
 	_, found := provider.OnDemandPrice("non-existent-type")
 	if found {
 		t.Error("Expected to not find price for non-existent instance type")
+	}
+
+	_, found = provider.SpotPrice("non-existent-type", "europe-west4-a")
+	if found {
+		t.Error("Expected to not find spot price for non-existent instance type")
 	}
 }
 
