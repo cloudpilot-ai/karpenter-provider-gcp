@@ -78,7 +78,7 @@ var (
 	ImageFamilyCustom               = "Custom"
 
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
-	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
+	LabelTopologyZoneID                      = "topology.kubernetes.io/zone"
 	LabelInstanceCategory                    = apis.Group + "/instance-category"
 	LabelInstanceFamily                      = apis.Group + "/instance-family"
 	LabelInstanceShape                       = apis.Group + "/instance-shape"
