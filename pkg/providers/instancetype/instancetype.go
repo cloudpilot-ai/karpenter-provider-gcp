@@ -149,16 +149,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 			continue
 		}
 
-		// Make sure all zone is checked.
-		zoneData := lo.Map(zones, func(zoneID string, _ int) ZoneData {
-			// We assume that all zones are available for all instance types in spot.
-			// Reference: https://cloud.google.com/compute/docs/instances/provisioning-models
-			ret := ZoneData{ID: zoneID, Available: true, SpotAvailable: true}
-			if ofs, ok := p.instanceTypesOfferings[instanceType]; !ok || !ofs.Has(zoneID) {
-				ret.Available = false
-			}
-			return ret
-		})
+		zoneData := p.buildZoneData(instanceType, zones)
 		offerings := p.createOfferings(ctx, instanceType, zoneData)
 		if len(offerings) == 0 {
 			continue
@@ -170,6 +161,19 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	p.instanceTypesCache.SetDefault(listKey, instanceTypes)
 
 	return instanceTypes, nil
+}
+
+// buildZoneData checks zonal availability from cached offerings while keeping spot
+// availability enabled for all zones per GCP spot provisioning behavior.
+func (p *DefaultProvider) buildZoneData(instanceType string, zones []string) []ZoneData {
+	ofs, ok := p.instanceTypesOfferings[instanceType]
+	return lo.Map(zones, func(zoneID string, _ int) ZoneData {
+		ret := ZoneData{ID: zoneID, Available: true, SpotAvailable: true}
+		if !ok || !ofs.Has(zoneID) {
+			ret.Available = false
+		}
+		return ret
+	})
 }
 
 // createOfferings creates a set of mutually exclusive offerings for a given instance type. This provider maintains an
