@@ -70,11 +70,10 @@ func TestDefaultProvider_InitialPrices(t *testing.T) {
 	}
 
 	// Test getting spot prices for various instance types
-	// Should fail, cause initial prices doesn't contain spot prices
 	for _, instanceType := range testInstanceTypes {
 		_, found := provider.SpotPrice(instanceType, "europe-west4-a")
-		if found {
-			t.Errorf("Expected to not find spot price for %s instance type, while prices wasn't updated", instanceType)
+		if !found {
+			t.Errorf("Failed to find spot-prices for %s", instanceType)
 			continue
 		}
 	}
