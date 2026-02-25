@@ -215,6 +215,27 @@ func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceNa
 	return instance, true, nil
 }
 
+func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*compute.Instance, error) {
+	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
+	call := p.computeService.Instances.AggregatedList(p.projectID)
+	call.Filter(fmt.Sprintf("name eq %s", instanceName))
+
+	var instance *compute.Instance
+	err := call.Pages(ctx, func(resp *compute.InstanceAggregatedList) error {
+		for _, items := range resp.Items {
+			for _, i := range items.Instances {
+				instance = i
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return instance, nil
+}
+
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
 	if len(instanceTypes) == 0 {
 		return nil, fmt.Errorf("no instance types provided")
@@ -222,6 +243,34 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
+
+	// Check if the instance already exists in any zone
+	if existingInstance, err := p.findInstanceByNodeClaim(ctx, nodeClaim); err != nil {
+		log.FromContext(ctx).Error(err, "failed to check if instance exists in region", "nodeClaim", nodeClaim.Name)
+	} else if existingInstance != nil {
+		zone := existingInstance.Zone
+		if split := strings.Split(zone, "/"); len(split) > 0 {
+			zone = split[len(split)-1]
+		}
+		machineType := existingInstance.MachineType
+		if split := strings.Split(machineType, "/"); len(split) > 0 {
+			machineType = split[len(split)-1]
+		}
+
+		log.FromContext(ctx).Info("Found existing instance for NodeClaim", "instance", existingInstance.Name, "zone", zone)
+		return &Instance{
+			InstanceID:   existingInstance.Name,
+			Name:         existingInstance.Name,
+			Type:         machineType,
+			Location:     zone,
+			ProjectID:    p.projectID,
+			ImageID:      resolveInstanceImage(existingInstance),
+			CreationTime: time.Now(),
+			CapacityType: capacityType,
+			Labels:       existingInstance.Labels,
+			Status:       InstanceStatusProvisioning,
+		}, nil
+	}
 
 	var errs []error
 	// try all instance types, if one is available, use it
