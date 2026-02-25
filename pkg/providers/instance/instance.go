@@ -236,6 +236,31 @@ func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim
 	return instance, nil
 }
 
+func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance, capacityType string) *Instance {
+	zone := existingInstance.Zone
+	if split := strings.Split(zone, "/"); len(split) > 0 {
+		zone = split[len(split)-1]
+	}
+	machineType := existingInstance.MachineType
+	if split := strings.Split(machineType, "/"); len(split) > 0 {
+		machineType = split[len(split)-1]
+	}
+
+	log.FromContext(ctx).Info("Found existing instance for NodeClaim", "instance", existingInstance.Name, "zone", zone)
+	return &Instance{
+		InstanceID:   existingInstance.Name,
+		Name:         existingInstance.Name,
+		Type:         machineType,
+		Location:     zone,
+		ProjectID:    p.projectID,
+		ImageID:      resolveInstanceImage(existingInstance),
+		CreationTime: time.Now(),
+		CapacityType: capacityType,
+		Labels:       existingInstance.Labels,
+		Status:       InstanceStatusProvisioning,
+	}
+}
+
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
 	if len(instanceTypes) == 0 {
 		return nil, fmt.Errorf("no instance types provided")
@@ -248,28 +273,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	if existingInstance, err := p.findInstanceByNodeClaim(ctx, nodeClaim); err != nil {
 		log.FromContext(ctx).Error(err, "failed to check if instance exists in region", "nodeClaim", nodeClaim.Name)
 	} else if existingInstance != nil {
-		zone := existingInstance.Zone
-		if split := strings.Split(zone, "/"); len(split) > 0 {
-			zone = split[len(split)-1]
-		}
-		machineType := existingInstance.MachineType
-		if split := strings.Split(machineType, "/"); len(split) > 0 {
-			machineType = split[len(split)-1]
-		}
-
-		log.FromContext(ctx).Info("Found existing instance for NodeClaim", "instance", existingInstance.Name, "zone", zone)
-		return &Instance{
-			InstanceID:   existingInstance.Name,
-			Name:         existingInstance.Name,
-			Type:         machineType,
-			Location:     zone,
-			ProjectID:    p.projectID,
-			ImageID:      resolveInstanceImage(existingInstance),
-			CreationTime: time.Now(),
-			CapacityType: capacityType,
-			Labels:       existingInstance.Labels,
-			Status:       InstanceStatusProvisioning,
-		}, nil
+		return p.adoptExistingInstance(ctx, existingInstance, capacityType), nil
 	}
 
 	var errs []error
