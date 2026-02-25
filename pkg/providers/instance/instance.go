@@ -279,30 +279,11 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	var errs []error
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
-		zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
+		instance, zone, template, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
-			errs = append(errs, err)
-			continue
-		}
-
-		nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
-		if nodePoolName == "" {
-			log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
-			return nil, fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
-		}
-
-		template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
-			errs = append(errs, err)
-			continue
-		}
-
-		instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, capacityType)
-		if err != nil {
-			if retryable {
-				errs = append(errs, err)
+			var retryableErr *retryableError
+			if errors.As(err, &retryableErr) {
+				errs = append(errs, retryableErr.err)
 				continue
 			}
 			return nil, err
@@ -342,6 +323,45 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	}
 
 	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
+}
+
+type retryableError struct {
+	err error
+}
+
+func (e *retryableError) Error() string {
+	return e.err.Error()
+}
+
+func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, capacityType string) (*compute.Instance, string, *compute.InstanceTemplate, error) {
+	zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
+		return nil, "", nil, &retryableError{err}
+	}
+
+	nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
+	if nodePoolName == "" {
+		err := fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
+		log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
+		return nil, "", nil, err
+	}
+
+	template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
+		return nil, "", nil, &retryableError{err}
+	}
+
+	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, capacityType)
+	if err != nil {
+		if retryable {
+			return nil, "", nil, &retryableError{err}
+		}
+		return nil, "", nil, err
+	}
+
+	return instance, zone, template, nil
 }
 
 func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, capacityType string) (*compute.Instance, bool, error) {
