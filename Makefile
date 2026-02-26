@@ -39,7 +39,7 @@ run: ## Run Karpenter controller binary against your local cluster
 		DISABLE_LEADER_ELECTION=true \
 		CLUSTER_NAME=${CLUSTER_NAME} \
 		PROJECT_ID=${PROJECT_ID} \
-		LOCATION=${REGION} \
+		CLUSTER_LOCATION=${REGION} \
 		INTERRUPTION_QUEUE=${CLUSTER_NAME} \
 		FEATURE_GATES="SpotToSpotConsolidation=true,NodeOverlay=true" \
 		go run ./cmd/controller/main.go
