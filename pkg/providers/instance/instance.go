@@ -59,13 +59,11 @@ const (
 	instanceTerminationActionDelete = "DELETE"
 )
 
-var (
-	InsufficientCapacityErrorCodes = sets.NewString(
-		"ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
-		"ZONE_RESOURCE_POOL_EXHAUSTED",
-		"IP_SPACE_EXHAUSTED_WITH_DETAILS",
-		"IP_SPACE_EXHAUSTED",
-	)
+var InsufficientCapacityErrorCodes = sets.NewString(
+	"ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+	"ZONE_RESOURCE_POOL_EXHAUSTED",
+	"IP_SPACE_EXHAUSTED_WITH_DETAILS",
+	"IP_SPACE_EXHAUSTED",
 )
 
 type Provider interface {
@@ -382,7 +380,48 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 	return instanceTypes
 }
 
-// zone should be based on the offering, for now lets return static zone from requirements
+func filterZonesByRequirement(zones []string, reqs scheduling.Requirements) []string {
+	zoneReq := reqs.Get(corev1.LabelTopologyZone)
+	if zoneReq == nil || len(zoneReq.Values()) == 0 {
+		return zones
+	}
+	allowed := sets.NewString()
+	for _, z := range zones {
+		if lo.Contains(zoneReq.Values(), z) {
+			allowed.Insert(z)
+		}
+	}
+	return allowed.List()
+}
+
+func randomZone(zones []string) string {
+	randomIndex, _ := rand.Int(rand.Reader, big.NewInt(int64(len(zones))))
+	return zones[randomIndex.Int64()]
+}
+
+func cheapestCompatibleZone(zones []string, reqs scheduling.Requirements, offerings cloudprovider.Offerings) string {
+	cheapestZone := ""
+	cheapestPrice := math.MaxFloat64
+	zonesSet := sets.NewString(zones...)
+	for _, offering := range offerings {
+		if !offering.Available {
+			continue
+		}
+		if reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) != nil {
+			continue
+		}
+		zone := offering.Requirements.Get(corev1.LabelTopologyZone).Any()
+		if !zonesSet.Has(zone) {
+			continue
+		}
+		if offering.Price < cheapestPrice {
+			cheapestZone = zone
+			cheapestPrice = offering.Price
+		}
+	}
+	return cheapestZone
+}
+
 func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.NodeClaim,
 	instanceType *cloudprovider.InstanceType, capacityType string,
 ) (string, error) {
@@ -391,37 +430,21 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 		return "", err
 	}
 
-	cheapestZone := ""
-	cheapestPrice := math.MaxFloat64
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	zones = filterZonesByRequirement(zones, reqs)
+
+	// If no zones remain after applying requirements, fail fast.
+	if len(zones) == 0 {
+		return "", fmt.Errorf("no zones match topology requirement %q", corev1.LabelTopologyZone)
+	}
+
+	// For on-demand, randomly select a zone from those that satisfy the requirement,
+	// to spread load while still honoring topology constraints.
 	if capacityType == karpv1.CapacityTypeOnDemand {
-		// For on-demand, randomly select a zone
-		if len(zones) > 0 {
-			randomIndex, _ := rand.Int(rand.Reader, big.NewInt(int64(len(zones))))
-			return zones[randomIndex.Int64()], nil
-		}
+		return randomZone(zones), nil
 	}
-
-	zonesSet := sets.NewString(zones...)
-	// For different AZ, the spot price may differ. So we need to get the cheapest vSwitch in the zone
-	for _, offering := range instanceType.Offerings {
-		if !offering.Available {
-			continue
-		}
-		if reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) != nil {
-			continue
-		}
-		ok := zonesSet.Has(offering.Requirements.Get(corev1.LabelTopologyZone).Any())
-		if !ok {
-			continue
-		}
-		if offering.Price < cheapestPrice {
-			cheapestZone = offering.Requirements.Get(corev1.LabelTopologyZone).Any()
-			cheapestPrice = offering.Price
-		}
-	}
-
-	return cheapestZone, nil
+	// else for spot, choose the cheapest zone
+	return cheapestCompatibleZone(zones, reqs, instanceType.Offerings), nil
 }
 
 func resolveNodePoolName(imageFamily string) string {
