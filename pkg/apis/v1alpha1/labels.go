@@ -33,6 +33,7 @@ func init() {
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(
 		LabelInstanceCategory,
 		LabelInstanceFamily,
+		LabelInstanceShape,
 		LabelInstanceGeneration,
 		LabelInstanceSize,
 		LabelInstanceCPU,
