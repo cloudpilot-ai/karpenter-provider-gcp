@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/utils/node"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
@@ -48,6 +49,8 @@ const (
 
 	NodeConditionReasonKubeletNotReady = "KubeletNotReady"
 	NodeConditionMessageShuttingDown   = "node is shutting down"
+
+	InterruptionReason = "interruption"
 )
 
 // Controller is an GCP interruption controller.
@@ -197,6 +200,11 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *karpv1.Node
 	}
 	log.FromContext(ctx).Info("initiating delete from interruption message", "nodeClaim", nodeClaim.Name)
 	c.recorder.Publish(interruptionevents.TerminatingOnInterruption(nodeClaim)...)
+	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+		metrics.ReasonLabel:       InterruptionReason,
+		metrics.NodePoolLabel:     nodeClaim.Labels[karpv1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: nodeClaim.Labels[karpv1.CapacityTypeLabelKey],
+	})
 	return nil
 }
 
