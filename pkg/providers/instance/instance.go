@@ -215,12 +215,15 @@ func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceNa
 
 func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*compute.Instance, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
-	call := p.computeService.Instances.AggregatedList(p.projectID)
-	call.Filter(fmt.Sprintf("name eq %s", instanceName))
+	call := p.computeService.Instances.AggregatedList(p.projectID).Filter(fmt.Sprintf("name eq %s", instanceName))
 
+	regionPrefix := "zones/" + p.region + "-"
 	var instance *compute.Instance
 	err := call.Pages(ctx, func(resp *compute.InstanceAggregatedList) error {
-		for _, items := range resp.Items {
+		for zoneKey, items := range resp.Items {
+			if !strings.HasPrefix(zoneKey, regionPrefix) {
+				continue
+			}
 			for _, i := range items.Instances {
 				instance = i
 				return nil
@@ -252,10 +255,11 @@ func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingIns
 		Location:     zone,
 		ProjectID:    p.projectID,
 		ImageID:      resolveInstanceImage(existingInstance),
-		CreationTime: time.Now(),
+		CreationTime: parseCreationTime(existingInstance.CreationTimestamp),
 		CapacityType: capacityType,
 		Labels:       existingInstance.Labels,
-		Status:       InstanceStatusProvisioning,
+		Tags:         existingInstance.Labels,
+		Status:       existingInstance.Status,
 	}
 }
 
