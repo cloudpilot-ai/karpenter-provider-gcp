@@ -19,6 +19,7 @@ package instance
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
@@ -216,6 +217,74 @@ func TestSelectZone_FailsWhenNoZonesMatchRequirement(t *testing.T) {
 
 	_, err := p.selectZone(ctx, nodeClaim, instanceType, karpv1.CapacityTypeOnDemand)
 	require.Error(t, err)
+}
+
+func TestAdoptExistingInstance_PopulatesFieldsFromGCEInstance(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	p := &DefaultProvider{projectID: "my-project"}
+
+	gceInstance := &compute.Instance{
+		Name:              "karpenter-test-node",
+		Zone:              "https://www.googleapis.com/compute/v1/projects/my-project/zones/us-west4-a",
+		MachineType:       "https://www.googleapis.com/compute/v1/projects/my-project/zones/us-west4-a/machineTypes/n2-standard-8",
+		Status:            "RUNNING",
+		CreationTimestamp: "2025-10-31T11:09:17.350-07:00",
+		Labels:            map[string]string{"karpenter-sh-nodepool": "my-pool"},
+		Scheduling: &compute.Scheduling{
+			ProvisioningModel: "SPOT",
+		},
+		Disks: []*compute.AttachedDisk{
+			{
+				Boot: true,
+				InitializeParams: &compute.AttachedDiskInitializeParams{
+					SourceImage: "projects/gke-node-images/global/images/gke-cos",
+				},
+			},
+		},
+	}
+
+	result := p.adoptExistingInstance(ctx, gceInstance, karpv1.CapacityTypeSpot)
+
+	require.Equal(t, "karpenter-test-node", result.InstanceID)
+	require.Equal(t, "karpenter-test-node", result.Name)
+	require.Equal(t, "us-west4-a", result.Location, "zone URL should be trimmed to zone name")
+	require.Equal(t, "n2-standard-8", result.Type, "machineType URL should be trimmed to type name")
+	require.Equal(t, "my-project", result.ProjectID)
+	require.Equal(t, "projects/gke-node-images/global/images/gke-cos", result.ImageID)
+	require.Equal(t, karpv1.CapacityTypeSpot, result.CapacityType)
+	require.Equal(t, "RUNNING", result.Status, "status must reflect the actual instance state, not hardcoded PROVISIONING")
+	require.Equal(t, gceInstance.Labels, result.Labels)
+	require.Equal(t, gceInstance.Labels, result.Tags, "Tags must be populated (matches syncInstances behavior)")
+	require.False(t, result.CreationTime.IsZero(), "CreationTime must not be zero")
+
+	// Verify the creation time was parsed from the instance timestamp, not time.Now()
+	expectedTime, err := time.Parse(time.RFC3339, "2025-10-31T11:09:17.350-07:00")
+	require.NoError(t, err)
+	require.Equal(t, expectedTime, result.CreationTime)
+}
+
+func TestAdoptExistingInstance_UsesActualStatusNotProvisioning(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	p := &DefaultProvider{projectID: "my-project"}
+
+	for _, status := range []string{"RUNNING", "STAGING", "PROVISIONING"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			gceInstance := &compute.Instance{
+				Name:              "karpenter-test-node",
+				Zone:              "us-west4-a",
+				MachineType:       "n2-standard-8",
+				Status:            status,
+				CreationTimestamp: "2025-10-31T11:09:17Z",
+			}
+			result := p.adoptExistingInstance(ctx, gceInstance, karpv1.CapacityTypeOnDemand)
+			require.Equal(t, status, result.Status)
+		})
+	}
 }
 
 func TestSelectZone_SpotChoosesCheapestWithinTopologyRequirement(t *testing.T) {
