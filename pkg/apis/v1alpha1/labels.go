@@ -45,6 +45,12 @@ func init() {
 		LabelInstanceGPUMemory,
 		LabelTopologyZoneID,
 		corev1.LabelWindowsBuild,
+		LabelGKEReadinessCalicoReady,
+		LabelGKEReadinessKubeProxyReady,
+		LabelGKEReadinessMetadataServerEnabled,
+		LabelGKEReadinessMasqAgentReady,
+		LabelGKEReadinessNetdReady,
+		LabelGKEReadinessNodeLocalDNSReady,
 	)
 }
 
@@ -77,6 +83,19 @@ var (
 	ImageFamilyUbuntu               = "Ubuntu"
 	ImageFamilyContainerOptimizedOS = "ContainerOptimizedOS"
 	ImageFamilyCustom               = "Custom"
+
+	// GKE readiness-gate labels are applied by the GKE control plane after node
+	// registration. System DaemonSets use these as nodeSelector to gate scheduling
+	// until the node is ready for each subsystem. Registering them as well-known
+	// allows Karpenter's DaemonSet overhead simulation (isDaemonPodCompatible) to
+	// include these DaemonSets when sizing instance types, preventing undersizing
+	// and node churn. See https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/202
+	LabelGKEReadinessCalicoReady            = "projectcalico.org/ds-ready"
+	LabelGKEReadinessKubeProxyReady         = "node.kubernetes.io/kube-proxy-ds-ready"
+	LabelGKEReadinessMetadataServerEnabled  = "iam.gke.io/gke-metadata-server-enabled"
+	LabelGKEReadinessMasqAgentReady         = "node.kubernetes.io/masq-agent-ds-ready"
+	LabelGKEReadinessNetdReady              = "cloud.google.com/gke-netd-ready"
+	LabelGKEReadinessNodeLocalDNSReady      = "addon.gke.io/node-local-dns-ds-ready"
 
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
