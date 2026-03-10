@@ -37,7 +37,8 @@ import (
 )
 
 func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass,
-	region string, offerings cloudprovider.Offerings) *cloudprovider.InstanceType {
+	region string, offerings cloudprovider.Offerings,
+) *cloudprovider.InstanceType {
 	if offerings == nil {
 		return nil
 	}
@@ -155,7 +156,14 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		requirements.Get(v1alpha1.LabelInstanceSize).Insert(instanceTypeParts[len(instanceTypeParts)-sizeOffset])
 		// The laster number of the first part is the generation
 		requirements.Get(v1alpha1.LabelInstanceGeneration).Insert(extractGeneration(instanceTypeParts[0]))
-		requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0])
+		// Backward-compatible "family" parsing:
+		// - For series+shape+size formats (e.g. n2-standard-4, c2d-highcpu-16), family is "<series>-<shape>".
+		// - For series+shape formats (e.g. e2-medium, e2-micro), family is "<series>".
+		family := instanceTypeParts[0]
+		if len(instanceTypeParts) >= 3 {
+			family = strings.Join(instanceTypeParts[:2], "-")
+		}
+		requirements.Get(v1alpha1.LabelInstanceFamily).Insert(family)
 		requirements.Get(v1alpha1.LabelInstanceShape).Insert(instanceTypeParts[1])
 
 		requirements.Get(corev1.LabelArchStable).Insert(extractArch(instanceTypeParts[0]))
