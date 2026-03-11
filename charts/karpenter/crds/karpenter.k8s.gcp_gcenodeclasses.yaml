@@ -133,6 +133,10 @@ spec:
                     rule: '!has(self.provisionedThroughput) || self.category in [''hyperdisk-balanced'',
                       ''hyperdisk-balanced-high-availability'', ''hyperdisk-throughput'',
                       ''hyperdisk-ml'']'
+                  - message: provisionedIOPS and provisionedThroughput must both be
+                      set or both be unset for hyperdisk-balanced and hyperdisk-balanced-high-availability
+                    rule: '!(self.category in [''hyperdisk-balanced'', ''hyperdisk-balanced-high-availability''])
+                      || (has(self.provisionedIOPS) == has(self.provisionedThroughput))'
                 maxItems: 10
                 type: array
               imageFamily:

@@ -169,6 +169,7 @@ type KubeletConfiguration struct {
 
 // +kubebuilder:validation:XValidation:message="provisionedIOPS is only applicable for pd-extreme, hyperdisk-balanced, hyperdisk-balanced-high-availability, and hyperdisk-extreme",rule="!has(self.provisionedIOPS) || self.category in ['pd-extreme', 'hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-extreme']"
 // +kubebuilder:validation:XValidation:message="provisionedThroughput is only applicable for hyperdisk-balanced, hyperdisk-balanced-high-availability, hyperdisk-throughput, and hyperdisk-ml",rule="!has(self.provisionedThroughput) || self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-throughput', 'hyperdisk-ml']"
+// +kubebuilder:validation:XValidation:message="provisionedIOPS and provisionedThroughput must both be set or both be unset for hyperdisk-balanced and hyperdisk-balanced-high-availability",rule="!(self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability']) || (has(self.provisionedIOPS) == has(self.provisionedThroughput))"
 type Disk struct {
 	// SizeGiB is the size of the disk. Unit: GiB
 	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 10"
