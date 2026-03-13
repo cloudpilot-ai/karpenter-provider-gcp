@@ -208,7 +208,7 @@ spec:
           values: ["on-demand", "spot"]
         - key: "karpenter.k8s.gcp/instance-family"
           operator: In
-          values: ["n4-standard", "n2-standard", "e2"]
+          values: ["n4", "n2", "e2"]
         - key: "kubernetes.io/arch"
           operator: In
           values: ["amd64"]
