@@ -495,3 +495,80 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 	require.Zero(t, disks[1].InitializeParams.ProvisionedThroughput)
 }
 
+func TestSetupNetworkInterfaces(t *testing.T) {
+	t.Parallel()
+
+	makeTemplate := func(rangeName string) *compute.InstanceTemplate {
+		return &compute.InstanceTemplate{
+			Properties: &compute.InstanceProperties{
+				NetworkInterfaces: []*compute.NetworkInterface{
+					{
+						AliasIpRanges: []*compute.AliasIpRange{
+							{SubnetworkRangeName: rangeName, IpCidrRange: "/24"},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	p := &DefaultProvider{}
+
+	t.Run("without SubnetRangeName, SubnetworkRangeName is unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{}
+		template := makeTemplate("original-pods-range")
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Len(t, result[0].AliasIpRanges, 1)
+		require.Equal(t, "original-pods-range", result[0].AliasIpRanges[0].SubnetworkRangeName)
+		require.Equal(t, "original-pods-range", template.Properties.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName, "template must not be mutated")
+	})
+
+	t.Run("with SubnetRangeName, SubnetworkRangeName is overridden", func(t *testing.T) {
+		t.Parallel()
+
+		rangeName := "pods-secondary"
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				SubnetRangeName: &rangeName,
+			},
+		}
+		template := makeTemplate("original-pods-range")
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Len(t, result[0].AliasIpRanges, 1)
+		require.Equal(t, "pods-secondary", result[0].AliasIpRanges[0].SubnetworkRangeName)
+		require.Equal(t, "original-pods-range", template.Properties.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName, "template must not be mutated")
+	})
+
+	t.Run("CIDR prefix is set from maxPods in both cases", func(t *testing.T) {
+		t.Parallel()
+
+		maxPods := int32(32)
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				KubeletConfiguration: &v1alpha1.KubeletConfiguration{MaxPods: &maxPods},
+			},
+		}
+		template := makeTemplate("some-range")
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
+		require.Equal(t, "/24", template.Properties.NetworkInterfaces[0].AliasIpRanges[0].IpCidrRange, "template must not be mutated")
+
+		rangeName := "pods-secondary"
+		nodeClass.Spec.SubnetRangeName = &rangeName
+		result = p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
+	})
+}
