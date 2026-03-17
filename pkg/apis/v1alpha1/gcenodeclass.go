@@ -167,6 +167,9 @@ type KubeletConfiguration struct {
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:message="provisionedIOPS is only applicable for pd-extreme, hyperdisk-balanced, hyperdisk-balanced-high-availability, and hyperdisk-extreme",rule="!has(self.provisionedIOPS) || self.category in ['pd-extreme', 'hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-extreme']"
+// +kubebuilder:validation:XValidation:message="provisionedThroughput is only applicable for hyperdisk-balanced, hyperdisk-balanced-high-availability, hyperdisk-throughput, and hyperdisk-ml",rule="!has(self.provisionedThroughput) || self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-throughput', 'hyperdisk-ml']"
+// +kubebuilder:validation:XValidation:message="provisionedIOPS and provisionedThroughput must both be set or both be unset for hyperdisk-balanced and hyperdisk-balanced-high-availability",rule="!(self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability']) || (has(self.provisionedIOPS) == has(self.provisionedThroughput))"
 type Disk struct {
 	// SizeGiB is the size of the disk. Unit: GiB
 	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 10"
@@ -195,6 +198,16 @@ type Disk struct {
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
 	// +optional
 	KMSKeyServiceAccount string `json:"kmsKeyServiceAccount,omitempty"`
+	// ProvisionedIOPS is the number of I/O operations per second to provision for the disk.
+	// Applicable for: pd-extreme (2,500–120,000), hyperdisk-balanced (3,000–160,000),
+	// hyperdisk-balanced-high-availability (up to 100,000), and hyperdisk-extreme (up to 350,000).
+	// +optional
+	ProvisionedIOPS *int64 `json:"provisionedIOPS,omitempty"`
+	// ProvisionedThroughput is the throughput in MiB/s to provision for the disk.
+	// Applicable for: hyperdisk-balanced (140–2,400 MiB/s), hyperdisk-balanced-high-availability (up to 1,200 MiB/s),
+	// hyperdisk-throughput (up to 2,400 MiB/s), and hyperdisk-ml (up to 1,200,000 MiB/s).
+	// +optional
+	ProvisionedThroughput *int64 `json:"provisionedThroughput,omitempty"`
 }
 
 // DiskCategory represents a disk category type
