@@ -28,6 +28,10 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 * **Provisioning** nodes that meet the requirements of the pods
 * **Removing** the nodes when the nodes are no longer needed
 
+## Release notes / upgrades
+
+See `CHANGELOG.md` for breaking changes and upgrade notes between releases.
+
 ## How it works
 
 Karpenter observes the aggregate resource requests of unscheduled pods and makes decisions to launch and terminate nodes to minimize scheduling latencies and infrastructure cost.

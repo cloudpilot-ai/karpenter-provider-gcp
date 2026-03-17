@@ -64,7 +64,7 @@ Then install the chart with the following command:
 # For Workload Identity
 helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
 
-helm upgrade karpenter charts/karpenter --install \
+helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \
@@ -148,7 +148,7 @@ Then install the chart with the following command:
 helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
 
 # For Service Account Keys
-helm upgrade karpenter charts/karpenter --install \
+helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \
@@ -208,7 +208,7 @@ spec:
           values: ["on-demand", "spot"]
         - key: "karpenter.k8s.gcp/instance-family"
           operator: In
-          values: ["n4-standard", "n2-standard", "e2"]
+          values: ["n4", "n2", "e2"]
         - key: "kubernetes.io/arch"
           operator: In
           values: ["amd64"]
