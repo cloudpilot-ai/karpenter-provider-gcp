@@ -581,13 +581,20 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	attachedDisks := make([]*compute.AttachedDisk, len(disks))
 	for i, disk := range disks {
 		// Create a new disk configuration for each disk to avoid sharing references
+		initParams := &compute.AttachedDiskInitializeParams{
+			DiskType:   fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category),
+			DiskSizeGb: int64(disk.SizeGiB),
+		}
+		if disk.ProvisionedIOPS != nil {
+			initParams.ProvisionedIops = *disk.ProvisionedIOPS
+		}
+		if disk.ProvisionedThroughput != nil {
+			initParams.ProvisionedThroughput = *disk.ProvisionedThroughput
+		}
 		attachedDisk := &compute.AttachedDisk{
-			AutoDelete: true,
-			Boot:       disk.Boot,
-			InitializeParams: &compute.AttachedDiskInitializeParams{
-				DiskType:   fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category),
-				DiskSizeGb: int64(disk.SizeGiB),
-			},
+			AutoDelete:       true,
+			Boot:             disk.Boot,
+			InitializeParams: initParams,
 		}
 
 		requirements := instanceType.Requirements

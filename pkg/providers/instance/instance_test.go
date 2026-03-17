@@ -25,6 +25,7 @@ import (
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -335,3 +336,162 @@ func TestSelectZone_SpotChoosesCheapestWithinTopologyRequirement(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "europe-west4-b", zone)
 }
+
+// amd64InstanceType returns a minimal InstanceType with amd64 architecture requirements.
+func amd64InstanceType() *cloudprovider.InstanceType {
+	return &cloudprovider.InstanceType{
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+		),
+	}
+}
+
+// nonBootDisk builds a GCENodeClass containing a single non-boot data disk.
+func nonBootDisk(category v1alpha1.DiskCategory, iops, throughput *int64) *v1alpha1.GCENodeClass {
+	disk := v1alpha1.Disk{
+		SizeGiB:               100,
+		Category:              category,
+		Boot:                  false,
+		ProvisionedIOPS:       iops,
+		ProvisionedThroughput: throughput,
+	}
+	return &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			Disks: []v1alpha1.Disk{disk},
+		},
+	}
+}
+
+// bootDiskNodeClass builds a GCENodeClass with a single boot disk and a resolved amd64 image.
+func bootDiskNodeClass(category v1alpha1.DiskCategory, iops, throughput *int64) *v1alpha1.GCENodeClass {
+	return &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			Disks: []v1alpha1.Disk{
+				{
+					SizeGiB:               100,
+					Category:              category,
+					Boot:                  true,
+					ProvisionedIOPS:       iops,
+					ProvisionedThroughput: throughput,
+				},
+			},
+		},
+		Status: v1alpha1.GCENodeClassStatus{
+			Images: []v1alpha1.Image{
+				{
+					SourceImage: "projects/my-project/global/images/my-image",
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelArchStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"amd64"},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("pd-ssd", nil, nil)
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+
+	require.NoError(t, err)
+	require.Len(t, disks, 1)
+	require.Zero(t, disks[0].InitializeParams.ProvisionedIops)
+	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
+}
+
+func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("pd-extreme", ptr.To(int64(5000)), nil)
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+
+	require.NoError(t, err)
+	require.Len(t, disks, 1)
+	require.Equal(t, int64(5000), disks[0].InitializeParams.ProvisionedIops)
+	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
+}
+
+func TestRenderDiskProperties_SetsProvisionedThroughput(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("hyperdisk-throughput", nil, ptr.To(int64(500)))
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+
+	require.NoError(t, err)
+	require.Len(t, disks, 1)
+	require.Zero(t, disks[0].InitializeParams.ProvisionedIops)
+	require.Equal(t, int64(500), disks[0].InitializeParams.ProvisionedThroughput)
+}
+
+func TestRenderDiskProperties_SetsBothIOPSAndThroughput(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("hyperdisk-balanced", ptr.To(int64(10000)), ptr.To(int64(400)))
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+
+	require.NoError(t, err)
+	require.Len(t, disks, 1)
+	require.Equal(t, int64(10000), disks[0].InitializeParams.ProvisionedIops)
+	require.Equal(t, int64(400), disks[0].InitializeParams.ProvisionedThroughput)
+}
+
+func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			Disks: []v1alpha1.Disk{
+				{
+					SizeGiB:         100,
+					Category:        "hyperdisk-balanced",
+					Boot:            true,
+					ProvisionedIOPS: ptr.To(int64(10000)),
+				},
+				{
+					SizeGiB:  200,
+					Category: "pd-ssd",
+					Boot:     false,
+				},
+			},
+		},
+		Status: v1alpha1.GCENodeClassStatus{
+			Images: []v1alpha1.Image{
+				{
+					SourceImage: "projects/my-project/global/images/my-image",
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelArchStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"amd64"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+
+	require.NoError(t, err)
+	require.Len(t, disks, 2)
+	require.Equal(t, int64(10000), disks[0].InitializeParams.ProvisionedIops)
+	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
+	require.Zero(t, disks[1].InitializeParams.ProvisionedIops)
+	require.Zero(t, disks[1].InitializeParams.ProvisionedThroughput)
+}
+
