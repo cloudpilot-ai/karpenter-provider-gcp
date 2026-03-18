@@ -713,9 +713,14 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 	var networkInterfaces []*compute.NetworkInterface
 
 	for _, networkInterface := range template.Properties.NetworkInterfaces {
+		copiedAliasIpRanges := make([]*compute.AliasIpRange, len(networkInterface.AliasIpRanges))
+		for i, r := range networkInterface.AliasIpRanges {
+			copied := *r
+			copiedAliasIpRanges[i] = &copied
+		}
 		tmpNetworkInterface := &compute.NetworkInterface{
 			AccessConfigs:            networkInterface.AccessConfigs,
-			AliasIpRanges:            networkInterface.AliasIpRanges,
+			AliasIpRanges:            copiedAliasIpRanges,
 			Fingerprint:              networkInterface.Fingerprint,
 			InternalIpv6PrefixLength: networkInterface.InternalIpv6PrefixLength,
 			Ipv6AccessConfigs:        networkInterface.Ipv6AccessConfigs,
@@ -732,10 +737,13 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 			ForceSendFields:          networkInterface.ForceSendFields,
 			NullFields:               networkInterface.NullFields,
 		}
-		for aliasIpRangeIndex := range networkInterface.AliasIpRanges {
+		for aliasIpRangeIndex := range copiedAliasIpRanges {
 			// Set the IP CIDR range for the alias IP range based on the calculated targetRange
 			// TODO: Optionally, add validation to ensure the network interface supports this range if needed
 			tmpNetworkInterface.AliasIpRanges[aliasIpRangeIndex].IpCidrRange = fmt.Sprintf("/%d", targetRange)
+			if nodeClass.Spec.SubnetRangeName != nil {
+				tmpNetworkInterface.AliasIpRanges[aliasIpRangeIndex].SubnetworkRangeName = *nodeClass.Spec.SubnetRangeName
+			}
 		}
 		networkInterfaces = append(networkInterfaces, tmpNetworkInterface)
 	}

@@ -151,6 +151,11 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.SubnetRangeName != nil {
+		in, out := &in.SubnetRangeName, &out.SubnetRangeName
+		*out = new(string)
+		**out = **in
+	}
 	if in.KubeletConfiguration != nil {
 		in, out := &in.KubeletConfiguration, &out.KubeletConfiguration
 		*out = new(KubeletConfiguration)

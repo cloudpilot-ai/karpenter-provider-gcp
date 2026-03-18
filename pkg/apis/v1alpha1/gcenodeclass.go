@@ -49,6 +49,14 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:Enum:={Ubuntu,ContainerOptimizedOS}
 	// +optional
 	ImageFamily *string `json:"imageFamily,omitempty"`
+	// SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
+	// to allocate pod IP addresses. If not specified, the range inherited from the node
+	// pool instance template is used (typically the default pods range).
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
+	// +optional
+	SubnetRangeName *string `json:"subnetRangeName,omitempty"`
 	// KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
 	// They are a vswitch of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
