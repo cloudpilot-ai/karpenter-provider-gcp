@@ -352,6 +352,15 @@ spec:
                   type: string
                 maxItems: 20
                 type: array
+              subnetRangeName:
+                description: |-
+                  SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
+                  to allocate pod IP addresses. If not specified, the range inherited from the node
+                  pool instance template is used (typically the default pods range).
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
+                type: string
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance
