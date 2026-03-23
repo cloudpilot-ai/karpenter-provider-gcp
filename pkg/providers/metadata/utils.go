@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
@@ -36,6 +37,8 @@ var (
 	maxPodsPerNodeRegex  = regexp.MustCompile(`max-pods-per-node=\d+`)
 	maxPodsRegex         = regexp.MustCompile(`max-pods=\d+`)
 	gkeProvisioningRegex = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex     = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex   = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -185,6 +188,61 @@ func PatchUnregisteredTaints(metadata *compute.Metadata) error {
 
 	if !patchedDone {
 		return fmt.Errorf("failed to patch unregistered taints")
+	}
+
+	return nil
+}
+
+func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloudprovider.InstanceType) error {
+	if metadata == nil || instanceType == nil {
+		return fmt.Errorf("metadata and instanceType must be non-nil")
+	}
+
+	arch := instanceType.Requirements.Get(corev1.LabelArchStable).Any()
+	if arch == "" {
+		arch = "amd64"
+	}
+	family := instanceType.Requirements.Get(v1alpha1.LabelInstanceFamily).Any()
+
+	patchedDone := false
+	for _, item := range metadata.Items {
+		if item.Key != "kube-env" {
+			continue
+		}
+		kubeEnv := swag.StringValue(item.Value)
+		if kubeEnv == "" {
+			return fmt.Errorf("kube-env metadata is empty")
+		}
+
+		updated := kubeEnv
+
+		// Fix server tarball URLs (GKE uses kubernetes-server-linux-<arch>.tar.gz).
+		if arch == "arm64" {
+			updated = strings.ReplaceAll(updated, "linux-amd64", "linux-arm64")
+		} else if arch == "amd64" {
+			updated = strings.ReplaceAll(updated, "linux-arm64", "linux-amd64")
+		}
+
+		// Fix `arch=` in AUTOSCALER_ENV_VARS and KUBELET_ARGS.
+		if kubeEnvArchRegex.MatchString(updated) {
+			updated = kubeEnvArchRegex.ReplaceAllString(updated, "arch="+arch)
+		}
+
+		// Fix machine family in AUTOSCALER_ENV_VARS and KUBELET_ARGS when we can determine it.
+		if family != "" && kubeEnvFamilyRegex.MatchString(updated) {
+			updated = kubeEnvFamilyRegex.ReplaceAllString(updated, "cloud.google.com/machine-family="+family)
+		}
+
+		if updated != kubeEnv {
+			item.Value = swag.String(updated)
+			patchedDone = true
+		}
+	}
+
+	if !patchedDone {
+		// Not all templates include these fields, so don't hard-fail if kube-env exists
+		// but did not require a patch.
+		return nil
 	}
 
 	return nil
