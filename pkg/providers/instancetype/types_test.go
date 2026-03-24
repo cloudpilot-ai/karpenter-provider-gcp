@@ -30,6 +30,46 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
+func TestCalculateDiskConfiguration(t *testing.T) {
+	tests := []struct {
+		name              string
+		nodeClass         *v1alpha1.GCENodeClass
+		expectedBootGiB   int64
+		expectedSSDGiB    int64
+		expectedSSDCount  int64
+	}{
+		{
+			name:             "30GiB boot disk from nodeClass (issue #220)",
+			nodeClass: &v1alpha1.GCENodeClass{
+				Spec: v1alpha1.GCENodeClassSpec{
+					Disks: []v1alpha1.Disk{
+						{Boot: true, SizeGiB: 30, Category: "hyperdisk-balanced"},
+					},
+				},
+			},
+			expectedBootGiB:  30,
+			expectedSSDGiB:   0,
+			expectedSSDCount: 0,
+		},
+		{
+			name:             "default 100GiB when no disks specified",
+			nodeClass:        &v1alpha1.GCENodeClass{},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   0,
+			expectedSSDCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bootGiB, ssdGiB, ssdCount := calculateDiskConfiguration(tt.nodeClass, &computepb.MachineType{})
+			assert.Equal(t, tt.expectedBootGiB, bootGiB, "boot disk GiB mismatch")
+			assert.Equal(t, tt.expectedSSDGiB, ssdGiB, "total SSD GiB mismatch")
+			assert.Equal(t, tt.expectedSSDCount, ssdCount, "SSD count mismatch")
+		})
+	}
+}
+
 func TestComputeRequirements(t *testing.T) {
 	tests := []struct {
 		name      string
