@@ -41,11 +41,11 @@ func (f *fakeGKEProvider) ResolveClusterZones(_ context.Context) ([]string, erro
 // making GCP API calls.
 type fakePricingProvider struct{}
 
-func (f *fakePricingProvider) LivenessProbe(_ *http.Request) error      { return nil }
-func (f *fakePricingProvider) InstanceTypes() []string                  { return nil }
-func (f *fakePricingProvider) OnDemandPrice(_ string) (float64, bool)   { return 1.0, true }
-func (f *fakePricingProvider) SpotPrice(_, _ string) (float64, bool)    { return 0.5, true }
-func (f *fakePricingProvider) UpdatePrices(_ context.Context) error     { return nil }
+func (f *fakePricingProvider) LivenessProbe(_ *http.Request) error    { return nil }
+func (f *fakePricingProvider) InstanceTypes() []string                { return nil }
+func (f *fakePricingProvider) OnDemandPrice(_ string) (float64, bool) { return 1.0, true }
+func (f *fakePricingProvider) SpotPrice(_, _ string) (float64, bool)  { return 0.5, true }
+func (f *fakePricingProvider) UpdatePrices(_ context.Context) error   { return nil }
 
 // newTestProvider builds a DefaultProvider wired with fakes and pre-populated
 // with one machine type so that List can return results without network calls.
@@ -56,9 +56,9 @@ func newTestProvider() *DefaultProvider {
 		MemoryMb:  aws.Int32(16384),
 	}
 	return &DefaultProvider{
-		authOptions:     &auth.Credential{Region: "us-central1"},
-		pricingProvider: &fakePricingProvider{},
-		gkeProvider:     &fakeGKEProvider{},
+		authOptions:       &auth.Credential{Region: "us-central1"},
+		pricingProvider:   &fakePricingProvider{},
+		gkeProvider:       &fakeGKEProvider{},
 		instanceTypesInfo: []*computepb.MachineType{mt},
 		instanceTypesOfferings: map[string]sets.Set[string]{
 			"n2-standard-4": sets.New("us-central1-a"),

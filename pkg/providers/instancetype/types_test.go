@@ -70,9 +70,6 @@ func TestListEphemeralStorageCacheIsolation(t *testing.T) {
 	assert.NotEmpty(t, its30)
 	ephemeral30 := its30[0].Overhead.KubeReserved.StorageEphemeral()
 
-	// With the fix (disksHash in key): each NodeClass gets its own cache entry and overhead.
-	// Without the fix: both calls share one key – the second call returns stale 76 Gi
-	// for a 30 GiB disk, causing kubelet to fail with "reservation > capacity".
 	assert.Equal(t, int64(76)*1024*1024*1024, ephemeral200.Value(),
 		"200 GiB disk should produce 76 Gi kubeReserved ephemeral-storage")
 	assert.Equal(t, int64(15)*1024*1024*1024, ephemeral30.Value(),
@@ -83,14 +80,14 @@ func TestListEphemeralStorageCacheIsolation(t *testing.T) {
 
 func TestCalculateDiskConfiguration(t *testing.T) {
 	tests := []struct {
-		name              string
-		nodeClass         *v1alpha1.GCENodeClass
-		expectedBootGiB   int64
-		expectedSSDGiB    int64
-		expectedSSDCount  int64
+		name             string
+		nodeClass        *v1alpha1.GCENodeClass
+		expectedBootGiB  int64
+		expectedSSDGiB   int64
+		expectedSSDCount int64
 	}{
 		{
-			name:             "30GiB boot disk from nodeClass (issue #220)",
+			name: "30GiB boot disk from nodeClass (issue #220)",
 			nodeClass: &v1alpha1.GCENodeClass{
 				Spec: v1alpha1.GCENodeClassSpec{
 					Disks: []v1alpha1.Disk{
