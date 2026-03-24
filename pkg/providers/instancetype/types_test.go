@@ -17,6 +17,7 @@ limitations under the License.
 package instancetype
 
 import (
+	"context"
 	"testing"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -28,7 +29,57 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 )
+
+// TestListEphemeralStorageCacheIsolation verifies that two GCENodeClass objects
+// with different boot disk sizes but the same KubeletConfiguration receive
+// independently computed ephemeral-storage overhead values from List().
+//
+// Without the disksHash in the cache key both calls share one entry, so the
+// 30 GiB class would silently inherit the 200 GiB reservation (76 Gi) and the
+// kubelet would refuse to start because 76 Gi > actual disk capacity (~25 Gi).
+func TestListEphemeralStorageCacheIsolation(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+
+	nodeClass200 := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			Disks: []v1alpha1.Disk{
+				{Boot: true, SizeGiB: 200, Category: "hyperdisk-balanced"},
+			},
+		},
+	}
+	nodeClass30 := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			Disks: []v1alpha1.Disk{
+				{Boot: true, SizeGiB: 30, Category: "hyperdisk-balanced"},
+			},
+		},
+	}
+
+	// First call: 200 GiB disk – populates the cache.
+	its200, err := p.List(ctx, nodeClass200)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, its200)
+	ephemeral200 := its200[0].Overhead.KubeReserved.StorageEphemeral()
+
+	// Second call: 30 GiB disk – must NOT reuse the 200 GiB cache entry.
+	its30, err := p.List(ctx, nodeClass30)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, its30)
+	ephemeral30 := its30[0].Overhead.KubeReserved.StorageEphemeral()
+
+	// With the fix (disksHash in key): each NodeClass gets its own cache entry and overhead.
+	// Without the fix: both calls share one key – the second call returns stale 76 Gi
+	// for a 30 GiB disk, causing kubelet to fail with "reservation > capacity".
+	assert.Equal(t, int64(76)*1024*1024*1024, ephemeral200.Value(),
+		"200 GiB disk should produce 76 Gi kubeReserved ephemeral-storage")
+	assert.Equal(t, int64(15)*1024*1024*1024, ephemeral30.Value(),
+		"30 GiB disk should produce 15 Gi kubeReserved ephemeral-storage, not the cached 76 Gi")
+	assert.Equal(t, 2, p.instanceTypesCache.ItemCount(),
+		"each distinct disk config must produce a separate cache entry")
+}
 
 func TestCalculateDiskConfiguration(t *testing.T) {
 	tests := []struct {
