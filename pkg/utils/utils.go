@@ -175,8 +175,8 @@ func ResolveReservedEphemeralStorage(bootDiskGiB, totalSSDGiB, localSSDCount int
 	// - 50% of boot disk capacity
 	// - 35% of boot disk capacity + 6 GiB
 	// - 100 GiB
-	option1 := int64(float64(bootDiskGiB) * 0.50)
-	option2 := int64(float64(bootDiskGiB)*0.35) + 6
+	option1 := int64(math.Round(float64(bootDiskGiB) * 0.50))
+	option2 := int64(math.Round(float64(bootDiskGiB)*0.35 + 6))
 	option3 := int64(100)
 
 	systemReservation = option1

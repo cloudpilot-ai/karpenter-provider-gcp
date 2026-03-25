@@ -137,6 +137,14 @@ func TestResolveReservedEphemeralStorage(t *testing.T) {
 	}{
 		// Boot disk scenarios
 		{
+			name:             "30GB boot disk only (issue #220)",
+			bootDiskGiB:      30,
+			totalSSDGiB:      0,
+			localSSDCount:    0,
+			expectedEviction: 3,  // 10% of 30GB
+			expectedSystem:   15, // 50%×30=15 < round(35%×30+6)=17 → 15 wins
+		},
+		{
 			name:             "100GB boot disk only",
 			bootDiskGiB:      100,
 			totalSSDGiB:      0,
