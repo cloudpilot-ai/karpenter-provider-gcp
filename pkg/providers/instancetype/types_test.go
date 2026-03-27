@@ -178,7 +178,7 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bootGiB, ssdGiB, ssdCount := calculateDiskConfiguration(tt.nodeClass, tt.mt)
+			bootGiB, ssdGiB, ssdCount := calculateDiskConfigGiB(tt.nodeClass, tt.mt)
 			assert.Equal(t, tt.expectedBootGiB, bootGiB, "boot disk GiB mismatch")
 			assert.Equal(t, tt.expectedSSDGiB, ssdGiB, "total SSD GiB mismatch")
 			assert.Equal(t, tt.expectedSSDCount, ssdCount, "SSD count mismatch")
