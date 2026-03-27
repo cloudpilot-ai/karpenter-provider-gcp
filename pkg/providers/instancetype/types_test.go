@@ -148,6 +148,32 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			expectedSSDGiB:   0,
 			expectedSSDCount: 0,
 		},
+		{
+			name:      "c4d-highmem-8-lssd: API reports 1 partition but total override applies",
+			nodeClass: &v1alpha1.GCENodeClass{},
+			mt: &computepb.MachineType{
+				Name: aws.String("c4d-highmem-8-lssd"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{
+					PartitionCount: aws.Int32(1),
+				},
+			},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   2250,
+			expectedSSDCount: 1,
+		},
+		{
+			name:      "c4d-highmem-16-lssd: API reports 1 partition but total override applies",
+			nodeClass: &v1alpha1.GCENodeClass{},
+			mt: &computepb.MachineType{
+				Name: aws.String("c4d-highmem-16-lssd"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{
+					PartitionCount: aws.Int32(1),
+				},
+			},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   3000,
+			expectedSSDCount: 1,
+		},
 	}
 
 	for _, tt := range tests {
