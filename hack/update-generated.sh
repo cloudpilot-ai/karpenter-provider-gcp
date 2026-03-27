@@ -11,6 +11,7 @@ export REPO_ROOT=$(pwd)
 export GOPATH="${REPO_ROOT}/_go"
 
 cleanup() {
+  chmod -R u+w "${GOPATH}" 2>/dev/null || true
   rm -rf "${GOPATH}"
 }
 trap "cleanup" EXIT SIGINT
