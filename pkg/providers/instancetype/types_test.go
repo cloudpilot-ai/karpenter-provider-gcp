@@ -82,6 +82,7 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 	tests := []struct {
 		name             string
 		nodeClass        *v1alpha1.GCENodeClass
+		mt               *computepb.MachineType
 		expectedBootGiB  int64
 		expectedSSDGiB   int64
 		expectedSSDCount int64
@@ -95,6 +96,7 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 					},
 				},
 			},
+			mt:               &computepb.MachineType{},
 			expectedBootGiB:  30,
 			expectedSSDGiB:   0,
 			expectedSSDCount: 0,
@@ -102,6 +104,46 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 		{
 			name:             "default 100GiB when no disks specified",
 			nodeClass:        &v1alpha1.GCENodeClass{},
+			mt:               &computepb.MachineType{},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   0,
+			expectedSSDCount: 0,
+		},
+		{
+			name:      "BundledLocalSsds standard family: 2 partitions × 375 GiB",
+			nodeClass: &v1alpha1.GCENodeClass{},
+			mt: &computepb.MachineType{
+				Name: aws.String("n2-standard-8"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{
+					PartitionCount: aws.Int32(2),
+				},
+			},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   750,
+			expectedSSDCount: 2,
+		},
+		{
+			name:      "BundledLocalSsds z3 family: 4 partitions × 3000 GiB",
+			nodeClass: &v1alpha1.GCENodeClass{},
+			mt: &computepb.MachineType{
+				Name: aws.String("z3-highmem-88-standardlssd"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{
+					PartitionCount: aws.Int32(4),
+				},
+			},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   12000,
+			expectedSSDCount: 4,
+		},
+		{
+			name:      "BundledLocalSsds PartitionCount=0 treated as no SSDs",
+			nodeClass: &v1alpha1.GCENodeClass{},
+			mt: &computepb.MachineType{
+				Name: aws.String("n2-standard-8"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{
+					PartitionCount: aws.Int32(0),
+				},
+			},
 			expectedBootGiB:  100,
 			expectedSSDGiB:   0,
 			expectedSSDCount: 0,
@@ -110,7 +152,7 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bootGiB, ssdGiB, ssdCount := calculateDiskConfiguration(tt.nodeClass, &computepb.MachineType{})
+			bootGiB, ssdGiB, ssdCount := calculateDiskConfiguration(tt.nodeClass, tt.mt)
 			assert.Equal(t, tt.expectedBootGiB, bootGiB, "boot disk GiB mismatch")
 			assert.Equal(t, tt.expectedSSDGiB, ssdGiB, "total SSD GiB mismatch")
 			assert.Equal(t, tt.expectedSSDCount, ssdCount, "SSD count mismatch")
