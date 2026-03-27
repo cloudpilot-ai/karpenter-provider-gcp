@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package localssd
 
 import (
 	"testing"
@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLocalSSDTotalGiB(t *testing.T) {
+func TestTotalGiB(t *testing.T) {
 	tests := []struct {
 		name           string
 		machineName    string
@@ -53,7 +53,7 @@ func TestLocalSSDTotalGiB(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := LocalSSDTotalGiB(tt.machineName, tt.partitionCount)
+			got := TotalGiB(tt.machineName, tt.partitionCount)
 			assert.Equal(t, tt.want, got)
 		})
 	}
