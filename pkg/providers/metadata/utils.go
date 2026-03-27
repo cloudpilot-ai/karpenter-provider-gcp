@@ -199,7 +199,6 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 	}
 
 	arch, family := kubeEnvPatchTargets(instanceType)
-	patchedDone := false
 	for _, item := range metadata.Items {
 		if item.Key != "kube-env" {
 			continue
@@ -217,14 +216,7 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 
 		if updated != kubeEnv {
 			item.Value = swag.String(updated)
-			patchedDone = true
 		}
-	}
-
-	if !patchedDone {
-		// Not all templates include these fields, so don't hard-fail if kube-env exists
-		// but did not require a patch.
-		return nil
 	}
 
 	return nil

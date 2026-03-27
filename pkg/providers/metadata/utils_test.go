@@ -13,6 +13,31 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
+func TestNoPatchKubeEnv(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{},
+		},
+	}
+
+	it := &cloudprovider.InstanceType{
+		Name: "c4a-highmem-2",
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "arm64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, "c4a"),
+		),
+	}
+
+	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
+
+	got := swag.StringValue(meta.Items[0].Value)
+	require.NotContains(t, got, "kubernetes-server-linux-arm64.tar.gz")
+	require.NotContains(t, got, "kubernetes-server-linux-amd64.tar.gz")
+	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
+	require.NotContains(t, got, "arch=arm64")
+	require.NotContains(t, got, "cloud.google.com/machine-family=e2")
+}
+
 func TestPatchKubeEnvForInstanceType_ARM64(t *testing.T) {
 	meta := &compute.Metadata{
 		Items: []*compute.MetadataItems{
