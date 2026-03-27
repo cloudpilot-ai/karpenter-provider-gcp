@@ -242,14 +242,8 @@ func calculateDiskConfiguration(nodeClass *v1alpha1.GCENodeClass, mt *computepb.
 
 	// Fallback to machine type bundled local SSDs if no nodeClass disk config
 	if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil && *bls.PartitionCount > 0 {
-		count := int64(*bls.PartitionCount)
-		localSSDCount = count
-		// z3 uses 3000 GiB per partition; all other families use 375 GiB
-		giBPerPartition := int64(375)
-		if strings.HasPrefix(aws.StringValue(mt.Name), "z3") {
-			giBPerPartition = 3000
-		}
-		totalSSDGiB = count * giBPerPartition
+		localSSDCount = int64(*bls.PartitionCount)
+		totalSSDGiB = utils.LocalSSDTotalGiB(aws.StringValue(mt.Name), int(*bls.PartitionCount))
 	}
 	return bootDiskGiB, totalSSDGiB, localSSDCount
 }
