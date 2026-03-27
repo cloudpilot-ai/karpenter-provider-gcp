@@ -24,10 +24,10 @@ import (
 
 func TestLocalSSDTotalGiB(t *testing.T) {
 	tests := []struct {
-		name          string
-		machineName   string
+		name           string
+		machineName    string
 		partitionCount int
-		want          int64
+		want           int64
 	}{
 		// Standard family: partitionCount × 375 GiB
 		{"n2 standard: 2 × 375", "n2-standard-8", 2, 750},
