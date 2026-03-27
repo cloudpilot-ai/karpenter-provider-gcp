@@ -14,25 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package localssd
 
 import "strings"
 
-// DefaultSSDPartitionGiB is the standard NVMe local SSD partition size for most GCP machine families.
-const DefaultSSDPartitionGiB int64 = 375
+// DefaultPartitionGiB is the standard NVMe local SSD partition size for most GCP machine families.
+const DefaultPartitionGiB int64 = 375
 
-type localSSDEntry struct {
+type entry struct {
 	totalGiB   int64 // total SSD capacity; 0 = compute from partitions
-	perPartGiB int64 // per-partition GiB; 0 = use DefaultSSDPartitionGiB
+	perPartGiB int64 // per-partition GiB; 0 = use DefaultPartitionGiB
 }
 
-// localSSDTable maps machine families (no "-") and specific machine types (contains "-") to their
+// table maps machine families (no "-") and specific machine types (contains "-") to their
 // local SSD sizing. Family entries override per-partition GiB; machine entries override the total
 // for machines where the Compute API returns a wrong PartitionCount.
 //
 // Source: https://github.com/Cyclenerd/google-cloud-pricing-cost-calculator/blob/master/build/gcp.yml
 // Cross-referenced with: https://cloud.google.com/compute/docs/disks/local-ssd
-var localSSDTable = map[string]localSSDEntry{
+var table = map[string]entry{
 	// z3 uses 3 TiB NVMe per partition; all other families use 375 GiB
 	"z3": {perPartGiB: 3000},
 
@@ -46,11 +46,11 @@ var localSSDTable = map[string]localSSDEntry{
 	"z3-highmem-192-highlssd-metal": {totalGiB: 72000}, // 12 × 6000 GiB
 }
 
-// LocalSSDTotalGiB returns total local SSD capacity in GiB for the given machine type.
+// TotalGiB returns total local SSD capacity in GiB for the given machine type.
 // Machine-level total overrides take priority (for machines where the API reports a wrong
 // PartitionCount); otherwise falls back to partitionCount × per-family partition size.
-func LocalSSDTotalGiB(machineName string, partitionCount int) int64 {
-	if e, ok := localSSDTable[machineName]; ok && e.totalGiB > 0 {
+func TotalGiB(machineName string, partitionCount int) int64 {
+	if e, ok := table[machineName]; ok && e.totalGiB > 0 {
 		return e.totalGiB
 	}
 	if partitionCount <= 0 {
@@ -60,14 +60,14 @@ func LocalSSDTotalGiB(machineName string, partitionCount int) int64 {
 }
 
 // partitionSizeGiB returns the GiB capacity of a single local SSD partition for the given
-// machine type, using a family-level override from localSSDTable or DefaultSSDPartitionGiB.
+// machine type, using a family-level override from table or DefaultPartitionGiB.
 func partitionSizeGiB(machineName string) int64 {
 	family := machineName
 	if i := strings.IndexByte(machineName, '-'); i > 0 {
 		family = machineName[:i]
 	}
-	if e, ok := localSSDTable[family]; ok && e.perPartGiB > 0 {
+	if e, ok := table[family]; ok && e.perPartGiB > 0 {
 		return e.perPartGiB
 	}
-	return DefaultSSDPartitionGiB
+	return DefaultPartitionGiB
 }
