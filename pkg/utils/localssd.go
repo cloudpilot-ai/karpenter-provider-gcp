@@ -46,8 +46,9 @@ var localSSDTable = map[string]localSSDEntry{
 	"z3-highmem-192-highlssd-metal": {totalGiB: 72000}, // 12 × 6000 GiB
 }
 
-// LocalSSDTotalGiB returns total local SSD capacity in GiB, applying any machine- or family-level
-// override from localSSDTable before falling back to partitionCount × per-family partition size.
+// LocalSSDTotalGiB returns total local SSD capacity in GiB for the given machine type.
+// Machine-level total overrides take priority (for machines where the API reports a wrong
+// PartitionCount); otherwise falls back to partitionCount × per-family partition size.
 func LocalSSDTotalGiB(machineName string, partitionCount int) int64 {
 	if e, ok := localSSDTable[machineName]; ok && e.totalGiB > 0 {
 		return e.totalGiB
@@ -55,13 +56,18 @@ func LocalSSDTotalGiB(machineName string, partitionCount int) int64 {
 	if partitionCount <= 0 {
 		return 0
 	}
+	return int64(partitionCount) * partitionSizeGiB(machineName)
+}
+
+// partitionSizeGiB returns the GiB capacity of a single local SSD partition for the given
+// machine type, using a family-level override from localSSDTable or DefaultSSDPartitionGiB.
+func partitionSizeGiB(machineName string) int64 {
 	family := machineName
 	if i := strings.IndexByte(machineName, '-'); i > 0 {
 		family = machineName[:i]
 	}
-	giBPerPart := DefaultSSDPartitionGiB
 	if e, ok := localSSDTable[family]; ok && e.perPartGiB > 0 {
-		giBPerPart = e.perPartGiB
+		return e.perPartGiB
 	}
-	return int64(partitionCount) * giBPerPart
+	return DefaultSSDPartitionGiB
 }
