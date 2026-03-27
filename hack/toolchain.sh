@@ -16,7 +16,7 @@ tools() {
     go install github.com/mikefarah/yq/v4@v4.44.3
     go install github.com/norwoodj/helm-docs/cmd/helm-docs@v1.14.2
     go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-    go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+    go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
     go install github.com/sigstore/cosign/v2/cmd/cosign@latest
     go install -tags extended github.com/gohugoio/hugo@v0.110.0
     go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -25,7 +25,6 @@ tools() {
     go install github.com/mattn/goveralls@v0.0.12
     go install github.com/google/go-containerregistry/cmd/crane@latest
     go install oras.land/oras/cmd/oras@v1.2.0
-    go install k8s.io/code-generator/cmd/deepcopy-gen@v0.27.0
 
     if ! echo "$PATH" | grep -q "${GOPATH:-undefined}/bin\|$HOME/go/bin"; then
         echo "Go workspace's \"bin\" directory is not in PATH. Run 'export PATH=\"\$PATH:\${GOPATH:-\$HOME/go}/bin\"'."
