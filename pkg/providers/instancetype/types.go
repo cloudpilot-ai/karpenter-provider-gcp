@@ -34,6 +34,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass,
@@ -236,7 +237,7 @@ func calculateDiskConfigGiB(nodeClass *v1alpha1.GCENodeClass, mt *computepb.Mach
 	// Fallback to machine type bundled local SSDs if no nodeClass disk config
 	if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil && *bls.PartitionCount > 0 {
 		localSSDCount = int64(*bls.PartitionCount)
-		totalSSDGiB = utils.LocalSSDTotalGiB(aws.StringValue(mt.Name), int(*bls.PartitionCount))
+		totalSSDGiB = localssd.TotalGiB(aws.StringValue(mt.Name), int(*bls.PartitionCount))
 	}
 	return bootDiskGiB, totalSSDGiB, localSSDCount
 }
