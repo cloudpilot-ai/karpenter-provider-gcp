@@ -769,6 +769,10 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
 	}
 
+	if err := metadata.PatchKubeEnvForInstanceType(instanceMetadata, instanceType); err != nil {
+		return fmt.Errorf("failed to patch kube-env for instance type: %w", err)
+	}
+
 	if capacityType == karpv1.CapacityTypeSpot {
 		if err := metadata.SetProvisioningModel(instanceMetadata, capacityType); err != nil {
 			return fmt.Errorf("failed to set provisioning model in metadata: %w", err)
