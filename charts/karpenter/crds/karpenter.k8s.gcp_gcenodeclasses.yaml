@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.17.3
   name: gcenodeclasses.karpenter.k8s.gcp
 spec:
   group: karpenter.k8s.gcp
@@ -352,6 +352,11 @@ spec:
                   type: string
                 maxItems: 20
                 type: array
+              serviceAccount:
+                description: ServiceAccount is the GCP IAM service account email to
+                  assign to the instance
+                pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
+                type: string
               subnetRangeName:
                 description: |-
                   SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
@@ -360,11 +365,6 @@ spec:
                 maxLength: 63
                 minLength: 1
                 pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
-                type: string
-              serviceAccount:
-                description: ServiceAccount is the GCP IAM service account email to
-                  assign to the instance
-                pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
                 type: string
             required:
             - imageSelectorTerms

@@ -28,7 +28,7 @@ TEST_SUITE ?= "..."
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-presubmit: update verify ut-test ## Run all steps in the developer loop
+presubmit: verify-codegen verify ut-test ## Run all steps in the developer loop
 
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
@@ -47,6 +47,9 @@ run: ## Run Karpenter controller binary against your local cluster
 update: tidy download ## Update go files header, CRD and generated code
 	hack/boilerplate.sh
 	hack/update-generated.sh
+
+verify-codegen: update ## Verify generated code is up to date
+	git diff --exit-code || (echo "Generated files are out of date — run 'make update' and commit the changes" && exit 1)
 
 verify: ## Verify code. Includes linting, formatting, etc
 	golangci-lint run --new-from-rev=origin/main --timeout=20m
@@ -89,7 +92,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test coverage update verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test coverage update verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 
