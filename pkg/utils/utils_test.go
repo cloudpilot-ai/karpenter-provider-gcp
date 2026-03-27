@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,7 +43,7 @@ func TestResolveReservedCPUMCore(t *testing.T) {
 	}
 
 	for _, tt := range testCases {
-		t.Run(tt.instanceType+"-"+string(rune(tt.cpuMCore)), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s-%d", tt.instanceType, tt.cpuMCore), func(t *testing.T) {
 			cpu := ResolveReservedCPUMCore(tt.instanceType, tt.cpuMCore)
 			assert.Equal(t, tt.expected, cpu)
 		})
