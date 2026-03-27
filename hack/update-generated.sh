@@ -11,8 +11,7 @@ export REPO_ROOT=$(pwd)
 export GOPATH="${REPO_ROOT}/_go"
 
 cleanup() {
-  # TODO: In github action, it needs root privilege to delete this dir
-  sudo rm -rf "${GOPATH}"
+  rm -rf "${GOPATH}"
 }
 trap "cleanup" EXIT SIGINT
 
