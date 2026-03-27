@@ -198,12 +198,7 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 		return fmt.Errorf("metadata and instanceType must be non-nil")
 	}
 
-	arch := instanceType.Requirements.Get(corev1.LabelArchStable).Any()
-	if arch == "" {
-		arch = "amd64"
-	}
-	family := instanceType.Requirements.Get(v1alpha1.LabelInstanceFamily).Any()
-
+	arch, family := kubeEnvPatchTargets(instanceType)
 	patchedDone := false
 	for _, item := range metadata.Items {
 		if item.Key != "kube-env" {
@@ -214,23 +209,10 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 			return fmt.Errorf("kube-env metadata is empty")
 		}
 
-		updated := kubeEnv
-
-		// Fix server tarball URLs (GKE uses kubernetes-server-linux-<arch>.tar.gz).
-		if arch == "arm64" {
-			updated = strings.ReplaceAll(updated, "linux-amd64", "linux-arm64")
-		} else if arch == "amd64" {
-			updated = strings.ReplaceAll(updated, "linux-arm64", "linux-amd64")
-		}
-
-		// Fix `arch=` in AUTOSCALER_ENV_VARS and KUBELET_ARGS.
-		if kubeEnvArchRegex.MatchString(updated) {
-			updated = kubeEnvArchRegex.ReplaceAllString(updated, "arch="+arch)
-		}
-
-		// Fix machine family in AUTOSCALER_ENV_VARS and KUBELET_ARGS when we can determine it.
-		if family != "" && kubeEnvFamilyRegex.MatchString(updated) {
-			updated = kubeEnvFamilyRegex.ReplaceAllString(updated, "cloud.google.com/machine-family="+family)
+		updated := patchKubeEnvForArch(kubeEnv, arch)
+		updated = patchKubeEnvKeyValue(updated, kubeEnvArchRegex, "arch="+arch)
+		if family != "" {
+			updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
 		}
 
 		if updated != kubeEnv {
@@ -246,6 +228,34 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 	}
 
 	return nil
+}
+
+func kubeEnvPatchTargets(instanceType *cloudprovider.InstanceType) (arch string, family string) {
+	arch = instanceType.Requirements.Get(corev1.LabelArchStable).Any()
+	if arch == "" {
+		arch = "amd64"
+	}
+	family = instanceType.Requirements.Get(v1alpha1.LabelInstanceFamily).Any()
+	return arch, family
+}
+
+func patchKubeEnvForArch(kubeEnv, arch string) string {
+	// Fix server tarball URLs (GKE uses kubernetes-server-linux-<arch>.tar.gz).
+	switch arch {
+	case "arm64":
+		return strings.ReplaceAll(kubeEnv, "linux-amd64", "linux-arm64")
+	case "amd64":
+		return strings.ReplaceAll(kubeEnv, "linux-arm64", "linux-amd64")
+	default:
+		return kubeEnv
+	}
+}
+
+func patchKubeEnvKeyValue(kubeEnv string, re *regexp.Regexp, replacement string) string {
+	if !re.MatchString(kubeEnv) {
+		return kubeEnv
+	}
+	return re.ReplaceAllString(kubeEnv, replacement)
 }
 
 func AppendNodeClaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
