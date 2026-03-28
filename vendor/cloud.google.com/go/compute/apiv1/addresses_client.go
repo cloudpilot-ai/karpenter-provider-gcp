@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,13 +42,14 @@ var newAddressesClientHook clientHook
 
 // AddressesCallOptions contains the retry settings for each method of AddressesClient.
 type AddressesCallOptions struct {
-	AggregatedList []gax.CallOption
-	Delete         []gax.CallOption
-	Get            []gax.CallOption
-	Insert         []gax.CallOption
-	List           []gax.CallOption
-	Move           []gax.CallOption
-	SetLabels      []gax.CallOption
+	AggregatedList     []gax.CallOption
+	Delete             []gax.CallOption
+	Get                []gax.CallOption
+	Insert             []gax.CallOption
+	List               []gax.CallOption
+	Move               []gax.CallOption
+	SetLabels          []gax.CallOption
+	TestIamPermissions []gax.CallOption
 }
 
 func defaultAddressesRESTCallOptions() *AddressesCallOptions {
@@ -101,6 +102,9 @@ func defaultAddressesRESTCallOptions() *AddressesCallOptions {
 		SetLabels: []gax.CallOption{
 			gax.WithTimeout(600000 * time.Millisecond),
 		},
+		TestIamPermissions: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+		},
 	}
 }
 
@@ -116,6 +120,7 @@ type internalAddressesClient interface {
 	List(context.Context, *computepb.ListAddressesRequest, ...gax.CallOption) *AddressIterator
 	Move(context.Context, *computepb.MoveAddressRequest, ...gax.CallOption) (*Operation, error)
 	SetLabels(context.Context, *computepb.SetLabelsAddressRequest, ...gax.CallOption) (*Operation, error)
+	TestIamPermissions(context.Context, *computepb.TestIamPermissionsAddressRequest, ...gax.CallOption) (*computepb.TestPermissionsResponse, error)
 }
 
 // AddressesClient is a client for interacting with Google Compute Engine API.
@@ -153,7 +158,10 @@ func (c *AddressesClient) Connection() *grpc.ClientConn {
 	return c.internalClient.Connection()
 }
 
-// AggregatedList retrieves an aggregated list of addresses. To prevent failure, Google recommends that you set the returnPartialSuccess parameter to true.
+// AggregatedList retrieves an aggregated list of addresses.
+//
+// To prevent failure, it is recommended that you set the
+// returnPartialSuccess parameter to true.
 func (c *AddressesClient) AggregatedList(ctx context.Context, req *computepb.AggregatedListAddressesRequest, opts ...gax.CallOption) *AddressesScopedListPairIterator {
 	return c.internalClient.AggregatedList(ctx, req, opts...)
 }
@@ -168,12 +176,14 @@ func (c *AddressesClient) Get(ctx context.Context, req *computepb.GetAddressRequ
 	return c.internalClient.Get(ctx, req, opts...)
 }
 
-// Insert creates an address resource in the specified project by using the data included in the request.
+// Insert creates an address resource in the specified project by using the data
+// included in the request.
 func (c *AddressesClient) Insert(ctx context.Context, req *computepb.InsertAddressRequest, opts ...gax.CallOption) (*Operation, error) {
 	return c.internalClient.Insert(ctx, req, opts...)
 }
 
-// List retrieves a list of addresses contained within the specified region.
+// List retrieves a list of addresses contained within
+// the specified region.
 func (c *AddressesClient) List(ctx context.Context, req *computepb.ListAddressesRequest, opts ...gax.CallOption) *AddressIterator {
 	return c.internalClient.List(ctx, req, opts...)
 }
@@ -183,9 +193,15 @@ func (c *AddressesClient) Move(ctx context.Context, req *computepb.MoveAddressRe
 	return c.internalClient.Move(ctx, req, opts...)
 }
 
-// SetLabels sets the labels on an Address. To learn more about labels, read the Labeling Resources documentation.
+// SetLabels sets the labels on an Address. To learn more about labels, read theLabeling
+// Resources documentation.
 func (c *AddressesClient) SetLabels(ctx context.Context, req *computepb.SetLabelsAddressRequest, opts ...gax.CallOption) (*Operation, error) {
 	return c.internalClient.SetLabels(ctx, req, opts...)
+}
+
+// TestIamPermissions returns permissions that a caller has on the specified resource.
+func (c *AddressesClient) TestIamPermissions(ctx context.Context, req *computepb.TestIamPermissionsAddressRequest, opts ...gax.CallOption) (*computepb.TestPermissionsResponse, error) {
+	return c.internalClient.TestIamPermissions(ctx, req, opts...)
 }
 
 // Methods, except Close, may be called concurrently. However, fields must not be modified concurrently with method calls.
@@ -281,7 +297,10 @@ func (c *addressesRESTClient) Connection() *grpc.ClientConn {
 	return nil
 }
 
-// AggregatedList retrieves an aggregated list of addresses. To prevent failure, Google recommends that you set the returnPartialSuccess parameter to true.
+// AggregatedList retrieves an aggregated list of addresses.
+//
+// To prevent failure, it is recommended that you set the
+// returnPartialSuccess parameter to true.
 func (c *addressesRESTClient) AggregatedList(ctx context.Context, req *computepb.AggregatedListAddressesRequest, opts ...gax.CallOption) *AddressesScopedListPairIterator {
 	it := &AddressesScopedListPairIterator{}
 	req = proto.Clone(req).(*computepb.AggregatedListAddressesRequest)
@@ -485,7 +504,8 @@ func (c *addressesRESTClient) Get(ctx context.Context, req *computepb.GetAddress
 	return resp, nil
 }
 
-// Insert creates an address resource in the specified project by using the data included in the request.
+// Insert creates an address resource in the specified project by using the data
+// included in the request.
 func (c *addressesRESTClient) Insert(ctx context.Context, req *computepb.InsertAddressRequest, opts ...gax.CallOption) (*Operation, error) {
 	m := protojson.MarshalOptions{AllowPartial: true}
 	body := req.GetAddressResource()
@@ -552,7 +572,8 @@ func (c *addressesRESTClient) Insert(ctx context.Context, req *computepb.InsertA
 	return op, nil
 }
 
-// List retrieves a list of addresses contained within the specified region.
+// List retrieves a list of addresses contained within
+// the specified region.
 func (c *addressesRESTClient) List(ctx context.Context, req *computepb.ListAddressesRequest, opts ...gax.CallOption) *AddressIterator {
 	it := &AddressIterator{}
 	req = proto.Clone(req).(*computepb.ListAddressesRequest)
@@ -705,7 +726,8 @@ func (c *addressesRESTClient) Move(ctx context.Context, req *computepb.MoveAddre
 	return op, nil
 }
 
-// SetLabels sets the labels on an Address. To learn more about labels, read the Labeling Resources documentation.
+// SetLabels sets the labels on an Address. To learn more about labels, read theLabeling
+// Resources documentation.
 func (c *addressesRESTClient) SetLabels(ctx context.Context, req *computepb.SetLabelsAddressRequest, opts ...gax.CallOption) (*Operation, error) {
 	m := protojson.MarshalOptions{AllowPartial: true}
 	body := req.GetRegionSetLabelsRequestResource()
@@ -770,4 +792,56 @@ func (c *addressesRESTClient) SetLabels(ctx context.Context, req *computepb.SetL
 		},
 	}
 	return op, nil
+}
+
+// TestIamPermissions returns permissions that a caller has on the specified resource.
+func (c *addressesRESTClient) TestIamPermissions(ctx context.Context, req *computepb.TestIamPermissionsAddressRequest, opts ...gax.CallOption) (*computepb.TestPermissionsResponse, error) {
+	m := protojson.MarshalOptions{AllowPartial: true}
+	body := req.GetTestPermissionsRequestResource()
+	jsonReq, err := m.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	baseUrl, err := url.Parse(c.endpoint)
+	if err != nil {
+		return nil, err
+	}
+	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/regions/%v/addresses/%v/testIamPermissions", req.GetProject(), req.GetRegion(), req.GetResource())
+
+	// Build HTTP headers from client and context metadata.
+	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "region", url.QueryEscape(req.GetRegion()), "resource", url.QueryEscape(req.GetResource()))}
+
+	hds = append(c.xGoogHeaders, hds...)
+	hds = append(hds, "Content-Type", "application/json")
+	headers := gax.BuildHeaders(ctx, hds...)
+	opts = append((*c.CallOptions).TestIamPermissions[0:len((*c.CallOptions).TestIamPermissions):len((*c.CallOptions).TestIamPermissions)], opts...)
+	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
+	resp := &computepb.TestPermissionsResponse{}
+	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
+		if settings.Path != "" {
+			baseUrl.Path = settings.Path
+		}
+		httpReq, err := http.NewRequest("POST", baseUrl.String(), bytes.NewReader(jsonReq))
+		if err != nil {
+			return err
+		}
+		httpReq = httpReq.WithContext(ctx)
+		httpReq.Header = headers
+
+		buf, err := executeHTTPRequest(ctx, c.httpClient, httpReq, c.logger, jsonReq, "TestIamPermissions")
+		if err != nil {
+			return err
+		}
+
+		if err := unm.Unmarshal(buf, resp); err != nil {
+			return err
+		}
+
+		return nil
+	}, opts...)
+	if e != nil {
+		return nil, e
+	}
+	return resp, nil
 }

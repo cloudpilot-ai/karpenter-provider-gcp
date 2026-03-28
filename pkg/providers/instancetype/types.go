@@ -240,12 +240,11 @@ func calculateDiskConfiguration(nodeClass *v1alpha1.GCENodeClass, mt *computepb.
 		return bootDiskGiB, totalSSDGiB, localSSDCount
 	}
 
-	// Fallback to machine type scratch disks if no nodeClass disk config
-	for _, disk := range mt.GetScratchDisks() {
-		if disk.DiskGb != nil {
-			totalSSDGiB += int64(*disk.DiskGb)
-			localSSDCount++
-		}
+	// Fallback to machine type bundled local SSDs if no nodeClass disk config
+	if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil {
+		count := int64(*bls.PartitionCount)
+		localSSDCount = count
+		totalSSDGiB = count * 375 // standard NVMe partition size
 	}
 	return bootDiskGiB, totalSSDGiB, localSSDCount
 }
