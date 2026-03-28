@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC.
+// Copyright 2026 Google LLC.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -338,6 +338,15 @@ type AdditionalIPRangesConfig struct {
 	// that can be used for pod IPs. Example1: gke-pod-range1 Example2:
 	// gke-pod-range1,gke-pod-range2
 	PodIpv4RangeNames []string `json:"podIpv4RangeNames,omitempty"`
+	// Status: Draining status of the additional subnet.
+	//
+	// Possible values:
+	//   "STATUS_UNSPECIFIED" - Not set, same as ACTIVE.
+	//   "ACTIVE" - ACTIVE status indicates that the subnet is available for new
+	// node pool creation.
+	//   "DRAINING" - DRAINING status indicates that the subnet is not used for new
+	// node pool creation.
+	Status string `json:"status,omitempty"`
 	// Subnetwork: Name of the subnetwork. This can be the full path of the
 	// subnetwork or just the name. Example1: my-subnet Example2:
 	// projects/gke-project/regions/us-central1/subnetworks/my-subnet
@@ -495,6 +504,9 @@ type AddonsConfig struct {
 	ParallelstoreCsiDriverConfig *ParallelstoreCsiDriverConfig `json:"parallelstoreCsiDriverConfig,omitempty"`
 	// RayOperatorConfig: Optional. Configuration for Ray Operator addon.
 	RayOperatorConfig *RayOperatorConfig `json:"rayOperatorConfig,omitempty"`
+	// SliceControllerConfig: Optional. Configuration for the slice controller
+	// add-on.
+	SliceControllerConfig *SliceControllerConfig `json:"sliceControllerConfig,omitempty"`
 	// StatefulHaConfig: Optional. Configuration for the StatefulHA add-on.
 	StatefulHaConfig *StatefulHAConfig `json:"statefulHaConfig,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "CloudRunConfig") to
@@ -1096,6 +1108,31 @@ func (s BootDisk) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// BootDiskProfile: Swap on the node's boot disk.
+type BootDiskProfile struct {
+	// SwapSizeGib: Specifies the size of the swap space in gibibytes (GiB).
+	SwapSizeGib int64 `json:"swapSizeGib,omitempty,string"`
+	// SwapSizePercent: Specifies the size of the swap space as a percentage of the
+	// boot disk size.
+	SwapSizePercent int64 `json:"swapSizePercent,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "SwapSizeGib") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "SwapSizeGib") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s BootDiskProfile) MarshalJSON() ([]byte, error) {
+	type NoMethod BootDiskProfile
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // CancelOperationRequest: CancelOperationRequest cancels a single operation.
 type CancelOperationRequest struct {
 	// Name: The name (project, location, operation id) of the operation to cancel.
@@ -1140,8 +1177,7 @@ type CertificateAuthorityDomainConfig struct {
 	// supported. Wildcards are NOT supported. Examples: - my.customdomain.com -
 	// 10.0.1.2:5000
 	Fqdns []string `json:"fqdns,omitempty"`
-	// GcpSecretManagerCertificateConfig: Google Secret Manager (GCP) certificate
-	// configuration.
+	// GcpSecretManagerCertificateConfig: Secret Manager certificate configuration.
 	GcpSecretManagerCertificateConfig *GCPSecretManagerCertificateConfig `json:"gcpSecretManagerCertificateConfig,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "Fqdns") to unconditionally
 	// include in API requests. By default, fields with empty or default values are
@@ -1345,7 +1381,7 @@ type Cluster struct {
 	// BinaryAuthorization: Configuration for Binary Authorization.
 	BinaryAuthorization *BinaryAuthorization `json:"binaryAuthorization,omitempty"`
 	// ClusterIpv4Cidr: The IP address range of the container pods in this cluster,
-	// in CIDR (http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing)
+	// in CIDR (https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing)
 	// notation (e.g. `10.96.0.0/14`). Leave blank to have one automatically chosen
 	// or specify a `/14` block in `10.0.0.0/8`.
 	ClusterIpv4Cidr string `json:"clusterIpv4Cidr,omitempty"`
@@ -1480,6 +1516,9 @@ type Cluster struct {
 	LoggingService string `json:"loggingService,omitempty"`
 	// MaintenancePolicy: Configure the maintenance policy for this cluster.
 	MaintenancePolicy *MaintenancePolicy `json:"maintenancePolicy,omitempty"`
+	// ManagedOpentelemetryConfig: Configuration for Managed OpenTelemetry
+	// pipeline.
+	ManagedOpentelemetryConfig *ManagedOpenTelemetryConfig `json:"managedOpentelemetryConfig,omitempty"`
 	// MasterAuth: The authentication information for accessing the master
 	// endpoint. If unspecified, the defaults are used: For clusters before v1.12,
 	// if master_auth is unspecified, `username` will be set to "admin", a random
@@ -1581,9 +1620,9 @@ type Cluster struct {
 	SelfLink string `json:"selfLink,omitempty"`
 	// ServicesIpv4Cidr: Output only. The IP address range of the Kubernetes
 	// services in this cluster, in CIDR
-	// (http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation (e.g.
-	// `1.2.3.4/29`). Service addresses are typically put in the last `/16` from
-	// the container CIDR.
+	// (https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation
+	// (e.g. `1.2.3.4/29`). Service addresses are typically put in the last `/16`
+	// from the container CIDR.
 	ServicesIpv4Cidr string `json:"servicesIpv4Cidr,omitempty"`
 	// ShieldedNodes: Shielded Nodes configuration.
 	ShieldedNodes *ShieldedNodes `json:"shieldedNodes,omitempty"`
@@ -1614,9 +1653,9 @@ type Cluster struct {
 	Subnetwork string `json:"subnetwork,omitempty"`
 	// TpuIpv4CidrBlock: Output only. The IP address range of the Cloud TPUs in
 	// this cluster, in CIDR
-	// (http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation (e.g.
-	// `1.2.3.4/29`). This field is deprecated due to the deprecation of 2VM TPU.
-	// The end of life date for 2VM TPU is 2025-04-25.
+	// (https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation
+	// (e.g. `1.2.3.4/29`). This field is deprecated due to the deprecation of 2VM
+	// TPU. The end of life date for 2VM TPU is 2025-04-25.
 	TpuIpv4CidrBlock string `json:"tpuIpv4CidrBlock,omitempty"`
 	// UserManagedKeysConfig: The Custom keys configuration for the cluster.
 	UserManagedKeysConfig *UserManagedKeysConfig `json:"userManagedKeysConfig,omitempty"`
@@ -1655,6 +1694,13 @@ func (s Cluster) MarshalJSON() ([]byte, error) {
 // information required by Cluster Autoscaler to automatically adjust the size
 // of the cluster and create/delete node pools based on the current needs.
 type ClusterAutoscaling struct {
+	// AutopilotGeneralProfile: Autopilot general profile for the cluster, which
+	// defines the configuration for the cluster.
+	//
+	// Possible values:
+	//   "AUTOPILOT_GENERAL_PROFILE_UNSPECIFIED" - Use default configuration.
+	//   "NO_PERFORMANCE" - Avoid extra IP consumption.
+	AutopilotGeneralProfile string `json:"autopilotGeneralProfile,omitempty"`
 	// AutoprovisioningLocations: The list of Google Compute Engine zones
 	// (https://cloud.google.com/compute/docs/zones#available) in which the
 	// NodePool's nodes can be created by NAP.
@@ -1678,13 +1724,13 @@ type ClusterAutoscaling struct {
 	// ResourceLimits: Contains global constraints regarding minimum and maximum
 	// amount of resources in the cluster.
 	ResourceLimits []*ResourceLimit `json:"resourceLimits,omitempty"`
-	// ForceSendFields is a list of field names (e.g. "AutoprovisioningLocations")
-	// to unconditionally include in API requests. By default, fields with empty or
+	// ForceSendFields is a list of field names (e.g. "AutopilotGeneralProfile") to
+	// unconditionally include in API requests. By default, fields with empty or
 	// default values are omitted from API requests. See
 	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
 	// details.
 	ForceSendFields []string `json:"-"`
-	// NullFields is a list of field names (e.g. "AutoprovisioningLocations") to
+	// NullFields is a list of field names (e.g. "AutopilotGeneralProfile") to
 	// include in API requests with the JSON null value. By default, fields with
 	// empty values are omitted from API requests. See
 	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
@@ -1853,6 +1899,9 @@ type ClusterUpdate struct {
 	// cluster. If left as an empty string,`logging.googleapis.com/kubernetes` will
 	// be used for GKE 1.14+ or `logging.googleapis.com` for earlier versions.
 	DesiredLoggingService string `json:"desiredLoggingService,omitempty"`
+	// DesiredManagedOpentelemetryConfig: The desired managed open telemetry
+	// configuration.
+	DesiredManagedOpentelemetryConfig *ManagedOpenTelemetryConfig `json:"desiredManagedOpentelemetryConfig,omitempty"`
 	// DesiredMasterAuthorizedNetworksConfig: The desired configuration options for
 	// master authorized networks feature. Deprecated: Use
 	// desired_control_plane_endpoints_config.ip_endpoints_config.authorized_network
@@ -1951,6 +2000,9 @@ type ClusterUpdate struct {
 	//   "PRIVATE_IPV6_GOOGLE_ACCESS_BIDIRECTIONAL" - Enables private IPv6 access
 	// to and from Google Services
 	DesiredPrivateIpv6GoogleAccess string `json:"desiredPrivateIpv6GoogleAccess,omitempty"`
+	// DesiredPrivilegedAdmissionConfig: The desired privileged admission config
+	// for the cluster.
+	DesiredPrivilegedAdmissionConfig *PrivilegedAdmissionConfig `json:"desiredPrivilegedAdmissionConfig,omitempty"`
 	// DesiredRbacBindingConfig: RBACBindingConfig allows user to restrict
 	// ClusterRoleBindings an RoleBindings that can be created.
 	DesiredRbacBindingConfig *RBACBindingConfig `json:"desiredRbacBindingConfig,omitempty"`
@@ -2579,6 +2631,29 @@ func (s DatabaseEncryption) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// DedicatedLocalSsdProfile: Provisions a new, separate local NVMe SSD
+// exclusively for swap.
+type DedicatedLocalSsdProfile struct {
+	// DiskCount: The number of physical local NVMe SSD disks to attach.
+	DiskCount int64 `json:"diskCount,omitempty,string"`
+	// ForceSendFields is a list of field names (e.g. "DiskCount") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "DiskCount") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s DedicatedLocalSsdProfile) MarshalJSON() ([]byte, error) {
+	type NoMethod DedicatedLocalSsdProfile
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // DefaultComputeClassConfig: DefaultComputeClassConfig defines default compute
 // class configuration.
 type DefaultComputeClassConfig struct {
@@ -2680,6 +2755,48 @@ func (s DesiredEnterpriseConfig) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// DisruptionEvent: DisruptionEvent is a notification sent to customers about
+// the disruption event of a resource.
+type DisruptionEvent struct {
+	// DisruptionType: The type of the disruption event.
+	//
+	// Possible values:
+	//   "DISRUPTION_TYPE_UNSPECIFIED" - DISRUPTION_TYPE_UNSPECIFIED indicates the
+	// disruption type is unspecified.
+	//   "POD_NOT_ENOUGH_PDB" - POD_NOT_ENOUGH_PDB indicates there are still
+	// running pods on the node during node drain because their evictions are
+	// blocked by PDB.
+	//   "POD_PDB_VIOLATION" - POD_PDB_VIOLATION indicates that there are force pod
+	// evictions during node drain which violate the PDB.
+	DisruptionType string `json:"disruptionType,omitempty"`
+	// PdbBlockedNode: The node whose drain is blocked by PDB. This field is set
+	// for both POD_PDB_VIOLATION and POD_NOT_ENOUGH_PDB event.
+	PdbBlockedNode string `json:"pdbBlockedNode,omitempty"`
+	// PdbBlockedPod: The pods whose evictions are blocked by PDB. This field is
+	// set for both POD_PDB_VIOLATION and POD_NOT_ENOUGH_PDB event.
+	PdbBlockedPod []*PdbBlockedPod `json:"pdbBlockedPod,omitempty"`
+	// PdbViolationTimeout: The timeout in seconds for which the node drain is
+	// blocked by PDB. After this timeout, pods are forcefully evicted. This field
+	// is only populated when event_type is POD_PDB_VIOLATION.
+	PdbViolationTimeout string `json:"pdbViolationTimeout,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "DisruptionType") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "DisruptionType") to include in
+	// API requests with the JSON null value. By default, fields with empty values
+	// are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s DisruptionEvent) MarshalJSON() ([]byte, error) {
+	type NoMethod DisruptionEvent
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // DnsCacheConfig: Configuration for NodeLocal DNSCache
 type DnsCacheConfig struct {
 	// Enabled: Whether NodeLocal DNSCache is enabled for this cluster.
@@ -2709,6 +2826,29 @@ func (s DnsCacheConfig) MarshalJSON() ([]byte, error) {
 type Empty struct {
 	// ServerResponse contains the HTTP response code and headers from the server.
 	googleapi.ServerResponse `json:"-"`
+}
+
+// EncryptionConfig: Defines encryption settings for the swap space.
+type EncryptionConfig struct {
+	// Disabled: Optional. If true, swap space will not be encrypted. Defaults to
+	// false (encrypted).
+	Disabled bool `json:"disabled,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "Disabled") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "Disabled") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s EncryptionConfig) MarshalJSON() ([]byte, error) {
+	type NoMethod EncryptionConfig
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
 // EnterpriseConfig: EnterpriseConfig is the cluster enterprise configuration.
@@ -2747,6 +2887,32 @@ type EnterpriseConfig struct {
 
 func (s EnterpriseConfig) MarshalJSON() ([]byte, error) {
 	type NoMethod EnterpriseConfig
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
+// EphemeralLocalSsdProfile: Swap on the local SSD shared with pod ephemeral
+// storage.
+type EphemeralLocalSsdProfile struct {
+	// SwapSizeGib: Specifies the size of the swap space in gibibytes (GiB).
+	SwapSizeGib int64 `json:"swapSizeGib,omitempty,string"`
+	// SwapSizePercent: Specifies the size of the swap space as a percentage of the
+	// ephemeral local SSD capacity.
+	SwapSizePercent int64 `json:"swapSizePercent,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "SwapSizeGib") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "SwapSizeGib") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s EphemeralLocalSsdProfile) MarshalJSON() ([]byte, error) {
+	type NoMethod EphemeralLocalSsdProfile
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
@@ -3066,6 +3232,35 @@ type GCPSecretManagerCertificateConfig struct {
 
 func (s GCPSecretManagerCertificateConfig) MarshalJSON() ([]byte, error) {
 	type NoMethod GCPSecretManagerCertificateConfig
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
+// GPUDirectConfig: GPUDirectConfig specifies the GPU direct strategy on the
+// node pool.
+type GPUDirectConfig struct {
+	// GpuDirectStrategy: The type of GPU direct strategy to enable on the node
+	// pool.
+	//
+	// Possible values:
+	//   "GPU_DIRECT_STRATEGY_UNSPECIFIED" - Default value. No GPU Direct strategy
+	// is enabled on the node.
+	//   "RDMA" - GPUDirect-RDMA on A3 Ultra, and A4 machine types
+	GpuDirectStrategy string `json:"gpuDirectStrategy,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "GpuDirectStrategy") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "GpuDirectStrategy") to include in
+	// API requests with the JSON null value. By default, fields with empty values
+	// are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s GPUDirectConfig) MarshalJSON() ([]byte, error) {
+	type NoMethod GPUDirectConfig
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
@@ -3607,8 +3802,8 @@ type IPAllocationPolicy struct {
 	// field is only applicable when `use_ip_aliases` is true. Set to blank to have
 	// a range chosen with the default size. Set to /netmask (e.g. `/14`) to have a
 	// range chosen with a specific netmask. Set to a CIDR
-	// (http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation (e.g.
-	// `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
+	// (https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation
+	// (e.g. `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
 	// `172.16.0.0/12`, `192.168.0.0/16`) to pick a specific range to use.
 	ClusterIpv4CidrBlock string `json:"clusterIpv4CidrBlock,omitempty"`
 	// ClusterSecondaryRangeName: The name of the secondary range to be used for
@@ -3643,8 +3838,8 @@ type IPAllocationPolicy struct {
 	// This is applicable only if `create_subnetwork` is true. Set to blank to have
 	// a range chosen with the default size. Set to /netmask (e.g. `/14`) to have a
 	// range chosen with a specific netmask. Set to a CIDR
-	// (http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation (e.g.
-	// `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
+	// (https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation
+	// (e.g. `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
 	// `172.16.0.0/12`, `192.168.0.0/16`) to pick a specific range to use.
 	NodeIpv4CidrBlock string `json:"nodeIpv4CidrBlock,omitempty"`
 	// PodCidrOverprovisionConfig: [PRIVATE FIELD] Pod CIDR size overprovisioning
@@ -3663,8 +3858,8 @@ type IPAllocationPolicy struct {
 	// size. This field is only applicable when `use_ip_aliases` is true. Set to
 	// blank to have a range chosen with the default size. Set to /netmask (e.g.
 	// `/14`) to have a range chosen with a specific netmask. Set to a CIDR
-	// (http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation (e.g.
-	// `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
+	// (https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation
+	// (e.g. `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
 	// `172.16.0.0/12`, `192.168.0.0/16`) to pick a specific range to use.
 	ServicesIpv4CidrBlock string `json:"servicesIpv4CidrBlock,omitempty"`
 	// ServicesIpv6CidrBlock: Output only. The services IPv6 CIDR block for the
@@ -3695,8 +3890,8 @@ type IPAllocationPolicy struct {
 	// This field is only applicable when `use_ip_aliases` is true. If unspecified,
 	// the range will use the default size. Set to /netmask (e.g. `/14`) to have a
 	// range chosen with a specific netmask. Set to a CIDR
-	// (http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation (e.g.
-	// `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
+	// (https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) notation
+	// (e.g. `10.96.0.0/14`) from the RFC-1918 private networks (e.g. `10.0.0.0/8`,
 	// `172.16.0.0/12`, `192.168.0.0/16`) to pick a specific range to use. This
 	// field is deprecated due to the deprecation of 2VM TPU. The end of life date
 	// for 2VM TPU is 2025-04-25.
@@ -3966,23 +4161,31 @@ type LinuxNodeConfig struct {
 	// Container-Optimized OS image that enforces kernel module signature
 	// verification.
 	NodeKernelModuleLoading *NodeKernelModuleLoading `json:"nodeKernelModuleLoading,omitempty"`
+	// SwapConfig: Optional. Enables and configures swap space on nodes. If
+	// omitted, swap is disabled.
+	SwapConfig *SwapConfig `json:"swapConfig,omitempty"`
 	// Sysctls: The Linux kernel parameters to be applied to the nodes and all pods
 	// running on the nodes. The following parameters are supported.
 	// net.core.busy_poll net.core.busy_read net.core.netdev_max_backlog
 	// net.core.rmem_max net.core.rmem_default net.core.wmem_default
 	// net.core.wmem_max net.core.optmem_max net.core.somaxconn net.ipv4.tcp_rmem
-	// net.ipv4.tcp_wmem net.ipv4.tcp_tw_reuse net.ipv4.tcp_max_orphans
+	// net.ipv4.tcp_wmem net.ipv4.tcp_tw_reuse net.ipv4.tcp_mtu_probing
+	// net.ipv4.tcp_max_orphans net.ipv4.tcp_max_tw_buckets
+	// net.ipv4.tcp_syn_retries net.ipv4.tcp_ecn net.ipv4.tcp_congestion_control
 	// net.netfilter.nf_conntrack_max net.netfilter.nf_conntrack_buckets
 	// net.netfilter.nf_conntrack_tcp_timeout_close_wait
 	// net.netfilter.nf_conntrack_tcp_timeout_time_wait
 	// net.netfilter.nf_conntrack_tcp_timeout_established
 	// net.netfilter.nf_conntrack_acct kernel.shmmni kernel.shmmax kernel.shmall
-	// fs.aio-max-nr fs.file-max fs.inotify.max_user_instances
-	// fs.inotify.max_user_watches fs.nr_open vm.dirty_background_ratio
-	// vm.dirty_expire_centisecs vm.dirty_ratio vm.dirty_writeback_centisecs
-	// vm.max_map_count vm.overcommit_memory vm.overcommit_ratio
-	// vm.vfs_cache_pressure vm.swappiness vm.watermark_scale_factor
-	// vm.min_free_kbytes
+	// kernel.perf_event_paranoid kernel.sched_rt_runtime_us
+	// kernel.softlockup_panic kernel.yama.ptrace_scope kernel.kptr_restrict
+	// kernel.dmesg_restrict kernel.sysrq fs.aio-max-nr fs.file-max
+	// fs.inotify.max_user_instances fs.inotify.max_user_watches fs.nr_open
+	// vm.dirty_background_ratio vm.dirty_background_bytes
+	// vm.dirty_expire_centisecs vm.dirty_ratio vm.dirty_bytes
+	// vm.dirty_writeback_centisecs vm.max_map_count vm.overcommit_memory
+	// vm.overcommit_ratio vm.vfs_cache_pressure vm.swappiness
+	// vm.watermark_scale_factor vm.min_free_kbytes
 	Sysctls map[string]string `json:"sysctls,omitempty"`
 	// TransparentHugepageDefrag: Optional. Defines the transparent hugepage defrag
 	// configuration on the node. VM hugepage allocation can be managed by either
@@ -4413,6 +4616,36 @@ type MaintenanceWindow struct {
 
 func (s MaintenanceWindow) MarshalJSON() ([]byte, error) {
 	type NoMethod MaintenanceWindow
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
+// ManagedOpenTelemetryConfig: ManagedOpenTelemetryConfig is the configuration
+// for the GKE Managed OpenTelemetry pipeline.
+type ManagedOpenTelemetryConfig struct {
+	// Scope: Scope of the Managed OpenTelemetry pipeline.
+	//
+	// Possible values:
+	//   "SCOPE_UNSPECIFIED" - SCOPE_UNSPECIFIED is when the scope is not set.
+	//   "NONE" - NONE is used to disable the Managed OpenTelemetry pipeline.
+	//   "COLLECTION_AND_INSTRUMENTATION_COMPONENTS" -
+	// COLLECTION_AND_INSTRUMENTATION_COMPONENTS is used to enable the Managed
+	// OpenTelemetry pipeline for collection and instrumentation components.
+	Scope string `json:"scope,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "Scope") to unconditionally
+	// include in API requests. By default, fields with empty or default values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "Scope") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s ManagedOpenTelemetryConfig) MarshalJSON() ([]byte, error) {
+	type NoMethod ManagedOpenTelemetryConfig
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
@@ -5012,6 +5245,11 @@ type NodeConfig struct {
 	// ConfidentialNodes: Confidential nodes config. All the nodes in the node pool
 	// will be Confidential VM once enabled.
 	ConfidentialNodes *ConfidentialNodes `json:"confidentialNodes,omitempty"`
+	// ConsolidationDelay: Consolidation delay defines duration after which the
+	// Cluster Autoscaler can scale down underutilized nodes. If not set, nodes are
+	// scaled down by default behavior, i.e. according to the chosen autoscaling
+	// profile.
+	ConsolidationDelay string `json:"consolidationDelay,omitempty"`
 	// ContainerdConfig: Parameters for containerd customization.
 	ContainerdConfig *ContainerdConfig `json:"containerdConfig,omitempty"`
 	// DiskSizeGb: Size of the disk attached to each node, specified in GB. The
@@ -5048,6 +5286,8 @@ type NodeConfig struct {
 	FlexStart bool `json:"flexStart,omitempty"`
 	// GcfsConfig: Google Container File System (image streaming) configs.
 	GcfsConfig *GcfsConfig `json:"gcfsConfig,omitempty"`
+	// GpuDirectConfig: The configuration for GPU Direct
+	GpuDirectConfig *GPUDirectConfig `json:"gpuDirectConfig,omitempty"`
 	// Gvnic: Enable or disable gvnic in the node pool.
 	Gvnic *VirtualNIC `json:"gvnic,omitempty"`
 	// ImageType: The image type to use for this node. Note that for a given image
@@ -5230,6 +5470,32 @@ type NodeConfigDefaults struct {
 
 func (s NodeConfigDefaults) MarshalJSON() ([]byte, error) {
 	type NoMethod NodeConfigDefaults
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
+// NodeDrainConfig: NodeDrainConfig contains the node drain related
+// configurations for this nodepool.
+type NodeDrainConfig struct {
+	// RespectPdbDuringNodePoolDeletion: Whether to respect PDB during node pool
+	// deletion.
+	RespectPdbDuringNodePoolDeletion bool `json:"respectPdbDuringNodePoolDeletion,omitempty"`
+	// ForceSendFields is a list of field names (e.g.
+	// "RespectPdbDuringNodePoolDeletion") to unconditionally include in API
+	// requests. By default, fields with empty or default values are omitted from
+	// API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g.
+	// "RespectPdbDuringNodePoolDeletion") to include in API requests with the JSON
+	// null value. By default, fields with empty values are omitted from API
+	// requests. See https://pkg.go.dev/google.golang.org/api#hdr-NullFields for
+	// more details.
+	NullFields []string `json:"-"`
+}
+
+func (s NodeDrainConfig) MarshalJSON() ([]byte, error) {
+	type NoMethod NodeDrainConfig
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
@@ -5522,11 +5788,14 @@ type NodeNetworkConfig struct {
 	// `ip_allocation_policy.use_ip_aliases` is true. This field cannot be changed
 	// after the node pool has been created.
 	PodRange string `json:"podRange,omitempty"`
-	// Subnetwork: Output only. The subnetwork path for the node pool. Format:
+	// Subnetwork: Optional. The subnetwork name/path for the node pool. Format:
 	// projects/{project}/regions/{region}/subnetworks/{subnetwork} If the cluster
-	// is associated with multiple subnetworks, the subnetwork for the node pool is
-	// picked based on the IP utilization during node pool creation and is
-	// immutable.
+	// is associated with multiple subnetworks, the subnetwork can be either: 1. A
+	// user supplied subnetwork name/full path during node pool creation. Example1:
+	// my-subnet Example2:
+	// projects/gke-project/regions/us-central1/subnetworks/my-subnet 2. A
+	// subnetwork path picked based on the IP utilization during node pool creation
+	// and is immutable.
 	Subnetwork string `json:"subnetwork,omitempty"`
 	// ForceSendFields is a list of field names (e.g.
 	// "AdditionalNodeNetworkConfigs") to unconditionally include in API requests.
@@ -5612,6 +5881,8 @@ type NodePool struct {
 	// NetworkConfig: Networking configuration for this NodePool. If specified, it
 	// overrides the cluster-level defaults.
 	NetworkConfig *NodeNetworkConfig `json:"networkConfig,omitempty"`
+	// NodeDrainConfig: Specifies the node drain configuration for this node pool.
+	NodeDrainConfig *NodeDrainConfig `json:"nodeDrainConfig,omitempty"`
 	// PlacementPolicy: Specifies the node placement policy.
 	PlacementPolicy *PlacementPolicy `json:"placementPolicy,omitempty"`
 	// PodIpv4CidrSize: Output only. The pod CIDR block size per node in this node
@@ -6231,6 +6502,31 @@ func (s ParentProductConfig) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// PdbBlockedPod: The namespace/name of the pod whose eviction is blocked by
+// PDB.
+type PdbBlockedPod struct {
+	// Name: The name of the pod.
+	Name string `json:"name,omitempty"`
+	// Namespace: The namespace of the pod.
+	Namespace string `json:"namespace,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "Name") to unconditionally
+	// include in API requests. By default, fields with empty or default values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "Name") to include in API requests
+	// with the JSON null value. By default, fields with empty values are omitted
+	// from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s PdbBlockedPod) MarshalJSON() ([]byte, error) {
+	type NoMethod PdbBlockedPod
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // PlacementPolicy: PlacementPolicy defines the placement policy used by the
 // node pool.
 type PlacementPolicy struct {
@@ -6657,7 +6953,7 @@ func (s RayOperatorConfig) MarshalJSON() ([]byte, error) {
 // RecurringTimeWindow: Represents an arbitrary window of time that recurs.
 type RecurringTimeWindow struct {
 	// Recurrence: An RRULE (https://tools.ietf.org/html/rfc5545#section-3.8.5.3)
-	// for how this window reccurs. They go on for the span of time between the
+	// for how this window recurs. They go on for the span of time between the
 	// start and end time. For example, to have something repeat every weekday,
 	// you'd use: `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR` To repeat some window daily
 	// (equivalent to the DailyMaintenanceWindow): `FREQ=DAILY` For the first
@@ -7859,6 +8155,29 @@ func (s ShieldedNodes) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// SliceControllerConfig: Configuration for the Slice Controller.
+type SliceControllerConfig struct {
+	// Enabled: Optional. Indicates whether Slice Controller is enabled in the
+	// cluster.
+	Enabled bool `json:"enabled,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "Enabled") to unconditionally
+	// include in API requests. By default, fields with empty or default values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "Enabled") to include in API
+	// requests with the JSON null value. By default, fields with empty values are
+	// omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s SliceControllerConfig) MarshalJSON() ([]byte, error) {
+	type NoMethod SliceControllerConfig
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // SoleTenantConfig: SoleTenantConfig contains the NodeAffinities to specify
 // what shared sole tenant node groups should back the node pool.
 type SoleTenantConfig struct {
@@ -8149,6 +8468,38 @@ func (s StatusCondition) MarshalJSON() ([]byte, error) {
 	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
 }
 
+// SwapConfig: Configuration for swap memory on a node pool.
+type SwapConfig struct {
+	// BootDiskProfile: Swap on the node's boot disk.
+	BootDiskProfile *BootDiskProfile `json:"bootDiskProfile,omitempty"`
+	// DedicatedLocalSsdProfile: Provisions a new, separate local NVMe SSD
+	// exclusively for swap.
+	DedicatedLocalSsdProfile *DedicatedLocalSsdProfile `json:"dedicatedLocalSsdProfile,omitempty"`
+	// Enabled: Optional. Enables or disables swap for the node pool.
+	Enabled bool `json:"enabled,omitempty"`
+	// EncryptionConfig: Optional. If omitted, swap space is encrypted by default.
+	EncryptionConfig *EncryptionConfig `json:"encryptionConfig,omitempty"`
+	// EphemeralLocalSsdProfile: Swap on the local SSD shared with pod ephemeral
+	// storage.
+	EphemeralLocalSsdProfile *EphemeralLocalSsdProfile `json:"ephemeralLocalSsdProfile,omitempty"`
+	// ForceSendFields is a list of field names (e.g. "BootDiskProfile") to
+	// unconditionally include in API requests. By default, fields with empty or
+	// default values are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-ForceSendFields for more
+	// details.
+	ForceSendFields []string `json:"-"`
+	// NullFields is a list of field names (e.g. "BootDiskProfile") to include in
+	// API requests with the JSON null value. By default, fields with empty values
+	// are omitted from API requests. See
+	// https://pkg.go.dev/google.golang.org/api#hdr-NullFields for more details.
+	NullFields []string `json:"-"`
+}
+
+func (s SwapConfig) MarshalJSON() ([]byte, error) {
+	type NoMethod SwapConfig
+	return gensupport.MarshalJSON(NoMethod(s), s.ForceSendFields, s.NullFields)
+}
+
 // TimeWindow: Represents an arbitrary window of time.
 type TimeWindow struct {
 	// EndTime: The time that the window ends. The end time should take place after
@@ -8340,6 +8691,11 @@ type UpdateNodePoolRequest struct {
 	// ConfidentialNodes: Confidential nodes config. All the nodes in the node pool
 	// will be Confidential VM once enabled.
 	ConfidentialNodes *ConfidentialNodes `json:"confidentialNodes,omitempty"`
+	// ConsolidationDelay: Consolidation delay defines duration after which the
+	// Cluster Autoscaler can scale down underutilized nodes. If not set, nodes are
+	// scaled down by default behavior, i.e. according to the chosen autoscaling
+	// profile.
+	ConsolidationDelay string `json:"consolidationDelay,omitempty"`
 	// ContainerdConfig: The desired containerd config for nodes in the node pool.
 	// Initiates an upgrade operation that recreates the nodes with the new config.
 	ContainerdConfig *ContainerdConfig `json:"containerdConfig,omitempty"`
@@ -8403,6 +8759,9 @@ type UpdateNodePoolRequest struct {
 	// update. Specified in the format
 	// `projects/*/locations/*/clusters/*/nodePools/*`.
 	Name string `json:"name,omitempty"`
+	// NodeDrainConfig: The desired node drain configuration for nodes in the node
+	// pool.
+	NodeDrainConfig *NodeDrainConfig `json:"nodeDrainConfig,omitempty"`
 	// NodeNetworkConfig: Node network config.
 	NodeNetworkConfig *NodeNetworkConfig `json:"nodeNetworkConfig,omitempty"`
 	// NodePoolId: Deprecated. The name of the node pool to upgrade. This field has
@@ -8600,6 +8959,9 @@ type UpgradeInfoEvent struct {
 	CurrentVersion string `json:"currentVersion,omitempty"`
 	// Description: A brief description of the event.
 	Description string `json:"description,omitempty"`
+	// DisruptionEvent: The information about the disruption event. This field is
+	// only populated when event_type is DISRUPTION_EVENT.
+	DisruptionEvent *DisruptionEvent `json:"disruptionEvent,omitempty"`
 	// EndTime: The time when the operation ended.
 	EndTime string `json:"endTime,omitempty"`
 	// EventType: The type of the event.
@@ -8615,6 +8977,8 @@ type UpgradeInfoEvent struct {
 	// versions starting with the one in the description.
 	//   "UPGRADE_LIFECYCLE" - UPGRADE_LIFECYCLE indicates the event is about the
 	// upgrade lifecycle.
+	//   "DISRUPTION_EVENT" - DISRUPTION_EVENT indicates the event is about the
+	// disruption.
 	EventType string `json:"eventType,omitempty"`
 	// ExtendedSupportEndTime: The end of extended support timestamp.
 	ExtendedSupportEndTime string `json:"extendedSupportEndTime,omitempty"`
@@ -8715,6 +9079,9 @@ type UpgradeSettings struct {
 	//   "BLUE_GREEN" - blue-green upgrade.
 	//   "SURGE" - SURGE is the traditional way of upgrade a node pool. max_surge
 	// and max_unavailable determines the level of upgrade parallelism.
+	//   "SHORT_LIVED" - SHORT_LIVED is the dedicated upgrade strategy for
+	// QueuedProvisioning and flex start nodepools scaled up only by enqueueing to
+	// the Dynamic Workload Scheduler (DWS).
 	Strategy string `json:"strategy,omitempty"`
 	// ForceSendFields is a list of field names (e.g. "BlueGreenSettings") to
 	// unconditionally include in API requests. By default, fields with empty or
@@ -8826,6 +9193,10 @@ type UserManagedKeysConfig struct {
 	// ControlPlaneDiskEncryptionKey: The Cloud KMS cryptoKey to use for
 	// Confidential Hyperdisk on the control plane nodes.
 	ControlPlaneDiskEncryptionKey string `json:"controlPlaneDiskEncryptionKey,omitempty"`
+	// ControlPlaneDiskEncryptionKeyVersions: Output only. All of the versions of
+	// the Cloud KMS cryptoKey that are used by Confidential Hyperdisks on the
+	// control plane nodes.
+	ControlPlaneDiskEncryptionKeyVersions []string `json:"controlPlaneDiskEncryptionKeyVersions,omitempty"`
 	// EtcdApiCa: Resource path of the Certificate Authority Service caPool to use
 	// for the etcd API CA in this cluster.
 	EtcdApiCa string `json:"etcdApiCa,omitempty"`
