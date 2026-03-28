@@ -85,6 +85,35 @@ type GCENodeClassSpec struct {
 	// ShieldedInstanceConfig is the Shielded VM configuration for the instance.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
+	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
+	// Interfaces are matched to the node pool template interfaces by position (index).
+	// +optional
+	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
+}
+
+// NetworkConfig holds per-interface network settings that override the node pool template.
+type NetworkConfig struct {
+	// NetworkInterfaces is a list of per-interface overrides, matched to the node pool
+	// template interfaces by position (index 0 = primary interface).
+	// +kubebuilder:validation:MaxItems=8
+	// +optional
+	NetworkInterfaces []NetworkInterface `json:"networkInterfaces,omitempty"`
+}
+
+// NetworkInterface defines overrides for a single network interface on provisioned nodes.
+type NetworkInterface struct {
+	// EnableExternalIPAccess controls whether this interface receives an external (public) IP
+	// address. Set to false to provision private nodes that have no external IP.
+	// When set to true or unset, access configs are inherited from the node pool template
+	// (no access config is added if the template has none).
+	// +optional
+	EnableExternalIPAccess *bool `json:"enableExternalIPAccess,omitempty"`
+	// Subnetwork is the self-link or partial URL of the subnetwork to use for this interface
+	// (e.g. "regions/us-central1/subnetworks/my-subnet").
+	// When unset, the subnetwork is inherited from the node pool template.
+	// Note: to override the pod IP range name on an interface, use spec.subnetRangeName instead.
+	// +optional
+	Subnetwork string `json:"subnetwork,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.

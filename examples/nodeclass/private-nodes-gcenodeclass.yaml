@@ -1,0 +1,20 @@
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: private-nodes-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  networkTags:
+    - karpenter-private
+  # networkConfig overrides per-interface settings from the node pool template.
+  # Setting enableExternalIPAccess: false on the primary interface creates private
+  # nodes that have no external (public) IP address. Egress to the internet is still
+  # possible via Cloud NAT.
+  networkConfig:
+    networkInterfaces:
+      - enableExternalIPAccess: false
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true

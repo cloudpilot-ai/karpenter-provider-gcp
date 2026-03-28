@@ -338,6 +338,35 @@ spec:
                 description: Metadata contains key/value pairs to set as instance
                   metadata
                 type: object
+              networkConfig:
+                description: |-
+                  NetworkConfig allows overriding per-interface network settings for provisioned nodes.
+                  Interfaces are matched to the node pool template interfaces by position (index).
+                properties:
+                  networkInterfaces:
+                    description: |-
+                      NetworkInterfaces is a list of per-interface overrides, matched to the node pool
+                      template interfaces by position (index 0 = primary interface).
+                    items:
+                      description: NetworkInterface defines overrides for a single
+                        network interface on provisioned nodes.
+                      properties:
+                        enableExternalIPAccess:
+                          description: |-
+                            EnableExternalIPAccess controls whether this interface receives an external (public) IP
+                            address. Set to false to provision private nodes that have no external IP.
+                            When unset, the setting is inherited from the node pool template.
+                          type: boolean
+                        subnetwork:
+                          description: |-
+                            Subnetwork is the self-link or partial URL of the subnetwork to use for this interface
+                            (e.g. "regions/us-central1/subnetworks/my-subnet").
+                            When unset, the subnetwork is inherited from the node pool template.
+                          type: string
+                      type: object
+                    maxItems: 8
+                    type: array
+                type: object
               networkTags:
                 description: NetworkTags is a list of network tags to apply to the
                   node.

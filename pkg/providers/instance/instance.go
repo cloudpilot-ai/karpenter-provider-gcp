@@ -749,14 +749,42 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 
 	var networkInterfaces []*compute.NetworkInterface
 
-	for _, networkInterface := range template.Properties.NetworkInterfaces {
+	for idx, networkInterface := range template.Properties.NetworkInterfaces {
 		copiedAliasIpRanges := make([]*compute.AliasIpRange, len(networkInterface.AliasIpRanges))
 		for i, r := range networkInterface.AliasIpRanges {
 			copied := *r
 			copiedAliasIpRanges[i] = &copied
 		}
-		tmpNetworkInterface := &compute.NetworkInterface{
-			AccessConfigs:            networkInterface.AccessConfigs,
+
+		// Deep-copy AccessConfigs so mutations to the new interface never reach the template.
+		copiedAccessConfigs := make([]*compute.AccessConfig, len(networkInterface.AccessConfigs))
+		for i, ac := range networkInterface.AccessConfigs {
+			copied := *ac
+			copiedAccessConfigs[i] = &copied
+		}
+
+		// Apply nodeclass overrides on top of template values.
+		accessConfigs := []*compute.AccessConfig(copiedAccessConfigs)
+		subnetwork := networkInterface.Subnetwork
+		if nodeClass.Spec.NetworkConfig != nil && idx < len(nodeClass.Spec.NetworkConfig.NetworkInterfaces) {
+			ifaceOverride := nodeClass.Spec.NetworkConfig.NetworkInterfaces[idx]
+			if ifaceOverride.EnableExternalIPAccess != nil && !*ifaceOverride.EnableExternalIPAccess {
+				accessConfigs = nil
+			}
+			if ifaceOverride.Subnetwork != "" {
+				subnetwork = ifaceOverride.Subnetwork
+			}
+		}
+
+		// When access configs are explicitly cleared, force-send the empty slice so the
+		// GCP API does not default-insert ONE_TO_ONE_NAT on the primary interface.
+		forceSendFields := networkInterface.ForceSendFields
+		if accessConfigs == nil && !lo.Contains(networkInterface.ForceSendFields, "AccessConfigs") {
+			forceSendFields = append(append([]string{}, networkInterface.ForceSendFields...), "AccessConfigs")
+		}
+
+		iface := &compute.NetworkInterface{
+			AccessConfigs:            accessConfigs,
 			AliasIpRanges:            copiedAliasIpRanges,
 			Fingerprint:              networkInterface.Fingerprint,
 			InternalIpv6PrefixLength: networkInterface.InternalIpv6PrefixLength,
@@ -770,19 +798,18 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 			NicType:                  networkInterface.NicType,
 			QueueCount:               networkInterface.QueueCount,
 			StackType:                networkInterface.StackType,
-			Subnetwork:               networkInterface.Subnetwork,
-			ForceSendFields:          networkInterface.ForceSendFields,
+			Subnetwork:               subnetwork,
+			ForceSendFields:          forceSendFields,
 			NullFields:               networkInterface.NullFields,
 		}
 		for aliasIpRangeIndex := range copiedAliasIpRanges {
-			// Set the IP CIDR range for the alias IP range based on the calculated targetRange
 			// TODO: Optionally, add validation to ensure the network interface supports this range if needed
-			tmpNetworkInterface.AliasIpRanges[aliasIpRangeIndex].IpCidrRange = fmt.Sprintf("/%d", targetRange)
+			iface.AliasIpRanges[aliasIpRangeIndex].IpCidrRange = fmt.Sprintf("/%d", targetRange)
 			if nodeClass.Spec.SubnetRangeName != nil {
-				tmpNetworkInterface.AliasIpRanges[aliasIpRangeIndex].SubnetworkRangeName = *nodeClass.Spec.SubnetRangeName
+				iface.AliasIpRanges[aliasIpRangeIndex].SubnetworkRangeName = *nodeClass.Spec.SubnetRangeName
 			}
 		}
-		networkInterfaces = append(networkInterfaces, tmpNetworkInterface)
+		networkInterfaces = append(networkInterfaces, iface)
 	}
 
 	return networkInterfaces
