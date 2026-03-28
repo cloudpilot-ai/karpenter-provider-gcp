@@ -763,8 +763,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 			copiedAccessConfigs[i] = &copied
 		}
 
-		// Apply nodeclass overrides on top of template values.
-		accessConfigs := []*compute.AccessConfig(copiedAccessConfigs)
+		accessConfigs := copiedAccessConfigs
 		subnetwork := networkInterface.Subnetwork
 		if nodeClass.Spec.NetworkConfig != nil && idx < len(nodeClass.Spec.NetworkConfig.NetworkInterfaces) {
 			ifaceOverride := nodeClass.Spec.NetworkConfig.NetworkInterfaces[idx]
@@ -778,9 +777,10 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 
 		// When access configs are explicitly cleared, force-send the empty slice so the
 		// GCP API does not default-insert ONE_TO_ONE_NAT on the primary interface.
-		forceSendFields := networkInterface.ForceSendFields
-		if accessConfigs == nil && !lo.Contains(networkInterface.ForceSendFields, "AccessConfigs") {
-			forceSendFields = append(append([]string{}, networkInterface.ForceSendFields...), "AccessConfigs")
+		// Always copy so iface never shares the template's ForceSendFields backing array.
+		forceSendFields := append([]string{}, networkInterface.ForceSendFields...)
+		if accessConfigs == nil && !lo.Contains(forceSendFields, "AccessConfigs") {
+			forceSendFields = append(forceSendFields, "AccessConfigs")
 		}
 
 		iface := &compute.NetworkInterface{
@@ -800,7 +800,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 			StackType:                networkInterface.StackType,
 			Subnetwork:               subnetwork,
 			ForceSendFields:          forceSendFields,
-			NullFields:               networkInterface.NullFields,
+			NullFields:               append([]string{}, networkInterface.NullFields...),
 		}
 		for aliasIpRangeIndex := range copiedAliasIpRanges {
 			// TODO: Optionally, add validation to ensure the network interface supports this range if needed

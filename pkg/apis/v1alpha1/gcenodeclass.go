@@ -93,8 +93,9 @@ type GCENodeClassSpec struct {
 
 // NetworkConfig holds per-interface network settings that override the node pool template.
 type NetworkConfig struct {
-	// NetworkInterfaces is a list of per-interface overrides, matched to the node pool
-	// template interfaces by position (index 0 = primary interface).
+	// NetworkInterfaces is a list of per-interface overrides matched to the node pool template
+	// interfaces by position (index 0 = primary interface). Interfaces beyond the end of this
+	// list are left unchanged from the template.
 	// +kubebuilder:validation:MaxItems=8
 	// +optional
 	NetworkInterfaces []NetworkInterface `json:"networkInterfaces,omitempty"`
@@ -102,10 +103,10 @@ type NetworkConfig struct {
 
 // NetworkInterface defines overrides for a single network interface on provisioned nodes.
 type NetworkInterface struct {
-	// EnableExternalIPAccess controls whether this interface receives an external (public) IP
-	// address. Set to false to provision private nodes that have no external IP.
-	// When set to true or unset, access configs are inherited from the node pool template
-	// (no access config is added if the template has none).
+	// EnableExternalIPAccess, when set to false, removes all access configs from this interface
+	// so that the node has no external (public) IP address. Setting it to true or leaving it
+	// unset inherits the template's access configs without modification — it does not add an
+	// external IP if the template has none.
 	// +optional
 	EnableExternalIPAccess *bool `json:"enableExternalIPAccess,omitempty"`
 	// Subnetwork is the self-link or partial URL of the subnetwork to use for this interface
