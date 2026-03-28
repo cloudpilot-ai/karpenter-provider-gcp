@@ -13,15 +13,23 @@ When Karpenter starts, it creates two zero-node GKE node pools that act as insta
 
 These pools have `InitialNodeCount: 0` — they hold no running nodes and exist purely to give Karpenter a GKE-managed instance template to clone from. The network configuration of these templates comes from the GKE cluster itself, not from Karpenter.
 
-## Cluster-level private nodes
+## Cluster-level private nodes (not yet supported)
 
-> **Note:** Karpenter GCP does not currently have explicit support for clusters with
-> [private nodes enabled at the cluster level](https://cloud.google.com/kubernetes-engine/docs/concepts/private-cluster-concept)
-> (`enablePrivateNodes: true`). The `karpenter-default` node pool template is created
-> without setting `NodePool.NetworkConfig.EnablePrivateNodes`, so behaviour on a
-> fully-private cluster is untested. If you are running on a fully-private cluster,
-> use `enableExternalIPAccess: false` explicitly on your `GCENodeClass` to be safe.
-> Tracked as a future improvement.
+Karpenter GCP does not currently support clusters that enforce private nodes at the
+cluster level (e.g. `DefaultEnablePrivateNodes: true` or
+`PrivateClusterConfig.enablePrivateNodes: true`).
+
+When Karpenter starts it creates the `karpenter-default` and `karpenter-ubuntu` node
+pools. The creation request sets only `ImageType` and `ServiceAccount` — `NodePool.NetworkConfig`
+is not set at all. On a cluster that restricts new node pools to private nodes only,
+this request will be rejected by GKE and Karpenter will fail to start.
+
+The `enableExternalIPAccess: false` field on `GCENodeClass` controls the external IP of
+**provisioned instances** but does not affect the template pool creation, so it does not
+solve this problem.
+
+Support for cluster-level private nodes is tracked in
+[GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
 
 ## Selectively disabling external IPs via NodeClass
 
