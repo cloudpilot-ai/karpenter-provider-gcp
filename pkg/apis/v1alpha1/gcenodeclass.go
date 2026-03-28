@@ -86,7 +86,6 @@ type GCENodeClassSpec struct {
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
-	// Interfaces are matched to the node pool template interfaces by position (index).
 	// +optional
 	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
 }

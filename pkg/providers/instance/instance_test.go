@@ -840,7 +840,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		result := p.setupNetworkInterfaces(template, nodeClass)
 
 		require.Len(t, result, 1)
-		require.Empty(t, result[0].AccessConfigs, "EnableExternalIPAccess=true does not synthesise an access config; template value is inherited")
+		require.Empty(t, result[0].AccessConfigs, "EnableExternalIPAccess=true does not synthesize an access config; template value is inherited")
 	})
 
 	t.Run("EnableExternalIPAccess=true keeps AccessConfigs from template", func(t *testing.T) {
@@ -961,13 +961,13 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 
 		require.Len(t, result, 1)
 		require.Empty(t, result[0].AccessConfigs, "access configs must be removed for private node")
-		accessConfigsCount := 0
+		count := 0
 		for _, f := range result[0].ForceSendFields {
 			if f == "AccessConfigs" {
-				accessConfigsCount++
+				count++
 			}
 		}
-		require.Equal(t, 1, accessConfigsCount, "AccessConfigs must appear exactly once in ForceSendFields")
+		require.Equal(t, 1, count, "AccessConfigs must appear exactly once in ForceSendFields")
 	})
 }
 
