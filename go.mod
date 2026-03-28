@@ -1,6 +1,6 @@
 module github.com/cloudpilot-ai/karpenter-provider-gcp
 
-go 1.24.6
+go 1.25.0
 
 require (
 	cloud.google.com/go/compute v1.38.0
