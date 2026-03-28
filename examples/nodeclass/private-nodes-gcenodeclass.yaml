@@ -20,9 +20,9 @@
 # 3. Firewall rules or IAP must be in place if you need SSH/kubectl exec access
 #    to the nodes, since there is no external IP to connect to directly.
 #
-# Note: if the cluster is already a fully private cluster (private nodes enabled
-# at the cluster level), the template will not have an access config and this
-# override is redundant — but safe to set.
+# Note: behaviour on clusters with enablePrivateNodes set at the cluster level is
+# untested. Setting enableExternalIPAccess: false explicitly is recommended
+# regardless, to ensure nodes are provisioned without a public IP.
 apiVersion: karpenter.k8s.gcp/v1alpha1
 kind: GCENodeClass
 metadata:

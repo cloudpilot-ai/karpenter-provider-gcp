@@ -15,7 +15,13 @@ These pools have `InitialNodeCount: 0` — they hold no running nodes and exist 
 
 ## Cluster-level private nodes
 
-When a GKE cluster is created with [private nodes](https://cloud.google.com/kubernetes-engine/docs/concepts/private-cluster-concept) enabled (`enablePrivateNodes: true`), every node pool in that cluster — including `karpenter-default` — is created without an external IP. Karpenter works transparently on fully-private clusters with no additional configuration.
+> **Note:** Karpenter GCP does not currently have explicit support for clusters with
+> [private nodes enabled at the cluster level](https://cloud.google.com/kubernetes-engine/docs/concepts/private-cluster-concept)
+> (`enablePrivateNodes: true`). The `karpenter-default` node pool template is created
+> without setting `NodePool.NetworkConfig.EnablePrivateNodes`, so behaviour on a
+> fully-private cluster is untested. If you are running on a fully-private cluster,
+> use `enableExternalIPAccess: false` explicitly on your `GCENodeClass` to be safe.
+> Tracked as a future improvement.
 
 ## Selectively disabling external IPs via NodeClass
 
