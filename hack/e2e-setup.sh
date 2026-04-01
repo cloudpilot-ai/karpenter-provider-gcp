@@ -131,14 +131,28 @@ case "${CLUSTER_STATUS}" in
   RUNNING)
     log "Reusing cluster ${CLUSTER_NAME}"
     ;;
-  RECONCILING|STOPPING|PROVISIONING)
+  STOPPING)
+    # A STOPPING cluster transitions to NOT_FOUND (deleted), never to RUNNING.
+    # Waiting for RUNNING would hang forever — fail fast so the caller can
+    # decide whether to re-run setup after the deletion completes.
+    echo "ERROR: cluster ${CLUSTER_NAME} is being deleted (STOPPING). Run e2e-teardown.sh then retry." >&2
+    exit 1
+    ;;
+  RECONCILING|PROVISIONING)
     log "Cluster ${CLUSTER_NAME} is in state ${CLUSTER_STATUS}, waiting for RUNNING..."
+    WAIT_SECS=0
+    MAX_WAIT_SECS=1200  # 20 minutes
     while true; do
       sleep 15
+      WAIT_SECS=$((WAIT_SECS + 15))
+      if [ "${WAIT_SECS}" -ge "${MAX_WAIT_SECS}" ]; then
+        echo "ERROR: cluster ${CLUSTER_NAME} did not reach RUNNING within ${MAX_WAIT_SECS}s (last status: ${CLUSTER_STATUS})" >&2
+        exit 1
+      fi
       CLUSTER_STATUS="$(gcloud container clusters describe "${CLUSTER_NAME}" \
         --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" \
         --format='value(status)' 2>/dev/null || echo NOT_FOUND)"
-      log "  cluster status: ${CLUSTER_STATUS}"
+      log "  cluster status: ${CLUSTER_STATUS} (${WAIT_SECS}s elapsed)"
       [ "${CLUSTER_STATUS}" = "RUNNING" ] && break
     done
     log "Cluster ${CLUSTER_NAME} is now RUNNING"

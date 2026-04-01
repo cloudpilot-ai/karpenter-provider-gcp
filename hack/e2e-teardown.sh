@@ -47,7 +47,9 @@ if gcloud container clusters describe "${CLUSTER_NAME}" \
 
   if helm status karpenter -n karpenter-system &>/dev/null; then
     log "Uninstalling karpenter Helm release..."
-    helm uninstall karpenter -n karpenter-system --wait --timeout 5m || true
+    if ! helm uninstall karpenter -n karpenter-system --wait --timeout 5m; then
+      log "WARNING: helm uninstall failed or timed out — karpenter-managed GCP instances may not have been terminated"
+    fi
   fi
 fi
 
@@ -61,9 +63,16 @@ if gcloud container clusters describe "${CLUSTER_NAME}" \
     --quiet
 
   log "Waiting for cluster deletion to complete..."
+  WAIT_SECS=0
+  MAX_WAIT_SECS=1800  # 30 minutes
   while gcloud container clusters describe "${CLUSTER_NAME}" \
       --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" &>/dev/null; do
     sleep 15
+    WAIT_SECS=$((WAIT_SECS + 15))
+    if [ "${WAIT_SECS}" -ge "${MAX_WAIT_SECS}" ]; then
+      echo "ERROR: cluster ${CLUSTER_NAME} did not finish deleting within ${MAX_WAIT_SECS}s" >&2
+      exit 1
+    fi
   done
   log "Cluster deleted."
 else

@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	container "google.golang.org/api/container/v1"
 )
 
 const (
@@ -58,6 +59,7 @@ type Environment struct {
 
 	KubeClient    kubernetes.Interface
 	DynamicClient dynamic.Interface
+	containerSvc  *container.Service
 }
 
 // NewEnvironment reads config from env vars, creates k8s clients, and waits
@@ -78,6 +80,11 @@ func NewEnvironment() *Environment {
 	dynamicClient, err := dynamic.NewForConfig(cfg)
 	Expect(err).NotTo(HaveOccurred(), "creating dynamic client")
 
+	initCtx, initCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
+	defer initCancel()
+	containerSvc, err := container.NewService(initCtx)
+	Expect(err).NotTo(HaveOccurred(), "creating GCP container service client")
+
 	env := &Environment{
 		ProjectID:       mustEnv("PROJECT_ID"),
 		ClusterName:     mustEnv("CLUSTER_NAME"),
@@ -85,6 +92,7 @@ func NewEnvironment() *Environment {
 		PodsRangeName:   mustEnv("PODS_RANGE_NAME"),
 		KubeClient:      kubeClient,
 		DynamicClient:   dynamicClient,
+		containerSvc:    containerSvc,
 	}
 
 	env.waitForControllerReady()
@@ -94,22 +102,24 @@ func NewEnvironment() *Environment {
 // Cleanup removes all karpenter-managed resources and waits for NodeClaims to
 // disappear, confirming the underlying GCP instances have been terminated.
 func (e *Environment) Cleanup() {
-	ctx, cancel := context.WithTimeout(context.Background(), NodeCleanupTimeout)
-	defer cancel()
+	deleteCtx, deleteCancel := context.WithTimeout(context.Background(), NodeCleanupTimeout)
+	defer deleteCancel()
 
-	e.deleteAll(ctx, NodePoolGVR)
-	e.deleteAll(ctx, GCENodeClassGVR)
+	e.deleteAll(deleteCtx, NodePoolGVR)
+	e.deleteAll(deleteCtx, GCENodeClassGVR)
 
 	// NodeClaim deletion drives GCP VM termination via the karpenter
 	// termination controller, so an empty list here means no orphaned VMs.
+	// Use a fresh context so the wait budget is not shared with the deletions above.
 	Eventually(func(g Gomega) {
-		claims, err := e.DynamicClient.Resource(NodeClaimGVR).List(ctx, metav1.ListOptions{})
+		claims, err := e.DynamicClient.Resource(NodeClaimGVR).List(context.Background(), metav1.ListOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(claims.Items).To(BeEmpty(), "not all NodeClaims cleaned up — possible orphaned GCP VMs")
 	}).WithTimeout(NodeCleanupTimeout).WithPolling(10 * time.Second).Should(Succeed())
 }
 
-// WaitForNodeRemoval polls until the named node no longer exists.
+// WaitForNodeRemoval polls until the named node no longer exists. Transient API
+// errors are retried; the caller's context controls the overall deadline.
 func (e *Environment) WaitForNodeRemoval(ctx context.Context, nodeName string) error {
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, NodeCleanupTimeout, true,
 		func(ctx context.Context) (bool, error) {
@@ -117,38 +127,45 @@ func (e *Environment) WaitForNodeRemoval(ctx context.Context, nodeName string) e
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
-			return false, err
+			// Treat all errors (transient network, throttling) as retryable.
+			return false, nil
 		},
 	)
 }
 
 // waitForControllerReady polls until the karpenter Deployment has all replicas
-// available. The Deployment was installed by e2e-setup.sh via Helm.
+// available and both GKE template node pools are RUNNING.
+// The Deployment was installed by e2e-setup.sh via Helm.
 func (e *Environment) waitForControllerReady() {
-	ctx, cancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
-	defer cancel()
+	deployCtx, deployCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
+	defer deployCancel()
 
 	Eventually(func(g Gomega) {
 		dep, err := e.KubeClient.AppsV1().Deployments(KarpenterNamespace).
-			Get(ctx, KarpenterDeployment, metav1.GetOptions{})
+			Get(deployCtx, KarpenterDeployment, metav1.GetOptions{})
 		g.Expect(err).NotTo(HaveOccurred(),
 			"getting karpenter Deployment — did e2e-setup.sh run successfully?")
 		g.Expect(dep.Status.AvailableReplicas).To(BeNumerically(">=", 1),
 			"karpenter Deployment has no available replicas yet")
 	}).WithTimeout(ControllerStartTimeout).WithPolling(5 * time.Second).Should(Succeed())
 
-	// Extra sanity: make sure the template node pools are up, which means
-	// the controller has fully initialized and is talking to the GKE API.
-	Eventually(func(g Gomega) {
-		for _, poolName := range []string{"karpenter-default", "karpenter-ubuntu"} {
-			pods, err := e.KubeClient.CoreV1().Pods(KarpenterNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("app.kubernetes.io/name=%s", KarpenterDeployment),
-			})
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(pods.Items).NotTo(BeEmpty(), "no karpenter pods found")
-			_ = poolName // pool check happens via node provisioning in tests
-		}
-	}).WithTimeout(ControllerStartTimeout).WithPolling(5 * time.Second).Should(Succeed())
+	// Wait for karpenter's template node pools to reach RUNNING state, which
+	// confirms the controller has initialised and the GKE node pool templates
+	// are ready to back instance provisioning. Without this, GetInstanceTemplates
+	// returns an empty map and every provisioning attempt fails immediately.
+	for _, poolName := range []string{"karpenter-default", "karpenter-ubuntu"} {
+		poolPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
+			e.ProjectID, e.ClusterLocation, e.ClusterName, poolName)
+		poolCtx, poolCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
+		defer poolCancel()
+		Eventually(func(g Gomega) {
+			pool, err := e.containerSvc.Projects.Locations.Clusters.NodePools.
+				Get(poolPath).Context(poolCtx).Do()
+			g.Expect(err).NotTo(HaveOccurred(), "getting GKE node pool %s", poolName)
+			g.Expect(pool.Status).To(Equal("RUNNING"),
+				"GKE node pool %s is not RUNNING (status=%s)", poolName, pool.Status)
+		}).WithTimeout(ControllerStartTimeout).WithPolling(10 * time.Second).Should(Succeed())
+	}
 }
 
 // deleteAll lists and deletes every resource of the given GVR, ignoring 404s.

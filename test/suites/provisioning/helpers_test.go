@@ -59,10 +59,14 @@ func runProvisioningTest(ctx context.Context, tc provisioningCase) {
 
 	initialNodes := allNodeNames(ctx)
 
+	var provisionedNodeName string
 	DeferCleanup(func(ctx context.Context) {
 		deleteDeployment(ctx, deployName)
 		deleteNodePool(ctx, nodePoolName)
 		deleteNodeClass(ctx, nodeClassName)
+		if provisionedNodeName != "" {
+			Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
+		}
 	})
 
 	createNodeClass(ctx, nodeClassName)
@@ -74,6 +78,7 @@ func runProvisioningTest(ctx context.Context, tc provisioningCase) {
 
 	node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
+	provisionedNodeName = node.Name
 
 	nodeReady := false
 	for _, c := range node.Status.Conditions {
@@ -92,11 +97,6 @@ func runProvisioningTest(ctx context.Context, tc provisioningCase) {
 	Expect(node.Labels[corev1.LabelArchStable]).To(Equal(tc.arch))
 	Expect(tc.families).To(ContainElement(node.Labels[gcpv1alpha1.LabelInstanceFamily]))
 	Expect(tc.instanceTypes).To(ContainElement(node.Labels[corev1.LabelInstanceTypeStable]))
-
-	deleteDeployment(ctx, deployName)
-	deleteNodePool(ctx, nodePoolName)
-	deleteNodeClass(ctx, nodeClassName)
-	Expect(env.WaitForNodeRemoval(ctx, node.Name)).To(Succeed())
 }
 
 func createNodeClass(ctx context.Context, name string) {
@@ -187,6 +187,7 @@ func createDeployment(ctx context.Context, name, appLabel, nodePoolName string) 
 func waitForRunningPod(ctx context.Context, appLabel string) *corev1.Pod {
 	var found *corev1.Pod
 	Eventually(func(g Gomega) {
+		found = nil // reset each poll so a pod that went non-Ready doesn't linger
 		pods, err := env.KubeClient.CoreV1().Pods(testNamespace).List(ctx,
 			metav1.ListOptions{LabelSelector: fmt.Sprintf("app=%s", appLabel)})
 		g.Expect(err).NotTo(HaveOccurred())
