@@ -77,6 +77,9 @@ ut-test: ## Run unit tests
 	go test ./pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
+e2etests: ## Run e2e tests (requires E2E_PROJECT_ID, E2E_GCP_CREDENTIALS, E2E_PREFIX)
+	go test ./test/e2e/... -v -timeout=60m -count=1
+
 coverage:
 	go tool cover -html coverage.out -o coverage.html
 
@@ -92,7 +95,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test e2etests coverage update verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 
