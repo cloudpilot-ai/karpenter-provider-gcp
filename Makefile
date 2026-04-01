@@ -103,6 +103,14 @@ e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
 	E2E_ZONE=$(E2E_ZONE) \
 	./hack/e2e-teardown.sh
 
+e2e-check-clean: ## Report any orphaned e2e GCP resources (does not delete)
+	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(PROJECT_ID) \
+	E2E_PREFIX=$(E2E_PREFIX) \
+	E2E_REGION=$(E2E_REGION) \
+	E2E_ZONE=$(E2E_ZONE) \
+	./hack/e2e-check-clean.sh
+
 coverage:
 	go tool cover -html coverage.out -o coverage.html
 
@@ -118,7 +126,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test e2e-setup e2etests e2e-teardown coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test e2e-setup e2etests e2e-teardown e2e-check-clean coverage update verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 
