@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# e2e-setup.sh — Idempotently creates GCP infra for e2e tests and deploys
+# the karpenter controller via Helm. Reuses existing resources on re-runs.
+#
+# Required:
+#   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
+#   E2E_PROJECT_ID                  GCP project ID
+#
+# Optional (with defaults):
+#   E2E_PREFIX        resource name prefix  (default: karpenter-e2e)
+#   E2E_REGION        GCP region            (default: us-central1)
+#   E2E_ZONE          GCP zone              (default: <region>-a)
+#   E2E_MACHINE_TYPE  system node type      (default: e2-standard-2)
+set -euo pipefail
+
+: "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
+: "${E2E_PROJECT_ID:?E2E_PROJECT_ID must be set}"
+
+E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
+E2E_REGION="${E2E_REGION:-us-central1}"
+E2E_ZONE="${E2E_ZONE:-${E2E_REGION}-a}"
+E2E_MACHINE_TYPE="${E2E_MACHINE_TYPE:-e2-standard-2}"
+
+# Derived names — must match Makefile variables exactly.
+CLUSTER_NAME="${E2E_PREFIX}-cluster"
+NETWORK_NAME="${E2E_PREFIX}-vpc"
+SUBNET_NAME="${E2E_PREFIX}-subnet"
+PODS_RANGE="${E2E_PREFIX}-pods"
+SERVICES_RANGE="${E2E_PREFIX}-services"
+GSA_ID="${E2E_PREFIX}-karpenter"
+GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
+AR_REPO="${E2E_PREFIX}-images"
+IMAGE_REPO="${E2E_REGION}-docker.pkg.dev/${E2E_PROJECT_ID}/${AR_REPO}/karpenter"
+
+PRIMARY_CIDR="10.0.0.0/20"
+PODS_CIDR="10.4.0.0/14"
+SERVICES_CIDR="10.8.0.0/20"
+
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+
+log() { echo "e2e-setup: $*" >&2; }
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+log "Authenticating..."
+gcloud auth activate-service-account \
+  --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
+  --project "${E2E_PROJECT_ID}" \
+  --quiet
+
+# ── VPC ────────────────────────────────────────────────────────────────────────
+if gcloud compute networks describe "${NETWORK_NAME}" \
+    --project "${E2E_PROJECT_ID}" --format='value(name)' &>/dev/null; then
+  log "Reusing network ${NETWORK_NAME}"
+else
+  log "Creating network ${NETWORK_NAME}..."
+  gcloud compute networks create "${NETWORK_NAME}" \
+    --project "${E2E_PROJECT_ID}" \
+    --subnet-mode=custom \
+    --quiet
+fi
+
+# ── Subnet ─────────────────────────────────────────────────────────────────────
+if gcloud compute networks subnets describe "${SUBNET_NAME}" \
+    --region "${E2E_REGION}" --project "${E2E_PROJECT_ID}" \
+    --format='value(name)' &>/dev/null; then
+  log "Reusing subnet ${SUBNET_NAME}"
+else
+  log "Creating subnet ${SUBNET_NAME}..."
+  gcloud compute networks subnets create "${SUBNET_NAME}" \
+    --network "${NETWORK_NAME}" \
+    --region "${E2E_REGION}" \
+    --range "${PRIMARY_CIDR}" \
+    --secondary-range "${PODS_RANGE}=${PODS_CIDR},${SERVICES_RANGE}=${SERVICES_CIDR}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+fi
+
+# ── Service Account ────────────────────────────────────────────────────────────
+if gcloud iam service-accounts describe "${GSA_EMAIL}" \
+    --project "${E2E_PROJECT_ID}" &>/dev/null; then
+  log "Reusing service account ${GSA_EMAIL}"
+else
+  log "Creating service account ${GSA_ID}..."
+  gcloud iam service-accounts create "${GSA_ID}" \
+    --project "${E2E_PROJECT_ID}" \
+    --display-name "Karpenter e2e controller" \
+    --quiet
+fi
+
+# ── IAM Bindings (idempotent) ──────────────────────────────────────────────────
+log "Ensuring IAM bindings for ${GSA_EMAIL}..."
+for role in roles/compute.admin roles/container.admin roles/iam.serviceAccountUser; do
+  gcloud projects add-iam-policy-binding "${E2E_PROJECT_ID}" \
+    --member "serviceAccount:${GSA_EMAIL}" \
+    --role "${role}" \
+    --condition=None \
+    --quiet >/dev/null
+done
+
+# ── Artifact Registry ──────────────────────────────────────────────────────────
+# Re-created on each run so images don't accumulate between runs.
+# (teardown.sh deletes it; setup.sh always creates it fresh.)
+if gcloud artifacts repositories describe "${AR_REPO}" \
+    --location "${E2E_REGION}" --project "${E2E_PROJECT_ID}" &>/dev/null; then
+  log "Reusing Artifact Registry repo ${AR_REPO}"
+else
+  log "Creating Artifact Registry repo ${AR_REPO}..."
+  gcloud artifacts repositories create "${AR_REPO}" \
+    --repository-format=docker \
+    --location "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+fi
+
+# Allow the karpenter GSA to pull from this registry.
+gcloud artifacts repositories add-iam-policy-binding "${AR_REPO}" \
+  --location "${E2E_REGION}" \
+  --project "${E2E_PROJECT_ID}" \
+  --member "serviceAccount:${GSA_EMAIL}" \
+  --role roles/artifactregistry.reader \
+  --quiet >/dev/null
+
+# ── GKE Cluster ────────────────────────────────────────────────────────────────
+CLUSTER_STATUS="$(gcloud container clusters describe "${CLUSTER_NAME}" \
+  --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" \
+  --format='value(status)' 2>/dev/null || echo NOT_FOUND)"
+
+SYSTEM_POOL_NAME="${E2E_PREFIX}-system"
+
+case "${CLUSTER_STATUS}" in
+  RUNNING)
+    log "Reusing cluster ${CLUSTER_NAME}"
+    ;;
+  RECONCILING|STOPPING|PROVISIONING)
+    log "Cluster ${CLUSTER_NAME} is in state ${CLUSTER_STATUS}, waiting for RUNNING..."
+    while true; do
+      sleep 15
+      CLUSTER_STATUS="$(gcloud container clusters describe "${CLUSTER_NAME}" \
+        --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" \
+        --format='value(status)' 2>/dev/null || echo NOT_FOUND)"
+      log "  cluster status: ${CLUSTER_STATUS}"
+      [ "${CLUSTER_STATUS}" = "RUNNING" ] && break
+    done
+    log "Cluster ${CLUSTER_NAME} is now RUNNING"
+    ;;
+  NOT_FOUND)
+    log "Creating cluster ${CLUSTER_NAME} (this may take ~10 min)..."
+    gcloud container clusters create "${CLUSTER_NAME}" \
+      --zone "${E2E_ZONE}" \
+      --project "${E2E_PROJECT_ID}" \
+      --network "${NETWORK_NAME}" \
+      --subnetwork "${SUBNET_NAME}" \
+      --cluster-secondary-range-name "${PODS_RANGE}" \
+      --services-secondary-range-name "${SERVICES_RANGE}" \
+      --enable-ip-alias \
+      --workload-pool "${E2E_PROJECT_ID}.svc.id.goog" \
+      --release-channel regular \
+      --machine-type "${E2E_MACHINE_TYPE}" \
+      --disk-size 30 \
+      --num-nodes 1 \
+      --quiet
+    ;;
+  *)
+    echo "ERROR: cluster ${CLUSTER_NAME} is in unexpected state: ${CLUSTER_STATUS}" >&2
+    exit 1
+    ;;
+esac
+
+# ── System Node Pool ────────────────────────────────────────────────────────────
+# A dedicated e2-standard-4 pool for the karpenter controller and system daemons.
+# The default-pool (created with the cluster) is deleted once this pool is ready.
+if gcloud container node-pools describe "${SYSTEM_POOL_NAME}" \
+    --cluster "${CLUSTER_NAME}" --zone "${E2E_ZONE}" \
+    --project "${E2E_PROJECT_ID}" &>/dev/null; then
+  log "Reusing system node pool ${SYSTEM_POOL_NAME}"
+else
+  log "Creating system node pool ${SYSTEM_POOL_NAME} (e2-standard-4)..."
+  gcloud container node-pools create "${SYSTEM_POOL_NAME}" \
+    --cluster "${CLUSTER_NAME}" \
+    --zone "${E2E_ZONE}" \
+    --project "${E2E_PROJECT_ID}" \
+    --machine-type e2-standard-4 \
+    --disk-size 30 \
+    --num-nodes 1 \
+    --quiet
+fi
+
+if gcloud container node-pools describe default-pool \
+    --cluster "${CLUSTER_NAME}" --zone "${E2E_ZONE}" \
+    --project "${E2E_PROJECT_ID}" &>/dev/null; then
+  log "Deleting default node pool..."
+  gcloud container node-pools delete default-pool \
+    --cluster "${CLUSTER_NAME}" \
+    --zone "${E2E_ZONE}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+fi
+
+# ── Credentials ────────────────────────────────────────────────────────────────
+log "Fetching cluster credentials..."
+gcloud container clusters get-credentials "${CLUSTER_NAME}" \
+  --zone "${E2E_ZONE}" \
+  --project "${E2E_PROJECT_ID}" \
+  --quiet
+
+# ── Kubernetes Resources ───────────────────────────────────────────────────────
+log "Ensuring test namespace..."
+kubectl create namespace karpenter-e2e-test --dry-run=client -o yaml | kubectl apply -f -
+
+# Drop any manually-created karpenter SA so Helm can own it.
+kubectl delete serviceaccount karpenter -n karpenter-system --ignore-not-found
+
+# ── Workload Identity Binding (idempotent) ─────────────────────────────────────
+log "Ensuring workload identity binding..."
+gcloud iam service-accounts add-iam-policy-binding "${GSA_EMAIL}" \
+  --role roles/iam.workloadIdentityUser \
+  --member "serviceAccount:${E2E_PROJECT_ID}.svc.id.goog[karpenter-system/karpenter]" \
+  --project "${E2E_PROJECT_ID}" \
+  --quiet >/dev/null
+
+# ── Build & Push Image ─────────────────────────────────────────────────────────
+log "Authenticating Docker to Artifact Registry..."
+gcloud auth configure-docker "${E2E_REGION}-docker.pkg.dev" --quiet
+
+log "Building and pushing karpenter image with ko..."
+KO_IMAGE_TAG="e2e-$(git rev-parse --short HEAD 2>/dev/null || echo latest)"
+IMAGE_REF="$(
+  KO_DOCKER_REPO="${IMAGE_REPO}" \
+  GOFLAGS="" \
+    ko build --bare \
+    --platform linux/amd64 \
+    --image-tag "${KO_IMAGE_TAG}" \
+    github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
+)"
+log "Image: ${IMAGE_REF}"
+
+# ko returns repo:tag@sha256:digest when --image-tag is set
+IMAGE_DIGEST="${IMAGE_REF##*@}"
+IMAGE_WITHOUT_DIGEST="${IMAGE_REF%@*}"
+IMAGE_REPOSITORY="${IMAGE_REPO}"
+IMAGE_TAG="${KO_IMAGE_TAG}"
+
+# ── Deploy Karpenter via Helm ──────────────────────────────────────────────────
+log "Deploying karpenter via Helm..."
+helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
+  --namespace karpenter-system \
+  --create-namespace \
+  --set controller.image.repository="${IMAGE_REPOSITORY}" \
+  --set controller.image.tag="${IMAGE_TAG}" \
+  --set controller.image.digest="${IMAGE_DIGEST}" \
+  --set logLevel=debug \
+  --set controller.settings.projectID="${E2E_PROJECT_ID}" \
+  --set controller.settings.clusterName="${CLUSTER_NAME}" \
+  --set controller.settings.clusterLocation="${E2E_ZONE}" \
+  --set controller.settings.interruptionQueue="${CLUSTER_NAME}" \
+  --set controller.featureGates.spotToSpotConsolidation=true \
+  --set "serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=${GSA_EMAIL}" \
+  --set controller.replicaCount=1 \
+  --set credentials.enabled=false \
+  --wait \
+  --timeout 5m
+
+log ""
+log "Setup complete. IMAGE_REF=${IMAGE_REF}"
+log "Run tests with:"
+log "  make e2etests"

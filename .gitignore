@@ -25,6 +25,13 @@ go.work.sum
 # env file
 .env
 
+# GCP service account keys
+*-key.json
+
+# Claude Code session data
+.claude/
+.sisyphus/
+
 # ide file
 .idea/
 .vscode/

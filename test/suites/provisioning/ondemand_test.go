@@ -1,0 +1,46 @@
+/*
+Copyright 2024 The CloudPilot AI Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package provisioning_test
+
+import (
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+)
+
+var _ = Describe("OnDemand Provisioning", func() {
+	It("should provision an amd64 on-demand node", func(ctx SpecContext) {
+		runProvisioningTest(ctx, provisioningCase{
+			capacityType:  karpv1.CapacityTypeOnDemand,
+			arch:          karpv1.ArchitectureAmd64,
+			families:      []string{"e2"},
+			instanceTypes: []string{"e2-standard-2"},
+		})
+	}, SpecTimeout(20*time.Minute))
+
+	// arm64 on-demand requires a t2a template node pool in the cluster.
+	// Enable once a karpenter-t2a template pool is added to e2e-setup.sh.
+	PIt("should provision an arm64 on-demand node", func(ctx SpecContext) {
+		runProvisioningTest(ctx, provisioningCase{
+			capacityType:  karpv1.CapacityTypeOnDemand,
+			arch:          karpv1.ArchitectureArm64,
+			families:      []string{"t2a"},
+			instanceTypes: []string{"t2a-standard-2"},
+		})
+	}, SpecTimeout(20*time.Minute))
+})
