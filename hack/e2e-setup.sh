@@ -256,12 +256,12 @@ IMAGE_REF="$(
   GOFLAGS="" \
     ko build --bare \
     --platform linux/amd64 \
-    --image-tag "${KO_IMAGE_TAG}" \
+    --tags "${KO_IMAGE_TAG}" \
     github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
 )"
 log "Image: ${IMAGE_REF}"
 
-# ko returns repo:tag@sha256:digest when --image-tag is set
+# ko --bare --tags returns repo@sha256:digest
 IMAGE_DIGEST="${IMAGE_REF##*@}"
 IMAGE_REPOSITORY="${IMAGE_REPO}"
 IMAGE_TAG="${KO_IMAGE_TAG}"
