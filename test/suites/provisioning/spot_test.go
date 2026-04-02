@@ -17,7 +17,6 @@ limitations under the License.
 package provisioning_test
 
 import (
-	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -34,13 +33,7 @@ var _ = Describe("Spot Provisioning", func() {
 		})
 	}, SpecTimeout(25*time.Minute))
 
-	// arm64 spot requires a karpenter-t2a template node pool in the cluster.
-	// Set CLUSTER_HAS_T2A_POOL=true in CI once e2e-setup.sh adds that pool.
-	// Tracked in: https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/TODO
 	It("should provision an arm64 spot node", func(ctx SpecContext) {
-		if os.Getenv("CLUSTER_HAS_T2A_POOL") != "true" {
-			Skip("CLUSTER_HAS_T2A_POOL not set — cluster lacks a karpenter-t2a template pool")
-		}
 		runProvisioningTest(ctx, provisioningCase{
 			capacityType:  karpv1.CapacityTypeSpot,
 			arch:          karpv1.ArchitectureArm64,
