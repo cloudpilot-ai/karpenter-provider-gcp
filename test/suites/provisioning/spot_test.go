@@ -37,8 +37,8 @@ var _ = Describe("Spot Provisioning", func() {
 		runProvisioningTest(ctx, provisioningCase{
 			capacityType:  karpv1.CapacityTypeSpot,
 			arch:          karpv1.ArchitectureArm64,
-			families:      []string{"t2a"},
-			instanceTypes: []string{"t2a-standard-2"},
+			families:      []string{"c4a", "t2a"},
+			instanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
 		})
 	}, SpecTimeout(25*time.Minute))
 })
