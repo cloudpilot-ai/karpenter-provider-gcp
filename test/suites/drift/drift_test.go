@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioning_test
+package drift_test
 
 import (
 	"context"
@@ -34,42 +34,42 @@ var _ = Describe("Drift", func() {
 	// running instance type. Karpenter detects requirement drift and replaces
 	// the node with one of the remaining allowed types.
 	It("should replace a drifted amd64 on-demand node", func(ctx SpecContext) {
-		runDriftTest(ctx, provisioningCase{
-			capacityType: karpv1.CapacityTypeOnDemand,
-			arch:         karpv1.ArchitectureAmd64,
+		runDriftTest(ctx, environment.TestCase{
+			CapacityType: karpv1.CapacityTypeOnDemand,
+			Arch:         karpv1.ArchitectureAmd64,
 			// Three types so after excluding the provisioned one at least two remain.
-			families:      []string{"e2", "n2"},
-			instanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+			Families:      []string{"e2", "n2"},
+			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
 		})
 	}, SpecTimeout(25*time.Minute))
 })
 
-func runDriftTest(ctx context.Context, tc provisioningCase) {
-	prefix := testPrefix(tc.arch, tc.capacityType) + "-drift"
-	suffix := uniqueSuffix()
+func runDriftTest(ctx context.Context, tc environment.TestCase) {
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-drift"
+	suffix := environment.UniqueSuffix()
 	nodeClassName := prefix + "-nc-" + suffix
 	nodePoolName := prefix + "-np-" + suffix
 	deployName := prefix + "-dep-" + suffix
 	appLabel := prefix + "-" + suffix
 
 	GinkgoWriter.Printf("[setup] drift arch=%s capacityType=%s nodePool=%s\n",
-		tc.arch, tc.capacityType, nodePoolName)
+		tc.Arch, tc.CapacityType, nodePoolName)
 
 	var firstNodeName string
 	DeferCleanup(func(ctx context.Context) {
-		deleteDeployment(ctx, deployName)
-		deleteNodePool(ctx, nodePoolName)
-		deleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, deployName)
+		env.DeleteNodePool(ctx, nodePoolName)
+		env.DeleteNodeClass(ctx, nodeClassName)
 		if firstNodeName != "" {
 			_ = env.WaitForNodeRemoval(ctx, firstNodeName)
 		}
 	})
 
-	createNodeClass(ctx, nodeClassName)
-	createNodePool(ctx, nodePoolName, nodeClassName, tc)
-	createDeployment(ctx, deployName, appLabel, nodePoolName, tc.arch)
+	env.CreateNodeClass(ctx, nodeClassName)
+	env.CreateNodePool(ctx, nodePoolName, nodeClassName, tc)
+	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
 
-	firstPod := waitForRunningPod(ctx, appLabel)
+	firstPod := env.WaitForRunningPod(ctx, appLabel)
 	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
 	firstNodeName = firstPod.Spec.NodeName
 
@@ -83,19 +83,19 @@ func runDriftTest(ctx context.Context, tc provisioningCase) {
 		firstNodeName, provisionedType)
 
 	// Exclude the provisioned instance type — the node is now drifted.
-	remaining := make([]string, 0, len(tc.instanceTypes)-1)
-	for _, t := range tc.instanceTypes {
+	remaining := make([]string, 0, len(tc.InstanceTypes)-1)
+	for _, t := range tc.InstanceTypes {
 		if t != provisionedType {
 			remaining = append(remaining, t)
 		}
 	}
 	Expect(remaining).NotTo(BeEmpty(), "no remaining instance types after excluding %s", provisionedType)
-	updateNodePoolInstanceTypes(ctx, nodePoolName, remaining)
+	env.UpdateNodePoolInstanceTypes(ctx, nodePoolName, remaining)
 
 	GinkgoWriter.Printf("[drift] NodePool updated; waiting for replacement on one of %v...\n", remaining)
 
 	replacementTimeout := 2 * environment.ProvisioningTimeout
-	replacementPod := waitForPodOnDifferentNode(ctx, appLabel, firstNodeName, replacementTimeout)
+	replacementPod := env.WaitForPodOnDifferentNode(ctx, appLabel, firstNodeName, replacementTimeout)
 	Expect(replacementPod.Spec.NodeName).NotTo(Equal(firstNodeName))
 
 	// Replacement node must use one of the remaining (non-drifted) instance types.

@@ -21,28 +21,30 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("OnDemand Provisioning", func() {
+var _ = Describe("On-Demand Provisioning", func() {
 	It("should provision an amd64 on-demand node", func(ctx SpecContext) {
-		runProvisioningTest(ctx, provisioningCase{
-			capacityType: karpv1.CapacityTypeOnDemand,
-			arch:         karpv1.ArchitectureAmd64,
+		runProvisioningTest(ctx, environment.TestCase{
+			CapacityType: karpv1.CapacityTypeOnDemand,
+			Arch:         karpv1.ArchitectureAmd64,
 			// e2-medium is the smallest cost-effective AMD64 instance; n2/e2-standard-2
 			// are listed as fallbacks for regions where e2-medium capacity is tight.
-			families:      []string{"e2", "n2"},
-			instanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+			Families:      []string{"e2", "n2"},
+			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
 		})
 	}, SpecTimeout(15*time.Minute))
 
 	It("should provision an arm64 on-demand node", func(ctx SpecContext) {
-		runProvisioningTest(ctx, provisioningCase{
-			capacityType: karpv1.CapacityTypeOnDemand,
-			arch:         karpv1.ArchitectureArm64,
+		runProvisioningTest(ctx, environment.TestCase{
+			CapacityType: karpv1.CapacityTypeOnDemand,
+			Arch:         karpv1.ArchitectureArm64,
 			// c4a (Google Axion) is available in more regions than t2a; both are listed
 			// so the test succeeds in zones that only have one of the two families.
-			families:      []string{"c4a", "t2a"},
-			instanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
+			Families:      []string{"c4a", "t2a"},
+			InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
 		})
 	}, SpecTimeout(15*time.Minute))
 })

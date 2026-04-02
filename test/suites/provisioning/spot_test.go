@@ -21,24 +21,26 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
 var _ = Describe("Spot Provisioning", func() {
 	It("should provision an amd64 spot node", func(ctx SpecContext) {
-		runProvisioningTest(ctx, provisioningCase{
-			capacityType:  karpv1.CapacityTypeSpot,
-			arch:          karpv1.ArchitectureAmd64,
-			families:      []string{"e2", "n2"},
-			instanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+		runProvisioningTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeSpot,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"e2", "n2"},
+			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
 		})
 	}, SpecTimeout(15*time.Minute))
 
 	It("should provision an arm64 spot node", func(ctx SpecContext) {
-		runProvisioningTest(ctx, provisioningCase{
-			capacityType:  karpv1.CapacityTypeSpot,
-			arch:          karpv1.ArchitectureArm64,
-			families:      []string{"c4a", "t2a"},
-			instanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
+		runProvisioningTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeSpot,
+			Arch:          karpv1.ArchitectureArm64,
+			Families:      []string{"c4a", "t2a"},
+			InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
 		})
 	}, SpecTimeout(15*time.Minute))
 })

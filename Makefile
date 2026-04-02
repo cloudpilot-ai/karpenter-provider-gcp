@@ -95,7 +95,7 @@ e2e-deploy: ## Build image and (re)deploy karpenter onto an existing e2e cluster
 	E2E_ZONE=$(E2E_ZONE) \
 	./hack/e2e-deploy.sh
 
-e2e-tests: ## Run all e2e tests in parallel (requires e2e-setup to have been run first)
+e2e-tests: ## Run all e2e test suites sequentially, each with internal parallelism
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -104,15 +104,20 @@ e2e-tests: ## Run all e2e tests in parallel (requires e2e-setup to have been run
 	go test -count 1 -timeout 2h -v ./test/suites/... \
 	-args -ginkgo.procs=4 -ginkgo.timeout=2h -ginkgo.v
 
-## Run a single e2e spec by substring, e.g.: make e2e-test FOCUS="amd64 on-demand"
+## Run a single e2e spec by substring.
+## Set SUITE to target a specific suite (provisioning, consolidation, drift, expiration).
+## e.g.: make e2e-test SUITE=consolidation FOCUS="amd64"
+##        make e2e-test FOCUS="amd64 on-demand"  (searches all suites)
 FOCUS ?=
-e2e-test: ## Run a single e2e spec (set FOCUS="<substring of spec name>")
+SUITE ?=
+e2e-test: ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<name>)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_ZONE) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
-	go test -count 1 -timeout 30m -v ./test/suites/... \
+	go test -count 1 -timeout 30m -v \
+	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...) \
 	-args -ginkgo.focus="$(FOCUS)" -ginkgo.v
 
 e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
@@ -146,7 +151,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 

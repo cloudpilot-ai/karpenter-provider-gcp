@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioning_test
+package expiration_test
 
 import (
 	"context"
@@ -31,61 +31,60 @@ import (
 
 var _ = Describe("Expiration", func() {
 	// Expiration test: set expireAfter on the NodePool so nodes are expired as
-	// soon as they register (1m < typical provisioning time), then verify that
-	// karpenter replaces the node with a fresh one and the pod migrates to it.
+	// soon as they register (1m < typical provisioning time ~5-7m), then verify
+	// that karpenter replaces the node with a fresh one and the pod migrates.
 	It("should replace an expired amd64 on-demand node", func(ctx SpecContext) {
-		runExpirationTest(ctx, provisioningCase{
-			capacityType:  karpv1.CapacityTypeOnDemand,
-			arch:          karpv1.ArchitectureAmd64,
-			families:      []string{"e2", "n2"},
-			instanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+		runExpirationTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"e2", "n2"},
+			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
 		})
 	}, SpecTimeout(25*time.Minute))
 })
 
-func runExpirationTest(ctx context.Context, tc provisioningCase) {
-	prefix := testPrefix(tc.arch, tc.capacityType) + "-exp"
-	suffix := uniqueSuffix()
+func runExpirationTest(ctx context.Context, tc environment.TestCase) {
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-exp"
+	suffix := environment.UniqueSuffix()
 	nodeClassName := prefix + "-nc-" + suffix
 	nodePoolName := prefix + "-np-" + suffix
 	deployName := prefix + "-dep-" + suffix
 	appLabel := prefix + "-" + suffix
 
-	// expireAfter is set short enough that the node will already be expired
-	// by the time it finishes bootstrapping (~5-7 min). Karpenter marks the
-	// NodeClaim as Expired and provisions a replacement immediately.
+	// expireAfter is set shorter than provisioning time (~5-7m) so the node is
+	// already expired when it finishes bootstrapping. Karpenter marks the
+	// NodeClaim as Expired and starts a replacement immediately.
 	const expireAfter = "1m"
 
 	GinkgoWriter.Printf("[setup] expiration arch=%s capacityType=%s nodePool=%s expireAfter=%s\n",
-		tc.arch, tc.capacityType, nodePoolName, expireAfter)
+		tc.Arch, tc.CapacityType, nodePoolName, expireAfter)
 
 	var firstNodeName string
 	DeferCleanup(func(ctx context.Context) {
-		deleteDeployment(ctx, deployName)
-		deleteNodePool(ctx, nodePoolName)
-		deleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, deployName)
+		env.DeleteNodePool(ctx, nodePoolName)
+		env.DeleteNodeClass(ctx, nodeClassName)
 		if firstNodeName != "" {
 			_ = env.WaitForNodeRemoval(ctx, firstNodeName)
 		}
 	})
 
-	createNodeClass(ctx, nodeClassName)
-	createNodePoolWithExpiry(ctx, nodePoolName, nodeClassName, tc, expireAfter)
-	createDeployment(ctx, deployName, appLabel, nodePoolName, tc.arch)
+	env.CreateNodeClass(ctx, nodeClassName)
+	env.CreateNodePoolWithExpiry(ctx, nodePoolName, nodeClassName, tc, expireAfter)
+	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
 
 	// Wait for the first pod to be running — the node is already expired at
-	// this point so karpenter will start replacement shortly.
-	firstPod := waitForRunningPod(ctx, appLabel)
+	// this point so karpenter starts a replacement shortly after.
+	firstPod := env.WaitForRunningPod(ctx, appLabel)
 	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
 	firstNodeName = firstPod.Spec.NodeName
 
 	GinkgoWriter.Printf("[expiration] first node: %s; waiting for replacement...\n", firstNodeName)
 
-	// Wait for the pod to be rescheduled onto a new node. Budget covers the
-	// full replacement cycle: karpenter creates a new NodeClaim, provisions a
-	// new GCP VM, pod migrates, and old node is drained.
+	// Budget covers the full replacement cycle: karpenter creates a new
+	// NodeClaim, provisions a new VM, pod migrates, old node is drained.
 	replacementTimeout := 2 * environment.ProvisioningTimeout
-	replacementPod := waitForPodOnDifferentNode(ctx, appLabel, firstNodeName, replacementTimeout)
+	replacementPod := env.WaitForPodOnDifferentNode(ctx, appLabel, firstNodeName, replacementTimeout)
 	Expect(replacementPod.Spec.NodeName).NotTo(Equal(firstNodeName))
 
 	GinkgoWriter.Printf("[expiration] replacement node: %s\n", replacementPod.Spec.NodeName)

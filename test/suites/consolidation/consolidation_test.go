@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioning_test
+package consolidation_test
 
 import (
 	"context"
@@ -23,6 +23,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
 var _ = Describe("Consolidation", func() {
@@ -30,49 +32,49 @@ var _ = Describe("Consolidation", func() {
 	// provision a node, empty it by scaling to 0, and verify karpenter removes
 	// the node without the test deleting the NodePool first.
 	It("should consolidate an empty amd64 on-demand node", func(ctx SpecContext) {
-		runConsolidationTest(ctx, provisioningCase{
-			capacityType:  karpv1.CapacityTypeOnDemand,
-			arch:          karpv1.ArchitectureAmd64,
-			families:      []string{"e2", "n2"},
-			instanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+		runConsolidationTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"e2", "n2"},
+			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
 		})
 	}, SpecTimeout(20*time.Minute))
 })
 
-func runConsolidationTest(ctx context.Context, tc provisioningCase) {
-	prefix := testPrefix(tc.arch, tc.capacityType) + "-con"
-	suffix := uniqueSuffix()
+func runConsolidationTest(ctx context.Context, tc environment.TestCase) {
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-con"
+	suffix := environment.UniqueSuffix()
 	nodeClassName := prefix + "-nc-" + suffix
 	nodePoolName := prefix + "-np-" + suffix
 	deployName := prefix + "-dep-" + suffix
 	appLabel := prefix + "-" + suffix
 
 	GinkgoWriter.Printf("[setup] consolidation arch=%s capacityType=%s nodePool=%s\n",
-		tc.arch, tc.capacityType, nodePoolName)
+		tc.Arch, tc.CapacityType, nodePoolName)
 
 	var provisionedNodeName string
 	DeferCleanup(func(ctx context.Context) {
-		deleteDeployment(ctx, deployName)
-		deleteNodePool(ctx, nodePoolName)
-		deleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, deployName)
+		env.DeleteNodePool(ctx, nodePoolName)
+		env.DeleteNodeClass(ctx, nodeClassName)
 		if provisionedNodeName != "" {
 			// Node may already be gone if consolidation succeeded; ignore the error.
 			_ = env.WaitForNodeRemoval(ctx, provisionedNodeName)
 		}
 	})
 
-	createNodeClass(ctx, nodeClassName)
-	createNodePool(ctx, nodePoolName, nodeClassName, tc)
-	createDeployment(ctx, deployName, appLabel, nodePoolName, tc.arch)
+	env.CreateNodeClass(ctx, nodeClassName)
+	env.CreateNodePool(ctx, nodePoolName, nodeClassName, tc)
+	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
 
-	pod := waitForRunningPod(ctx, appLabel)
+	pod := env.WaitForRunningPod(ctx, appLabel)
 	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 	provisionedNodeName = pod.Spec.NodeName
 
 	GinkgoWriter.Printf("[consolidation] node provisioned: %s; scaling deployment to 0\n", provisionedNodeName)
 
 	// Empty the node — karpenter should consolidate it within consolidateAfter + VM deletion time.
-	scaleDeployment(ctx, deployName, 0)
+	env.ScaleDeployment(ctx, deployName, 0)
 
 	GinkgoWriter.Printf("[consolidation] waiting for node %s to be removed...\n", provisionedNodeName)
 	Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
