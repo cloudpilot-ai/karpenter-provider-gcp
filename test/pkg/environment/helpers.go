@@ -380,13 +380,22 @@ func toAny(ss []string) []any {
 	return out
 }
 
-// deleteIfExists deletes a resource if it already exists, ignoring 404. Used
-// before creating resources so that stale leftovers from a previous run do not
-// cause "already exists" failures.
+// deleteIfExists deletes a resource if it exists and waits for it to be fully
+// removed before returning. This prevents "object is being deleted" errors when
+// a resource from a previous run still has its finalizer running.
 func deleteIfExists(ctx context.Context, client dynamic.Interface, gvr schema.GroupVersionResource, name string) {
 	err := client.Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		// Log but don't fail — the Create call will surface any real error.
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return
+		}
 		GinkgoWriter.Printf("deleteIfExists: deleting %s/%s: %v\n", gvr.Resource, name, err)
+		return
 	}
+	// Wait for the object to disappear so the caller can safely recreate it.
+	Eventually(func(g Gomega) {
+		_, err := client.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+			"waiting for %s/%s to be fully deleted", gvr.Resource, name)
+	}).WithTimeout(NodeCleanupTimeout).WithPolling(5 * time.Second).Should(Succeed())
 }
