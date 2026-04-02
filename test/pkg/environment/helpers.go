@@ -136,6 +136,13 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	if expireAfter != "" {
 		templateSpec["expireAfter"] = expireAfter
 	}
+	// When expireAfter is set we use WhenEmpty rather than WhenEmptyOrUnderutilized
+	// so that node replacement is driven solely by expiration, not by concurrent
+	// utilization-based consolidation which would interfere with the test.
+	consolidationPolicy := "WhenEmptyOrUnderutilized"
+	if expireAfter != "" {
+		consolidationPolicy = "WhenEmpty"
+	}
 	deleteIfExists(ctx, e.DynamicClient, NodePoolGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",
@@ -145,7 +152,7 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 			"weight": int64(DefaultNodePoolWeight),
 			"disruption": map[string]any{
 				"consolidateAfter":    DefaultConsolidateAfter,
-				"consolidationPolicy": "WhenEmptyOrUnderutilized",
+				"consolidationPolicy": consolidationPolicy,
 				"budgets":             []any{map[string]any{"nodes": "100%"}},
 			},
 			"template": map[string]any{"spec": templateSpec},
