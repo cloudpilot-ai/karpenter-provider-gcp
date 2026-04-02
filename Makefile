@@ -95,6 +95,17 @@ e2etests: ## Run e2e tests (requires e2e-setup to have been run first)
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	go test -p 1 -count 1 -timeout 3.5h -v ./test/suites/...
 
+## Run a single e2e spec by substring, e.g.: make e2etest FOCUS="amd64 on-demand"
+FOCUS ?=
+e2etest: ## Run a single e2e spec (set FOCUS="<substring of spec name>")
+	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
+	PROJECT_ID=$(PROJECT_ID) \
+	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
+	CLUSTER_LOCATION=$(E2E_ZONE) \
+	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
+	go test -p 1 -count 1 -timeout 1h -v ./test/suites/... \
+	-args -ginkgo.focus="$(FOCUS)"
+
 e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
 	E2E_PROJECT_ID=$(PROJECT_ID) \
@@ -126,7 +137,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test e2e-setup e2etests e2e-teardown e2e-check-clean coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test e2e-setup e2etests e2etest e2e-teardown e2e-check-clean coverage update verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 

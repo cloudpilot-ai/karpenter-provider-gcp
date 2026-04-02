@@ -42,7 +42,11 @@ const (
 	TestNamespace = "karpenter-e2e-test"
 
 	ControllerStartTimeout = 5 * time.Minute
-	NodeCleanupTimeout     = 8 * time.Minute
+	// NodePoolReadyTimeout is used when waiting for GKE template node pools to
+	// reach RUNNING state. Pool creation (triggered by karpenter on first start)
+	// can take up to 10 minutes, longer than a plain Deployment rollout.
+	NodePoolReadyTimeout = 10 * time.Minute
+	NodeCleanupTimeout   = 8 * time.Minute
 	// ProvisioningTimeout is the maximum time allowed for a GCP VM to be created,
 	// boot, register with the cluster, and for the pod to reach Running. GCP
 	// typically takes 5–8 minutes; 12 minutes gives a comfortable margin.
@@ -174,14 +178,14 @@ func (e *Environment) waitForControllerReady() {
 	for _, poolName := range []string{"karpenter-default", "karpenter-ubuntu"} {
 		poolPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
 			e.ProjectID, e.ClusterLocation, e.ClusterName, poolName)
-		poolCtx, poolCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
+		poolCtx, poolCancel := context.WithTimeout(context.Background(), NodePoolReadyTimeout)
 		Eventually(func(g Gomega) {
 			pool, err := e.containerSvc.Projects.Locations.Clusters.NodePools.
 				Get(poolPath).Context(poolCtx).Do()
 			g.Expect(err).NotTo(HaveOccurred(), "getting GKE node pool %s", poolName)
 			g.Expect(pool.Status).To(Equal("RUNNING"),
 				"GKE node pool %s is not RUNNING (status=%s)", poolName, pool.Status)
-		}).WithTimeout(ControllerStartTimeout).WithPolling(10 * time.Second).Should(Succeed())
+		}).WithTimeout(NodePoolReadyTimeout).WithPolling(15 * time.Second).Should(Succeed())
 		poolCancel()
 	}
 }
