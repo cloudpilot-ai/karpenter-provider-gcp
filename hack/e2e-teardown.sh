@@ -134,4 +134,50 @@ if gcloud compute networks describe "${NETWORK_NAME}" \
     --quiet
 fi
 
+# ── Cloud Logging ──────────────────────────────────────────────────────────────
+# Delete all Cloud Logging entries written by the cluster. We first collect the
+# distinct log names that have entries with our cluster's resource label, then
+# delete each named log. gcloud has no per-entry delete — deleting the log name
+# removes all entries in it project-wide, which is fine in a dedicated e2e
+# project. In a shared project this would also remove entries from other
+# resources that share the same log name; add --force if needed or skip.
+log "Deleting Cloud Logging data for cluster ${CLUSTER_NAME}..."
+LOG_NAMES=$(gcloud logging entries list \
+    --project="${E2E_PROJECT_ID}" \
+    --filter="resource.labels.cluster_name=\"${CLUSTER_NAME}\"" \
+    --format="value(logName)" \
+    --limit=1000 2>/dev/null | sort -u)
+if [ -n "${LOG_NAMES}" ]; then
+  while IFS= read -r log_name; do
+    [ -z "${log_name}" ] && continue
+    log "  Deleting log ${log_name}..."
+    gcloud logging logs delete "${log_name}" \
+        --project="${E2E_PROJECT_ID}" --quiet 2>/dev/null || \
+      log "  WARNING: could not delete log ${log_name} (may already be gone)"
+  done <<< "${LOG_NAMES}"
+  log "Cloud Logging cleanup done."
+else
+  log "No Cloud Logging entries found for cluster ${CLUSTER_NAME} (already clean or logging was disabled)."
+fi
+
+# Cloud Monitoring timeseries data (GKE built-in metrics such as
+# kubernetes.io/container/*) cannot be deleted via API — they expire
+# automatically after their retention period (typically 6 weeks).
+# Custom metric descriptors created by the cluster are deleted below.
+log "Deleting custom Cloud Monitoring metric descriptors for cluster ${CLUSTER_NAME}..."
+CUSTOM_METRICS=$(gcloud monitoring metrics-descriptors list \
+    --project="${E2E_PROJECT_ID}" \
+    --filter="metric.type:\"custom.googleapis.com\" AND description~\"${CLUSTER_NAME}\"" \
+    --format="value(name)" 2>/dev/null || true)
+if [ -n "${CUSTOM_METRICS}" ]; then
+  while IFS= read -r metric; do
+    [ -z "${metric}" ] && continue
+    gcloud monitoring metrics-descriptors delete "${metric}" \
+        --project="${E2E_PROJECT_ID}" --quiet 2>/dev/null || true
+  done <<< "${CUSTOM_METRICS}"
+  log "Custom metric descriptors deleted."
+else
+  log "No custom metric descriptors found (timeseries data expires automatically)."
+fi
+
 log "Teardown complete."

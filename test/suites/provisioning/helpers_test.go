@@ -317,3 +317,113 @@ func testPrefix(arch, capacityType string) string {
 	}
 	return arch + "-" + ct
 }
+
+// scaleDeployment updates the replica count for an existing Deployment.
+func scaleDeployment(ctx context.Context, name string, replicas int32) {
+	dep, err := env.KubeClient.AppsV1().Deployments(environment.TestNamespace).Get(ctx, name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "getting Deployment %s for scale", name)
+	dep.Spec.Replicas = &replicas
+	_, err = env.KubeClient.AppsV1().Deployments(environment.TestNamespace).Update(ctx, dep, metav1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "scaling Deployment %s to %d", name, replicas)
+}
+
+// createNodePoolWithExpiry creates a NodePool like createNodePool but sets
+// expireAfter on the template so karpenter replaces nodes after the given
+// duration. expireAfter must be a valid karpenter duration string, e.g. "2m".
+func createNodePoolWithExpiry(ctx context.Context, name, nodeClassName string, tc provisioningCase, expireAfter string) {
+	requirements := []any{
+		map[string]any{"key": karpv1.CapacityTypeLabelKey, "operator": "In", "values": []any{tc.capacityType}},
+		map[string]any{"key": gcpv1alpha1.LabelInstanceFamily, "operator": "In", "values": toAny(tc.families)},
+		map[string]any{"key": corev1.LabelInstanceTypeStable, "operator": "In", "values": toAny(tc.instanceTypes)},
+		map[string]any{"key": corev1.LabelArchStable, "operator": "In", "values": []any{tc.arch}},
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.sh/v1",
+		"kind":       "NodePool",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"weight": int64(defaultNodePoolWeight),
+			"disruption": map[string]any{
+				"consolidateAfter":    defaultConsolidateAfter,
+				"consolidationPolicy": "WhenEmptyOrUnderutilized",
+				"budgets":             []any{map[string]any{"nodes": "100%"}},
+			},
+			"template": map[string]any{
+				"spec": map[string]any{
+					"expireAfter": expireAfter,
+					"nodeClassRef": map[string]any{
+						"name":  nodeClassName,
+						"kind":  "GCENodeClass",
+						"group": "karpenter.k8s.gcp",
+					},
+					"requirements": requirements,
+				},
+			},
+		},
+	}}
+	_, err := env.DynamicClient.Resource(environment.NodePoolGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating NodePool %s", name)
+}
+
+// updateNodePoolInstanceTypes patches the NodePool's instance-type requirement
+// to the given list so that nodes running a type not in the list are drifted.
+func updateNodePoolInstanceTypes(ctx context.Context, name string, instanceTypes []string) {
+	np, err := env.DynamicClient.Resource(environment.NodePoolGVR).Get(ctx, name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "getting NodePool %s for update", name)
+
+	spec := np.Object["spec"].(map[string]any)
+	template := spec["template"].(map[string]any)
+	tspec := template["spec"].(map[string]any)
+	reqs := tspec["requirements"].([]any)
+	for i, req := range reqs {
+		r := req.(map[string]any)
+		if r["key"] == corev1.LabelInstanceTypeStable {
+			r["values"] = toAny(instanceTypes)
+			reqs[i] = r
+			break
+		}
+	}
+	tspec["requirements"] = reqs
+	template["spec"] = tspec
+	spec["template"] = template
+	np.Object["spec"] = spec
+
+	_, err = env.DynamicClient.Resource(environment.NodePoolGVR).Update(ctx, np, metav1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "updating NodePool %s instance types", name)
+}
+
+// waitForPodOnDifferentNode waits until a Running pod with appLabel is
+// scheduled on a node other than excludeNode. Use when testing node
+// replacement (expiration, drift) where a new node must be provisioned.
+func waitForPodOnDifferentNode(ctx context.Context, appLabel, excludeNode string, timeout time.Duration) *corev1.Pod {
+	var found *corev1.Pod
+	Eventually(func(g Gomega) {
+		found = nil
+		pods, err := env.KubeClient.CoreV1().Pods(environment.TestNamespace).List(ctx,
+			metav1.ListOptions{LabelSelector: fmt.Sprintf("app=%s", appLabel)})
+		g.Expect(err).NotTo(HaveOccurred())
+		for i := range pods.Items {
+			p := &pods.Items[i]
+			if p.Spec.NodeName == "" || p.Spec.NodeName == excludeNode {
+				continue
+			}
+			if p.Status.Phase != corev1.PodRunning {
+				continue
+			}
+			for _, c := range p.Status.Conditions {
+				if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+					found = p.DeepCopy()
+					return
+				}
+			}
+		}
+		if claims, err2 := env.ListNodeClaims(ctx); err2 == nil {
+			for _, c := range claims {
+				GinkgoWriter.Printf("NodeClaim %s: %v\n", c.GetName(), c.Object["status"])
+			}
+		}
+		g.Expect(found).NotTo(BeNil(),
+			"no running pod with label app=%s on a node other than %s", appLabel, excludeNode)
+	}).WithTimeout(timeout).WithPolling(5 * time.Second).Should(Succeed())
+	return found
+}
