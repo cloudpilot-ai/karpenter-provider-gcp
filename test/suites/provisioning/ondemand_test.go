@@ -28,8 +28,8 @@ var _ = Describe("OnDemand Provisioning", func() {
 		runProvisioningTest(ctx, provisioningCase{
 			capacityType:  karpv1.CapacityTypeOnDemand,
 			arch:          karpv1.ArchitectureAmd64,
-			families:      []string{"e2"},
-			instanceTypes: []string{"e2-standard-2", "e2-standard-4"},
+			families:      []string{"e2", "n2"},
+			instanceTypes: []string{"e2-standard-2", "e2-standard-4", "n2-standard-2", "n2-standard-4"},
 		})
 	}, SpecTimeout(25*time.Minute))
 
