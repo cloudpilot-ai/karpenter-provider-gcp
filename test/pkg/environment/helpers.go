@@ -203,6 +203,13 @@ func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, node
 			},
 		},
 	}
+	// Delete any stale Deployment from a previous run before creating the new one.
+	_ = e.KubeClient.AppsV1().Deployments(TestNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+	Eventually(func(g Gomega) {
+		_, err := e.KubeClient.AppsV1().Deployments(TestNamespace).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "waiting for stale Deployment %s to be deleted", name)
+	}).WithTimeout(NodeCleanupTimeout).WithPolling(5 * time.Second).Should(Succeed())
+
 	_, err := e.KubeClient.AppsV1().Deployments(TestNamespace).Create(ctx, dep, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating Deployment %s", name)
 }
