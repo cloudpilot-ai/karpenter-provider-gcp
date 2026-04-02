@@ -131,12 +131,14 @@ func createNodeClass(ctx context.Context, name string) {
 }
 
 func createNodePool(ctx context.Context, name, nodeClassName string, tc provisioningCase) {
+	// No zone constraint: karpenter selects from all zones where template pools
+	// exist (all zones in the cluster region). This avoids test failures due to
+	// transient single-zone capacity shortages.
 	requirements := []any{
 		map[string]any{"key": karpv1.CapacityTypeLabelKey, "operator": "In", "values": []any{tc.capacityType}},
 		map[string]any{"key": gcpv1alpha1.LabelInstanceFamily, "operator": "In", "values": toAny(tc.families)},
 		map[string]any{"key": corev1.LabelInstanceTypeStable, "operator": "In", "values": toAny(tc.instanceTypes)},
 		map[string]any{"key": corev1.LabelArchStable, "operator": "In", "values": []any{tc.arch}},
-		map[string]any{"key": corev1.LabelTopologyZone, "operator": "In", "values": []any{env.ClusterLocation}},
 	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",

@@ -29,7 +29,7 @@ var _ = Describe("Spot Provisioning", func() {
 			capacityType:  karpv1.CapacityTypeSpot,
 			arch:          karpv1.ArchitectureAmd64,
 			families:      []string{"e2"},
-			instanceTypes: []string{"e2-standard-2"},
+			instanceTypes: []string{"e2-standard-2", "e2-standard-4"},
 		})
 	}, SpecTimeout(25*time.Minute))
 
