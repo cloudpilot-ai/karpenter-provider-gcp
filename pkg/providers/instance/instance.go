@@ -342,7 +342,8 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, "", nil, &retryableError{err}
 	}
 
-	nodePoolName := resolveNodePoolName(nodeClass.ImageFamily())
+	arch := instanceType.Requirements.Get(corev1.LabelArchStable).Any()
+	nodePoolName := resolveNodePoolName(nodeClass.ImageFamily(), arch)
 	if nodePoolName == "" {
 		err := fmt.Errorf("failed to resolve node pool name for image family %q", nodeClass.ImageFamily())
 		log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", nodeClass.ImageFamily())
@@ -527,11 +528,17 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 	return cheapestCompatibleZone(zones, reqs, instanceType.Offerings), nil
 }
 
-func resolveNodePoolName(imageFamily string) string {
+func resolveNodePoolName(imageFamily, arch string) string {
 	switch imageFamily {
 	case v1alpha1.ImageFamilyContainerOptimizedOS:
+		if arch == "arm64" {
+			return nodepooltemplate.KarpenterCOSARM64NodePoolTemplate
+		}
 		return nodepooltemplate.KarpenterDefaultNodePoolTemplate
 	case v1alpha1.ImageFamilyUbuntu:
+		if arch == "arm64" {
+			return nodepooltemplate.KarpenterUbuntuARM64NodePoolTemplate
+		}
 		return nodepooltemplate.KarpenterUbuntuNodePoolTemplate
 	}
 
