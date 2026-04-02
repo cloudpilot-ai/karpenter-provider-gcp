@@ -81,7 +81,7 @@ KUBELET_ARGS: cloud.google.com/machine-family=e2, arch=amd64; --v=2
 	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
 
 	got := swag.StringValue(meta.Items[0].Value)
-	// SERVER_BINARY_TAR_URL is not patched; the ARM64 node pool template already has the correct URL+hash.
+	// SERVER_BINARY_TAR_URL is left unchanged; the arch-native node pool template carries the correct URL and hash.
 	require.Contains(t, got, "kubernetes-server-linux-amd64.tar.gz")
 	require.Contains(t, got, "cloud.google.com/machine-family=c4a")
 	require.Contains(t, got, "arch=arm64")
@@ -113,7 +113,7 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
 
 	got := swag.StringValue(meta.Items[0].Value)
-	// SERVER_BINARY_TAR_URL is not patched; the AMD64 node pool template already has the correct URL+hash.
+	// SERVER_BINARY_TAR_URL is left unchanged; the arch-native node pool template carries the correct URL and hash.
 	require.Contains(t, got, "kubernetes-server-linux-arm64.tar.gz")
 	require.Contains(t, got, "cloud.google.com/machine-family=e2")
 	require.Contains(t, got, "arch=amd64")
