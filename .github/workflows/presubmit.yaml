@@ -21,7 +21,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: false
+
+      - name: Cache toolchain binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: toolchain-${{ runner.os }}-${{ hashFiles('hack/toolchain.sh') }}
 
       - name: Install toolchain
         run: |
