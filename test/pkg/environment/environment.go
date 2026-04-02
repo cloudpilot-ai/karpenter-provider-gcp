@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
@@ -37,15 +38,21 @@ import (
 const (
 	KarpenterNamespace  = "karpenter-system"
 	KarpenterDeployment = "karpenter"
+	// TestNamespace is the namespace used by all e2e test suites for workloads.
+	TestNamespace = "karpenter-e2e-test"
 
 	ControllerStartTimeout = 5 * time.Minute
 	NodeCleanupTimeout     = 8 * time.Minute
-	ProvisioningTimeout    = 8 * time.Minute
-	PauseImage             = "registry.k8s.io/pause:3.10"
+	// ProvisioningTimeout is the maximum time allowed for a GCP VM to be created,
+	// boot, register with the cluster, and for the pod to reach Running. GCP
+	// typically takes 5–8 minutes; 12 minutes gives a comfortable margin.
+	ProvisioningTimeout = 12 * time.Minute
+	PauseImage          = "registry.k8s.io/pause:3.10"
 )
 
 var (
-	NodeClaimGVR    = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
+	// nodeClaimGVR is package-private; use ListNodeClaims to access NodeClaims.
+	nodeClaimGVR    = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
 	NodePoolGVR     = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
 	GCENodeClassGVR = schema.GroupVersionResource{Group: "karpenter.k8s.gcp", Version: "v1alpha1", Resource: "gcenodeclasses"}
 )
@@ -54,7 +61,7 @@ var (
 type Environment struct {
 	ProjectID       string
 	ClusterName     string
-	ClusterLocation string // zone, e.g. us-central1-a
+	ClusterLocation string // region or zone, e.g. "us-central1" or "us-central1-a"
 	PodsRangeName   string
 
 	KubeClient    kubernetes.Interface
@@ -112,16 +119,16 @@ func (e *Environment) Cleanup() {
 	// termination controller, so an empty list here means no orphaned VMs.
 	// Use a fresh context so the wait budget is not shared with the deletions above.
 	Eventually(func(g Gomega) {
-		claims, err := e.DynamicClient.Resource(NodeClaimGVR).List(context.Background(), metav1.ListOptions{})
+		claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(context.Background(), metav1.ListOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(claims.Items).To(BeEmpty(), "not all NodeClaims cleaned up — possible orphaned GCP VMs")
 	}).WithTimeout(NodeCleanupTimeout).WithPolling(10 * time.Second).Should(Succeed())
 }
 
 // WaitForNodeRemoval polls until the named node no longer exists. Transient API
-// errors are retried; the caller's context controls the overall deadline.
+// errors are retried; the caller's context is the sole deadline authority.
 func (e *Environment) WaitForNodeRemoval(ctx context.Context, nodeName string) error {
-	return wait.PollUntilContextTimeout(ctx, 10*time.Second, NodeCleanupTimeout, true,
+	return wait.PollUntilContextCancel(ctx, 10*time.Second, true,
 		func(ctx context.Context) (bool, error) {
 			_, err := e.KubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 			if apierrors.IsNotFound(err) {
@@ -133,10 +140,21 @@ func (e *Environment) WaitForNodeRemoval(ctx context.Context, nodeName string) e
 	)
 }
 
+// ListNodeClaims returns all NodeClaim objects in the cluster.
+func (e *Environment) ListNodeClaims(ctx context.Context) ([]unstructured.Unstructured, error) {
+	list, err := e.DynamicClient.Resource(nodeClaimGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 // waitForControllerReady polls until the karpenter Deployment has all replicas
 // available and both GKE template node pools are RUNNING.
 // The Deployment was installed by e2e-setup.sh via Helm.
 func (e *Environment) waitForControllerReady() {
+	// Each phase gets its own independent 5-minute budget so a slow deployment
+	// start does not eat into the pool-readiness window.
 	deployCtx, deployCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
 	defer deployCancel()
 
@@ -157,7 +175,6 @@ func (e *Environment) waitForControllerReady() {
 		poolPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
 			e.ProjectID, e.ClusterLocation, e.ClusterName, poolName)
 		poolCtx, poolCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
-		defer poolCancel()
 		Eventually(func(g Gomega) {
 			pool, err := e.containerSvc.Projects.Locations.Clusters.NodePools.
 				Get(poolPath).Context(poolCtx).Do()
@@ -165,6 +182,7 @@ func (e *Environment) waitForControllerReady() {
 			g.Expect(pool.Status).To(Equal("RUNNING"),
 				"GKE node pool %s is not RUNNING (status=%s)", poolName, pool.Status)
 		}).WithTimeout(ControllerStartTimeout).WithPolling(10 * time.Second).Should(Succeed())
+		poolCancel()
 	}
 }
 

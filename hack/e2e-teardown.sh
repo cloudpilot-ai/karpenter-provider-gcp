@@ -5,16 +5,24 @@
 #
 # Required:
 #   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
-#   E2E_PROJECT_ID                  GCP project ID
 #
 # Optional (with defaults matching e2e-setup.sh):
-#   E2E_PREFIX   (default: karpenter-e2e)
-#   E2E_REGION   (default: us-central1)
-#   E2E_ZONE     (default: <region>-a)
+#   E2E_PROJECT_ID  GCP project ID  (default: parsed from credentials)
+#   E2E_PREFIX      (default: karpenter-e2e)
+#   E2E_REGION      (default: us-central1)
+#   E2E_ZONE        (default: <region>-a)
 set -euo pipefail
 
 : "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
-: "${E2E_PROJECT_ID:?E2E_PROJECT_ID must be set}"
+
+log() { echo "e2e-teardown: $*" >&2; }
+
+# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials file.
+if [ -z "${E2E_PROJECT_ID:-}" ]; then
+  E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
+    || { echo "ERROR: E2E_PROJECT_ID is not set and could not be parsed from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
+  log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
+fi
 
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
@@ -26,8 +34,6 @@ SUBNET_NAME="${E2E_PREFIX}-subnet"
 GSA_ID="${E2E_PREFIX}-karpenter"
 GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 AR_REPO="${E2E_PREFIX}-images"
-
-log() { echo "e2e-teardown: $*" >&2; }
 
 gcloud auth activate-service-account \
   --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
@@ -97,7 +103,7 @@ for role in roles/compute.admin roles/container.admin roles/iam.serviceAccountUs
     --member "serviceAccount:${GSA_EMAIL}" \
     --role "${role}" \
     --condition=None \
-    --quiet 2>/dev/null || true
+    --quiet || true
 done
 
 # ── Service Account ────────────────────────────────────────────────────────────

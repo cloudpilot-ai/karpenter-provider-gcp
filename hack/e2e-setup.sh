@@ -4,9 +4,9 @@
 #
 # Required:
 #   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
-#   E2E_PROJECT_ID                  GCP project ID
 #
 # Optional (with defaults):
+#   E2E_PROJECT_ID    GCP project ID        (default: parsed from credentials)
 #   E2E_PREFIX        resource name prefix  (default: karpenter-e2e)
 #   E2E_REGION        GCP region            (default: us-central1)
 #   E2E_ZONE          GCP zone              (default: <region>-a)
@@ -14,7 +14,15 @@
 set -euo pipefail
 
 : "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
-: "${E2E_PROJECT_ID:?E2E_PROJECT_ID must be set}"
+
+log() { echo "e2e-setup: $*" >&2; }
+
+# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials file.
+if [ -z "${E2E_PROJECT_ID:-}" ]; then
+  E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
+    || { echo "ERROR: E2E_PROJECT_ID is not set and could not be parsed from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
+  log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
+fi
 
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
@@ -38,14 +46,19 @@ SERVICES_CIDR="10.8.0.0/20"
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
-log() { echo "e2e-setup: $*" >&2; }
-
 # ── Auth ───────────────────────────────────────────────────────────────────────
 log "Authenticating..."
 gcloud auth activate-service-account \
   --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
   --project "${E2E_PROJECT_ID}" \
   --quiet
+
+# Verify the project exists and is accessible; avoids silent hangs on a wrong ID.
+if ! gcloud projects describe "${E2E_PROJECT_ID}" &>/dev/null; then
+  echo "ERROR: GCP project '${E2E_PROJECT_ID}' not found or not accessible. Verify E2E_PROJECT_ID." >&2
+  exit 1
+fi
+log "Verified project ${E2E_PROJECT_ID}"
 
 # ── VPC ────────────────────────────────────────────────────────────────────────
 if gcloud compute networks describe "${NETWORK_NAME}" \
@@ -250,7 +263,6 @@ log "Image: ${IMAGE_REF}"
 
 # ko returns repo:tag@sha256:digest when --image-tag is set
 IMAGE_DIGEST="${IMAGE_REF##*@}"
-IMAGE_WITHOUT_DIGEST="${IMAGE_REF%@*}"
 IMAGE_REPOSITORY="${IMAGE_REPO}"
 IMAGE_TAG="${KO_IMAGE_TAG}"
 

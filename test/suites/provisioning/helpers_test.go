@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -37,7 +37,15 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-const testNamespace = "karpenter-e2e-test"
+const (
+	// defaultE2EDiskGiB is the boot disk size for test nodes; 30 GiB meets the
+	// minimum required by ContainerOptimizedOS while keeping costs low.
+	defaultE2EDiskGiB = 30
+	// defaultNodePoolWeight separates test NodePools from any pre-existing ones.
+	defaultNodePoolWeight = 10
+	// defaultConsolidateAfter is how quickly Karpenter reclaims idle test nodes.
+	defaultConsolidateAfter = "30s"
+)
 
 type provisioningCase struct {
 	capacityType  string
@@ -46,11 +54,15 @@ type provisioningCase struct {
 	instanceTypes []string
 }
 
-// runProvisioningTest creates a NodeClass, NodePool, and Deployment for the
-// given case, waits for a pod to run on a newly provisioned node, asserts the
-// expected labels, then deletes the Deployment and waits for the node to be
-// removed (confirming the GCP VM was also terminated).
+// runProvisioningTest asserts that Karpenter provisions a GCP node matching tc,
+// schedules the test pod onto it, and terminates the VM when the pod is removed.
 func runProvisioningTest(ctx context.Context, tc provisioningCase) {
+	switch tc.capacityType {
+	case karpv1.CapacityTypeOnDemand, karpv1.CapacityTypeSpot:
+	default:
+		panic(fmt.Sprintf("unknown capacityType %q — use karpv1.CapacityTypeOnDemand or karpv1.CapacityTypeSpot", tc.capacityType))
+	}
+
 	suffix := uniqueSuffix()
 	nodeClassName := "nodeclass-" + suffix
 	nodePoolName := "nodepool-" + suffix
@@ -109,7 +121,7 @@ func createNodeClass(ctx context.Context, name string) {
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(30), "boot": true},
+				map[string]any{"category": "pd-balanced", "sizeGiB": int64(defaultE2EDiskGiB), "boot": true},
 			},
 			"subnetRangeName": env.PodsRangeName,
 		},
@@ -131,9 +143,9 @@ func createNodePool(ctx context.Context, name, nodeClassName string, tc provisio
 		"kind":       "NodePool",
 		"metadata":   map[string]any{"name": name},
 		"spec": map[string]any{
-			"weight": int64(10),
+			"weight": int64(defaultNodePoolWeight),
 			"disruption": map[string]any{
-				"consolidateAfter":    "30s",
+				"consolidateAfter":    defaultConsolidateAfter,
 				"consolidationPolicy": "WhenEmptyOrUnderutilized",
 				"budgets":             []any{map[string]any{"nodes": "100%"}},
 			},
@@ -157,7 +169,7 @@ func createDeployment(ctx context.Context, name, appLabel, nodePoolName string) 
 	replicas := int32(1)
 	zero := int64(0)
 	dep := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: environment.TestNamespace},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": appLabel}},
@@ -180,7 +192,7 @@ func createDeployment(ctx context.Context, name, appLabel, nodePoolName string) 
 			},
 		},
 	}
-	_, err := env.KubeClient.AppsV1().Deployments(testNamespace).Create(ctx, dep, metav1.CreateOptions{})
+	_, err := env.KubeClient.AppsV1().Deployments(environment.TestNamespace).Create(ctx, dep, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating Deployment %s", name)
 }
 
@@ -188,7 +200,7 @@ func waitForRunningPod(ctx context.Context, appLabel string) *corev1.Pod {
 	var found *corev1.Pod
 	Eventually(func(g Gomega) {
 		found = nil // reset each poll so a pod that went non-Ready doesn't linger
-		pods, err := env.KubeClient.CoreV1().Pods(testNamespace).List(ctx,
+		pods, err := env.KubeClient.CoreV1().Pods(environment.TestNamespace).List(ctx,
 			metav1.ListOptions{LabelSelector: fmt.Sprintf("app=%s", appLabel)})
 		g.Expect(err).NotTo(HaveOccurred())
 		for i := range pods.Items {
@@ -203,13 +215,24 @@ func waitForRunningPod(ctx context.Context, appLabel string) *corev1.Pod {
 				}
 			}
 		}
+		// Emit diagnostics so failures show context rather than just the label.
+		if len(pods.Items) > 0 {
+			GinkgoWriter.Printf("pod app=%s phase=%s nodeName=%q\n",
+				appLabel, pods.Items[0].Status.Phase, pods.Items[0].Spec.NodeName)
+		}
+		if claims, err2 := env.ListNodeClaims(ctx); err2 == nil {
+			GinkgoWriter.Printf("NodeClaims: %d\n", len(claims))
+			for _, c := range claims {
+				GinkgoWriter.Printf("  %s\n", c.GetName())
+			}
+		}
 		g.Expect(found).NotTo(BeNil(), "no running pod with label app=%s", appLabel)
 	}).WithTimeout(environment.ProvisioningTimeout).WithPolling(5 * time.Second).Should(Succeed())
 	return found
 }
 
 func deleteDeployment(ctx context.Context, name string) {
-	err := env.KubeClient.AppsV1().Deployments(testNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+	err := env.KubeClient.AppsV1().Deployments(environment.TestNamespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if !apierrors.IsNotFound(err) {
 		Expect(err).NotTo(HaveOccurred(), "deleting Deployment %s", name)
 	}
@@ -247,12 +270,16 @@ func toAny(ss []string) []any {
 	return out
 }
 
-// uniqueSuffix returns a short base-36 timestamp suffix, unique within a run.
+// suffixCounter makes uniqueSuffix safe under ginkgo --procs N: the process
+// index separates parallel workers; the counter separates sequential specs.
+var suffixCounter atomic.Int64
+
+// uniqueSuffix returns a suffix that is unique across parallel Ginkgo processes
+// and across sequential specs within a process, safe for use in k8s names.
 func uniqueSuffix() string {
-	raw := strconv.FormatInt(time.Now().UnixNano(), 36)
-	// keep last 8 chars to stay within k8s name limits
-	if len(raw) > 8 {
-		raw = raw[len(raw)-8:]
-	}
-	return strings.ToLower(raw)
+	n := suffixCounter.Add(1)
+	proc := GinkgoParallelProcess()
+	return fmt.Sprintf("p%sc%s",
+		strconv.FormatInt(int64(proc), 36),
+		strconv.FormatInt(n, 36))
 }
