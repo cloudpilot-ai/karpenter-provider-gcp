@@ -181,7 +181,7 @@ func (e *Environment) Cleanup() {
 		poolSet[p] = struct{}{}
 	}
 	Eventually(func(g Gomega) {
-		claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(context.Background(), metav1.ListOptions{})
+		claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(deleteCtx, metav1.ListOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
 		for _, c := range claims.Items {
 			poolName := c.GetLabels()[karpv1.NodePoolLabelKey]

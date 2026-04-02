@@ -102,7 +102,7 @@ e2e-tests: ## Run all e2e test suites sequentially, each with internal paralleli
 	CLUSTER_LOCATION=$(E2E_ZONE) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	go test -count 1 -timeout 2h -v ./test/suites/... \
-	-args -ginkgo.procs=4 -ginkgo.timeout=2h -ginkgo.v
+	-args -ginkgo.procs=2 -ginkgo.timeout=2h -ginkgo.v
 
 ## Run a single e2e spec by substring.
 ## Set SUITE to target a specific suite (provisioning, consolidation, drift, expiration).

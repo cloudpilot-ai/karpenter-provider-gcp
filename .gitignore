@@ -29,6 +29,7 @@ go.work.sum
 *-key.json
 
 # AI coding assistant data and session artifacts
+CLAUDE.md
 .claude/
 .sisyphus/
 .cursor/
