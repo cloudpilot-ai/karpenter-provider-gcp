@@ -83,7 +83,7 @@ func runProvisioningTest(ctx context.Context, tc provisioningCase) {
 
 	createNodeClass(ctx, nodeClassName)
 	createNodePool(ctx, nodePoolName, nodeClassName, tc)
-	createDeployment(ctx, deployName, appLabel, nodePoolName)
+	createDeployment(ctx, deployName, appLabel, nodePoolName, tc.arch)
 
 	pod := waitForRunningPod(ctx, appLabel)
 	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
@@ -167,9 +167,20 @@ func createNodePool(ctx context.Context, name, nodeClassName string, tc provisio
 	Expect(err).NotTo(HaveOccurred(), "creating NodePool %s", name)
 }
 
-func createDeployment(ctx context.Context, name, appLabel, nodePoolName string) {
+func createDeployment(ctx context.Context, name, appLabel, nodePoolName, arch string) {
 	replicas := int32(1)
 	zero := int64(0)
+	// GKE automatically taints ARM64 nodes with kubernetes.io/arch=arm64:NoSchedule.
+	// Pods must explicitly tolerate this taint to be scheduled on ARM64 nodes.
+	var tolerations []corev1.Toleration
+	if arch == karpv1.ArchitectureArm64 {
+		tolerations = []corev1.Toleration{{
+			Key:      corev1.LabelArchStable,
+			Value:    karpv1.ArchitectureArm64,
+			Effect:   corev1.TaintEffectNoSchedule,
+			Operator: corev1.TolerationOpEqual,
+		}}
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: environment.TestNamespace},
 		Spec: appsv1.DeploymentSpec{
@@ -179,6 +190,7 @@ func createDeployment(ctx context.Context, name, appLabel, nodePoolName string) 
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": appLabel}},
 				Spec: corev1.PodSpec{
 					NodeSelector:                  map[string]string{karpv1.NodePoolLabelKey: nodePoolName},
+					Tolerations:                   tolerations,
 					TerminationGracePeriodSeconds: &zero,
 					Containers: []corev1.Container{{
 						Name:  "inflate",
