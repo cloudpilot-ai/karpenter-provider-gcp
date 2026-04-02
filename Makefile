@@ -87,6 +87,14 @@ e2e-setup: ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
 	E2E_ZONE=$(E2E_ZONE) \
 	./hack/e2e-setup.sh
 
+e2e-deploy: ## Build image and (re)deploy karpenter onto an existing e2e cluster
+	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(PROJECT_ID) \
+	E2E_PREFIX=$(E2E_PREFIX) \
+	E2E_REGION=$(E2E_REGION) \
+	E2E_ZONE=$(E2E_ZONE) \
+	./hack/e2e-deploy.sh
+
 e2etests: ## Run e2e tests (requires e2e-setup to have been run first)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(PROJECT_ID) \

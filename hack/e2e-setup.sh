@@ -245,48 +245,15 @@ gcloud iam service-accounts add-iam-policy-binding "${GSA_EMAIL}" \
   --project "${E2E_PROJECT_ID}" \
   --quiet >/dev/null
 
-# ── Build & Push Image ─────────────────────────────────────────────────────────
-log "Authenticating Docker to Artifact Registry..."
-gcloud auth configure-docker "${E2E_REGION}-docker.pkg.dev" --quiet
-
-log "Building and pushing karpenter image with ko..."
-KO_IMAGE_TAG="e2e-$(git rev-parse --short HEAD 2>/dev/null || echo latest)"
-IMAGE_REF="$(
-  KO_DOCKER_REPO="${IMAGE_REPO}" \
-  GOFLAGS="" \
-    ko build --bare \
-    --platform linux/amd64 \
-    --tags "${KO_IMAGE_TAG}" \
-    github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
-)"
-log "Image: ${IMAGE_REF}"
-
-# ko --bare --tags returns repo@sha256:digest
-IMAGE_DIGEST="${IMAGE_REF##*@}"
-IMAGE_REPOSITORY="${IMAGE_REPO}"
-IMAGE_TAG="${KO_IMAGE_TAG}"
-
-# ── Deploy Karpenter via Helm ──────────────────────────────────────────────────
-log "Deploying karpenter via Helm..."
-helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
-  --namespace karpenter-system \
-  --create-namespace \
-  --set controller.image.repository="${IMAGE_REPOSITORY}" \
-  --set controller.image.tag="${IMAGE_TAG}" \
-  --set controller.image.digest="${IMAGE_DIGEST}" \
-  --set logLevel=debug \
-  --set controller.settings.projectID="${E2E_PROJECT_ID}" \
-  --set controller.settings.clusterName="${CLUSTER_NAME}" \
-  --set controller.settings.clusterLocation="${E2E_ZONE}" \
-  --set controller.settings.interruptionQueue="${CLUSTER_NAME}" \
-  --set controller.featureGates.spotToSpotConsolidation=true \
-  --set "serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=${GSA_EMAIL}" \
-  --set controller.replicaCount=1 \
-  --set credentials.enabled=false \
-  --wait \
-  --timeout 5m
+# ── Build & Deploy ─────────────────────────────────────────────────────────────
+GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS}" \
+E2E_PROJECT_ID="${E2E_PROJECT_ID}" \
+E2E_PREFIX="${E2E_PREFIX}" \
+E2E_REGION="${E2E_REGION}" \
+E2E_ZONE="${E2E_ZONE}" \
+  "${REPO_ROOT}/hack/e2e-deploy.sh"
 
 log ""
-log "Setup complete. IMAGE_REF=${IMAGE_REF}"
+log "Setup complete."
 log "Run tests with:"
 log "  make e2etests"
