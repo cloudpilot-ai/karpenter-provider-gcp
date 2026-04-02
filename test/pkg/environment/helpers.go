@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/wait"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -280,28 +281,38 @@ func (e *Environment) ScaleDeployment(ctx context.Context, name string, replicas
 
 // UpdateNodePoolInstanceTypes patches the NodePool's instance-type requirement
 // to the given list so that nodes running a type not in the list are drifted.
+// Retries automatically on resource-version conflicts (karpenter reconciles
+// the NodePool concurrently and can bump the resourceVersion between our
+// Get and Update).
 func (e *Environment) UpdateNodePoolInstanceTypes(ctx context.Context, name string, instanceTypes []string) {
-	np, err := e.DynamicClient.Resource(NodePoolGVR).Get(ctx, name, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred(), "getting NodePool %s for update", name)
-
-	spec := np.Object["spec"].(map[string]any)
-	template := spec["template"].(map[string]any)
-	tspec := template["spec"].(map[string]any)
-	reqs := tspec["requirements"].([]any)
-	for i, req := range reqs {
-		r := req.(map[string]any)
-		if r["key"] == corev1.LabelInstanceTypeStable {
-			r["values"] = toAny(instanceTypes)
-			reqs[i] = r
-			break
+	err := wait.PollUntilContextCancel(ctx, time.Second, true, func(ctx context.Context) (bool, error) {
+		np, err := e.DynamicClient.Resource(NodePoolGVR).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
 		}
-	}
-	tspec["requirements"] = reqs
-	template["spec"] = tspec
-	spec["template"] = template
-	np.Object["spec"] = spec
+		spec := np.Object["spec"].(map[string]any)
+		template := spec["template"].(map[string]any)
+		tspec := template["spec"].(map[string]any)
+		reqs := tspec["requirements"].([]any)
+		for i, req := range reqs {
+			r := req.(map[string]any)
+			if r["key"] == corev1.LabelInstanceTypeStable {
+				r["values"] = toAny(instanceTypes)
+				reqs[i] = r
+				break
+			}
+		}
+		tspec["requirements"] = reqs
+		template["spec"] = tspec
+		spec["template"] = template
+		np.Object["spec"] = spec
 
-	_, err = e.DynamicClient.Resource(NodePoolGVR).Update(ctx, np, metav1.UpdateOptions{})
+		_, err = e.DynamicClient.Resource(NodePoolGVR).Update(ctx, np, metav1.UpdateOptions{})
+		if apierrors.IsConflict(err) {
+			return false, nil // retry
+		}
+		return err == nil, err
+	})
 	Expect(err).NotTo(HaveOccurred(), "updating NodePool %s instance types", name)
 }
 
