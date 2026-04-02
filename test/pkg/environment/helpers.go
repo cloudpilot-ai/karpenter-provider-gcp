@@ -31,7 +31,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -80,8 +82,10 @@ func TestPrefix(arch, capacityType string) string {
 }
 
 // CreateNodeClass creates a GCENodeClass with ContainerOptimizedOS image and a
-// 30 GiB boot disk, using the environment's pods range.
+// 30 GiB boot disk, using the environment's pods range. If a resource with the
+// same name already exists (leftover from a previous run), it is deleted first.
 func (e *Environment) CreateNodeClass(ctx context.Context, name string) {
+	deleteIfExists(ctx, e.DynamicClient, GCENodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
@@ -132,6 +136,7 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	if expireAfter != "" {
 		templateSpec["expireAfter"] = expireAfter
 	}
+	deleteIfExists(ctx, e.DynamicClient, NodePoolGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",
 		"kind":       "NodePool",
@@ -373,4 +378,15 @@ func toAny(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// deleteIfExists deletes a resource if it already exists, ignoring 404. Used
+// before creating resources so that stale leftovers from a previous run do not
+// cause "already exists" failures.
+func deleteIfExists(ctx context.Context, client dynamic.Interface, gvr schema.GroupVersionResource, name string) {
+	err := client.Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		// Log but don't fail — the Create call will surface any real error.
+		GinkgoWriter.Printf("deleteIfExists: deleting %s/%s: %v\n", gvr.Resource, name, err)
+	}
 }
