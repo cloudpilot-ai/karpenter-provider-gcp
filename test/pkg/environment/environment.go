@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/gomega"
+	container "google.golang.org/api/container/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -32,7 +34,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	container "google.golang.org/api/container/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 const (
@@ -74,6 +76,12 @@ type Environment struct {
 	KubeClient    kubernetes.Interface
 	DynamicClient dynamic.Interface
 	containerSvc  *container.Service
+
+	// mu guards ownedNodePools and ownedNodeClasses so Cleanup is safe when
+	// multiple Ginkgo processes share the same Environment.
+	mu               sync.Mutex
+	ownedNodePools   map[string]struct{}
+	ownedNodeClasses map[string]struct{}
 }
 
 // NewEnvironment reads config from env vars, creates k8s clients, and waits
@@ -100,35 +108,89 @@ func NewEnvironment() *Environment {
 	Expect(err).NotTo(HaveOccurred(), "creating GCP container service client")
 
 	env := &Environment{
-		ProjectID:       mustEnv("PROJECT_ID"),
-		ClusterName:     mustEnv("CLUSTER_NAME"),
-		ClusterLocation: mustEnv("CLUSTER_LOCATION"),
-		PodsRangeName:   mustEnv("PODS_RANGE_NAME"),
-		KubeClient:      kubeClient,
-		DynamicClient:   dynamicClient,
-		containerSvc:    containerSvc,
+		ProjectID:        mustEnv("PROJECT_ID"),
+		ClusterName:      mustEnv("CLUSTER_NAME"),
+		ClusterLocation:  mustEnv("CLUSTER_LOCATION"),
+		PodsRangeName:    mustEnv("PODS_RANGE_NAME"),
+		KubeClient:       kubeClient,
+		DynamicClient:    dynamicClient,
+		containerSvc:     containerSvc,
+		ownedNodePools:   make(map[string]struct{}),
+		ownedNodeClasses: make(map[string]struct{}),
 	}
 
 	env.waitForControllerReady()
 	return env
 }
 
-// Cleanup removes all karpenter-managed resources and waits for NodeClaims to
-// disappear, confirming the underlying GCP instances have been terminated.
+// trackNodePool records a NodePool name as owned by this Environment instance.
+// Must be called after successfully creating a NodePool.
+func (e *Environment) trackNodePool(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ownedNodePools[name] = struct{}{}
+}
+
+// trackNodeClass records a GCENodeClass name as owned by this Environment instance.
+// Must be called after successfully creating a GCENodeClass.
+func (e *Environment) trackNodeClass(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ownedNodeClasses[name] = struct{}{}
+}
+
+// Cleanup removes karpenter resources created by this Environment and waits
+// for their NodeClaims to drain. Scoped to owned resources so that parallel
+// suite processes do not interfere with each other.
 func (e *Environment) Cleanup() {
 	deleteCtx, deleteCancel := context.WithTimeout(context.Background(), NodeCleanupTimeout)
 	defer deleteCancel()
 
-	e.deleteAll(deleteCtx, NodePoolGVR)
-	e.deleteAll(deleteCtx, GCENodeClassGVR)
+	e.mu.Lock()
+	pools := make([]string, 0, len(e.ownedNodePools))
+	for name := range e.ownedNodePools {
+		pools = append(pools, name)
+	}
+	classes := make([]string, 0, len(e.ownedNodeClasses))
+	for name := range e.ownedNodeClasses {
+		classes = append(classes, name)
+	}
+	e.mu.Unlock()
 
-	// NodeClaim deletion drives GCP VM termination via the karpenter
-	// termination controller, so an empty list here means no orphaned VMs.
-	// Use a fresh context so the wait budget is not shared with the deletions above.
+	for _, name := range pools {
+		err := e.DynamicClient.Resource(NodePoolGVR).Delete(deleteCtx, name, metav1.DeleteOptions{})
+		if !apierrors.IsNotFound(err) {
+			Expect(err).NotTo(HaveOccurred(), "cleanup: deleting NodePool %s", name)
+		}
+	}
+	for _, name := range classes {
+		err := e.DynamicClient.Resource(GCENodeClassGVR).Delete(deleteCtx, name, metav1.DeleteOptions{})
+		if !apierrors.IsNotFound(err) {
+			Expect(err).NotTo(HaveOccurred(), "cleanup: deleting GCENodeClass %s", name)
+		}
+	}
+
+	if len(pools) == 0 {
+		return
+	}
+
+	// Wait only for NodeClaims belonging to this suite's NodePools to drain.
+	// This avoids blocking on NodeClaims from concurrently running suites.
+	poolSet := make(map[string]struct{}, len(pools))
+	for _, p := range pools {
+		poolSet[p] = struct{}{}
+	}
 	Eventually(func(g Gomega) {
 		claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(context.Background(), metav1.ListOptions{})
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(claims.Items).To(BeEmpty(), "not all NodeClaims cleaned up — possible orphaned GCP VMs")
+		for _, c := range claims.Items {
+			poolName := c.GetLabels()[karpv1.NodePoolLabelKey]
+			if _, owned := poolSet[poolName]; owned {
+				g.Expect(false).To(BeTrue(),
+					"NodeClaim %s (nodepool=%s) not yet cleaned up — possible orphaned GCP VM",
+					c.GetName(), poolName)
+			}
+		}
 	}).WithTimeout(NodeCleanupTimeout).WithPolling(10 * time.Second).Should(Succeed())
 }
 
@@ -193,21 +255,6 @@ func (e *Environment) waitForControllerReady() {
 				"GKE node pool %s is not RUNNING (status=%s)", poolName, pool.Status)
 		}
 	}).WithTimeout(NodePoolReadyTimeout).WithPolling(10 * time.Second).Should(Succeed())
-}
-
-// deleteAll lists and deletes every resource of the given GVR, ignoring 404s.
-func (e *Environment) deleteAll(ctx context.Context, gvr schema.GroupVersionResource) {
-	items, err := e.DynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
-	if apierrors.IsNotFound(err) {
-		return
-	}
-	Expect(err).NotTo(HaveOccurred(), "listing %s for cleanup", gvr.Resource)
-	for _, item := range items.Items {
-		err := e.DynamicClient.Resource(gvr).Delete(ctx, item.GetName(), metav1.DeleteOptions{})
-		if !apierrors.IsNotFound(err) {
-			Expect(err).NotTo(HaveOccurred(), "deleting %s/%s", gvr.Resource, item.GetName())
-		}
-	}
 }
 
 func mustEnv(key string) string {

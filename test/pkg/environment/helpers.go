@@ -98,6 +98,7 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name string) {
 	}}
 	_, err := e.DynamicClient.Resource(GCENodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
 }
 
 // CreateNodePool creates a NodePool with the given requirements and the default
@@ -147,6 +148,7 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	}}
 	_, err := e.DynamicClient.Resource(NodePoolGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating NodePool %s", name)
+	e.trackNodePool(name)
 }
 
 // CreateDeployment creates a single-replica Deployment of the pause container
@@ -203,35 +205,48 @@ func (e *Environment) WaitForRunningPod(ctx context.Context, appLabel string) *c
 			metav1.ListOptions{LabelSelector: fmt.Sprintf("app=%s", appLabel)})
 		g.Expect(err).NotTo(HaveOccurred())
 		for i := range pods.Items {
-			p := &pods.Items[i]
-			if p.Status.Phase != corev1.PodRunning || p.Spec.NodeName == "" {
-				continue
-			}
-			for _, c := range p.Status.Conditions {
-				if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
-					found = p.DeepCopy()
-					return
-				}
+			if isRunningAndReady(&pods.Items[i]) {
+				found = pods.Items[i].DeepCopy()
+				return
 			}
 		}
-		if len(pods.Items) > 0 {
-			p := &pods.Items[0]
-			GinkgoWriter.Printf("pod app=%s phase=%s nodeName=%q\n",
-				appLabel, p.Status.Phase, p.Spec.NodeName)
-			for _, c := range p.Status.Conditions {
-				if c.Status != "True" {
-					GinkgoWriter.Printf("  pod condition %s=%s: %s\n", c.Type, c.Status, c.Message)
-				}
-			}
-		}
-		if claims, err2 := e.ListNodeClaims(ctx); err2 == nil {
-			for _, c := range claims {
-				GinkgoWriter.Printf("NodeClaim %s: %v\n", c.GetName(), c.Object["status"])
-			}
-		}
+		e.logWaitStatus(ctx, appLabel, pods.Items)
 		g.Expect(found).NotTo(BeNil(), "no running pod with label app=%s", appLabel)
 	}).WithTimeout(ProvisioningTimeout).WithPolling(5 * time.Second).Should(Succeed())
 	return found
+}
+
+// isRunningAndReady returns true if the pod is Running, scheduled, and Ready.
+func isRunningAndReady(p *corev1.Pod) bool {
+	if p.Status.Phase != corev1.PodRunning || p.Spec.NodeName == "" {
+		return false
+	}
+	for _, c := range p.Status.Conditions {
+		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// logWaitStatus prints pod conditions and NodeClaim statuses to help diagnose
+// slow provisioning.
+func (e *Environment) logWaitStatus(ctx context.Context, appLabel string, pods []corev1.Pod) {
+	if len(pods) > 0 {
+		p := &pods[0]
+		GinkgoWriter.Printf("pod app=%s phase=%s nodeName=%q\n",
+			appLabel, p.Status.Phase, p.Spec.NodeName)
+		for _, c := range p.Status.Conditions {
+			if c.Status != "True" {
+				GinkgoWriter.Printf("  pod condition %s=%s: %s\n", c.Type, c.Status, c.Message)
+			}
+		}
+	}
+	if claims, err := e.ListNodeClaims(ctx); err == nil {
+		for _, c := range claims {
+			GinkgoWriter.Printf("NodeClaim %s: %v\n", c.GetName(), c.Object["status"])
+		}
+	}
 }
 
 // WaitForPodOnDifferentNode polls until a Running pod with appLabel is
