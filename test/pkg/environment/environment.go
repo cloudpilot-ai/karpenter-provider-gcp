@@ -46,11 +46,14 @@ const (
 	// reach RUNNING state. Pool creation (triggered by karpenter on first start)
 	// can take up to 10 minutes, longer than a plain Deployment rollout.
 	NodePoolReadyTimeout = 10 * time.Minute
-	NodeCleanupTimeout   = 8 * time.Minute
-	// ProvisioningTimeout is the maximum time allowed for a GCP VM to be created,
-	// boot, register with the cluster, and for the pod to reach Running. GCP
-	// typically takes 5–8 minutes; 12 minutes gives a comfortable margin.
-	ProvisioningTimeout = 12 * time.Minute
+	// NodeCleanupTimeout is the budget for a karpenter-provisioned VM to be
+	// terminated after the owning NodePool is deleted. GCP VM deletion typically
+	// completes in 60–90 s; 5 minutes is a comfortable margin.
+	NodeCleanupTimeout = 5 * time.Minute
+	// ProvisioningTimeout is the maximum time for a GCP VM to be created, boot,
+	// register with the cluster, and for the pod to reach Running. GCP typically
+	// takes 4–7 minutes; 10 minutes gives a comfortable margin.
+	ProvisioningTimeout = 10 * time.Minute
 	PauseImage          = "registry.k8s.io/pause:3.10"
 )
 
@@ -132,7 +135,7 @@ func (e *Environment) Cleanup() {
 // WaitForNodeRemoval polls until the named node no longer exists. Transient API
 // errors are retried; the caller's context is the sole deadline authority.
 func (e *Environment) WaitForNodeRemoval(ctx context.Context, nodeName string) error {
-	return wait.PollUntilContextCancel(ctx, 10*time.Second, true,
+	return wait.PollUntilContextCancel(ctx, 5*time.Second, true,
 		func(ctx context.Context) (bool, error) {
 			_, err := e.KubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 			if apierrors.IsNotFound(err) {
@@ -172,22 +175,24 @@ func (e *Environment) waitForControllerReady() {
 	}).WithTimeout(ControllerStartTimeout).WithPolling(5 * time.Second).Should(Succeed())
 
 	// Wait for karpenter's template node pools to reach RUNNING state, which
-	// confirms the controller has initialised and the GKE node pool templates
+	// confirms the controller has initialized and the GKE node pool templates
 	// are ready to back instance provisioning. Without this, GetInstanceTemplates
 	// returns an empty map and every provisioning attempt fails immediately.
-	for _, poolName := range []string{"karpenter-default", "karpenter-ubuntu"} {
-		poolPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-			e.ProjectID, e.ClusterLocation, e.ClusterName, poolName)
-		poolCtx, poolCancel := context.WithTimeout(context.Background(), NodePoolReadyTimeout)
-		Eventually(func(g Gomega) {
+	// Both pools are checked in a single Eventually so they poll concurrently
+	// rather than blocking sequentially on each one.
+	poolCtx, poolCancel := context.WithTimeout(context.Background(), NodePoolReadyTimeout)
+	defer poolCancel()
+	Eventually(func(g Gomega) {
+		for _, poolName := range []string{"karpenter-default", "karpenter-ubuntu"} {
+			poolPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
+				e.ProjectID, e.ClusterLocation, e.ClusterName, poolName)
 			pool, err := e.containerSvc.Projects.Locations.Clusters.NodePools.
 				Get(poolPath).Context(poolCtx).Do()
 			g.Expect(err).NotTo(HaveOccurred(), "getting GKE node pool %s", poolName)
 			g.Expect(pool.Status).To(Equal("RUNNING"),
 				"GKE node pool %s is not RUNNING (status=%s)", poolName, pool.Status)
-		}).WithTimeout(NodePoolReadyTimeout).WithPolling(15 * time.Second).Should(Succeed())
-		poolCancel()
-	}
+		}
+	}).WithTimeout(NodePoolReadyTimeout).WithPolling(10 * time.Second).Should(Succeed())
 }
 
 // deleteAll lists and deletes every resource of the given GVR, ignoring 404s.

@@ -29,9 +29,9 @@ var _ = Describe("Spot Provisioning", func() {
 			capacityType:  karpv1.CapacityTypeSpot,
 			arch:          karpv1.ArchitectureAmd64,
 			families:      []string{"e2", "n2"},
-			instanceTypes: []string{"e2-standard-2", "e2-standard-4", "n2-standard-2", "n2-standard-4"},
+			instanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
 		})
-	}, SpecTimeout(25*time.Minute))
+	}, SpecTimeout(15*time.Minute))
 
 	It("should provision an arm64 spot node", func(ctx SpecContext) {
 		runProvisioningTest(ctx, provisioningCase{
@@ -40,5 +40,5 @@ var _ = Describe("Spot Provisioning", func() {
 			families:      []string{"c4a", "t2a"},
 			instanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
 		})
-	}, SpecTimeout(25*time.Minute))
+	}, SpecTimeout(15*time.Minute))
 })

@@ -63,11 +63,15 @@ func runProvisioningTest(ctx context.Context, tc provisioningCase) {
 		panic(fmt.Sprintf("unknown capacityType %q — use karpv1.CapacityTypeOnDemand or karpv1.CapacityTypeSpot", tc.capacityType))
 	}
 
+	prefix := testPrefix(tc.arch, tc.capacityType)
 	suffix := uniqueSuffix()
-	nodeClassName := "nodeclass-" + suffix
-	nodePoolName := "nodepool-" + suffix
-	deployName := "deploy-" + suffix
-	appLabel := "app-" + suffix
+	nodeClassName := prefix + "-nc-" + suffix
+	nodePoolName := prefix + "-np-" + suffix
+	deployName := prefix + "-dep-" + suffix
+	appLabel := prefix + "-" + suffix
+
+	GinkgoWriter.Printf("[setup] arch=%s capacityType=%s nodePool=%s\n",
+		tc.arch, tc.capacityType, nodePoolName)
 
 	initialNodes := allNodeNames(ctx)
 
@@ -231,13 +235,18 @@ func waitForRunningPod(ctx context.Context, appLabel string) *corev1.Pod {
 		}
 		// Emit diagnostics so failures show context rather than just the label.
 		if len(pods.Items) > 0 {
+			p := &pods.Items[0]
 			GinkgoWriter.Printf("pod app=%s phase=%s nodeName=%q\n",
-				appLabel, pods.Items[0].Status.Phase, pods.Items[0].Spec.NodeName)
+				appLabel, p.Status.Phase, p.Spec.NodeName)
+			for _, c := range p.Status.Conditions {
+				if c.Status != "True" {
+					GinkgoWriter.Printf("  pod condition %s=%s: %s\n", c.Type, c.Status, c.Message)
+				}
+			}
 		}
 		if claims, err2 := env.ListNodeClaims(ctx); err2 == nil {
-			GinkgoWriter.Printf("NodeClaims: %d\n", len(claims))
 			for _, c := range claims {
-				GinkgoWriter.Printf("  %s\n", c.GetName())
+				GinkgoWriter.Printf("NodeClaim %s: %v\n", c.GetName(), c.Object["status"])
 			}
 		}
 		g.Expect(found).NotTo(BeNil(), "no running pod with label app=%s", appLabel)
@@ -296,4 +305,15 @@ func uniqueSuffix() string {
 	return fmt.Sprintf("p%sc%s",
 		strconv.FormatInt(int64(proc), 36),
 		strconv.FormatInt(n, 36))
+}
+
+// testPrefix returns a short, human-readable prefix encoding the architecture
+// and capacity type, e.g. "amd64-od" or "arm64-spot". Used as a name prefix
+// for NodePools, GCENodeClasses, and Deployments so logs are self-describing.
+func testPrefix(arch, capacityType string) string {
+	ct := "od"
+	if capacityType == karpv1.CapacityTypeSpot {
+		ct = "spot"
+	}
+	return arch + "-" + ct
 }

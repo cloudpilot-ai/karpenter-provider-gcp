@@ -185,6 +185,8 @@ case "${CLUSTER_STATUS}" in
       --machine-type "${E2E_MACHINE_TYPE}" \
       --disk-size 30 \
       --num-nodes 1 \
+      --no-enable-cloud-logging \
+      --no-enable-cloud-monitoring \
       --quiet
     ;;
   *)
