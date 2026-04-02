@@ -28,13 +28,15 @@ go.work.sum
 # GCP service account keys
 *-key.json
 
-# AI coding assistant data
+# AI coding assistant data and session artifacts
 .claude/
 .sisyphus/
 .cursor/
 .copilot/
 .windsurf/
 .aider*
+TODO.md
+*-review.md
 
 # ide file
 .idea/
