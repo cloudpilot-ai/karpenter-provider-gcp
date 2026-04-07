@@ -30,8 +30,8 @@ var _ = Describe("Spot Provisioning", func() {
 		runProvisioningTest(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeSpot,
 			Arch:          karpv1.ArchitectureAmd64,
-			Families:      []string{"e2", "n2"},
-			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
 		})
 	}, SpecTimeout(15*time.Minute))
 

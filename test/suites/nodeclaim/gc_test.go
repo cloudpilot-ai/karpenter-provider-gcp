@@ -39,8 +39,8 @@ var _ = Describe("GarbageCollection", func() {
 		runGCTest(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,
-			Families:      []string{"e2", "n2"},
-			InstanceTypes: []string{"e2-medium", "e2-standard-2"},
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
 		})
 	}, SpecTimeout(environment.ProvisioningTimeout+gcTimeout+environment.NodeCleanupTimeout))
 })

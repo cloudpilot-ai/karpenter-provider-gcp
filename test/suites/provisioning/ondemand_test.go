@@ -30,10 +30,8 @@ var _ = Describe("On-Demand Provisioning", func() {
 		runProvisioningTest(ctx, environment.TestCase{
 			CapacityType: karpv1.CapacityTypeOnDemand,
 			Arch:         karpv1.ArchitectureAmd64,
-			// e2-medium is the smallest cost-effective AMD64 instance; n2/e2-standard-2
-			// are listed as fallbacks for regions where e2-medium capacity is tight.
-			Families:      []string{"e2", "n2"},
-			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
 		})
 	}, SpecTimeout(15*time.Minute))
 

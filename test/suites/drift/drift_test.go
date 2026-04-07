@@ -37,9 +37,9 @@ var _ = Describe("Drift", func() {
 		runDriftTest(ctx, environment.TestCase{
 			CapacityType: karpv1.CapacityTypeOnDemand,
 			Arch:         karpv1.ArchitectureAmd64,
-			// Three types so after excluding the provisioned one at least two remain.
-			Families:      []string{"e2", "n2"},
-			InstanceTypes: []string{"e2-medium", "e2-standard-2", "n2-standard-2"},
+			// Two types so after excluding the provisioned one one remains.
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
 		})
 	}, SpecTimeout(25*time.Minute))
 })
