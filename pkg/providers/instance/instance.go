@@ -484,9 +484,6 @@ func cheapestCompatibleZone(zones []string, reqs scheduling.Requirements, offeri
 	cheapestPrice := math.MaxFloat64
 	zonesSet := sets.NewString(zones...)
 	for _, offering := range offerings {
-		if !offering.Available {
-			continue
-		}
 		if reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) != nil {
 			continue
 		}
