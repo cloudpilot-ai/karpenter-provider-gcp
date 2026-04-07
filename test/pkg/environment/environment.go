@@ -51,8 +51,9 @@ const (
 	NodePoolReadyTimeout = 10 * time.Minute
 	// NodeCleanupTimeout is the budget for a karpenter-provisioned VM to be
 	// terminated after the owning NodePool is deleted. GCP VM deletion typically
-	// completes in 60–90 s; 5 minutes is a comfortable margin.
-	NodeCleanupTimeout = 5 * time.Minute
+	// completes in 60–90 s. Test nodes carry a per-nodepool taint so no system
+	// pods land on them; there is nothing to evict before deletion.
+	NodeCleanupTimeout = 3 * time.Minute
 	// ProvisioningTimeout is the maximum time for a GCP VM to be created, boot,
 	// register with the cluster, and for the pod to reach Running. GCP typically
 	// takes 4–7 minutes; 10 minutes gives a comfortable margin.

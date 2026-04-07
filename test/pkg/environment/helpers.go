@@ -135,6 +135,13 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 			"group": "karpenter.k8s.gcp",
 		},
 		"requirements": requirements,
+		"taints": []any{
+			map[string]any{
+				"key":    "karpenter-e2e/nodepool",
+				"value":  name,
+				"effect": "NoSchedule",
+			},
+		},
 	}
 	if expireAfter != "" {
 		templateSpec["expireAfter"] = expireAfter
@@ -172,14 +179,19 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, nodePoolName, arch string) {
 	replicas := int32(1)
 	zero := int64(0)
-	var tolerations []corev1.Toleration
+	tolerations := []corev1.Toleration{{
+		Key:      "karpenter-e2e/nodepool",
+		Value:    nodePoolName,
+		Effect:   corev1.TaintEffectNoSchedule,
+		Operator: corev1.TolerationOpEqual,
+	}}
 	if arch == karpv1.ArchitectureArm64 {
-		tolerations = []corev1.Toleration{{
+		tolerations = append(tolerations, corev1.Toleration{
 			Key:      corev1.LabelArchStable,
 			Value:    karpv1.ArchitectureArm64,
 			Effect:   corev1.TaintEffectNoSchedule,
 			Operator: corev1.TolerationOpEqual,
-		}}
+		})
 	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: TestNamespace},

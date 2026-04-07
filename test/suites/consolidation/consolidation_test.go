@@ -38,7 +38,7 @@ var _ = Describe("Consolidation", func() {
 			Families:      []string{"n2"},
 			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
 		})
-	}, SpecTimeout(20*time.Minute))
+	}, SpecTimeout(15*time.Minute))
 })
 
 func runConsolidationTest(ctx context.Context, tc environment.TestCase) {
