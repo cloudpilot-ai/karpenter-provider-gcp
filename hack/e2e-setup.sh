@@ -10,7 +10,7 @@
 #   E2E_PREFIX        resource name prefix  (default: karpenter-e2e)
 #   E2E_REGION        GCP region            (default: us-central1)
 #   E2E_ZONE          GCP zone              (default: <region>-a)
-#   E2E_MACHINE_TYPE  system node type      (default: e2-standard-4)
+#   E2E_MACHINE_TYPE  system node type      (default: n2-standard-2)
 set -euo pipefail
 
 : "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
@@ -27,7 +27,7 @@ fi
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
 E2E_ZONE="${E2E_ZONE:-${E2E_REGION}-a}"
-E2E_MACHINE_TYPE="${E2E_MACHINE_TYPE:-e2-standard-4}"
+E2E_MACHINE_TYPE="${E2E_MACHINE_TYPE:-n2-standard-2}"
 
 # Derived names — must match Makefile variables exactly.
 CLUSTER_NAME="${E2E_PREFIX}-cluster"
