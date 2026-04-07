@@ -11,15 +11,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added a garbage-collection controller (`instance.garbagecollection`) that periodically
   detects and deletes GCE VM instances with no corresponding NodeClaim, preventing orphaned
   instances from accumulating after missed deletes or controller restarts.
-- Added `goog-k8s-cluster-location` GCE label to instances at creation time. The GC
-  controller and the instance cache only operate on instances that carry this label, so
-  they reliably scope to the correct cluster even when multiple clusters share the same name
-  in different GCP locations.
+- Added `goog-k8s-cluster-location` GCE label to instances at creation time. Combined with
+  the existing `goog-k8s-cluster-name` label, Karpenter now scopes the instance cache and
+  GC controller to the correct cluster even when multiple clusters share the same name in
+  different GCP locations. Instances without `goog-k8s-cluster-location` are excluded from
+  the cache and are not touched by the GC controller.
 
 ### Migration guide
 
-See [MIGRATION.md](MIGRATION.md) for the full upgrade steps, including rotating live nodes
-to the new label scheme and cleaning up any pre-existing orphaned instances.
+No action is required to upgrade. See [MIGRATION.md](MIGRATION.md) for optional steps to
+rotate existing nodes onto the new label scheme and clean up any orphaned instances that
+may have accumulated before this release.
 
 ## v0.2.0
 
