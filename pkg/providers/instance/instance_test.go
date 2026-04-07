@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
@@ -33,8 +34,6 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-
-	"github.com/patrickmn/go-cache"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
@@ -204,7 +203,7 @@ func TestDelete_ReturnsNodeClaimNotFoundWhenInstanceIsTerminated(t *testing.T) {
 
 	err := p.Delete(context.Background(), "gce://test-project/us-central1-a/karpenter-node1")
 
-	require.True(t, cloudprovider.IsNodeClaimNotFoundError(err), "TERMINATED should signal karpenter to finalise the NodeClaim")
+	require.True(t, cloudprovider.IsNodeClaimNotFoundError(err), "TERMINATED should signal karpenter to finalize the NodeClaim")
 	require.False(t, deleteCalled, "no delete should be issued for an already-terminated instance")
 }
 
