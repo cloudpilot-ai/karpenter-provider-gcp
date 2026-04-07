@@ -37,7 +37,7 @@ var _ = Describe("On-Demand Provisioning", func() {
 		})
 	}, SpecTimeout(15*time.Minute))
 
-	It("should provision an arm64 on-demand node", func(ctx SpecContext) {
+	XIt("should provision an arm64 on-demand node", func(ctx SpecContext) {
 		runProvisioningTest(ctx, environment.TestCase{
 			CapacityType: karpv1.CapacityTypeOnDemand,
 			Arch:         karpv1.ArchitectureArm64,

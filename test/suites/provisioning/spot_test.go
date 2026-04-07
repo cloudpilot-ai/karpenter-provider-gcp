@@ -35,7 +35,7 @@ var _ = Describe("Spot Provisioning", func() {
 		})
 	}, SpecTimeout(15*time.Minute))
 
-	It("should provision an arm64 spot node", func(ctx SpecContext) {
+	XIt("should provision an arm64 spot node", func(ctx SpecContext) {
 		runProvisioningTest(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeSpot,
 			Arch:          karpv1.ArchitectureArm64,

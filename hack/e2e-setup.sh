@@ -10,7 +10,7 @@
 #   E2E_PREFIX        resource name prefix  (default: karpenter-e2e)
 #   E2E_REGION        GCP region            (default: us-central1)
 #   E2E_ZONE          GCP zone              (default: <region>-a)
-#   E2E_MACHINE_TYPE  system node type      (default: e2-standard-2)
+#   E2E_MACHINE_TYPE  system node type      (default: e2-standard-4)
 set -euo pipefail
 
 : "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
@@ -27,7 +27,7 @@ fi
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
 E2E_ZONE="${E2E_ZONE:-${E2E_REGION}-a}"
-E2E_MACHINE_TYPE="${E2E_MACHINE_TYPE:-e2-standard-2}"
+E2E_MACHINE_TYPE="${E2E_MACHINE_TYPE:-e2-standard-4}"
 
 # Derived names — must match Makefile variables exactly.
 CLUSTER_NAME="${E2E_PREFIX}-cluster"
@@ -138,8 +138,6 @@ CLUSTER_STATUS="$(gcloud container clusters describe "${CLUSTER_NAME}" \
   --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" \
   --format='value(status)' 2>/dev/null || echo NOT_FOUND)"
 
-SYSTEM_POOL_NAME="${E2E_PREFIX}-system"
-
 case "${CLUSTER_STATUS}" in
   RUNNING)
     log "Reusing cluster ${CLUSTER_NAME}"
@@ -194,36 +192,6 @@ case "${CLUSTER_STATUS}" in
     exit 1
     ;;
 esac
-
-# ── System Node Pool ────────────────────────────────────────────────────────────
-# A dedicated e2-standard-4 pool for the karpenter controller and system daemons.
-# The default-pool (created with the cluster) is deleted once this pool is ready.
-if gcloud container node-pools describe "${SYSTEM_POOL_NAME}" \
-    --cluster "${CLUSTER_NAME}" --zone "${E2E_ZONE}" \
-    --project "${E2E_PROJECT_ID}" &>/dev/null; then
-  log "Reusing system node pool ${SYSTEM_POOL_NAME}"
-else
-  log "Creating system node pool ${SYSTEM_POOL_NAME} (e2-standard-4)..."
-  gcloud container node-pools create "${SYSTEM_POOL_NAME}" \
-    --cluster "${CLUSTER_NAME}" \
-    --zone "${E2E_ZONE}" \
-    --project "${E2E_PROJECT_ID}" \
-    --machine-type e2-standard-4 \
-    --disk-size 30 \
-    --num-nodes 1 \
-    --quiet
-fi
-
-if gcloud container node-pools describe default-pool \
-    --cluster "${CLUSTER_NAME}" --zone "${E2E_ZONE}" \
-    --project "${E2E_PROJECT_ID}" &>/dev/null; then
-  log "Deleting default node pool..."
-  gcloud container node-pools delete default-pool \
-    --cluster "${CLUSTER_NAME}" \
-    --zone "${E2E_ZONE}" \
-    --project "${E2E_PROJECT_ID}" \
-    --quiet
-fi
 
 # ── Credentials ────────────────────────────────────────────────────────────────
 log "Fetching cluster credentials..."
