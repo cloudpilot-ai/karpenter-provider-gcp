@@ -1177,6 +1177,36 @@ func TestSetupInstanceLabels_StampsClusterLocation(t *testing.T) {
 		"cluster location must be stamped on the instance label %q", locationKey)
 }
 
+func TestSetupInstanceLabels_ClusterNameNotOverwrittenByRequirements(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{
+		clusterName:     "real-cluster",
+		clusterLocation: "us-central1-f",
+	}
+	inst := &compute.Instance{Labels: make(map[string]string)}
+	nodeClaim := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{karpv1.NodePoolLabelKey: "my-pool"},
+		},
+	}
+	nodeClass := &v1alpha1.GCENodeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-nc"},
+	}
+	it := &cloudprovider.InstanceType{
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(utils.LabelClusterNameKey, corev1.NodeSelectorOpIn, "attacker-cluster"),
+		),
+	}
+
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, it)
+
+	nameKey := utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)
+	require.Equal(t, "real-cluster", inst.Labels[nameKey],
+		"cluster name must not be overwritten by a NodePool label with the same key")
+}
+
 func TestSetupInstanceLabels_ClusterLocationNotOverwrittenByRequirements(t *testing.T) {
 	t.Parallel()
 
@@ -1210,31 +1240,42 @@ func TestSetupInstanceLabels_ClusterLocationNotOverwrittenByRequirements(t *test
 		"cluster location must not be overwritten by a NodePool label with the same key")
 }
 
-func TestSyncInstancesLocationFilter(t *testing.T) {
+func TestBelongsToCluster(t *testing.T) {
 	t.Parallel()
 
 	const controllerLocation = "us-central1-f"
+	const controllerRegion = "us-central1"
 	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
 
 	cases := []struct {
 		name      string
 		labels    map[string]string
-		wantCache bool
+		zone      string
+		want      bool
 	}{
 		{
-			name:      "label present and matches controller location",
-			labels:    map[string]string{locationKey: controllerLocation},
-			wantCache: true,
+			name:   "label present and matches controller location",
+			labels: map[string]string{locationKey: controllerLocation},
+			zone:   "us-central1-f",
+			want:   true,
 		},
 		{
-			name:      "label present but belongs to a different cluster location",
-			labels:    map[string]string{locationKey: "us-east1-b"},
-			wantCache: false,
+			name:   "label present but belongs to a different cluster location",
+			labels: map[string]string{locationKey: "us-east1-b"},
+			zone:   "us-east1-b",
+			want:   false,
 		},
 		{
-			name:      "label absent (legacy instance created before this feature)",
-			labels:    map[string]string{},
-			wantCache: true,
+			name:   "label absent, zone in same region (legacy node during rolling upgrade)",
+			labels: map[string]string{},
+			zone:   "us-central1-a",
+			want:   true,
+		},
+		{
+			name:   "label absent, zone in different region (same-named cluster, old karpenter)",
+			labels: map[string]string{},
+			zone:   "us-east1-b",
+			want:   false,
 		},
 	}
 
@@ -1242,9 +1283,23 @@ func TestSyncInstancesLocationFilter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			p := &DefaultProvider{clusterLocation: controllerLocation}
-			inst := &Instance{InstanceID: "test-instance", Labels: tc.labels}
-			require.Equal(t, tc.wantCache, p.belongsToCluster(inst), tc.name)
+			p := &DefaultProvider{clusterLocation: controllerLocation, region: controllerRegion}
+			inst := &Instance{InstanceID: "test-instance", Location: tc.zone, Labels: tc.labels}
+			require.Equal(t, tc.want, p.belongsToCluster(inst), tc.name)
 		})
+	}
+}
+
+func TestZoneToRegion(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ zone, want string }{
+		{"us-central1-f", "us-central1"},
+		{"europe-west1-b", "europe-west1"},
+		{"northamerica-northeast1-a", "northamerica-northeast1"},
+		{"nozone", "nozone"},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, zoneToRegion(tc.zone), tc.zone)
 	}
 }

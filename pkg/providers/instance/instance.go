@@ -918,7 +918,6 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	// Set common Karpenter labels
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
 
 	// Add instance type requirement labels before stamping the cluster identity
 	// labels so that user-supplied NodePool labels cannot overwrite them.
@@ -926,22 +925,45 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 		instance.Labels[entry.Key] = entry.Value
 	})
 
-	// Stamp cluster identity last so a NodePool label named goog-k8s-cluster-location
-	// cannot overwrite it and cause syncInstances to drop this instance from cache.
+	// Stamp both cluster-identity labels last so NodePool labels cannot overwrite them.
+	// LabelClusterNameKey is used by the syncInstances API filter; LabelClusterLocationKey
+	// is checked by belongsToCluster to distinguish same-named clusters in different locations.
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
 }
 
 // belongsToCluster reports whether inst was created by this controller's cluster.
-// New instances carry goog-k8s-cluster-location; if present it must match.
-// Instances without the label pass through so that a rolling upgrade from an
-// older controller version does not temporarily lose visibility of running nodes.
+// It only checks the location dimension; cluster-name is already enforced by the
+// GCE API label filter in syncInstances.
 //
-// TODO: once goog-k8s-cluster-location has been present for long enough that
-// all clusters in the wild have cycled their nodes at least once, remove the
-// !ok branch and require the label on every instance.
+// New instances carry goog-k8s-cluster-location and must match exactly.
+// Legacy instances (no label, created before this version) fall back to a
+// zone-to-region comparison so that a rolling upgrade within the same cluster
+// does not lose visibility of running nodes — while still excluding instances
+// from a same-named cluster in a different GCP region.
+//
+// TODO: once goog-k8s-cluster-location has been present long enough that all
+// nodes in production have been cycled, drop the fallback branch and require
+// the label on every instance.
 func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
-	return !ok || loc == p.clusterLocation
+	if ok {
+		return loc == p.clusterLocation
+	}
+	// Legacy instance: no location label. Accept it only if its zone belongs to
+	// this controller's region, reducing the risk of the GC controller treating
+	// nodes from a same-named cluster in a different region as orphans.
+	return zoneToRegion(inst.Location) == p.region
+}
+
+// zoneToRegion strips the trailing zone suffix from a GCE zone name.
+// e.g. "us-central1-f" → "us-central1", "europe-west1-b" → "europe-west1".
+func zoneToRegion(zone string) string {
+	i := strings.LastIndex(zone, "-")
+	if i < 0 {
+		return zone
+	}
+	return zone[:i]
 }
 
 func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
