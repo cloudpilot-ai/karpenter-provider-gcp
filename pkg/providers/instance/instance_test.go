@@ -1152,25 +1152,27 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		"buildInstance must use the passed capacityType, not recompute it from instanceType offerings")
 }
 
+// instanceLabelsFixture returns the common NodeClaim and GCENodeClass objects used
+// by setupInstanceLabels tests. Only the provider varies between tests.
+func instanceLabelsFixture() (*compute.Instance, *karpv1.NodeClaim, *v1alpha1.GCENodeClass) {
+	return &compute.Instance{Labels: make(map[string]string)},
+		&karpv1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{karpv1.NodePoolLabelKey: "my-pool"},
+			},
+		},
+		&v1alpha1.GCENodeClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-nc"},
+		}
+}
+
 func TestSetupInstanceLabels_StampsClusterLocation(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{
-		clusterName:     "my-cluster",
-		clusterLocation: "us-central1-f",
-	}
-	inst := &compute.Instance{Labels: make(map[string]string)}
-	nodeClaim := &karpv1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{karpv1.NodePoolLabelKey: "my-pool"},
-		},
-	}
-	nodeClass := &v1alpha1.GCENodeClass{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-nc"},
-	}
-	it := amd64InstanceType()
+	p := &DefaultProvider{clusterName: "my-cluster", clusterLocation: "us-central1-f"}
+	inst, nodeClaim, nodeClass := instanceLabelsFixture()
 
-	p.setupInstanceLabels(inst, nodeClaim, nodeClass, it)
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, amd64InstanceType())
 
 	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
 	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
@@ -1180,19 +1182,8 @@ func TestSetupInstanceLabels_StampsClusterLocation(t *testing.T) {
 func TestSetupInstanceLabels_ClusterNameNotOverwrittenByRequirements(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{
-		clusterName:     "real-cluster",
-		clusterLocation: "us-central1-f",
-	}
-	inst := &compute.Instance{Labels: make(map[string]string)}
-	nodeClaim := &karpv1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{karpv1.NodePoolLabelKey: "my-pool"},
-		},
-	}
-	nodeClass := &v1alpha1.GCENodeClass{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-nc"},
-	}
+	p := &DefaultProvider{clusterName: "real-cluster", clusterLocation: "us-central1-f"}
+	inst, nodeClaim, nodeClass := instanceLabelsFixture()
 	it := &cloudprovider.InstanceType{
 		Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
@@ -1210,25 +1201,11 @@ func TestSetupInstanceLabels_ClusterNameNotOverwrittenByRequirements(t *testing.
 func TestSetupInstanceLabels_ClusterLocationNotOverwrittenByRequirements(t *testing.T) {
 	t.Parallel()
 
-	// A NodePool whose requirements carry the cluster-location label key must not
-	// be able to overwrite the controller-stamped value.
-	p := &DefaultProvider{
-		clusterName:     "my-cluster",
-		clusterLocation: "us-central1-f",
-	}
-	inst := &compute.Instance{Labels: make(map[string]string)}
-	nodeClaim := &karpv1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{karpv1.NodePoolLabelKey: "my-pool"},
-		},
-	}
-	nodeClass := &v1alpha1.GCENodeClass{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-nc"},
-	}
+	p := &DefaultProvider{clusterName: "my-cluster", clusterLocation: "us-central1-f"}
+	inst, nodeClaim, nodeClass := instanceLabelsFixture()
 	it := &cloudprovider.InstanceType{
 		Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-			// Simulate a user-supplied NodePool label with the same key as the location label.
 			scheduling.NewRequirement(utils.LabelClusterLocationKey, corev1.NodeSelectorOpIn, "attacker-region"),
 		),
 	}

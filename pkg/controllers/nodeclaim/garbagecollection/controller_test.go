@@ -174,7 +174,6 @@ func TestGC_SkipsInstanceWithEmptyProviderID(t *testing.T) {
 			CreationTimestamp: metav1.Time{Time: time.Now().Add(-2 * time.Minute)},
 		},
 	}
-	// Status.ProviderID intentionally left empty.
 	c := newController([]*karpv1.NodeClaim{noID}, nil)
 
 	_, err := c.Reconcile(context.Background())
