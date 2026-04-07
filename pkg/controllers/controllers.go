@@ -37,6 +37,7 @@ import (
 	nodeclasshash "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/hash"
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
 	nodeclasstermination "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/termination"
+	nodeclaimgc "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclaim/garbagecollection"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/instancetype"
 	controllerspricing "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/pricing"
@@ -75,6 +76,7 @@ func NewController(
 		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),
 		node.NewController(kubeClient, cloudProvider),
+		nodeclaimgc.NewController(kubeClient, cloudProvider),
 	}
 
 	if options.FromContext(ctx).Interruption {
