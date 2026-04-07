@@ -483,6 +483,59 @@ func TestSelectZone_OnDemandReturnsICEWhenAllZonesUnavailable(t *testing.T) {
 		"should return InsufficientCapacityError when all zones are exhausted")
 }
 
+func TestSelectZone_SpotSkipsUnavailableZones(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	uo := pkgcache.NewUnavailableOfferings()
+	uo.MarkUnavailable(ctx, "ICE", "n2-standard-4", "europe-west4-a", karpv1.CapacityTypeSpot)
+
+	p := &DefaultProvider{
+		gkeProvider: &fakeGKEProvider{
+			zones: []string{"europe-west4-a", "europe-west4-b"},
+		},
+		unavailableOfferings: uo,
+	}
+	instanceType := &cloudprovider.InstanceType{
+		Name: "n2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Price: 1.0, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "europe-west4-a"),
+			)},
+			{Available: true, Price: 0.5, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "europe-west4-b"),
+			)},
+		},
+	}
+
+	zone, err := p.selectZone(ctx, &karpv1.NodeClaim{}, instanceType, karpv1.CapacityTypeSpot)
+	require.NoError(t, err)
+	require.Equal(t, "europe-west4-b", zone, "should skip the ICE-cached zone even though it has a cheaper offering")
+}
+
+func TestSelectZone_SpotReturnsICEWhenAllZonesUnavailable(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	uo := pkgcache.NewUnavailableOfferings()
+	for _, z := range []string{"europe-west4-a", "europe-west4-b"} {
+		uo.MarkUnavailable(ctx, "ICE", "n2-standard-4", z, karpv1.CapacityTypeSpot)
+	}
+
+	p := &DefaultProvider{
+		gkeProvider: &fakeGKEProvider{
+			zones: []string{"europe-west4-a", "europe-west4-b"},
+		},
+		unavailableOfferings: uo,
+	}
+	instanceType := &cloudprovider.InstanceType{Name: "n2-standard-4"}
+
+	_, err := p.selectZone(ctx, &karpv1.NodeClaim{}, instanceType, karpv1.CapacityTypeSpot)
+	require.Error(t, err)
+	require.True(t, cloudprovider.IsInsufficientCapacityError(err),
+		"should return InsufficientCapacityError when all zones are exhausted for spot")
+}
+
 // amd64InstanceType returns a minimal InstanceType with amd64 architecture requirements.
 func amd64InstanceType() *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
