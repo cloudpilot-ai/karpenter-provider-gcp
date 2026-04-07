@@ -404,14 +404,17 @@ func (e *Environment) AllNodeNames(ctx context.Context) map[string]struct{} {
 // and then deletes it. This leaves the backing GCE VM running without an owner,
 // simulating the orphaned-VM scenario that the GC controller is meant to clean up.
 func (e *Environment) ForceDeleteNodeClaim(ctx context.Context, name string) {
-	nc, err := e.DynamicClient.Resource(nodeClaimGVR).Get(ctx, name, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred(), "getting NodeClaim %s", name)
+	// Retry on conflict: karpenter may update the NodeClaim concurrently,
+	// causing a resource-version conflict on our finalizer removal.
+	Eventually(func(g Gomega) {
+		nc, err := e.DynamicClient.Resource(nodeClaimGVR).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred(), "getting NodeClaim %s", name)
+		nc.SetFinalizers(nil)
+		_, err = e.DynamicClient.Resource(nodeClaimGVR).Update(ctx, nc, metav1.UpdateOptions{})
+		g.Expect(err).NotTo(HaveOccurred(), "removing finalizer from NodeClaim %s", name)
+	}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).Should(Succeed())
 
-	nc.SetFinalizers(nil)
-	_, err = e.DynamicClient.Resource(nodeClaimGVR).Update(ctx, nc, metav1.UpdateOptions{})
-	Expect(err).NotTo(HaveOccurred(), "removing finalizer from NodeClaim %s", name)
-
-	err = e.DynamicClient.Resource(nodeClaimGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	err := e.DynamicClient.Resource(nodeClaimGVR).Delete(ctx, name, metav1.DeleteOptions{})
 	if !apierrors.IsNotFound(err) {
 		Expect(err).NotTo(HaveOccurred(), "deleting NodeClaim %s", name)
 	}
