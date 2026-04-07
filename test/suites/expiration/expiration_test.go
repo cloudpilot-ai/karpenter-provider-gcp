@@ -51,10 +51,10 @@ func runExpirationTest(ctx context.Context, tc environment.TestCase) {
 	deployName := prefix + "-dep-" + suffix
 	appLabel := prefix + "-" + suffix
 
-	// expireAfter must be longer than GCP provisioning time (~8m) so the first
+	// expireAfter must be longer than GCP provisioning time (~1.5m) so the first
 	// node has time to register and the pod to run before the expiry fires.
-	// At T+12m karpenter replaces the node; the replacement is ready at ~T+20m.
-	const expireAfter = "12m"
+	// At T+3m karpenter replaces the node; the replacement is ready at ~T+5m.
+	const expireAfter = "3m"
 
 	GinkgoWriter.Printf("[setup] expiration arch=%s capacityType=%s nodePool=%s expireAfter=%s\n",
 		tc.Arch, tc.CapacityType, nodePoolName, expireAfter)
