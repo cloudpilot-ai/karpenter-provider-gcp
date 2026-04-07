@@ -30,6 +30,7 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -37,6 +38,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 func TestMergeInstanceTagsPreservesTemplateAndAddsNetworkTags(t *testing.T) {
@@ -1148,4 +1150,101 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 	require.NotNil(t, instance)
 	require.Equal(t, "SPOT", instance.Scheduling.ProvisioningModel,
 		"buildInstance must use the passed capacityType, not recompute it from instanceType offerings")
+}
+
+func TestSetupInstanceLabels_StampsClusterLocation(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{
+		clusterName:     "my-cluster",
+		clusterLocation: "us-central1-f",
+	}
+	inst := &compute.Instance{Labels: make(map[string]string)}
+	nodeClaim := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{karpv1.NodePoolLabelKey: "my-pool"},
+		},
+	}
+	nodeClass := &v1alpha1.GCENodeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-nc"},
+	}
+	it := amd64InstanceType()
+
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, it)
+
+	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
+	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
+		"cluster location must be stamped on the instance label %q", locationKey)
+}
+
+func TestSetupInstanceLabels_ClusterLocationNotOverwrittenByRequirements(t *testing.T) {
+	t.Parallel()
+
+	// A NodePool whose requirements carry the cluster-location label key must not
+	// be able to overwrite the controller-stamped value.
+	p := &DefaultProvider{
+		clusterName:     "my-cluster",
+		clusterLocation: "us-central1-f",
+	}
+	inst := &compute.Instance{Labels: make(map[string]string)}
+	nodeClaim := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{karpv1.NodePoolLabelKey: "my-pool"},
+		},
+	}
+	nodeClass := &v1alpha1.GCENodeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-nc"},
+	}
+	it := &cloudprovider.InstanceType{
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			// Simulate a user-supplied NodePool label with the same key as the location label.
+			scheduling.NewRequirement(utils.LabelClusterLocationKey, corev1.NodeSelectorOpIn, "attacker-region"),
+		),
+	}
+
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, it)
+
+	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
+	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
+		"cluster location must not be overwritten by a NodePool label with the same key")
+}
+
+func TestSyncInstancesLocationFilter(t *testing.T) {
+	t.Parallel()
+
+	const controllerLocation = "us-central1-f"
+	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
+
+	cases := []struct {
+		name      string
+		labels    map[string]string
+		wantCache bool
+	}{
+		{
+			name:      "label present and matches controller location",
+			labels:    map[string]string{locationKey: controllerLocation},
+			wantCache: true,
+		},
+		{
+			name:      "label present but belongs to a different cluster location",
+			labels:    map[string]string{locationKey: "us-east1-b"},
+			wantCache: false,
+		},
+		{
+			name:      "label absent (legacy instance created before this feature)",
+			labels:    map[string]string{},
+			wantCache: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := &DefaultProvider{clusterLocation: controllerLocation}
+			inst := &Instance{InstanceID: "test-instance", Labels: tc.labels}
+			require.Equal(t, tc.wantCache, p.belongsToCluster(inst), tc.name)
+		})
+	}
 }

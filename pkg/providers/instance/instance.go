@@ -919,14 +919,25 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
-	// Stamp the cluster location so that the GC controller and syncInstances can
-	// distinguish instances from same-named clusters in different locations.
-	instance.Labels[utils.LabelClusterLocationKey] = p.clusterLocation
 
-	// Add instance type requirement labels
+	// Add instance type requirement labels before stamping the cluster identity
+	// labels so that user-supplied NodePool labels cannot overwrite them.
 	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
 		instance.Labels[entry.Key] = entry.Value
 	})
+
+	// Stamp cluster identity last so a NodePool label named goog-k8s-cluster-location
+	// cannot overwrite it and cause syncInstances to drop this instance from cache.
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
+}
+
+// belongsToCluster reports whether inst was created by this controller's cluster.
+// New instances carry goog-k8s-cluster-location; if present it must match.
+// Instances without the label pass through so that a rolling upgrade from an
+// older controller version does not temporarily lose visibility of running nodes.
+func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
+	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
+	return !ok || loc == p.clusterLocation
 }
 
 func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
@@ -1193,16 +1204,10 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 		}
 	}
 
-	// In-memory post-filter by cluster location. New instances carry the
-	// goog-k8s-cluster-location label; if present it must match this controller's
-	// cluster location. Old instances without the label are not filtered out so
-	// that a rolling upgrade from an older version of this controller does not
-	// temporarily lose visibility of running nodes.
-	for _, instance := range instances {
-		if loc, ok := instance.Labels[utils.LabelClusterLocationKey]; ok && loc != p.clusterLocation {
-			continue
+	for _, inst := range instances {
+		if p.belongsToCluster(inst) {
+			p.instanceCache.Set(inst.InstanceID, inst, cache.DefaultExpiration)
 		}
-		p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
 	}
 	return nil
 }
