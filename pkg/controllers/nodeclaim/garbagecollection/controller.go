@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	gcInterval    = 2 * time.Minute
+	gcInterval = 2 * time.Minute
 	// gcGracePeriod prevents newly created instances from being GC'd before their
 	// NodeClaim has been written to the API server.
 	gcGracePeriod = 30 * time.Second
