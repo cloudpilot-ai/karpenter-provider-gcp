@@ -933,37 +933,12 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 }
 
 // belongsToCluster reports whether inst was created by this controller's cluster.
-// It only checks the location dimension; cluster-name is already enforced by the
-// GCE API label filter in syncInstances.
-//
-// New instances carry goog-k8s-cluster-location and must match exactly.
-// Legacy instances (no label, created before this version) fall back to a
-// zone-to-region comparison so that a rolling upgrade within the same cluster
-// does not lose visibility of running nodes — while still excluding instances
-// from a same-named cluster in a different GCP region.
-//
-// TODO: once goog-k8s-cluster-location has been present long enough that all
-// nodes in production have been cycled, drop the fallback branch and require
-// the label on every instance.
+// It requires goog-k8s-cluster-location to be present and match; instances
+// without the label are excluded from the cache and therefore from GC.
+// Cluster-name is enforced separately by the GCE API label filter in syncInstances.
 func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
-	if ok {
-		return loc == p.clusterLocation
-	}
-	// Legacy instance: no location label. Accept it only if its zone belongs to
-	// this controller's region, reducing the risk of the GC controller treating
-	// nodes from a same-named cluster in a different region as orphans.
-	return zoneToRegion(inst.Location) == p.region
-}
-
-// zoneToRegion strips the trailing zone suffix from a GCE zone name.
-// e.g. "us-central1-f" → "us-central1", "europe-west1-b" → "europe-west1".
-func zoneToRegion(zone string) string {
-	i := strings.LastIndex(zone, "-")
-	if i < 0 {
-		return zone
-	}
-	return zone[:i]
+	return ok && loc == p.clusterLocation
 }
 
 func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
