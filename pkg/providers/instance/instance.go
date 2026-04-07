@@ -518,9 +518,18 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 		return "", fmt.Errorf("no zones match topology requirement %q", corev1.LabelTopologyZone)
 	}
 
-	// For on-demand, randomly select a zone from those that satisfy the requirement,
-	// to spread load while still honoring topology constraints.
+	// For on-demand, skip zones already known to be unavailable so we don't
+	// waste an API call and refresh the 30-min ICE cache TTL on a guaranteed
+	// failure. The spot path handles this via cheapestCompatibleZone, which
+	// already filters by offering.Available.
 	if capacityType == karpv1.CapacityTypeOnDemand {
+		zones = lo.Filter(zones, func(z string, _ int) bool {
+			return p.unavailableOfferings == nil || !p.unavailableOfferings.IsUnavailable(instanceType.Name, z, capacityType)
+		})
+		if len(zones) == 0 {
+			return "", cloudprovider.NewInsufficientCapacityError(
+				fmt.Errorf("all zones exhausted for instance type %s", instanceType.Name))
+		}
 		return randomZone(zones), nil
 	}
 	// else for spot, choose the cheapest zone
