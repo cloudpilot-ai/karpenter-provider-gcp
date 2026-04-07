@@ -127,6 +127,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,
+		options.FromContext(ctx).ClusterLocation,
 		region,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
