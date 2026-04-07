@@ -162,6 +162,27 @@ func (e *errorOnFirstDeleteProvider) Delete(ctx context.Context, nc *karpv1.Node
 	return e.fakeCloudProvider.Delete(ctx, nc)
 }
 
+func TestGC_SkipsInstanceWithEmptyProviderID(t *testing.T) {
+	t.Parallel()
+
+	// An instance with no ProviderID must never be GC'd: it would pass the
+	// knownIDs check (empty string is never inserted) and could be a node still
+	// initialising before its ProviderID is written back.
+	noID := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "no-provider-id",
+			CreationTimestamp: metav1.Time{Time: time.Now().Add(-2 * time.Minute)},
+		},
+	}
+	// Status.ProviderID intentionally left empty.
+	c := newController([]*karpv1.NodeClaim{noID}, nil)
+
+	_, err := c.Reconcile(context.Background())
+
+	require.NoError(t, err)
+	require.Empty(t, cloudProviderOf(c).deletedIDs, "instance with empty ProviderID must not be GC'd")
+}
+
 func TestGC_ContinuesAfterDeleteError(t *testing.T) {
 	t.Parallel()
 
@@ -178,7 +199,7 @@ func TestGC_ContinuesAfterDeleteError(t *testing.T) {
 
 	_, err := c.Reconcile(context.Background())
 
-	require.NoError(t, err, "a delete error must not abort the reconcile loop")
+	require.Error(t, err, "reconcile must return an error when a delete fails so controller-runtime applies backoff")
 	require.Equal(t, []string{second.Status.ProviderID}, cp.deletedIDs,
-		"second instance should still be deleted even if the first fails")
+		"second instance must still be attempted even when the first delete fails")
 }

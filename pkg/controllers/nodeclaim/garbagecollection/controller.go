@@ -18,6 +18,7 @@ package garbagecollection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -59,30 +60,37 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, fmt.Errorf("listing nodeclaims: %w", err)
 	}
 
-	knownIDs := sets.NewString()
+	knownIDs := sets.New[string]()
 	for i := range nodeClaimList.Items {
 		if id := nodeClaimList.Items[i].Status.ProviderID; id != "" {
 			knownIDs.Insert(id)
 		}
 	}
 
-	for _, nc := range instances {
-		if nc.DeletionTimestamp != nil {
+	var deleteErrs []error
+	for _, inst := range instances {
+		if inst.Status.ProviderID == "" {
 			continue
 		}
-		if knownIDs.Has(nc.Status.ProviderID) {
+		if inst.DeletionTimestamp != nil {
 			continue
 		}
-		if time.Since(nc.CreationTimestamp.Time) < gcGracePeriod {
+		if knownIDs.Has(inst.Status.ProviderID) {
 			continue
 		}
-		log.FromContext(ctx).Info("garbage collecting orphaned instance", "providerID", nc.Status.ProviderID)
-		if err := c.cloudProvider.Delete(ctx, nc); err != nil && !cloudprovider.IsNodeClaimNotFoundError(err) {
-			log.FromContext(ctx).Error(err, "failed to delete orphaned instance", "providerID", nc.Status.ProviderID)
+		if time.Since(inst.CreationTimestamp.Time) < gcGracePeriod {
+			continue
+		}
+		log.FromContext(ctx).Info("garbage collecting orphaned instance", "providerID", inst.Status.ProviderID)
+		if err := c.cloudProvider.Delete(ctx, inst); err != nil && !cloudprovider.IsNodeClaimNotFoundError(err) {
+			log.FromContext(ctx).Error(err, "failed to delete orphaned instance", "providerID", inst.Status.ProviderID)
+			deleteErrs = append(deleteErrs, err)
 		}
 	}
 
-	return reconciler.Result{RequeueAfter: gcInterval}, nil
+	// Return any delete errors so controller-runtime applies exponential backoff.
+	// All instances are attempted regardless; the error is only returned after the loop.
+	return reconciler.Result{RequeueAfter: gcInterval}, errors.Join(deleteErrs...)
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

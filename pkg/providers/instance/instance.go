@@ -932,9 +932,8 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
 }
 
-// belongsToCluster reports whether inst was created by this controller's cluster.
-// It requires goog-k8s-cluster-location to be present and match; instances
-// without the label are excluded from the cache and therefore from GC.
+// belongsToCluster reports whether inst's goog-k8s-cluster-location label matches
+// this controller's cluster location. Instances without the label return false.
 // Cluster-name is enforced separately by the GCE API label filter in syncInstances.
 func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
