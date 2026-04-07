@@ -187,7 +187,7 @@ func TestGC_SkipsInstanceWithEmptyProviderID(t *testing.T) {
 
 	// An instance with no ProviderID must never be GC'd: it would pass the
 	// knownIDs check (empty string is never inserted) and could be a node still
-	// initialising before its ProviderID is written back.
+	// initializing before its ProviderID is written back.
 	noID := &karpv1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "no-provider-id",

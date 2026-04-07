@@ -33,9 +33,9 @@ import (
 )
 
 const (
-	LabelNodePoolKey        string = "karpenter.sh/nodepool"
-	LabelGCENodeClassKey    string = "karpenter.k8s.gcp/gcenodeclass"
-	LabelClusterNameKey     string = "goog-k8s-cluster-name"
+	LabelNodePoolKey     string = "karpenter.sh/nodepool"
+	LabelGCENodeClassKey string = "karpenter.k8s.gcp/gcenodeclass"
+	LabelClusterNameKey  string = "goog-k8s-cluster-name"
 	// LabelClusterLocationKey is a well-known GCE label key used by GKE. The value is the
 	// cluster's location (region or zone, e.g. "us-central1" or "us-central1-f").
 	LabelClusterLocationKey string = "goog-k8s-cluster-location"
