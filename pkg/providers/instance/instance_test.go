@@ -18,17 +18,23 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+
+	"github.com/patrickmn/go-cache"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
@@ -129,6 +135,96 @@ func TestInsufficientCapacityBackoffTTLForOtherReasons(t *testing.T) {
 	ttl := insufficientCapacityBackoffTTL("ZONE_RESOURCE_POOL_EXHAUSTED")
 
 	require.Equal(t, pkgcache.UnavailableOfferingsTTL, ttl)
+}
+
+// newFakeComputeProvider builds a DefaultProvider whose computeService targets a fake
+// HTTP server driven by handler.
+func newFakeComputeProvider(t *testing.T, handler http.Handler) *DefaultProvider {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	svc, err := compute.NewService(context.Background(),
+		option.WithEndpoint(srv.URL+"/"),
+		option.WithoutAuthentication(),
+	)
+	require.NoError(t, err)
+	return &DefaultProvider{
+		projectID:      "test-project",
+		region:         "us-central1",
+		computeService: svc,
+		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
+	}
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func TestDelete_ReturnsNotFoundWhenInstanceMissing(t *testing.T) {
+	t.Parallel()
+
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, &googleapi.Error{Code: http.StatusNotFound, Message: "not found"})
+	}))
+
+	err := p.Delete(context.Background(), "gce://test-project/us-central1-a/karpenter-node1")
+
+	require.True(t, cloudprovider.IsNodeClaimNotFoundError(err), "expected NodeClaimNotFoundError, got %v", err)
+}
+
+func TestDelete_ReturnsNilWhenInstanceIsStopping(t *testing.T) {
+	t.Parallel()
+
+	deleteCalled := false
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalled = true
+		}
+		writeJSON(w, &compute.Instance{Name: "karpenter-node1", Status: InstanceStatusStopping})
+	}))
+
+	err := p.Delete(context.Background(), "gce://test-project/us-central1-a/karpenter-node1")
+
+	require.NoError(t, err, "STOPPING should return nil so the reconciler requeues")
+	require.False(t, deleteCalled, "a new delete must not be issued while one is already in progress")
+}
+
+func TestDelete_ReturnsNodeClaimNotFoundWhenInstanceIsTerminated(t *testing.T) {
+	t.Parallel()
+
+	deleteCalled := false
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalled = true
+		}
+		writeJSON(w, &compute.Instance{Name: "karpenter-node1", Status: InstanceStatusTerminated})
+	}))
+
+	err := p.Delete(context.Background(), "gce://test-project/us-central1-a/karpenter-node1")
+
+	require.True(t, cloudprovider.IsNodeClaimNotFoundError(err), "TERMINATED should signal karpenter to finalise the NodeClaim")
+	require.False(t, deleteCalled, "no delete should be issued for an already-terminated instance")
+}
+
+func TestDelete_IssuesDeleteWhenInstanceIsRunning(t *testing.T) {
+	t.Parallel()
+
+	deleteCalled := false
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalled = true
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			return
+		}
+		writeJSON(w, &compute.Instance{Name: "karpenter-node1", Status: InstanceStatusRunning})
+	}))
+
+	err := p.Delete(context.Background(), "gce://test-project/us-central1-a/karpenter-node1")
+
+	require.NoError(t, err)
+	require.True(t, deleteCalled, "delete must be issued for a running instance")
 }
 
 type fakeGKEProvider struct {
