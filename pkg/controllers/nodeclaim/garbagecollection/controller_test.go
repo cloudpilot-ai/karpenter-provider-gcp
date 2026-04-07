@@ -29,6 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 // fakeKubeClient overrides only the List method used by the GC controller.
@@ -76,7 +78,23 @@ func (f *fakeCloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 }
 func (f *fakeCloudProvider) LivenessProbe(_ *http.Request) error { return nil }
 
+// newNC creates a NodeClaim with the cluster-location label stamped, matching what
+// production Karpenter does for all instances created after this release.
 func newNC(providerID string, age time.Duration) *karpv1.NodeClaim {
+	nc := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              providerID,
+			CreationTimestamp: metav1.Time{Time: time.Now().Add(-age)},
+			Labels:            map[string]string{utils.LabelClusterLocationKey: "us-central1-f"},
+		},
+	}
+	nc.Status.ProviderID = providerID
+	return nc
+}
+
+// newNCLegacy creates a NodeClaim without the cluster-location label, representing
+// instances created by an older Karpenter version before this label was introduced.
+func newNCLegacy(providerID string, age time.Duration) *karpv1.NodeClaim {
 	nc := &karpv1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              providerID,
@@ -201,4 +219,19 @@ func TestGC_ContinuesAfterDeleteError(t *testing.T) {
 	require.Error(t, err, "reconcile must return an error when a delete fails so controller-runtime applies backoff")
 	require.Equal(t, []string{second.Status.ProviderID}, cp.deletedIDs,
 		"second instance must still be attempted even when the first delete fails")
+}
+
+func TestGC_SkipsLegacyInstanceWithoutLocationLabel(t *testing.T) {
+	t.Parallel()
+
+	// Instances without goog-k8s-cluster-location were created by an older Karpenter
+	// version. The cache includes them for backward compatibility, but GC must not touch
+	// them — we cannot confirm they belong exclusively to this cluster.
+	legacy := newNCLegacy("gce://proj/zone/legacy", 2*time.Minute)
+	c := newController([]*karpv1.NodeClaim{legacy}, nil)
+
+	_, err := c.Reconcile(context.Background())
+
+	require.NoError(t, err)
+	require.Empty(t, cloudProviderOf(c).deletedIDs, "legacy instance without cluster-location label must not be GC'd")
 }

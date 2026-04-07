@@ -16,15 +16,16 @@ Karpenter identifies instances that belong to this cluster using two GCE labels:
   time and checked in-process to distinguish clusters that share the same name in different
   GCP locations.
 
-Instances that carry both labels are tracked in the instance cache and are eligible for
-automatic GC. Instances without `goog-k8s-cluster-location` — i.e., those created by an
-older version of Karpenter — are excluded from the cache and are not touched by the GC
-controller.
+Instances with `goog-k8s-cluster-location` present are eligible for automatic GC.
+Instances without it — created by an older Karpenter version — remain in the instance
+cache (so Karpenter retains control of them) but are **never** touched by the GC
+controller. This means upgrading is safe: no nodes are deleted on upgrade, and existing
+nodes stay fully managed until they are naturally replaced by a newer Karpenter version
+that stamps the label.
 
 The upgrade itself requires no action. The steps below are **optional** and only relevant
 if you want to clean up orphaned instances that may have accumulated before this release
-(see #242). Future orphaned instances are handled automatically once nodes carry the new
-label.
+(see #242). Future orphaned instances on new-style nodes are handled automatically.
 
 ---
 

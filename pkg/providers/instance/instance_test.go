@@ -1239,9 +1239,9 @@ func TestBelongsToCluster(t *testing.T) {
 			want:   false,
 		},
 		{
-			name:   "label absent (pre-location-label instance) — excluded from cache and GC",
+			name:   "label absent (pre-location-label instance) — included in cache for backward compatibility",
 			labels: map[string]string{},
-			want:   false,
+			want:   true,
 		},
 	}
 

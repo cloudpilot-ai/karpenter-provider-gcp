@@ -332,6 +332,12 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 		labels[karpv1.NodePoolLabelKey] = v
 	}
 
+	// Propagate the cluster-location label so the GC controller can skip instances that
+	// were created before this label was introduced (absence == legacy, skip GC).
+	if v, ok := i.Labels[utils.LabelClusterLocationKey]; ok {
+		labels[utils.LabelClusterLocationKey] = v
+	}
+
 	nodeClaim.Labels = labels
 	nodeClaim.Annotations = annotations
 	nodeClaim.CreationTimestamp = metav1.Time{Time: i.CreationTime}

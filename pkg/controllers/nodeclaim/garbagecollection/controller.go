@@ -31,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
@@ -79,6 +81,13 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			continue
 		}
 		if time.Since(inst.CreationTimestamp.Time) < gcGracePeriod {
+			continue
+		}
+		// Only GC instances that carry the cluster-location label. Instances without it
+		// were created by an older Karpenter version and are tracked by the cache as a
+		// backward-compatibility measure, but we cannot confirm they belong exclusively
+		// to this cluster, so we leave them alone.
+		if _, ok := inst.Labels[utils.LabelClusterLocationKey]; !ok {
 			continue
 		}
 		log.FromContext(ctx).Info("garbage collecting orphaned instance", "providerID", inst.Status.ProviderID)

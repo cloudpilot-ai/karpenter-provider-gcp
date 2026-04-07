@@ -932,12 +932,15 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
 }
 
-// belongsToCluster reports whether inst's goog-k8s-cluster-location label matches
-// this controller's cluster location. Instances without the label return false.
-// Cluster-name is enforced separately by the GCE API label filter in syncInstances.
+// belongsToCluster reports whether inst should be tracked in this controller's instance
+// cache. An instance with goog-k8s-cluster-location present must match this cluster's
+// location. An instance without the label (created by an older Karpenter version) is
+// treated as ours for backward compatibility — the GC controller separately skips
+// label-less instances to prevent cross-cluster deletion. Cluster-name is enforced by the
+// GCE API label filter in syncInstances.
 func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
-	return ok && loc == p.clusterLocation
+	return !ok || loc == p.clusterLocation
 }
 
 func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
