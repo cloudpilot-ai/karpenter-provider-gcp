@@ -938,6 +938,12 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 // treated as ours for backward compatibility — the GC controller separately skips
 // label-less instances to prevent cross-cluster deletion. Cluster-name is enforced by the
 // GCE API label filter in syncInstances.
+//
+// TODO: once all instances carry goog-k8s-cluster-location (i.e. after all clusters have
+// been upgraded past this release and all pre-existing nodes have been rotated), replace
+// the !ok fallback with strict matching (ok && loc == p.clusterLocation) and add the
+// label as a server-side filter in syncInstances. Until then the fallback must stay to
+// avoid making pre-label instances invisible to Karpenter.
 func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
 	return !ok || loc == p.clusterLocation

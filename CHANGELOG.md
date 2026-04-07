@@ -12,16 +12,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   detects and deletes GCE VM instances with no corresponding NodeClaim, preventing orphaned
   instances from accumulating after missed deletes or controller restarts.
 - Added `goog-k8s-cluster-location` GCE label to instances at creation time. Combined with
-  the existing `goog-k8s-cluster-name` label, Karpenter now scopes the instance cache and
-  GC controller to the correct cluster even when multiple clusters share the same name in
-  different GCP locations. Instances without `goog-k8s-cluster-location` are excluded from
-  the cache and are not touched by the GC controller.
+  the existing `goog-k8s-cluster-name` label, the GC controller can now scope deletions to
+  the correct cluster when multiple clusters share the same name in different GCP locations.
+  Instances without the label (created by an older Karpenter version) remain in the instance
+  cache so Karpenter retains full control of them, but are never touched by the GC
+  controller. The label will be enforced strictly in a future release once all clusters have
+  migrated.
 
 ### Migration guide
 
-No action is required to upgrade. See [MIGRATION.md](MIGRATION.md) for optional steps to
-rotate existing nodes onto the new label scheme and clean up any orphaned instances that
-may have accumulated before this release.
+No action is required to upgrade. Existing nodes stay fully managed until they are
+naturally replaced by the new version, at which point they receive the location label and
+become eligible for automatic GC. See [MIGRATION.md](MIGRATION.md) for optional steps to
+rotate nodes early and clean up any orphaned instances that may have accumulated before
+this release.
 
 ## v0.2.0
 

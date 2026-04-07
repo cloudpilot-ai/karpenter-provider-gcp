@@ -87,6 +87,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		// were created by an older Karpenter version and are tracked by the cache as a
 		// backward-compatibility measure, but we cannot confirm they belong exclusively
 		// to this cluster, so we leave them alone.
+		//
+		// TODO: remove this guard once belongsToCluster in instance.go is tightened to
+		// strict matching — at that point label-less instances will never reach List(),
+		// so this check becomes redundant.
 		if _, ok := inst.Labels[utils.LabelClusterLocationKey]; !ok {
 			continue
 		}

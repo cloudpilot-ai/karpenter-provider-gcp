@@ -334,6 +334,9 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 
 	// Propagate the cluster-location label so the GC controller can skip instances that
 	// were created before this label was introduced (absence == legacy, skip GC).
+	// TODO: remove together with the location guard in the GC controller once
+	// belongsToCluster enforces strict matching and label-less instances no longer
+	// enter the cache or appear in List().
 	if v, ok := i.Labels[utils.LabelClusterLocationKey]; ok {
 		labels[utils.LabelClusterLocationKey] = v
 	}
