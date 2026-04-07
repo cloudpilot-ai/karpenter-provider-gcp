@@ -95,14 +95,14 @@ e2e-deploy: ## Build image and (re)deploy karpenter onto an existing e2e cluster
 	E2E_ZONE=$(E2E_ZONE) \
 	./hack/e2e-deploy.sh
 
-e2e-tests: ## Run all e2e test suites sequentially, each with internal parallelism
+GINKGO_PROCS ?= 4
+e2e-tests: ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_ZONE) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
-	go test -count 1 -timeout 2h -v ./test/suites/... \
-	-args -ginkgo.procs=2 -ginkgo.timeout=2h -ginkgo.v
+	ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
 
 ## Run a single e2e spec by substring.
 ## Set SUITE to target a specific suite (provisioning, consolidation, drift, expiration).
