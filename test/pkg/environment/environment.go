@@ -25,6 +25,7 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
+	compute "google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,6 +77,7 @@ type Environment struct {
 	KubeClient    kubernetes.Interface
 	DynamicClient dynamic.Interface
 	containerSvc  *container.Service
+	computeSvc    *compute.Service
 
 	// mu guards ownedNodePools and ownedNodeClasses so Cleanup is safe when
 	// multiple Ginkgo processes share the same Environment.
@@ -107,6 +109,9 @@ func NewEnvironment() *Environment {
 	containerSvc, err := container.NewService(initCtx)
 	Expect(err).NotTo(HaveOccurred(), "creating GCP container service client")
 
+	computeSvc, err := compute.NewService(initCtx)
+	Expect(err).NotTo(HaveOccurred(), "creating GCP compute service client")
+
 	env := &Environment{
 		ProjectID:        mustEnv("PROJECT_ID"),
 		ClusterName:      mustEnv("CLUSTER_NAME"),
@@ -115,6 +120,7 @@ func NewEnvironment() *Environment {
 		KubeClient:       kubeClient,
 		DynamicClient:    dynamicClient,
 		containerSvc:     containerSvc,
+		computeSvc:       computeSvc,
 		ownedNodePools:   make(map[string]struct{}),
 		ownedNodeClasses: make(map[string]struct{}),
 	}

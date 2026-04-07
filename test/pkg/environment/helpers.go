@@ -18,13 +18,16 @@ package environment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/api/googleapi"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -383,6 +386,64 @@ func (e *Environment) AllNodeNames(ctx context.Context) map[string]struct{} {
 		result[n.Name] = struct{}{}
 	}
 	return result
+}
+
+// ForceDeleteNodeClaim removes the karpenter finalizer from the named NodeClaim
+// and then deletes it. This leaves the backing GCE VM running without an owner,
+// simulating the orphaned-VM scenario that the GC controller is meant to clean up.
+func (e *Environment) ForceDeleteNodeClaim(ctx context.Context, name string) {
+	nc, err := e.DynamicClient.Resource(nodeClaimGVR).Get(ctx, name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "getting NodeClaim %s", name)
+
+	nc.SetFinalizers(nil)
+	_, err = e.DynamicClient.Resource(nodeClaimGVR).Update(ctx, nc, metav1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "removing finalizer from NodeClaim %s", name)
+
+	err = e.DynamicClient.Resource(nodeClaimGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	if !apierrors.IsNotFound(err) {
+		Expect(err).NotTo(HaveOccurred(), "deleting NodeClaim %s", name)
+	}
+}
+
+// WaitForVMDeletion polls the GCE Instances API until the VM identified by
+// providerID returns 404, confirming the GC controller deleted it.
+// providerID format: gce://<project>/<zone>/<name>
+func (e *Environment) WaitForVMDeletion(ctx context.Context, providerID string) error {
+	project, zone, name, err := parseProviderID(providerID)
+	if err != nil {
+		return err
+	}
+	return wait.PollUntilContextCancel(ctx, 10*time.Second, true,
+		func(ctx context.Context) (bool, error) {
+			_, err := e.computeSvc.Instances.Get(project, zone, name).Context(ctx).Do()
+			if err == nil {
+				return false, nil
+			}
+			if isNotFound(err) {
+				return true, nil
+			}
+			return false, nil
+		},
+	)
+}
+
+// parseProviderID splits a gce://<project>/<zone>/<name> provider ID.
+func parseProviderID(providerID string) (project, zone, name string, err error) {
+	s := strings.TrimPrefix(providerID, "gce://")
+	parts := strings.SplitN(s, "/", 3)
+	if len(parts) != 3 {
+		return "", "", "", fmt.Errorf("unexpected providerID format: %q", providerID)
+	}
+	return parts[0], parts[1], parts[2], nil
+}
+
+// isNotFound returns true for a 404 googleapi error.
+func isNotFound(err error) bool {
+	var gErr *googleapi.Error
+	if errors.As(err, &gErr) {
+		return gErr.Code == 404
+	}
+	return false
 }
 
 // toAny converts a string slice to []any for use in unstructured objects.
