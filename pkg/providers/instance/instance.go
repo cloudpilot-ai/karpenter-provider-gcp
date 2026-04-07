@@ -935,6 +935,10 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 // New instances carry goog-k8s-cluster-location; if present it must match.
 // Instances without the label pass through so that a rolling upgrade from an
 // older controller version does not temporarily lose visibility of running nodes.
+//
+// TODO: once goog-k8s-cluster-location has been present for long enough that
+// all clusters in the wild have cycled their nodes at least once, remove the
+// !ok branch and require the label on every instance.
 func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
 	return !ok || loc == p.clusterLocation
