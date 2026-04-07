@@ -116,13 +116,26 @@ if gcloud iam service-accounts describe "${GSA_EMAIL}" \
 fi
 
 # ── Subnet ─────────────────────────────────────────────────────────────────────
+# GKE cluster deletion is async: even after the cluster API object disappears,
+# GKE-managed instance groups may still hold the subnet for a minute or two.
+# Retry with backoff so we don't fail when re-running teardown after a partial run.
 if gcloud compute networks subnets describe "${SUBNET_NAME}" \
     --region "${E2E_REGION}" --project "${E2E_PROJECT_ID}" &>/dev/null; then
   log "Deleting subnet ${SUBNET_NAME}..."
-  gcloud compute networks subnets delete "${SUBNET_NAME}" \
-    --region "${E2E_REGION}" \
-    --project "${E2E_PROJECT_ID}" \
-    --quiet
+  WAIT_SECS=0
+  MAX_WAIT_SECS=600
+  until gcloud compute networks subnets delete "${SUBNET_NAME}" \
+      --region "${E2E_REGION}" \
+      --project "${E2E_PROJECT_ID}" \
+      --quiet 2>/dev/null; do
+    if [ "${WAIT_SECS}" -ge "${MAX_WAIT_SECS}" ]; then
+      echo "ERROR: subnet ${SUBNET_NAME} still in use after ${MAX_WAIT_SECS}s — GKE instance groups may not have fully cleaned up" >&2
+      exit 1
+    fi
+    log "Subnet still in use (GKE instance group cleanup in progress); retrying in 15s (${WAIT_SECS}s elapsed)..."
+    sleep 15
+    WAIT_SECS=$((WAIT_SECS + 15))
+  done
 fi
 
 # ── VPC ────────────────────────────────────────────────────────────────────────
