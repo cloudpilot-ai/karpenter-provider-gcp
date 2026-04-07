@@ -126,6 +126,19 @@ func NewEnvironment() *Environment {
 		ownedNodeClasses: make(map[string]struct{}),
 	}
 
+	// Fast-fail: verify the cluster exists at the configured location before
+	// entering any Eventually loop. Without this, a wrong CLUSTER_LOCATION
+	// silently times out for up to NodePoolReadyTimeout minutes and makes all
+	// specs appear to pass (0 specs ran = no failures in ginkgo).
+	clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
+		env.ProjectID, env.ClusterLocation, env.ClusterName)
+	if _, err := containerSvc.Projects.Locations.Clusters.Get(clusterPath).Context(initCtx).Do(); err != nil {
+		panic(fmt.Sprintf(
+			"cluster %q not reachable at location %q (PROJECT_ID=%s) — check CLUSTER_LOCATION env var (E2E_ZONE in Makefile): %v",
+			env.ClusterName, env.ClusterLocation, env.ProjectID, err,
+		))
+	}
+
 	env.waitForControllerReady()
 	return env
 }

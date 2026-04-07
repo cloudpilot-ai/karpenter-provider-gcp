@@ -26,7 +26,7 @@ KARPENTER_CORE_DIR = $(shell go list -m -f '{{ .Dir }}' sigs.k8s.io/karpenter)
 # between the setup script and the test binary.
 E2E_PREFIX       ?= karpenter-e2e
 E2E_REGION       ?= us-central1
-E2E_ZONE         ?= $(E2E_REGION)-a
+E2E_ZONE         ?= $(E2E_REGION)-f
 E2E_SA_PATH      ?= karpenter-e2e-key.json
 E2E_CLUSTER_NAME ?= $(E2E_PREFIX)-cluster
 E2E_PODS_RANGE   ?= $(E2E_PREFIX)-pods
@@ -102,7 +102,7 @@ e2e-tests: ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_ZONE) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
-	ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
+	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
 
 ## Run a single e2e spec by substring.
 ## Set SUITE to target a specific suite (provisioning, consolidation, drift, expiration).
