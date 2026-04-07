@@ -522,11 +522,9 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 	// Without this filter, every retry calls MarkUnavailable and resets the
 	// 30-min TTL, preventing natural expiry. Applied to both on-demand and
 	// spot so both paths behave consistently.
-	if p.unavailableOfferings != nil {
-		zones = lo.Filter(zones, func(z string, _ int) bool {
-			return !p.unavailableOfferings.IsUnavailable(instanceType.Name, z, capacityType)
-		})
-	}
+	zones = lo.Filter(zones, func(z string, _ int) bool {
+		return !p.unavailableOfferings.IsUnavailable(instanceType.Name, z, capacityType)
+	})
 	if len(zones) == 0 {
 		return "", cloudprovider.NewInsufficientCapacityError(
 			fmt.Errorf("all zones exhausted for instance type %s", instanceType.Name))

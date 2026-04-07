@@ -243,6 +243,7 @@ func TestSelectZone_OnDemandHonorsTopologyRequirement(t *testing.T) {
 		gkeProvider: &fakeGKEProvider{
 			zones: []string{"europe-west4-a", "europe-west4-b", "europe-west4-c"},
 		},
+		unavailableOfferings: pkgcache.NewUnavailableOfferings(),
 	}
 
 	nodeClaim := &karpv1.NodeClaim{
@@ -284,6 +285,7 @@ func TestSelectZone_FailsWhenNoZonesMatchRequirement(t *testing.T) {
 		gkeProvider: &fakeGKEProvider{
 			zones: []string{"europe-west4-a", "europe-west4-c"},
 		},
+		unavailableOfferings: pkgcache.NewUnavailableOfferings(),
 	}
 
 	nodeClaim := &karpv1.NodeClaim{
@@ -392,6 +394,7 @@ func TestSelectZone_SpotChoosesCheapestWithinTopologyRequirement(t *testing.T) {
 		gkeProvider: &fakeGKEProvider{
 			zones: []string{"europe-west4-a", "europe-west4-b"},
 		},
+		unavailableOfferings: pkgcache.NewUnavailableOfferings(),
 	}
 
 	nodeClaim := &karpv1.NodeClaim{
