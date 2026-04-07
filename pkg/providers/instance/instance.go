@@ -913,14 +913,13 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 	}
 }
 
-// setupInstanceLabels configures all labels for the instance
+// setupInstanceLabels writes all GCE labels for a new instance. Cluster-identity labels
+// (goog-k8s-cluster-name and goog-k8s-cluster-location) are always written last so that
+// user-supplied NodePool requirement labels with the same key cannot overwrite them.
 func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) {
-	// Set common Karpenter labels
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
 
-	// Add instance type requirement labels before stamping the cluster identity
-	// labels so that user-supplied NodePool labels cannot overwrite them.
 	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
 		instance.Labels[entry.Key] = entry.Value
 	})

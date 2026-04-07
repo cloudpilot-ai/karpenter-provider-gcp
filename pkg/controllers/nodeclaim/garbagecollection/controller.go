@@ -97,7 +97,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		log.FromContext(ctx).Info("garbage collecting orphaned instance", "providerID", inst.Status.ProviderID)
 		if err := c.cloudProvider.Delete(ctx, inst); err != nil && !cloudprovider.IsNodeClaimNotFoundError(err) {
 			log.FromContext(ctx).Error(err, "failed to delete orphaned instance", "providerID", inst.Status.ProviderID)
-			deleteErrs = append(deleteErrs, err)
+			deleteErrs = append(deleteErrs, fmt.Errorf("deleting %s: %w", inst.Status.ProviderID, err))
 		}
 	}
 

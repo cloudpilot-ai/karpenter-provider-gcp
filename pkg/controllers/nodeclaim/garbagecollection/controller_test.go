@@ -40,9 +40,11 @@ type fakeKubeClient struct {
 }
 
 func (f *fakeKubeClient) List(_ context.Context, list client.ObjectList, _ ...client.ListOption) error {
-	if ncl, ok := list.(*karpv1.NodeClaimList); ok {
-		ncl.Items = f.nodeClaims
+	ncl, ok := list.(*karpv1.NodeClaimList)
+	if !ok {
+		panic("fakeKubeClient.List: unexpected type, only *karpv1.NodeClaimList is supported")
 	}
+	ncl.Items = f.nodeClaims
 	return nil
 }
 
