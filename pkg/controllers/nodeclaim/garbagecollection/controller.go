@@ -71,27 +71,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	var deleteErrs []error
 	for _, inst := range instances {
-		if inst.Status.ProviderID == "" {
-			continue
-		}
-		if inst.DeletionTimestamp != nil {
-			continue
-		}
-		if knownIDs.Has(inst.Status.ProviderID) {
-			continue
-		}
-		if time.Since(inst.CreationTimestamp.Time) < gcGracePeriod {
-			continue
-		}
-		// Only GC instances that carry the cluster-location label. Instances without it
-		// were created by an older Karpenter version and are tracked by the cache as a
-		// backward-compatibility measure, but we cannot confirm they belong exclusively
-		// to this cluster, so we leave them alone.
-		//
-		// TODO: remove this guard once belongsToCluster in instance.go is tightened to
-		// strict matching — at that point label-less instances will never reach List(),
-		// so this check becomes redundant.
-		if _, ok := inst.Labels[utils.LabelClusterLocationKey]; !ok {
+		if !isOrphaned(inst, knownIDs) {
 			continue
 		}
 		log.FromContext(ctx).Info("garbage collecting orphaned instance", "providerID", inst.Status.ProviderID)
@@ -104,6 +84,35 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// Return any delete errors so controller-runtime applies exponential backoff.
 	// All instances are attempted regardless; the error is only returned after the loop.
 	return reconciler.Result{RequeueAfter: gcInterval}, errors.Join(deleteErrs...)
+}
+
+// isOrphaned reports whether inst is an orphaned GCE instance that should be
+// garbage-collected. Returns false when the instance is still backed by a
+// NodeClaim, is too young (within the grace period for NodeClaim write-back),
+// is already being deleted, has no ProviderID, or lacks the cluster-location
+// label that positively identifies it as belonging exclusively to this cluster.
+//
+// TODO: remove the cluster-location guard once belongsToCluster in instance.go
+// is tightened to strict matching — at that point label-less instances will
+// never reach List(), making this check redundant.
+func isOrphaned(inst *karpv1.NodeClaim, knownIDs sets.Set[string]) bool {
+	if inst.Status.ProviderID == "" {
+		return false
+	}
+	if inst.DeletionTimestamp != nil {
+		return false
+	}
+	if knownIDs.Has(inst.Status.ProviderID) {
+		return false
+	}
+	if time.Since(inst.CreationTimestamp.Time) < gcGracePeriod {
+		return false
+	}
+	// Instances without goog-k8s-cluster-location were created by an older
+	// Karpenter version. We cannot confirm they belong exclusively to this
+	// cluster, so we leave them alone rather than risk cross-cluster deletion.
+	_, hasLocationLabel := inst.Labels[utils.LabelClusterLocationKey]
+	return hasLocationLabel
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
