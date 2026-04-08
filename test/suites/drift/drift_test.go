@@ -35,8 +35,8 @@ var _ = Describe("Drift", func() {
 	// the node with one of the remaining allowed types.
 	It("should replace a drifted amd64 on-demand node", func(ctx SpecContext) {
 		runDriftTest(ctx, environment.TestCase{
-			CapacityType: karpv1.CapacityTypeOnDemand,
-			Arch:         karpv1.ArchitectureAmd64,
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
 			Families:      []string{"n2"},
 			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
 		})
