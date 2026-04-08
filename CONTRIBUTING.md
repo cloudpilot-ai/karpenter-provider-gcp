@@ -98,5 +98,63 @@ This guides breaks down into two parts
 
 3. Once you have installed the CRDs, go ahead and install the karpenter by running the below command
     ```
-    make run 
+    make run
     ```
+
+## End-to-end tests
+
+E2e tests run against a real GKE cluster. The cluster is **not** torn down between runs — it is reused across test sessions to save setup time.
+
+### Prerequisites
+
+```bash
+export PROJECT_ID=<gcp-project-id>
+export CLUSTER_NAME=<cluster-name>      # e.g. karpenter-e2e-cluster
+export REGION=<gcp-region>             # e.g. us-central1
+export CLUSTER_LOCATION=<zone>         # e.g. us-central1-f
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+```
+
+### One-time cluster setup
+
+```bash
+make e2e-setup
+```
+
+This idempotently creates a GKE cluster, VPC, subnet, service account, IAM bindings, Artifact Registry repo, and deploys karpenter via Helm.
+
+### Deploy a new controller image
+
+```bash
+make e2e-deploy
+```
+
+Builds the controller image with `ko` and runs `helm upgrade --install`.
+
+### Run all suites
+
+```bash
+make e2e-tests
+```
+
+Runs all suites in parallel (default `GINKGO_PROCS=4`). Override with `GINKGO_PROCS=N`.
+
+### Run a single spec
+
+```bash
+make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
+```
+
+Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`.
+
+### Tear down all e2e infrastructure
+
+```bash
+make e2e-teardown
+```
+
+### Check for orphaned resources (without deleting)
+
+```bash
+make e2e-check-clean
+```
