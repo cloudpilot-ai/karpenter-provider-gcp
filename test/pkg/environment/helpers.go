@@ -65,7 +65,7 @@ type TestCase struct {
 
 // UniqueSuffix returns a 6-character random hex string safe for use in k8s names.
 func UniqueSuffix() string {
-	return fmt.Sprintf("%06x", rand.Uint32()&0xffffff)
+	return fmt.Sprintf("%06x", rand.Uint32()&0xffffff) //nolint:gosec // weak RNG is fine for test resource name suffixes
 }
 
 // TestPrefix returns a human-readable prefix for test resource names. The arch

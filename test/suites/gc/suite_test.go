@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeclaim_test
+package gc_test
 
 import (
 	"testing"
@@ -27,7 +27,7 @@ import (
 
 var env *environment.Environment
 
-func TestNodeClaim(t *testing.T) {
+func TestGC(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = environment.NewEnvironment()
@@ -37,5 +37,5 @@ func TestNodeClaim(t *testing.T) {
 			env.Cleanup()
 		}
 	})
-	RunSpecs(t, "NodeClaim Suite")
+	RunSpecs(t, "GC Suite")
 }
