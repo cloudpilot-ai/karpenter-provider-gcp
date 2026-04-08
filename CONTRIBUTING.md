@@ -108,12 +108,12 @@ E2e tests run against a real GKE cluster. The cluster is **not** torn down betwe
 ### Prerequisites
 
 ```bash
-export PROJECT_ID=<gcp-project-id>
-export CLUSTER_NAME=<cluster-name>      # e.g. karpenter-e2e-cluster
-export REGION=<gcp-region>             # e.g. us-central1
-export CLUSTER_LOCATION=<zone>         # e.g. us-central1-f
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+export E2E_PROJECT_ID=<gcp-project-id>
+export E2E_SA_PATH=/path/to/service-account-key.json
+export E2E_LOCATION=<zone-or-region>   # e.g. us-central1-f or us-central1
 ```
+
+`E2E_REGION` (default: `us-central1`) and `E2E_PREFIX` (default: `karpenter-e2e`) can be overridden if needed. `E2E_REGION` must match the region of `E2E_LOCATION` when using a zonal location.
 
 ### One-time cluster setup
 

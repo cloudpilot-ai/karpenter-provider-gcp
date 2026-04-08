@@ -7,15 +7,15 @@
 #   E2E_PROJECT_ID                  GCP project ID
 #   E2E_PREFIX                      resource name prefix (default: karpenter-e2e)
 #   E2E_REGION                      GCP region          (default: us-central1)
-#   E2E_ZONE                        GCP zone            (default: <region>-a)
+#   E2E_LOCATION                    GCP location (zone or region)
 set -euo pipefail
 
 : "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
 : "${E2E_PROJECT_ID:?E2E_PROJECT_ID must be set}"
 
+: "${E2E_LOCATION:?E2E_LOCATION must be set (zone, e.g. us-central1-f, or region, e.g. us-central1)}"
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
-E2E_ZONE="${E2E_ZONE:-${E2E_REGION}-a}"
 
 CLUSTER_NAME="${E2E_PREFIX}-cluster"
 GSA_ID="${E2E_PREFIX}-karpenter"
@@ -52,7 +52,7 @@ helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
   --set logLevel=debug \
   --set controller.settings.projectID="${E2E_PROJECT_ID}" \
   --set controller.settings.clusterName="${CLUSTER_NAME}" \
-  --set controller.settings.clusterLocation="${E2E_ZONE}" \
+  --set controller.settings.clusterLocation="${E2E_LOCATION}" \
   --set controller.settings.interruptionQueue="${CLUSTER_NAME}" \
   --set controller.featureGates.spotToSpotConsolidation=true \
   --set "serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=${GSA_EMAIL}" \

@@ -10,7 +10,7 @@
 #   E2E_PROJECT_ID  GCP project ID  (default: parsed from credentials)
 #   E2E_PREFIX      (default: karpenter-e2e)
 #   E2E_REGION      (default: us-central1)
-#   E2E_ZONE        (default: <region>-a)
+#   E2E_LOCATION    GCP location (zone or region)
 set -euo pipefail
 
 : "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
@@ -24,9 +24,9 @@ if [ -z "${E2E_PROJECT_ID:-}" ]; then
   log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
 fi
 
+: "${E2E_LOCATION:?E2E_LOCATION must be set (zone, e.g. us-central1-f, or region, e.g. us-central1)}"
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
-E2E_ZONE="${E2E_ZONE:-${E2E_REGION}-a}"
 
 CLUSTER_NAME="${E2E_PREFIX}-cluster"
 NETWORK_NAME="${E2E_PREFIX}-vpc"
@@ -42,10 +42,10 @@ gcloud auth activate-service-account \
 
 # Uninstall karpenter before deleting the cluster so it can clean up GCP instances.
 if gcloud container clusters describe "${CLUSTER_NAME}" \
-    --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" &>/dev/null; then
+    --location "${E2E_LOCATION}" --project "${E2E_PROJECT_ID}" &>/dev/null; then
   log "Fetching cluster credentials for Helm uninstall..."
   gcloud container clusters get-credentials "${CLUSTER_NAME}" \
-    --zone "${E2E_ZONE}" \
+    --location "${E2E_LOCATION}" \
     --project "${E2E_PROJECT_ID}" \
     --quiet
 
@@ -59,10 +59,10 @@ fi
 
 # GKE cluster
 if gcloud container clusters describe "${CLUSTER_NAME}" \
-    --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" &>/dev/null; then
+    --location "${E2E_LOCATION}" --project "${E2E_PROJECT_ID}" &>/dev/null; then
   log "Deleting cluster ${CLUSTER_NAME}..."
   gcloud container clusters delete "${CLUSTER_NAME}" \
-    --zone "${E2E_ZONE}" \
+    --location "${E2E_LOCATION}" \
     --project "${E2E_PROJECT_ID}" \
     --quiet
 
@@ -70,7 +70,7 @@ if gcloud container clusters describe "${CLUSTER_NAME}" \
   WAIT_SECS=0
   MAX_WAIT_SECS=1800  # 30 minutes
   while gcloud container clusters describe "${CLUSTER_NAME}" \
-      --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" &>/dev/null; do
+      --location "${E2E_LOCATION}" --project "${E2E_PROJECT_ID}" &>/dev/null; do
     sleep 15
     WAIT_SECS=$((WAIT_SECS + 15))
     if [ "${WAIT_SECS}" -ge "${MAX_WAIT_SECS}" ]; then

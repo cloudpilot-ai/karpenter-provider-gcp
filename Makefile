@@ -76,48 +76,52 @@ ut-test: ## Run unit tests
 
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
 # between the setup script and the test binary.
-# E2E_PROJECT_ID must be set explicitly — no default (project IDs are always user/team-specific)
+# E2E_PROJECT_ID, E2E_SA_PATH, and E2E_LOCATION must be set explicitly — no defaults.
 E2E_PROJECT_ID   ?=
+E2E_SA_PATH      ?=
+E2E_LOCATION     ?=
 E2E_PREFIX       ?= karpenter-e2e
 E2E_REGION       ?= us-central1
-E2E_ZONE         ?= $(E2E_REGION)-f
-E2E_SA_PATH      ?= karpenter-e2e-key.json
 E2E_CLUSTER_NAME ?= $(E2E_PREFIX)-cluster
 E2E_PODS_RANGE   ?= $(E2E_PREFIX)-pods
 
-e2e-setup: ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
+e2e-setup: require-e2e-vars ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
-	E2E_ZONE=$(E2E_ZONE) \
+	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-setup.sh
 
-e2e-deploy: ## Build image and (re)deploy karpenter onto an existing e2e cluster
+e2e-deploy: require-e2e-vars ## Build image and (re)deploy karpenter onto an existing e2e cluster
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
-	E2E_ZONE=$(E2E_ZONE) \
+	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-deploy.sh
 
-require-project-id: ## Fail fast if PROJECT_ID is not set
-	@test -n "$(PROJECT_ID)" || (echo "ERROR: PROJECT_ID is not set. Example: make e2e-tests PROJECT_ID=my-gcp-project" >&2 && exit 1)
+require-e2e-vars: ## Fail fast if required e2e variables are not set
+	@test -n "$(E2E_PROJECT_ID)"  || (echo "ERROR: E2E_PROJECT_ID is not set"  >&2 && exit 1)
+	@test -n "$(E2E_SA_PATH)"     || (echo "ERROR: E2E_SA_PATH is not set"     >&2 && exit 1)
+	@test -n "$(E2E_LOCATION)"    || (echo "ERROR: E2E_LOCATION is not set"    >&2 && exit 1)
 
 GINKGO_PROCS ?= 4
-e2e-tests: require-project-id ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
+e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
-	PROJECT_ID=$(PROJECT_ID) \
+	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
-	CLUSTER_LOCATION=$(E2E_ZONE) \
+	CLUSTER_LOCATION=$(E2E_LOCATION) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
 
 FOCUS ?=
 SUITE ?=
-e2e-test: require-project-id ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite-dir>)
+e2e-test: require-e2e-vars ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite-dir>)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
-	PROJECT_ID=$(PROJECT_ID) \
+	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
-	CLUSTER_LOCATION=$(E2E_ZONE) \
+	CLUSTER_LOCATION=$(E2E_LOCATION) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	go test -count 1 -timeout 30m -v \
 	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...) \
@@ -127,14 +131,14 @@ e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
-	E2E_ZONE=$(E2E_ZONE) \
+	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-teardown.sh
 
 e2e-check-clean: ## Report any orphaned e2e GCP resources (does not delete)
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
-	E2E_ZONE=$(E2E_ZONE) \
+	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-check-clean.sh
 
 coverage:

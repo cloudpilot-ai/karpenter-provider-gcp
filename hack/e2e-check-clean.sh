@@ -8,7 +8,7 @@
 #   E2E_PROJECT_ID  GCP project ID  (default: parsed from credentials)
 #   E2E_PREFIX      resource name prefix  (default: karpenter-e2e)
 #   E2E_REGION      GCP region            (default: us-central1)
-#   E2E_ZONE        GCP zone              (default: <region>-a)
+#   E2E_LOCATION    GCP location (zone or region)
 set -euo pipefail
 
 if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
@@ -27,9 +27,9 @@ if [ -z "${E2E_PROJECT_ID:-}" ]; then
     || { echo "ERROR: could not parse project_id from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
 fi
 
+: "${E2E_LOCATION:?E2E_LOCATION must be set (zone, e.g. us-central1-f, or region, e.g. us-central1)}"
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
-E2E_ZONE="${E2E_ZONE:-${E2E_REGION}-a}"
 
 CLUSTER_NAME="${E2E_PREFIX}-cluster"
 NETWORK_NAME="${E2E_PREFIX}-vpc"
@@ -50,7 +50,7 @@ echo "Checking for orphaned e2e resources in project ${E2E_PROJECT_ID}..." >&2
 
 # GKE cluster
 status="$(gcloud container clusters describe "${CLUSTER_NAME}" \
-  --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" \
+  --location "${E2E_LOCATION}" --project "${E2E_PROJECT_ID}" \
   --format='value(status)' 2>/dev/null || true)"
 if [ -n "${status}" ]; then
   report "GKE cluster" "${CLUSTER_NAME} (status=${status})"
@@ -59,7 +59,7 @@ fi
 # Compute instances (named "karpenter-<nodepool>-<suffix>")
 instances="$(gcloud compute instances list \
   --project "${E2E_PROJECT_ID}" \
-  --filter="name~^karpenter- AND zone:${E2E_ZONE}" \
+  --filter="name~^karpenter- AND zone:${E2E_LOCATION}" \
   --format='value(name,zone,status)' 2>/dev/null || true)"
 if [ -n "${instances}" ]; then
   while IFS= read -r line; do
@@ -70,7 +70,7 @@ fi
 # Orphaned disks (billed even when unattached)
 orphan_disks="$(gcloud compute disks list \
   --project "${E2E_PROJECT_ID}" \
-  --filter="zone:${E2E_ZONE} AND name~^karpenter- AND -users:*" \
+  --filter="zone:${E2E_LOCATION} AND name~^karpenter- AND -users:*" \
   --format='value(name,sizeGb,status)' 2>/dev/null || true)"
 if [ -n "${orphan_disks}" ]; then
   while IFS= read -r line; do

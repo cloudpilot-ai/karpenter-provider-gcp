@@ -9,7 +9,7 @@
 #   E2E_PROJECT_ID    GCP project ID        (default: parsed from credentials)
 #   E2E_PREFIX        resource name prefix  (default: karpenter-e2e)
 #   E2E_REGION        GCP region            (default: us-central1)
-#   E2E_ZONE          GCP zone              (default: <region>-a)
+#   E2E_LOCATION      GCP location (zone or region, e.g. us-central1-f or us-central1)
 #   E2E_MACHINE_TYPE  system node type      (default: n2-standard-2)
 set -euo pipefail
 
@@ -24,9 +24,9 @@ if [ -z "${E2E_PROJECT_ID:-}" ]; then
   log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
 fi
 
+: "${E2E_LOCATION:?E2E_LOCATION must be set (zone, e.g. us-central1-f, or region, e.g. us-central1)}"
 E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
 E2E_REGION="${E2E_REGION:-us-central1}"
-E2E_ZONE="${E2E_ZONE:-${E2E_REGION}-a}"
 E2E_MACHINE_TYPE="${E2E_MACHINE_TYPE:-n2-standard-2}"
 
 # Derived names — must match Makefile variables exactly.
@@ -131,7 +131,7 @@ gcloud artifacts repositories add-iam-policy-binding "${AR_REPO}" \
 
 # GKE cluster
 CLUSTER_STATUS="$(gcloud container clusters describe "${CLUSTER_NAME}" \
-  --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" \
+  --location "${E2E_LOCATION}" --project "${E2E_PROJECT_ID}" \
   --format='value(status)' 2>/dev/null || echo NOT_FOUND)"
 
 case "${CLUSTER_STATUS}" in
@@ -157,7 +157,7 @@ case "${CLUSTER_STATUS}" in
         exit 1
       fi
       CLUSTER_STATUS="$(gcloud container clusters describe "${CLUSTER_NAME}" \
-        --zone "${E2E_ZONE}" --project "${E2E_PROJECT_ID}" \
+        --location "${E2E_LOCATION}" --project "${E2E_PROJECT_ID}" \
         --format='value(status)' 2>/dev/null || echo NOT_FOUND)"
       log "  cluster status: ${CLUSTER_STATUS} (${WAIT_SECS}s elapsed)"
       [ "${CLUSTER_STATUS}" = "RUNNING" ] && break
@@ -167,7 +167,7 @@ case "${CLUSTER_STATUS}" in
   NOT_FOUND)
     log "Creating cluster ${CLUSTER_NAME} (this may take ~10 min)..."
     gcloud container clusters create "${CLUSTER_NAME}" \
-      --zone "${E2E_ZONE}" \
+      --location "${E2E_LOCATION}" \
       --project "${E2E_PROJECT_ID}" \
       --network "${NETWORK_NAME}" \
       --subnetwork "${SUBNET_NAME}" \
@@ -191,7 +191,7 @@ esac
 
 log "Fetching cluster credentials..."
 gcloud container clusters get-credentials "${CLUSTER_NAME}" \
-  --zone "${E2E_ZONE}" \
+  --location "${E2E_LOCATION}" \
   --project "${E2E_PROJECT_ID}" \
   --quiet
 
@@ -212,7 +212,7 @@ GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS}" \
 E2E_PROJECT_ID="${E2E_PROJECT_ID}" \
 E2E_PREFIX="${E2E_PREFIX}" \
 E2E_REGION="${E2E_REGION}" \
-E2E_ZONE="${E2E_ZONE}" \
+E2E_LOCATION="${E2E_LOCATION}" \
   "${REPO_ROOT}/hack/e2e-deploy.sh"
 
 log ""
