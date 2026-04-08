@@ -44,7 +44,7 @@ var _ = Describe("Drift", func() {
 })
 
 func runDriftTest(ctx context.Context, tc environment.TestCase) {
-	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-drift"
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "drift")
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 

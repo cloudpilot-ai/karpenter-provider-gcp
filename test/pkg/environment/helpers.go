@@ -68,14 +68,15 @@ func UniqueSuffix() string {
 	return fmt.Sprintf("%06x", rand.Uint32()&0xffffff)
 }
 
-// TestPrefix returns a short, human-readable prefix encoding the architecture
-// and capacity type, e.g. "amd64-od" or "arm64-spot".
-func TestPrefix(arch, capacityType string) string {
+// TestPrefix returns a human-readable prefix for test resource names. The arch
+// and capacityType are always included; additional parts (e.g. suite name) are
+// appended as extra dash-separated segments.
+func TestPrefix(arch, capacityType string, parts ...string) string {
 	ct := "od"
 	if capacityType == karpv1.CapacityTypeSpot {
 		ct = "spot"
 	}
-	return arch + "-" + ct
+	return strings.Join(append([]string{arch, ct}, parts...), "-")
 }
 
 // CreateNodeClass creates a GCENodeClass with ContainerOptimizedOS image and a

@@ -46,7 +46,7 @@ var _ = Describe("GarbageCollection", func() {
 })
 
 func runGCTest(ctx context.Context, tc environment.TestCase) {
-	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-gc"
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "gc")
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 

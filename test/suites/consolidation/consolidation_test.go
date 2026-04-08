@@ -42,7 +42,7 @@ var _ = Describe("Consolidation", func() {
 })
 
 func runConsolidationTest(ctx context.Context, tc environment.TestCase) {
-	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-consolidation"
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "consolidation")
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 

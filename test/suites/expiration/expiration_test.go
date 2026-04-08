@@ -43,7 +43,7 @@ var _ = Describe("Expiration", func() {
 })
 
 func runExpirationTest(ctx context.Context, tc environment.TestCase) {
-	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-expiration"
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "expiration")
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 
