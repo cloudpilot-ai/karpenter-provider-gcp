@@ -46,29 +46,26 @@ var _ = Describe("Drift", func() {
 func runDriftTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-drift"
 	suffix := environment.UniqueSuffix()
-	nodeClassName := prefix + "-nc-" + suffix
-	nodePoolName := prefix + "-np-" + suffix
-	deployName := prefix + "-dep-" + suffix
-	appLabel := prefix + "-" + suffix
+	name := prefix + "-" + suffix
 
 	GinkgoWriter.Printf("[setup] drift arch=%s capacityType=%s nodePool=%s\n",
-		tc.Arch, tc.CapacityType, nodePoolName)
+		tc.Arch, tc.CapacityType, name)
 
 	var firstNodeName string
 	DeferCleanup(func(ctx context.Context) {
-		env.DeleteDeployment(ctx, deployName)
-		env.DeleteNodePool(ctx, nodePoolName)
-		env.DeleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, name)
+		env.DeleteNodePool(ctx, name)
+		env.DeleteNodeClass(ctx, name)
 		if firstNodeName != "" {
 			_ = env.WaitForNodeRemoval(ctx, firstNodeName)
 		}
 	})
 
-	env.CreateNodeClass(ctx, nodeClassName)
-	env.CreateNodePool(ctx, nodePoolName, nodeClassName, tc)
-	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
+	env.CreateNodeClass(ctx, name)
+	env.CreateNodePool(ctx, name, name, tc)
+	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
-	firstPod := env.WaitForRunningPod(ctx, appLabel)
+	firstPod := env.WaitForRunningPod(ctx, name)
 	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
 	firstNodeName = firstPod.Spec.NodeName
 
@@ -89,11 +86,11 @@ func runDriftTest(ctx context.Context, tc environment.TestCase) {
 		}
 	}
 	Expect(remaining).NotTo(BeEmpty(), "no remaining instance types after excluding %s", provisionedType)
-	env.UpdateNodePoolInstanceTypes(ctx, nodePoolName, remaining)
+	env.UpdateNodePoolInstanceTypes(ctx, name, remaining)
 
 	GinkgoWriter.Printf("[drift] NodePool updated; waiting for replacement on one of %v...\n", remaining)
 
-	replacementPod := env.WaitForPodOnDifferentNode(ctx, appLabel, firstNodeName, environment.ReplacementTimeout)
+	replacementPod := env.WaitForPodOnDifferentNode(ctx, name, firstNodeName, environment.ReplacementTimeout)
 	Expect(replacementPod.Spec.NodeName).NotTo(Equal(firstNodeName))
 
 	// Replacement node must use one of the remaining (non-drifted) instance types.

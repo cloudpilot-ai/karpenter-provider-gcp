@@ -20,9 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"math/rand/v2"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -64,17 +63,9 @@ type TestCase struct {
 	InstanceTypes []string
 }
 
-// suffixCounter makes UniqueSuffix safe under ginkgo --procs N.
-var suffixCounter atomic.Int64
-
-// UniqueSuffix returns a suffix that is unique across parallel Ginkgo processes
-// and across sequential specs within a process, safe for use in k8s names.
+// UniqueSuffix returns a 6-character random hex string safe for use in k8s names.
 func UniqueSuffix() string {
-	n := suffixCounter.Add(1)
-	proc := GinkgoParallelProcess()
-	return fmt.Sprintf("p%sc%s",
-		strconv.FormatInt(int64(proc), 36),
-		strconv.FormatInt(n, 36))
+	return fmt.Sprintf("%06x", rand.Uint32()&0xffffff)
 }
 
 // TestPrefix returns a short, human-readable prefix encoding the architecture

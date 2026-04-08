@@ -45,10 +45,7 @@ var _ = Describe("Expiration", func() {
 func runExpirationTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-exp"
 	suffix := environment.UniqueSuffix()
-	nodeClassName := prefix + "-nc-" + suffix
-	nodePoolName := prefix + "-np-" + suffix
-	deployName := prefix + "-dep-" + suffix
-	appLabel := prefix + "-" + suffix
+	name := prefix + "-" + suffix
 
 	// expireAfter must be longer than GCP provisioning time (~1.5m) so the first
 	// node has time to register and the pod to run before the expiry fires.
@@ -56,25 +53,25 @@ func runExpirationTest(ctx context.Context, tc environment.TestCase) {
 	const expireAfter = "3m"
 
 	GinkgoWriter.Printf("[setup] expiration arch=%s capacityType=%s nodePool=%s expireAfter=%s\n",
-		tc.Arch, tc.CapacityType, nodePoolName, expireAfter)
+		tc.Arch, tc.CapacityType, name, expireAfter)
 
 	var firstNodeName string
 	DeferCleanup(func(ctx context.Context) {
-		env.DeleteDeployment(ctx, deployName)
-		env.DeleteNodePool(ctx, nodePoolName)
-		env.DeleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, name)
+		env.DeleteNodePool(ctx, name)
+		env.DeleteNodeClass(ctx, name)
 		if firstNodeName != "" {
 			_ = env.WaitForNodeRemoval(ctx, firstNodeName)
 		}
 	})
 
-	env.CreateNodeClass(ctx, nodeClassName)
-	env.CreateNodePoolWithExpiry(ctx, nodePoolName, nodeClassName, tc, expireAfter)
-	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
+	env.CreateNodeClass(ctx, name)
+	env.CreateNodePoolWithExpiry(ctx, name, name, tc, expireAfter)
+	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
 	// Wait for the first pod to be running — the node is already expired at
 	// this point so karpenter starts a replacement shortly after.
-	firstPod := env.WaitForRunningPod(ctx, appLabel)
+	firstPod := env.WaitForRunningPod(ctx, name)
 	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
 	firstNodeName = firstPod.Spec.NodeName
 
@@ -82,7 +79,7 @@ func runExpirationTest(ctx context.Context, tc environment.TestCase) {
 
 	// Budget covers the full replacement cycle: karpenter creates a new
 	// NodeClaim, provisions a new VM, pod migrates, old node is drained.
-	replacementPod := env.WaitForPodOnDifferentNode(ctx, appLabel, firstNodeName, environment.ReplacementTimeout)
+	replacementPod := env.WaitForPodOnDifferentNode(ctx, name, firstNodeName, environment.ReplacementTimeout)
 	Expect(replacementPod.Spec.NodeName).NotTo(Equal(firstNodeName))
 
 	GinkgoWriter.Printf("[expiration] replacement node: %s\n", replacementPod.Spec.NodeName)
@@ -90,7 +87,7 @@ func runExpirationTest(ctx context.Context, tc environment.TestCase) {
 	node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, replacementPod.Spec.NodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(environment.IsNodeReady(node)).To(BeTrue(), "replacement node %s is not Ready", node.Name)
-	Expect(node.Labels[karpv1.NodePoolLabelKey]).To(Equal(nodePoolName))
+	Expect(node.Labels[karpv1.NodePoolLabelKey]).To(Equal(name))
 
 	// karpenter drains and terminates the expired node; no explicit test delete is needed.
 	Expect(env.WaitForNodeRemoval(ctx, firstNodeName)).To(Succeed())

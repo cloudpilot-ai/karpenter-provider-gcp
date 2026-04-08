@@ -44,37 +44,34 @@ var _ = Describe("Consolidation", func() {
 func runConsolidationTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-con"
 	suffix := environment.UniqueSuffix()
-	nodeClassName := prefix + "-nc-" + suffix
-	nodePoolName := prefix + "-np-" + suffix
-	deployName := prefix + "-dep-" + suffix
-	appLabel := prefix + "-" + suffix
+	name := prefix + "-" + suffix
 
 	GinkgoWriter.Printf("[setup] consolidation arch=%s capacityType=%s nodePool=%s\n",
-		tc.Arch, tc.CapacityType, nodePoolName)
+		tc.Arch, tc.CapacityType, name)
 
 	var provisionedNodeName string
 	DeferCleanup(func(ctx context.Context) {
-		env.DeleteDeployment(ctx, deployName)
-		env.DeleteNodePool(ctx, nodePoolName)
-		env.DeleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, name)
+		env.DeleteNodePool(ctx, name)
+		env.DeleteNodeClass(ctx, name)
 		if provisionedNodeName != "" {
 			// Node may already be gone if consolidation succeeded; ignore the error.
 			_ = env.WaitForNodeRemoval(ctx, provisionedNodeName)
 		}
 	})
 
-	env.CreateNodeClass(ctx, nodeClassName)
-	env.CreateNodePool(ctx, nodePoolName, nodeClassName, tc)
-	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
+	env.CreateNodeClass(ctx, name)
+	env.CreateNodePool(ctx, name, name, tc)
+	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
-	pod := env.WaitForRunningPod(ctx, appLabel)
+	pod := env.WaitForRunningPod(ctx, name)
 	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 	provisionedNodeName = pod.Spec.NodeName
 
 	GinkgoWriter.Printf("[consolidation] node provisioned: %s; scaling deployment to 0\n", provisionedNodeName)
 
 	// Empty the node — karpenter should consolidate it within consolidateAfter + VM deletion time.
-	env.ScaleDeployment(ctx, deployName, 0)
+	env.ScaleDeployment(ctx, name, 0)
 
 	GinkgoWriter.Printf("[consolidation] waiting for node %s to be removed...\n", provisionedNodeName)
 	Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
@@ -88,7 +85,7 @@ func runConsolidationTest(ctx context.Context, tc environment.TestCase) {
 	claims, err := env.ListNodeClaims(ctx)
 	Expect(err).NotTo(HaveOccurred())
 	for _, c := range claims {
-		Expect(c.GetLabels()[karpv1.NodePoolLabelKey]).NotTo(Equal(nodePoolName),
-			"unexpected NodeClaim for nodePool %s after consolidation", nodePoolName)
+		Expect(c.GetLabels()[karpv1.NodePoolLabelKey]).NotTo(Equal(name),
+			"unexpected NodeClaim for nodePool %s after consolidation", name)
 	}
 }

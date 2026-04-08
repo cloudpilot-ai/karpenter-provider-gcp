@@ -34,31 +34,28 @@ import (
 func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType)
 	suffix := environment.UniqueSuffix()
-	nodeClassName := prefix + "-nc-" + suffix
-	nodePoolName := prefix + "-np-" + suffix
-	deployName := prefix + "-dep-" + suffix
-	appLabel := prefix + "-" + suffix
+	name := prefix + "-" + suffix
 
 	GinkgoWriter.Printf("[setup] arch=%s capacityType=%s nodePool=%s\n",
-		tc.Arch, tc.CapacityType, nodePoolName)
+		tc.Arch, tc.CapacityType, name)
 
 	initialNodes := env.AllNodeNames(ctx)
 
 	var provisionedNodeName string
 	DeferCleanup(func(ctx context.Context) {
-		env.DeleteDeployment(ctx, deployName)
-		env.DeleteNodePool(ctx, nodePoolName)
-		env.DeleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, name)
+		env.DeleteNodePool(ctx, name)
+		env.DeleteNodeClass(ctx, name)
 		if provisionedNodeName != "" {
 			Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
 		}
 	})
 
-	env.CreateNodeClass(ctx, nodeClassName)
-	env.CreateNodePool(ctx, nodePoolName, nodeClassName, tc)
-	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
+	env.CreateNodeClass(ctx, name)
+	env.CreateNodePool(ctx, name, name, tc)
+	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
-	pod := env.WaitForRunningPod(ctx, appLabel)
+	pod := env.WaitForRunningPod(ctx, name)
 	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 
 	node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
@@ -69,7 +66,7 @@ func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
 	Expect(existedBefore).To(BeFalse(), "expected a newly provisioned node, got a pre-existing one")
 	Expect(environment.IsNodeReady(node)).To(BeTrue(), "node %s is not Ready", node.Name)
 	Expect(node.Labels[karpv1.NodeRegisteredLabelKey]).To(Equal("true"))
-	Expect(node.Labels[karpv1.NodePoolLabelKey]).To(Equal(nodePoolName))
+	Expect(node.Labels[karpv1.NodePoolLabelKey]).To(Equal(name))
 	Expect(node.Labels[karpv1.CapacityTypeLabelKey]).To(Equal(tc.CapacityType))
 	Expect(node.Labels[corev1.LabelArchStable]).To(Equal(tc.Arch))
 	Expect(tc.Families).To(ContainElement(node.Labels[gcpv1alpha1.LabelInstanceFamily]))

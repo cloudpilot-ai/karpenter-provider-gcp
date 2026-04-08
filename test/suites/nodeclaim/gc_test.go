@@ -48,32 +48,29 @@ var _ = Describe("GarbageCollection", func() {
 func runGCTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-gc"
 	suffix := environment.UniqueSuffix()
-	nodeClassName := prefix + "-nc-" + suffix
-	nodePoolName := prefix + "-np-" + suffix
-	deployName := prefix + "-dep-" + suffix
-	appLabel := prefix + "-" + suffix
+	name := prefix + "-" + suffix
 
 	GinkgoWriter.Printf("[setup] gc arch=%s capacityType=%s nodePool=%s\n",
-		tc.Arch, tc.CapacityType, nodePoolName)
+		tc.Arch, tc.CapacityType, name)
 
 	var (
 		provisionedNodeName string
 		providerID          string
 	)
 	DeferCleanup(func(ctx context.Context) {
-		env.DeleteDeployment(ctx, deployName)
-		env.DeleteNodePool(ctx, nodePoolName)
-		env.DeleteNodeClass(ctx, nodeClassName)
+		env.DeleteDeployment(ctx, name)
+		env.DeleteNodePool(ctx, name)
+		env.DeleteNodeClass(ctx, name)
 		if provisionedNodeName != "" {
 			_ = env.WaitForNodeRemoval(ctx, provisionedNodeName)
 		}
 	})
 
-	env.CreateNodeClass(ctx, nodeClassName)
-	env.CreateNodePool(ctx, nodePoolName, nodeClassName, tc)
-	env.CreateDeployment(ctx, deployName, appLabel, nodePoolName, tc.Arch)
+	env.CreateNodeClass(ctx, name)
+	env.CreateNodePool(ctx, name, name, tc)
+	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
-	pod := env.WaitForRunningPod(ctx, appLabel)
+	pod := env.WaitForRunningPod(ctx, name)
 	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 	provisionedNodeName = pod.Spec.NodeName
 
@@ -99,8 +96,8 @@ func runGCTest(ctx context.Context, tc environment.TestCase) {
 	GinkgoWriter.Printf("[gc] force-deleting NodeClaim %s to orphan the VM\n", nodeClaimName)
 
 	// Remove the NodePool and Deployment first so Karpenter does not reprovision.
-	env.DeleteDeployment(ctx, deployName)
-	env.DeleteNodePool(ctx, nodePoolName)
+	env.DeleteDeployment(ctx, name)
+	env.DeleteNodePool(ctx, name)
 
 	// Force-delete the NodeClaim: remove finalizer then delete.
 	// This leaves the GCE VM running without any NodeClaim owner.
