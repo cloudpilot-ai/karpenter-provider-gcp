@@ -14,7 +14,7 @@ KO_DOCKER_REPO ?= ko.local
 KOCACHE ?= ~/.ko
 
 # GCP Cluster Context
-PROJECT_ID ?= karpenter-provider-gcp
+# PROJECT_ID must be set explicitly — no default (project IDs are always personal/team-specific)
 CLUSTER_NAME ?= karpenter-provider-gcp
 REGION ?= us-central1
 
@@ -76,6 +76,8 @@ ut-test: ## Run unit tests
 
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
 # between the setup script and the test binary.
+# E2E_PROJECT_ID must be set explicitly — no default (project IDs are always user/team-specific)
+E2E_PROJECT_ID   ?=
 E2E_PREFIX       ?= karpenter-e2e
 E2E_REGION       ?= us-central1
 E2E_ZONE         ?= $(E2E_REGION)-f
@@ -85,7 +87,6 @@ E2E_PODS_RANGE   ?= $(E2E_PREFIX)-pods
 
 e2e-setup: ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
-	E2E_PROJECT_ID=$(PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_ZONE=$(E2E_ZONE) \
@@ -93,14 +94,16 @@ e2e-setup: ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
 
 e2e-deploy: ## Build image and (re)deploy karpenter onto an existing e2e cluster
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
-	E2E_PROJECT_ID=$(PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_ZONE=$(E2E_ZONE) \
 	./hack/e2e-deploy.sh
 
+require-project-id: ## Fail fast if PROJECT_ID is not set
+	@test -n "$(PROJECT_ID)" || (echo "ERROR: PROJECT_ID is not set. Example: make e2e-tests PROJECT_ID=my-gcp-project" >&2 && exit 1)
+
 GINKGO_PROCS ?= 4
-e2e-tests: ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
+e2e-tests: require-project-id ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -110,7 +113,7 @@ e2e-tests: ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
 
 FOCUS ?=
 SUITE ?=
-e2e-test: ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite-dir>)
+e2e-test: require-project-id ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite-dir>)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -122,7 +125,6 @@ e2e-test: ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite
 
 e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
-	E2E_PROJECT_ID=$(PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_ZONE=$(E2E_ZONE) \
@@ -130,7 +132,6 @@ e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
 
 e2e-check-clean: ## Report any orphaned e2e GCP resources (does not delete)
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
-	E2E_PROJECT_ID=$(PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_ZONE=$(E2E_ZONE) \
@@ -151,7 +152,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 
