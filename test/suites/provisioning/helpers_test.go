@@ -32,7 +32,7 @@ import (
 // runProvisioningTest creates a NodePool/NodeClass/Deployment, waits for a pod to run
 // on a newly provisioned node, and asserts the node carries the expected labels.
 func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
-	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType)
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType) + "-provisioning"
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 
