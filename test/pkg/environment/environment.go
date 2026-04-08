@@ -139,7 +139,7 @@ func NewEnvironment() *Environment {
 		))
 	}
 
-	env.waitForControllerReady(initCtx)
+	env.waitForControllerReady()
 	return env
 }
 
@@ -242,8 +242,8 @@ func (e *Environment) ListNodeClaims(ctx context.Context) ([]unstructured.Unstru
 // waitForControllerReady polls until the karpenter Deployment has all replicas
 // available and both GKE template node pools are RUNNING.
 // The Deployment was installed by e2e-setup.sh via Helm.
-func (e *Environment) waitForControllerReady(ctx context.Context) {
-	deployCtx, deployCancel := context.WithTimeout(ctx, ControllerStartTimeout)
+func (e *Environment) waitForControllerReady() {
+	deployCtx, deployCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
 	defer deployCancel()
 
 	Eventually(func(g Gomega) {
@@ -261,7 +261,7 @@ func (e *Environment) waitForControllerReady(ctx context.Context) {
 	// returns an empty map and every provisioning attempt fails immediately.
 	// Both pools are checked in a single Eventually so they poll concurrently
 	// rather than blocking sequentially on each one.
-	poolCtx, poolCancel := context.WithTimeout(ctx, NodePoolReadyTimeout)
+	poolCtx, poolCancel := context.WithTimeout(context.Background(), NodePoolReadyTimeout)
 	defer poolCancel()
 	Eventually(func(g Gomega) {
 		for _, poolName := range []string{"karpenter-default", "karpenter-ubuntu"} {
