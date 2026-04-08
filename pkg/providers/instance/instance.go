@@ -667,6 +667,24 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
 
+	// Configure Shielded VM options
+	if nodeClass.Spec.ShieldedInstanceConfig != nil {
+		sic := nodeClass.Spec.ShieldedInstanceConfig
+		instance.ShieldedInstanceConfig = &compute.ShieldedInstanceConfig{}
+		if sic.EnableSecureBoot != nil {
+			instance.ShieldedInstanceConfig.EnableSecureBoot = *sic.EnableSecureBoot
+			instance.ShieldedInstanceConfig.ForceSendFields = append(instance.ShieldedInstanceConfig.ForceSendFields, "EnableSecureBoot")
+		}
+		if sic.EnableVtpm != nil {
+			instance.ShieldedInstanceConfig.EnableVtpm = *sic.EnableVtpm
+			instance.ShieldedInstanceConfig.ForceSendFields = append(instance.ShieldedInstanceConfig.ForceSendFields, "EnableVtpm")
+		}
+		if sic.EnableIntegrityMonitoring != nil {
+			instance.ShieldedInstanceConfig.EnableIntegrityMonitoring = *sic.EnableIntegrityMonitoring
+			instance.ShieldedInstanceConfig.ForceSendFields = append(instance.ShieldedInstanceConfig.ForceSendFields, "EnableIntegrityMonitoring")
+		}
+	}
+
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
 

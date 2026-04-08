@@ -357,6 +357,23 @@ spec:
                   assign to the instance
                 pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
                 type: string
+              shieldedInstanceConfig:
+                description: ShieldedInstanceConfig is the Shielded VM configuration
+                  for the instance.
+                properties:
+                  enableIntegrityMonitoring:
+                    description: EnableIntegrityMonitoring defines whether the instance
+                      has integrity monitoring enabled.
+                    type: boolean
+                  enableSecureBoot:
+                    description: EnableSecureBoot defines whether the instance has
+                      Secure Boot enabled.
+                    type: boolean
+                  enableVtpm:
+                    description: EnableVtpm defines whether the instance has the vTPM
+                      enabled.
+                    type: boolean
+                type: object
               subnetRangeName:
                 description: |-
                   SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
