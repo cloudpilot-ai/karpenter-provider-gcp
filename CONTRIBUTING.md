@@ -115,6 +115,19 @@ export E2E_LOCATION=<zone-or-region>   # e.g. us-central1-f or us-central1
 
 `E2E_REGION` (default: `us-central1`) and `E2E_PREFIX` (default: `karpenter-e2e`) can be overridden if needed. `E2E_REGION` must match the region of `E2E_LOCATION` when using a zonal location.
 
+### Required permissions
+
+The service account pointed to by `E2E_SA_PATH` must have the following IAM roles on the project:
+
+| Role | Why needed |
+|------|------------|
+| `roles/container.admin` | Create/delete/describe GKE clusters |
+| `roles/compute.networkAdmin` | Create/delete VPC and subnet |
+| `roles/compute.viewer` | List instances and disks (e2e-check-clean) |
+| `roles/iam.serviceAccountAdmin` | Create/delete the karpenter service account |
+| `roles/resourcemanager.projectIamAdmin` | Bind roles to the karpenter service account |
+| `roles/artifactregistry.admin` | Create/delete Artifact Registry repo and push images |
+
 ### One-time cluster setup
 
 ```bash
