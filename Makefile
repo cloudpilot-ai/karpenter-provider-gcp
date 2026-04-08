@@ -22,9 +22,6 @@ REGION ?= us-central1
 MOD_DIRS = $(shell find . -path "./website" -prune -o -name go.mod -type f -print | xargs dirname)
 KARPENTER_CORE_DIR = $(shell go list -m -f '{{ .Dir }}' sigs.k8s.io/karpenter)
 
-# TEST_SUITE enables you to select a specific test suite directory to run "make e2etests" against
-TEST_SUITE ?= "..."
-
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
@@ -77,6 +74,68 @@ ut-test: ## Run unit tests
 	go test ./pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
+# E2E configuration — names are derived from E2E_PREFIX to stay consistent
+# between the setup script and the test binary.
+E2E_PREFIX       ?= karpenter-e2e
+E2E_REGION       ?= us-central1
+E2E_ZONE         ?= $(E2E_REGION)-f
+E2E_SA_PATH      ?= karpenter-e2e-key.json
+E2E_CLUSTER_NAME ?= $(E2E_PREFIX)-cluster
+E2E_PODS_RANGE   ?= $(E2E_PREFIX)-pods
+
+e2e-setup: ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
+	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(PROJECT_ID) \
+	E2E_PREFIX=$(E2E_PREFIX) \
+	E2E_REGION=$(E2E_REGION) \
+	E2E_ZONE=$(E2E_ZONE) \
+	./hack/e2e-setup.sh
+
+e2e-deploy: ## Build image and (re)deploy karpenter onto an existing e2e cluster
+	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(PROJECT_ID) \
+	E2E_PREFIX=$(E2E_PREFIX) \
+	E2E_REGION=$(E2E_REGION) \
+	E2E_ZONE=$(E2E_ZONE) \
+	./hack/e2e-deploy.sh
+
+GINKGO_PROCS ?= 4
+e2e-tests: ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
+	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
+	PROJECT_ID=$(PROJECT_ID) \
+	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
+	CLUSTER_LOCATION=$(E2E_ZONE) \
+	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
+	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
+
+FOCUS ?=
+SUITE ?=
+e2e-test: ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite-dir>)
+	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
+	PROJECT_ID=$(PROJECT_ID) \
+	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
+	CLUSTER_LOCATION=$(E2E_ZONE) \
+	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
+	go test -count 1 -timeout 30m -v \
+	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...) \
+	-args -ginkgo.focus="$(FOCUS)" -ginkgo.v
+
+e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
+	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(PROJECT_ID) \
+	E2E_PREFIX=$(E2E_PREFIX) \
+	E2E_REGION=$(E2E_REGION) \
+	E2E_ZONE=$(E2E_ZONE) \
+	./hack/e2e-teardown.sh
+
+e2e-check-clean: ## Report any orphaned e2e GCP resources (does not delete)
+	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	E2E_PROJECT_ID=$(PROJECT_ID) \
+	E2E_PREFIX=$(E2E_PREFIX) \
+	E2E_REGION=$(E2E_REGION) \
+	E2E_ZONE=$(E2E_ZONE) \
+	./hack/e2e-check-clean.sh
+
 coverage:
 	go tool cover -html coverage.out -o coverage.html
 
@@ -92,7 +151,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 
