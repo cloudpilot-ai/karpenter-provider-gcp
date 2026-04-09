@@ -34,6 +34,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass,
@@ -43,7 +44,12 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 	}
 
 	// Calculate disk configuration from GCENodeClass
-	bootDiskGiB, totalSSDGiB, localSSDCount := calculateDiskConfiguration(nodeClass, mt)
+	bootDiskGiB, totalSSDGiB, localSSDCount := calculateDiskConfigGiB(nodeClass, mt)
+	totalStorageGiB := totalSSDGiB
+	if totalSSDGiB == 0 {
+		totalStorageGiB = bootDiskGiB
+	}
+	totalStorageBytes := totalStorageGiB * 1024 * 1024 * 1024
 
 	reservedCPU, reservedMemory, evictionMemory, ephemeralEviction, ephemeralSystem := utils.ResolveReservedResource(
 		aws.StringValue(mt.Name),
@@ -79,7 +85,7 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 		Name:         aws.StringValue(mt.Name),
 		Requirements: computeRequirements(mt, offerings, region),
 		Offerings:    offerings,
-		Capacity:     computeCapacity(ctx, mt, nodeClass),
+		Capacity:     computeCapacity(ctx, mt, nodeClass, totalStorageBytes),
 		Overhead:     &overhead,
 	}
 
@@ -187,12 +193,12 @@ func extractArch(instanceTypePrefix string) string {
 	return "amd64"
 }
 
-func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass) corev1.ResourceList {
+func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass, totalStorageBytes int64) corev1.ResourceList {
 	resourceList := corev1.ResourceList{
 		corev1.ResourceCPU:              *cpu(mt),
 		corev1.ResourceMemory:           *memory(ctx, mt),
 		corev1.ResourcePods:             *resource.NewQuantity(int64(nodeClass.GetMaxPods()), resource.DecimalSI),
-		corev1.ResourceEphemeralStorage: *ephemeralStorage(mt, nodeClass),
+		corev1.ResourceEphemeralStorage: *resource.NewQuantity(totalStorageBytes, resource.BinarySI),
 		v1alpha1.ResourceNVIDIAGPU:      *resource.NewQuantity(int64(len(mt.GetAccelerators())), resource.DecimalSI),
 	}
 	return resourceList
@@ -208,19 +214,7 @@ func memory(ctx context.Context, mt *computepb.MachineType) *resource.Quantity {
 	return resource.NewQuantity(totalQuantity-int64(float64(totalQuantity)*osReservedPercent), resource.DecimalSI)
 }
 
-func ephemeralStorage(mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass) *resource.Quantity {
-	bootDiskGiB, totalSSDGiB, _ := calculateDiskConfiguration(nodeClass, mt)
-
-	// Total ephemeral storage is either local SSDs or boot disk
-	totalStorageGiB := totalSSDGiB
-	if totalSSDGiB == 0 {
-		totalStorageGiB = bootDiskGiB
-	}
-
-	return resource.NewQuantity(totalStorageGiB*1024*1024*1024, resource.BinarySI)
-}
-
-func calculateDiskConfiguration(nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType) (int64, int64, int64) {
+func calculateDiskConfigGiB(nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType) (int64, int64, int64) {
 	bootDiskGiB := int64(100) // Default boot disk size
 	totalSSDGiB := int64(0)
 	localSSDCount := int64(0)
@@ -240,12 +234,10 @@ func calculateDiskConfiguration(nodeClass *v1alpha1.GCENodeClass, mt *computepb.
 		return bootDiskGiB, totalSSDGiB, localSSDCount
 	}
 
-	// Fallback to machine type scratch disks if no nodeClass disk config
-	for _, disk := range mt.GetScratchDisks() {
-		if disk.DiskGb != nil {
-			totalSSDGiB += int64(*disk.DiskGb)
-			localSSDCount++
-		}
+	// Fallback to machine type bundled local SSDs if no nodeClass disk config
+	if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil && *bls.PartitionCount > 0 {
+		localSSDCount = int64(*bls.PartitionCount)
+		totalSSDGiB = localssd.TotalGiB(aws.StringValue(mt.Name), int(*bls.PartitionCount))
 	}
 	return bootDiskGiB, totalSSDGiB, localSSDCount
 }

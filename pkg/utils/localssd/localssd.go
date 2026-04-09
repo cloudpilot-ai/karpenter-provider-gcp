@@ -1,0 +1,73 @@
+/*
+Copyright 2025 The CloudPilot AI Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package localssd
+
+import "strings"
+
+// DefaultPartitionGiB is the standard NVMe local SSD partition size for most GCP machine families.
+const DefaultPartitionGiB int64 = 375
+
+type entry struct {
+	totalGiB   int64 // total SSD capacity; 0 = compute from partitions
+	perPartGiB int64 // per-partition GiB; 0 = use DefaultPartitionGiB
+}
+
+// table maps machine families (no "-") and specific machine types (contains "-") to their
+// local SSD sizing. Family entries override per-partition GiB; machine entries override the total
+// for machines where the Compute API returns a wrong PartitionCount.
+//
+// Source: https://github.com/Cyclenerd/google-cloud-pricing-cost-calculator/blob/master/build/gcp.yml
+// Cross-referenced with: https://cloud.google.com/compute/docs/disks/local-ssd
+var table = map[string]entry{
+	// z3 uses 3 TiB NVMe per partition; all other families use 375 GiB
+	"z3": {perPartGiB: 3000},
+
+	// c4d lssd variants: Compute API reports PartitionCount=1 but actual capacity differs
+	"c4d-highmem-8-lssd":  {totalGiB: 2250}, // 6 × 375 GiB
+	"c4d-highmem-16-lssd": {totalGiB: 3000}, // 8 × 375 GiB
+
+	// Bare-metal variants use 3000 GiB per partition (not 375 GiB)
+	"c4-highmem-288-lssd-metal":     {totalGiB: 18000}, // 6 × 3000 GiB
+	"c4-standard-288-lssd-metal":    {totalGiB: 18000}, // 6 × 3000 GiB
+	"z3-highmem-192-highlssd-metal": {totalGiB: 72000}, // 12 × 6000 GiB
+}
+
+// TotalGiB returns total local SSD capacity in GiB for the given machine type.
+// Machine-level total overrides take priority (for machines where the API reports a wrong
+// PartitionCount); otherwise falls back to partitionCount × per-family partition size.
+func TotalGiB(machineName string, partitionCount int) int64 {
+	if e, ok := table[machineName]; ok && e.totalGiB > 0 {
+		return e.totalGiB
+	}
+	if partitionCount <= 0 {
+		return 0
+	}
+	return int64(partitionCount) * partitionSizeGiB(machineName)
+}
+
+// partitionSizeGiB returns the GiB capacity of a single local SSD partition for the given
+// machine type, using a family-level override from table or DefaultPartitionGiB.
+func partitionSizeGiB(machineName string) int64 {
+	family := machineName
+	if i := strings.IndexByte(machineName, '-'); i > 0 {
+		family = machineName[:i]
+	}
+	if e, ok := table[family]; ok && e.perPartGiB > 0 {
+		return e.perPartGiB
+	}
+	return DefaultPartitionGiB
+}
