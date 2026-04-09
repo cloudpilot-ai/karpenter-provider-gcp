@@ -527,9 +527,12 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 			fmt.Errorf("all zones exhausted for instance type %s", instanceType.Name))
 	}
 
+	// For on-demand, randomly select a zone from those that satisfy the requirement,
+	// to spread load while still honoring topology constraints.
 	if capacityType == karpv1.CapacityTypeOnDemand {
 		return randomZone(zones), nil
 	}
+	// else for spot, choose the cheapest zone
 	return cheapestCompatibleZone(zones, reqs, instanceType.Offerings), nil
 }
 
