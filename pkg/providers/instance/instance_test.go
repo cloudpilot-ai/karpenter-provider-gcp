@@ -798,3 +798,101 @@ func TestSetupScheduling_DoesNotMutateTemplate(t *testing.T) {
 	require.Equal(t, "MIGRATE", template.Properties.Scheduling.OnHostMaintenance,
 		"original template fields must be unchanged")
 }
+
+func spotOrOnDemandNodeClaim() *karpv1.NodeClaim {
+	return &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      karpv1.CapacityTypeLabelKey,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand},
+					},
+				},
+			},
+		},
+	}
+}
+
+func onDemandNodeClaim() *karpv1.NodeClaim {
+	return &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      karpv1.CapacityTypeLabelKey,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{karpv1.CapacityTypeOnDemand},
+					},
+				},
+			},
+		},
+	}
+}
+
+func spotOffering() *cloudprovider.Offering {
+	return &cloudprovider.Offering{
+		Available: true,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeSpot),
+		),
+	}
+}
+
+func onDemandOffering() *cloudprovider.Offering {
+	return &cloudprovider.Offering{
+		Available: true,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+		),
+	}
+}
+
+func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	// on-demand-only: no spot offering — pre-fix buildInstance would recompute "on-demand" from this.
+	onDemandOnlyIT := &cloudprovider.InstanceType{
+		Name: "n2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\narch=amd64\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		&v1alpha1.GCENodeClass{},
+		onDemandOnlyIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-test",
+		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	require.Equal(t, "SPOT", instance.Scheduling.ProvisioningModel,
+		"buildInstance must use the passed capacityType, not recompute it from instanceType offerings")
+}
