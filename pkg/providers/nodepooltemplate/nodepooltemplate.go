@@ -129,6 +129,7 @@ func resolveZones(ctx context.Context, computeService *compute.Service, projectI
 	return zones, nil
 }
 
+// creating both default nodepool templates could be run concurrently
 func (p *DefaultProvider) Create(ctx context.Context) error {
 	if err := p.ensureKarpenterNodePoolTemplate(ctx, KarpenterDefaultNodePoolTemplateImageType, KarpenterDefaultNodePoolTemplate, p.defaultServiceAccount, ""); err != nil {
 		return err
@@ -314,6 +315,7 @@ func resolveInstanceTemplateName(instanceTemplateURL string) (string, error) {
 
 	parts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
 
+	// Look for the last part only if path contains "instanceTemplates"
 	for i := 0; i < len(parts)-1; i++ {
 		if parts[i] == "instanceTemplates" {
 			return parts[i+1], nil
@@ -331,10 +333,12 @@ func resolveInstanceGroupZoneAndManagerName(instanceGroupURL string) (string, st
 
 	parts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
 
+	// Ensure the path has enough components to extract zone and instance group manager name
 	if len(parts) < 8 || parts[4] != "zones" || parts[6] != "instanceGroupManagers" {
 		return "", "", fmt.Errorf("invalid instance group URL: %s", instanceGroupURL)
 	}
 
+	// Extract zone and instance group manager name
 	zone := parts[5]
 	instanceGroupManagerName := parts[7]
 
