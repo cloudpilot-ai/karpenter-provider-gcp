@@ -489,9 +489,6 @@ func cheapestCompatibleZone(zones []string, reqs scheduling.Requirements, offeri
 	cheapestPrice := math.MaxFloat64
 	zonesSet := sets.NewString(zones...)
 	for _, offering := range offerings {
-		if !offering.Available {
-			continue
-		}
 		if reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) != nil {
 			continue
 		}
@@ -521,6 +518,18 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 	// If no zones remain after applying requirements, fail fast.
 	if len(zones) == 0 {
 		return "", fmt.Errorf("no zones match topology requirement %q", corev1.LabelTopologyZone)
+	}
+
+	// Skip zones with known ICE for this instance type and capacity type.
+	// Without this filter, every retry calls MarkUnavailable and resets the
+	// 30-min TTL, preventing natural expiry. Applied to both on-demand and
+	// spot so both paths behave consistently.
+	zones = lo.Filter(zones, func(z string, _ int) bool {
+		return !p.unavailableOfferings.IsUnavailable(instanceType.Name, z, capacityType)
+	})
+	if len(zones) == 0 {
+		return "", cloudprovider.NewInsufficientCapacityError(
+			fmt.Errorf("all zones exhausted for instance type %s", instanceType.Name))
 	}
 
 	// For on-demand, randomly select a zone from those that satisfy the requirement,
