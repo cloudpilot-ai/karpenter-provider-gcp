@@ -162,14 +162,6 @@ make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
 
 Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`, `scheduling`, `networking`.
 
-**Disabled tests** — some specs are gated with `XIt` pending upstream PRs:
-
-| Suite | Spec | Waiting on |
-|-------|------|------------|
-| `provisioning` | arm64 on-demand / spot | #236 (arm64 native templates) |
-| `gc` | orphaned VM cleanup | stabilisation |
-| `networking` | private node (no external IP) | #229 (NetworkConfig / private nodes) |
-
 ### Tear down all e2e infrastructure
 
 ```bash
