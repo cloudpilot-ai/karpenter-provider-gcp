@@ -34,6 +34,8 @@ SUBNET_NAME="${E2E_PREFIX}-subnet"
 GSA_ID="${E2E_PREFIX}-karpenter"
 GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 AR_REPO="${E2E_PREFIX}-images"
+ROUTER_NAME="${E2E_PREFIX}-router"
+NAT_NAME="${E2E_PREFIX}-nat"
 
 gcloud auth activate-service-account \
   --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
@@ -109,6 +111,34 @@ if gcloud iam service-accounts describe "${GSA_EMAIL}" \
   gcloud iam service-accounts delete "${GSA_EMAIL}" \
     --project "${E2E_PROJECT_ID}" \
     --quiet
+fi
+
+# Cloud NAT — must be removed before the router and subnet.
+if gcloud compute routers nats describe "${NAT_NAME}" \
+    --router "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" &>/dev/null; then
+  log "Deleting Cloud NAT ${NAT_NAME}..."
+  gcloud compute routers nats delete "${NAT_NAME}" \
+    --router "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+else
+  log "Cloud NAT ${NAT_NAME} not found, skipping."
+fi
+
+# Cloud Router — must be removed before the subnet.
+if gcloud compute routers describe "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" &>/dev/null; then
+  log "Deleting Cloud Router ${ROUTER_NAME}..."
+  gcloud compute routers delete "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+else
+  log "Cloud Router ${ROUTER_NAME} not found, skipping."
 fi
 
 # GKE cluster deletion is async: even after the cluster API object disappears,

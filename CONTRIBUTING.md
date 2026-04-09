@@ -134,7 +134,9 @@ The service account pointed to by `E2E_SA_PATH` must have the following IAM role
 make e2e-setup
 ```
 
-This idempotently creates a GKE cluster, VPC, subnet, service account, IAM bindings, Artifact Registry repo, and deploys karpenter via Helm.
+This idempotently creates a GKE cluster, VPC, subnet, Cloud Router, Cloud NAT, service account, IAM bindings, Artifact Registry repo, and deploys karpenter via Helm.
+
+Cloud NAT is required for the `networking` suite: nodes provisioned with `enableExternalIPAccess: false` have no public IP and need NAT for outbound internet access.
 
 ### Deploy a new controller image
 
@@ -158,7 +160,15 @@ Runs all suites in parallel (default `GINKGO_PROCS=4`). Override with `GINKGO_PR
 make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
 ```
 
-Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`.
+Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`, `scheduling`, `networking`.
+
+**Disabled tests** — some specs are gated with `XIt` pending upstream PRs:
+
+| Suite | Spec | Waiting on |
+|-------|------|------------|
+| `provisioning` | arm64 on-demand / spot | #236 (arm64 native templates) |
+| `gc` | orphaned VM cleanup | stabilisation |
+| `networking` | private node (no external IP) | #229 (NetworkConfig / private nodes) |
 
 ### Tear down all e2e infrastructure
 

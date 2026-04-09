@@ -26,6 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -101,6 +102,45 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name string) {
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
 	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
+// CreateNodeClass but with networkConfig.networkInterfaces[0].enableExternalIPAccess
+// set to false, so Karpenter provisions nodes with no external (public) IP.
+func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, name string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+			"networkConfig": map[string]any{
+				"networkInterfaces": []any{
+					map[string]any{"enableExternalIPAccess": false},
+				},
+			},
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// GetGCEInstance fetches the GCE instance corresponding to the given node
+// provider ID (format: gce://<project>/<zone>/<name>).
+func (e *Environment) GetGCEInstance(ctx context.Context, providerID string) (*compute.Instance, error) {
+	project, zone, name, err := parseProviderID(providerID)
+	if err != nil {
+		return nil, err
+	}
+	return e.computeSvc.Instances.Get(project, zone, name).Context(ctx).Do()
 }
 
 // CreateNodePool creates a NodePool with the given requirements and the default

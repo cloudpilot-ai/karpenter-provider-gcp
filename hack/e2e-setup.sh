@@ -38,6 +38,8 @@ SERVICES_RANGE="${E2E_PREFIX}-services"
 GSA_ID="${E2E_PREFIX}-karpenter"
 GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 AR_REPO="${E2E_PREFIX}-images"
+ROUTER_NAME="${E2E_PREFIX}-router"
+NAT_NAME="${E2E_PREFIX}-nat"
 IMAGE_REPO="${E2E_REGION}-docker.pkg.dev/${E2E_PROJECT_ID}/${AR_REPO}/karpenter"
 
 PRIMARY_CIDR="10.0.0.0/20"
@@ -83,6 +85,40 @@ else
     --region "${E2E_REGION}" \
     --range "${PRIMARY_CIDR}" \
     --secondary-range "${PODS_RANGE}=${PODS_CIDR},${SERVICES_RANGE}=${SERVICES_CIDR}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+fi
+
+# Cloud Router (prerequisite for Cloud NAT)
+if gcloud compute routers describe "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" --project "${E2E_PROJECT_ID}" \
+    --format='value(name)' &>/dev/null; then
+  log "Reusing Cloud Router ${ROUTER_NAME}"
+else
+  log "Creating Cloud Router ${ROUTER_NAME}..."
+  gcloud compute routers create "${ROUTER_NAME}" \
+    --network "${NETWORK_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+fi
+
+# Cloud NAT — provides outbound internet access for private nodes (no external IP).
+# Required for nodes provisioned with enableExternalIPAccess: false to pull images
+# or reach GCP APIs that lack Private Google Access endpoints.
+if gcloud compute routers nats describe "${NAT_NAME}" \
+    --router "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" \
+    --format='value(name)' &>/dev/null; then
+  log "Reusing Cloud NAT ${NAT_NAME}"
+else
+  log "Creating Cloud NAT ${NAT_NAME}..."
+  gcloud compute routers nats create "${NAT_NAME}" \
+    --router "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --auto-allocate-nat-external-ips \
+    --nat-all-subnet-ip-ranges \
     --project "${E2E_PROJECT_ID}" \
     --quiet
 fi

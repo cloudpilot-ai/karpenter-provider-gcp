@@ -37,6 +37,8 @@ SUBNET_NAME="${E2E_PREFIX}-subnet"
 GSA_ID="${E2E_PREFIX}-karpenter"
 GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 AR_REPO="${E2E_PREFIX}-images"
+ROUTER_NAME="${E2E_PREFIX}-router"
+NAT_NAME="${E2E_PREFIX}-nat"
 
 found=0
 
@@ -89,6 +91,23 @@ fi
 if gcloud iam service-accounts describe "${GSA_EMAIL}" \
     --project "${E2E_PROJECT_ID}" &>/dev/null; then
   report "Service account" "${GSA_EMAIL}"
+fi
+
+# Cloud NAT
+if gcloud compute routers nats describe "${NAT_NAME}" \
+    --router "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" \
+    &>/dev/null; then
+  report "Cloud NAT" "${NAT_NAME} on router ${ROUTER_NAME} in ${E2E_REGION}"
+fi
+
+# Cloud Router
+if gcloud compute routers describe "${ROUTER_NAME}" \
+    --region "${E2E_REGION}" \
+    --project "${E2E_PROJECT_ID}" \
+    &>/dev/null; then
+  report "Cloud Router" "${ROUTER_NAME} in ${E2E_REGION}"
 fi
 
 # Subnet
