@@ -40,8 +40,12 @@ const (
 	vmMemoryOverheadPercentFlagName   = "vm-memory-overhead-percent"
 	gkeEnableInterruption             = "INTERRUPTION"
 	GCPAuth                           = "GOOGLE_APPLICATION_CREDENTIALS"
+	nodePoolBootDiskKmsKeyEnvVarName  = "DEFAULT_NODEPOOL_BOOT_DISK_KMS_KEY"
+	nodePoolBootDiskKmsKeyFlagName    = "default-nodepool-boot-disk-kms-key"
 	nodePoolServiceAccountEnvVarName  = "DEFAULT_NODEPOOL_SERVICE_ACCOUNT"
 	nodePoolServiceAccountFlagName    = "default-nodepool-service-account"
+	nodePoolShieldedVMEnvVarName      = "DEFAULT_NODEPOOL_SHIELDED_VM"
+	nodePoolShieldedVMFlagName        = "default-nodepool-shielded-vm"
 )
 
 func init() {
@@ -59,7 +63,9 @@ type Options struct {
 	// GCPAuth is the path to the Google Application Credentials JSON file.
 	// https://cloud.google.com/docs/authentication/application-default-credentials
 	GCPAuth                string
+	NodePoolBootDiskKmsKey string
 	NodePoolServiceAccount string
+	NodePoolShieldedVM     bool
 	Interruption           bool
 }
 
@@ -70,7 +76,9 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.ClusterName, gkeClusterFlagName, env.WithDefaultString(gkeClusterNameEnvVarName, ""), "Name of the GKE cluster that provisioned nodes should connect to.")
 	fs.Float64Var(&o.VMMemoryOverheadPercent, vmMemoryOverheadPercentFlagName, utils.WithDefaultFloat64(vmMemoryOverheadPercentEnvVarName, 0.07), "Percentage of memory overhead for VM. If not set, the controller will use the default value 7%.")
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
+	fs.StringVar(&o.NodePoolBootDiskKmsKey, nodePoolBootDiskKmsKeyFlagName, env.WithDefaultString(nodePoolBootDiskKmsKeyEnvVarName, ""), "Cloud KMS key to use for boot disk encryption on default node pool templates. Format: projects/{project}/locations/{location}/keyRings/{keyring}/cryptoKeys/{key}")
 	fs.StringVar(&o.NodePoolServiceAccount, nodePoolServiceAccountFlagName, env.WithDefaultString(nodePoolServiceAccountEnvVarName, ""), "Service account to use for default node pool templates. If not set, uses <project number>-compute@developer.gserviceaccount.com")
+	fs.BoolVar(&o.NodePoolShieldedVM, nodePoolShieldedVMFlagName, env.WithDefaultBool(nodePoolShieldedVMEnvVarName, false), "Enable Shielded VM (Secure Boot) on default node pool templates.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }
 

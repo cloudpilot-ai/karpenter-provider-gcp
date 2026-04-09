@@ -74,11 +74,17 @@ controller:
     projectID: ""
     # -- The GCP region for instance type discovery (e.g., us-central1)
     clusterLocation: ""
+    # -- The GCP cluster name.
+    clusterName: ""
+    # -- Cloud KMS key for boot disk encryption on default node pool templates.
+    # Format: projects/{project}/locations/{location}/keyRings/{keyring}/cryptoKeys/{key}
+    defaultNodePoolBootDiskKmsKey: ""
+    # -- Enable Shielded VM (Secure Boot) on default node pool templates.
+    # Required when the compute.requireShieldedVm org policy is enforced.
+    defaultNodePoolShieldedVM: false
     # -- The exact GCP cluster location for GKE API calls (e.g., us-central1-a for zonal, us-central1 for regional).
     # If not set, defaults to 'clusterLocation' for backward compatibility.
     nodeLocation: ""
-    # -- The GCP cluster name.
-    clusterName: ""
     # -- The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%.
     vmMemoryOverheadPercent: 0.065
     # -- The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one

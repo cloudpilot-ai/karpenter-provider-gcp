@@ -53,6 +53,14 @@ spec:
               value: {{ .Values.controller.settings.projectID }}
             - name: CLUSTER_LOCATION
               value: {{ .Values.controller.settings.clusterLocation }}
+            {{- if .Values.controller.settings.defaultNodePoolBootDiskKmsKey }}
+            - name: DEFAULT_NODEPOOL_BOOT_DISK_KMS_KEY
+              value: {{ .Values.controller.settings.defaultNodePoolBootDiskKmsKey }}
+            {{- end }}
+            {{- if .Values.controller.settings.defaultNodePoolShieldedVM }}
+            - name: DEFAULT_NODEPOOL_SHIELDED_VM
+              value: "true"
+            {{- end }}
             {{- if .Values.controller.settings.nodeLocation }}
             - name: NODE_LOCATION
               value: {{ .Values.controller.settings.nodeLocation }}

@@ -40,9 +40,11 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	bootDiskKmsKey        string
 	computeService        *compute.Service
 	containerService      *container.Service
 	kubeClient            client.Client
+	shieldedVM            bool
 	versionProvider       version.Provider
 	ClusterInfo           ClusterInfo
 	defaultServiceAccount string
@@ -76,7 +78,8 @@ const arm64MachineType = "c4a-standard-1"
 
 func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
 	containerService *container.Service, versionProvider version.Provider,
-	clusterName, region, projectID, serviceAccount, clusterLocation, nodeLocation string) *DefaultProvider {
+	clusterName, region, projectID, serviceAccount, clusterLocation, nodeLocation, bootDiskKmsKey string,
+	shieldedVM bool) *DefaultProvider {
 
 	zones, err := resolveZones(ctx, computeService, projectID, region)
 	if err != nil {
@@ -85,9 +88,11 @@ func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeSe
 	}
 
 	return &DefaultProvider{
+		bootDiskKmsKey:        bootDiskKmsKey,
 		kubeClient:            kubeClient,
 		computeService:        computeService,
 		containerService:      containerService,
+		shieldedVM:            shieldedVM,
 		versionProvider:       versionProvider,
 		defaultServiceAccount: serviceAccount,
 		ClusterInfo: ClusterInfo{
@@ -181,11 +186,17 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 	}
 
 	nodeConfig := &container.NodeConfig{
+		BootDiskKmsKey: p.bootDiskKmsKey,
 		ImageType:      imageType,
 		ServiceAccount: serviceAccount,
 	}
 	if machineType != "" {
 		nodeConfig.MachineType = machineType
+	}
+	if p.shieldedVM {
+		nodeConfig.ShieldedInstanceConfig = &container.ShieldedInstanceConfig{
+			EnableSecureBoot: true,
+		}
 	}
 	nodePoolOpts := &container.CreateNodePoolRequest{
 		NodePool: &container.NodePool{
