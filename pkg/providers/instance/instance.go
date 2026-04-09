@@ -813,14 +813,16 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass,
 
 // setupScheduling configures scheduling for the instance
 func (p *DefaultProvider) setupScheduling(template *compute.InstanceTemplate, capacityType string) *compute.Scheduling {
-	sched := template.Properties.Scheduling
-	if sched == nil {
-		sched = &compute.Scheduling{}
+	// Copy the struct so we never mutate the shared template — the same template
+	// pointer is reused across zone and instance-type retries inside Create().
+	var sched compute.Scheduling
+	if template.Properties.Scheduling != nil {
+		sched = *template.Properties.Scheduling
 	}
 	if capacityType == karpv1.CapacityTypeSpot {
 		sched.InstanceTerminationAction = instanceTerminationActionDelete
 	}
-	return sched
+	return &sched
 }
 
 // initializeInstanceLabels initializes the instance labels map

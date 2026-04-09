@@ -572,3 +572,27 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
 	})
 }
+
+// TestSetupScheduling_DoesNotMutateTemplate guards against setupScheduling mutating the shared
+// template. The same template pointer is reused across zone and instance-type retries inside
+// Create(), so any in-place write to template.Properties.Scheduling would persist across
+// iterations and corrupt subsequent instances.
+func TestSetupScheduling_DoesNotMutateTemplate(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling: &compute.Scheduling{OnHostMaintenance: "MIGRATE"},
+		},
+	}
+
+	sched := p.setupScheduling(template, karpv1.CapacityTypeSpot)
+
+	require.Equal(t, instanceTerminationActionDelete, sched.InstanceTerminationAction,
+		"returned Scheduling must have InstanceTerminationAction set for spot")
+	require.Empty(t, template.Properties.Scheduling.InstanceTerminationAction,
+		"setupScheduling must not write to the original template Scheduling struct")
+	require.Equal(t, "MIGRATE", template.Properties.Scheduling.OnHostMaintenance,
+		"original template fields must be unchanged")
+}
