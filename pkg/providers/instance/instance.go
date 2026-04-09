@@ -378,7 +378,10 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		return instance, false, nil
 	}
 
-	instance = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
+	instance, err = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
+	if err != nil {
+		return nil, false, fmt.Errorf("building instance %s: %w", instanceName, err)
+	}
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
 		reason, reasonCode, insufficient := extractInsertInsufficientCapacityReason(err)
@@ -630,19 +633,17 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string) *compute.Instance {
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string) (*compute.Instance, error) {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to render disk properties")
-		return nil
+		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
 
 	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
 
 	// Setup metadata
 	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType); err != nil {
-		log.FromContext(context.Background()).Error(err, "failed to setup instance metadata")
-		return nil
+		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
 	// Setup service accounts
@@ -683,7 +684,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
 
-	return instance
+	return instance, nil
 }
 
 // nolint:gocyclo
