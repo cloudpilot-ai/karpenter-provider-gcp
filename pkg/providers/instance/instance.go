@@ -971,17 +971,38 @@ func (p *DefaultProvider) getZonesInRegion(ctx context.Context) ([]string, error
 }
 
 func (p *DefaultProvider) Delete(ctx context.Context, providerID string) error {
-	project, zone, instance, err := parseGCEProviderID(providerID)
+	project, zone, instanceName, err := parseGCEProviderID(providerID)
 	if err != nil {
 		return fmt.Errorf("parsing provider ID: %w", err)
 	}
 
-	log.FromContext(ctx).Info("Deleting instance", "project", project, "zone", zone, "instance", instance)
+	log.FromContext(ctx).Info("Deleting instance", "project", project, "zone", zone, "instance", instanceName)
 
-	op, err := p.computeService.Instances.Delete(project, zone, instance).Context(ctx).Do()
+	// Check current state before issuing a delete. This prevents sending multiple overlapping
+	// delete operations to GCE (which cause 403 rateLimitExceeded on repeated reconciles).
+	inst, err := p.computeService.Instances.Get(project, zone, instanceName).Context(ctx).Do()
 	if err != nil {
 		if isInstanceNotFoundError(err) {
-			log.FromContext(ctx).Info("Instance already deleted or not found", "instance", instance)
+			log.FromContext(ctx).Info("Instance already deleted", "instance", instanceName)
+			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
+		}
+		return fmt.Errorf("getting instance state before delete: %w", err)
+	}
+
+	switch inst.Status {
+	case InstanceStatusTerminated:
+		log.FromContext(ctx).Info("Instance already terminated", "instance", instanceName)
+		return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance %s is already %s", instanceName, inst.Status))
+	case InstanceStatusStopping:
+		// Delete already in flight; caller re-queues and rechecks.
+		log.FromContext(ctx).Info("Instance delete already in progress", "instance", instanceName)
+		return nil
+	}
+
+	op, err := p.computeService.Instances.Delete(project, zone, instanceName).Context(ctx).Do()
+	if err != nil {
+		if isInstanceNotFoundError(err) {
+			log.FromContext(ctx).Info("Instance disappeared before delete call", "instance", instanceName)
 			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
 		}
 		return fmt.Errorf("deleting instance: %w", err)
