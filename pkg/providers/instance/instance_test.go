@@ -849,6 +849,63 @@ func onDemandOffering() *cloudprovider.Offering {
 	}
 }
 
+func TestGetCapacityType(t *testing.T) {
+	t.Parallel()
+
+	onDemandOnly := &cloudprovider.InstanceType{
+		Offerings: cloudprovider.Offerings{onDemandOffering()},
+	}
+	withSpot := &cloudprovider.InstanceType{
+		Offerings: cloudprovider.Offerings{spotOffering(), onDemandOffering()},
+	}
+	exhaustedSpot := &cloudprovider.InstanceType{
+		Offerings: cloudprovider.Offerings{
+			{Available: false, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeSpot),
+			)},
+			onDemandOffering(),
+		},
+	}
+
+	tests := []struct {
+		name          string
+		nodeClaim     *karpv1.NodeClaim
+		instanceTypes []*cloudprovider.InstanceType
+		want          string
+	}{
+		{
+			// Spot is not the first type — confirms the loop scans all candidates.
+			name:          "returns spot when a later instance type has an available spot offering",
+			nodeClaim:     spotOrOnDemandNodeClaim(),
+			instanceTypes: []*cloudprovider.InstanceType{onDemandOnly, withSpot},
+			want:          karpv1.CapacityTypeSpot,
+		},
+		{
+			// All types have only exhausted or absent spot — confirms no false positive.
+			// Also validates that exhausted spot offerings (Available: false) are skipped.
+			name:          "falls back to on-demand when no available spot offerings exist",
+			nodeClaim:     spotOrOnDemandNodeClaim(),
+			instanceTypes: []*cloudprovider.InstanceType{exhaustedSpot, onDemandOnly},
+			want:          karpv1.CapacityTypeOnDemand,
+		},
+		{
+			// nodeClaim forbids spot; on-demand offering is present and must be selected.
+			name:          "respects on-demand-only node claim even when spot offerings exist",
+			nodeClaim:     onDemandNodeClaim(),
+			instanceTypes: []*cloudprovider.InstanceType{withSpot, onDemandOnly},
+			want:          karpv1.CapacityTypeOnDemand,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := &DefaultProvider{}
+			require.Equal(t, tt.want, p.getCapacityType(tt.nodeClaim, tt.instanceTypes))
+		})
+	}
+}
+
 func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 	t.Parallel()
 
