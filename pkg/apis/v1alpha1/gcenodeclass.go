@@ -82,6 +82,9 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:MaxItems=20
 	// +optional
 	NetworkTags []NetworkTag `json:"networkTags,omitempty"`
+	// ShieldedInstanceConfig is the Shielded VM configuration for the instance.
+	// +optional
+	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
@@ -233,6 +236,19 @@ type SecondaryBootDiskMode string
 // +kubebuilder:validation:MinLength=1
 // +kubebuilder:validation:MaxLength=63
 type NetworkTag string
+
+// ShieldedInstanceConfig defines the Shielded VM options for a GCE instance.
+type ShieldedInstanceConfig struct {
+	// EnableSecureBoot defines whether the instance has Secure Boot enabled.
+	// +optional
+	EnableSecureBoot *bool `json:"enableSecureBoot,omitempty"`
+	// EnableVtpm defines whether the instance has the vTPM enabled.
+	// +optional
+	EnableVtpm *bool `json:"enableVtpm,omitempty"`
+	// EnableIntegrityMonitoring defines whether the instance has integrity monitoring enabled.
+	// +optional
+	EnableIntegrityMonitoring *bool `json:"enableIntegrityMonitoring,omitempty"`
+}
 
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
