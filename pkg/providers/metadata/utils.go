@@ -208,8 +208,10 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 			return fmt.Errorf("kube-env metadata is empty")
 		}
 
-		updated := patchKubeEnvForArch(kubeEnv, arch)
-		updated = patchKubeEnvKeyValue(updated, kubeEnvArchRegex, "arch="+arch)
+		// Note: SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH are left untouched.
+		// They are set correctly per-architecture by GKE in the node pool template.
+		// Patching the URL without the corresponding hash causes bootstrap failures.
+		updated := patchKubeEnvKeyValue(kubeEnv, kubeEnvArchRegex, "arch="+arch)
 		if family != "" {
 			updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
 		}
@@ -229,18 +231,6 @@ func kubeEnvPatchTargets(instanceType *cloudprovider.InstanceType) (arch string,
 	}
 	family = instanceType.Requirements.Get(v1alpha1.LabelInstanceFamily).Any()
 	return arch, family
-}
-
-func patchKubeEnvForArch(kubeEnv, arch string) string {
-	// Fix server tarball URLs (GKE uses kubernetes-server-linux-<arch>.tar.gz).
-	switch arch {
-	case "arm64":
-		return strings.ReplaceAll(kubeEnv, "linux-amd64", "linux-arm64")
-	case "amd64":
-		return strings.ReplaceAll(kubeEnv, "linux-arm64", "linux-amd64")
-	default:
-		return kubeEnv
-	}
 }
 
 func patchKubeEnvKeyValue(kubeEnv string, re *regexp.Regexp, replacement string) string {
