@@ -383,7 +383,7 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		return instance, false, nil
 	}
 
-	instance, err = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName)
+	instance, err = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName, capacityType)
 	if err != nil {
 		return nil, false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
@@ -653,13 +653,11 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName string) (*compute.Instance, error) {
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName, capacityType string) (*compute.Instance, error) {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
-
-	capacityType := p.getCapacityType(nodeClaim, []*cloudprovider.InstanceType{instanceType})
 
 	// Setup metadata
 	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType); err != nil {
