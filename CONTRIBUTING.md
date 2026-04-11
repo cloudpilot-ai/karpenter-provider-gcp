@@ -98,5 +98,78 @@ This guides breaks down into two parts
 
 3. Once you have installed the CRDs, go ahead and install the karpenter by running the below command
     ```
-    make run 
+    make run
     ```
+
+## End-to-end tests
+
+E2e tests run against a real GKE cluster. The cluster is **not** torn down between runs — it is reused across test sessions to save setup time.
+
+### Prerequisites
+
+```bash
+export E2E_PROJECT_ID=<gcp-project-id>
+export E2E_SA_PATH=/path/to/service-account-key.json
+export E2E_LOCATION=<zone-or-region>   # e.g. us-central1-f or us-central1
+```
+
+`E2E_REGION` (default: `us-central1`) and `E2E_PREFIX` (default: `karpenter-e2e`) can be overridden if needed. `E2E_REGION` must match the region of `E2E_LOCATION` when using a zonal location.
+
+### Required permissions
+
+The service account pointed to by `E2E_SA_PATH` must have the following IAM roles on the project:
+
+| Role | Why needed |
+|------|------------|
+| `roles/container.admin` | Create/delete/describe GKE clusters |
+| `roles/compute.networkAdmin` | Create/delete VPC and subnet |
+| `roles/compute.viewer` | List instances and disks (e2e-check-clean) |
+| `roles/iam.serviceAccountAdmin` | Create/delete the karpenter service account |
+| `roles/resourcemanager.projectIamAdmin` | Bind roles to the karpenter service account |
+| `roles/artifactregistry.admin` | Create/delete Artifact Registry repo and push images |
+
+### One-time cluster setup
+
+```bash
+make e2e-setup
+```
+
+This idempotently creates a GKE cluster, VPC, subnet, Cloud Router, Cloud NAT, service account, IAM bindings, Artifact Registry repo, and deploys karpenter via Helm.
+
+Cloud NAT is required for the `networking` suite: nodes provisioned with `enableExternalIPAccess: false` have no public IP and need NAT for outbound internet access.
+
+### Deploy a new controller image
+
+```bash
+make e2e-deploy
+```
+
+Builds the controller image with `ko` and runs `helm upgrade --install`.
+
+### Run all suites
+
+```bash
+make e2e-tests
+```
+
+Runs all suites in parallel (default `GINKGO_PROCS=4`). Override with `GINKGO_PROCS=N`.
+
+### Run a single spec
+
+```bash
+make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
+```
+
+Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`, `scheduling`, `networking`.
+
+### Tear down all e2e infrastructure
+
+```bash
+make e2e-teardown
+```
+
+### Check for orphaned resources (without deleting)
+
+```bash
+make e2e-check-clean
+```

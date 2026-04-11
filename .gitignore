@@ -25,6 +25,20 @@ go.work.sum
 # env file
 .env
 
+# GCP service account keys
+*-key.json
+
+# AI coding assistant data and session artifacts
+CLAUDE.md
+.claude/
+.sisyphus/
+.cursor/
+.copilot/
+.windsurf/
+.aider*
+TODO.md
+*-review.md
+
 # ide file
 .idea/
 .vscode/
