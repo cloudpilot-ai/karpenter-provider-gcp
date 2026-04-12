@@ -4,29 +4,33 @@ This page explains how to control external IP assignment and subnetwork placemen
 
 ## How Karpenter manages node pool templates
 
-When Karpenter starts, it creates two zero-node GKE node pools that act as instance templates:
+When Karpenter starts, it creates four zero-node GKE node pools that act as instance templates:
 
-| Pool name | Image |
-|-----------|-------|
-| `karpenter-default` | Container-Optimized OS |
-| `karpenter-ubuntu` | Ubuntu |
+| Pool name | Image | Architecture |
+|-----------|-------|--------------|
+| `karpenter-default` | Container-Optimized OS | amd64 |
+| `karpenter-ubuntu` | Ubuntu | amd64 |
+| `karpenter-cos-arm64` | Container-Optimized OS | arm64 |
+| `karpenter-ubuntu-arm64` | Ubuntu | arm64 |
 
 These pools have `InitialNodeCount: 0` — they hold no running nodes and exist purely to give Karpenter a GKE-managed instance template to clone from. The network configuration of these templates comes from the GKE cluster itself, not from Karpenter.
 
-## Cluster-level private nodes (not yet supported)
+The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created on a best-effort basis. If the cluster's region does not support arm64 machine types, those pools are skipped and arm64 provisioning is disabled for that image family.
 
-Karpenter GCP does not currently support clusters that enforce private nodes at the
+## Cluster-level private nodes (untested)
+
+Karpenter GCP has not been tested on clusters that enforce private nodes at the
 cluster level (e.g. `DefaultEnablePrivateNodes: true` or
-`PrivateClusterConfig.enablePrivateNodes: true`).
+`PrivateClusterConfig.enablePrivateNodes: true`). It may not work.
 
-When Karpenter starts it creates the `karpenter-default` and `karpenter-ubuntu` node
-pools. The creation request sets only `ImageType` and `ServiceAccount` — `NodePool.NetworkConfig`
-is not set at all. On a cluster that restricts new node pools to private nodes only,
-this request will be rejected by GKE and Karpenter will fail to start.
+When Karpenter starts it creates the four template node pools. The creation request
+sets only `ImageType` and `ServiceAccount` — `NodePool.NetworkConfig` is not set at all.
+On a cluster that restricts new node pools to private nodes only, this request may be
+rejected by GKE, preventing Karpenter from starting.
 
 The `enableExternalIPAccess: false` field on `GCENodeClass` controls the external IP of
 **provisioned instances** but does not affect the template pool creation, so it does not
-solve this problem.
+address this.
 
 Support for cluster-level private nodes is tracked in
 [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
