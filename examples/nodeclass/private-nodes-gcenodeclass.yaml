@@ -1,0 +1,41 @@
+# Example: provisioning private nodes (no external IP) with Karpenter.
+#
+# Background
+# ----------
+# Karpenter manages two zero-node GKE node pools ("karpenter-default" and
+# "karpenter-ubuntu") that act as instance templates. On a standard GKE cluster
+# those templates include a ONE_TO_ONE_NAT access config, giving each node a
+# public IP. Setting networkConfig.networkInterfaces[0].enableExternalIPAccess: false
+# removes the access config from every node Karpenter provisions via this
+# NodeClass, without changing the template pool itself.
+#
+# Prerequisites
+# -------------
+# 1. Cloud NAT must be configured on the VPC if provisioned nodes need outbound
+#    internet access (pulling images, calling GCP APIs, etc.):
+#    https://cloud.google.com/nat/docs/gke-example
+# 2. The GKE cluster must be VPC-native (alias IP ranges enabled) — this is
+#    the default for all new GKE clusters:
+#    https://cloud.google.com/kubernetes-engine/docs/concepts/alias-ips
+# 3. Firewall rules or IAP must be in place if you need SSH/kubectl exec access
+#    to the nodes, since there is no external IP to connect to directly.
+#
+# Note: behaviour on clusters with enablePrivateNodes set at the cluster level is
+# untested. Setting enableExternalIPAccess: false explicitly is recommended
+# regardless, to ensure nodes are provisioned without a public IP.
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: private-nodes-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  networkTags:
+    - karpenter-private
+  networkConfig:
+    networkInterfaces:
+      - enableExternalIPAccess: false
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true

@@ -773,6 +773,202 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		require.Len(t, result, 1)
 		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
 	})
+
+	// makeTemplateWithAccessConfig builds on makeTemplate, adding an access config and subnetwork
+	// to the primary interface to simulate a public-node pool template.
+	makeTemplateWithAccessConfig := func() *compute.InstanceTemplate {
+		tmpl := makeTemplate("pods")
+		tmpl.Properties.NetworkInterfaces[0].AccessConfigs = []*compute.AccessConfig{
+			{Type: "ONE_TO_ONE_NAT", Name: "External NAT"},
+		}
+		tmpl.Properties.NetworkInterfaces[0].Subnetwork = "regions/us-central1/subnetworks/default"
+		return tmpl
+	}
+
+	t.Run("without NetworkConfig, AccessConfigs are inherited from template", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{}
+		template := makeTemplateWithAccessConfig()
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Len(t, result[0].AccessConfigs, 1, "access config should be inherited from template")
+	})
+
+	t.Run("EnableExternalIPAccess=false removes AccessConfigs (private node)", func(t *testing.T) {
+		t.Parallel()
+
+		disabled := false
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{
+						{EnableExternalIPAccess: &disabled},
+					},
+				},
+			},
+		}
+		template := makeTemplateWithAccessConfig()
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Empty(t, result[0].AccessConfigs, "access configs must be removed for private node")
+		require.Contains(t, result[0].ForceSendFields, "AccessConfigs", "AccessConfigs must be force-sent as empty so GCP API does not default-insert ONE_TO_ONE_NAT")
+		require.Len(t, template.Properties.NetworkInterfaces[0].AccessConfigs, 1, "template must not be mutated")
+		require.NotContains(t, template.Properties.NetworkInterfaces[0].ForceSendFields, "AccessConfigs", "template ForceSendFields must not be mutated")
+	})
+
+	t.Run("EnableExternalIPAccess=true on template with no AccessConfigs leaves them empty (no-op)", func(t *testing.T) {
+		t.Parallel()
+
+		enabled := true
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{
+						{EnableExternalIPAccess: &enabled},
+					},
+				},
+			},
+		}
+		// makeTemplate produces a template with no AccessConfigs.
+		template := makeTemplate("pods")
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Empty(t, result[0].AccessConfigs, "EnableExternalIPAccess=true does not synthesize an access config; template value is inherited")
+	})
+
+	t.Run("EnableExternalIPAccess=true keeps AccessConfigs from template", func(t *testing.T) {
+		t.Parallel()
+
+		enabled := true
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{
+						{EnableExternalIPAccess: &enabled},
+					},
+				},
+			},
+		}
+		template := makeTemplateWithAccessConfig()
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Len(t, result[0].AccessConfigs, 1, "access configs should be kept when explicitly enabled")
+	})
+
+	t.Run("NetworkConfig.Subnetwork overrides template subnetwork", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{
+						{Subnetwork: "regions/us-central1/subnetworks/private-subnet"},
+					},
+				},
+			},
+		}
+		template := makeTemplateWithAccessConfig()
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Equal(t, "regions/us-central1/subnetworks/private-subnet", result[0].Subnetwork)
+		require.Equal(t, "regions/us-central1/subnetworks/default", template.Properties.NetworkInterfaces[0].Subnetwork, "template must not be mutated")
+	})
+
+	t.Run("NetworkConfig with fewer interfaces than template does not override unmatched interfaces", func(t *testing.T) {
+		t.Parallel()
+
+		disabled := false
+		// Template with two interfaces; NodeClass overrides only the first.
+		template := &compute.InstanceTemplate{
+			Properties: &compute.InstanceProperties{
+				NetworkInterfaces: []*compute.NetworkInterface{
+					{
+						AccessConfigs: []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT"}},
+						AliasIpRanges: []*compute.AliasIpRange{{SubnetworkRangeName: "pods", IpCidrRange: "/24"}},
+					},
+					{
+						AccessConfigs: []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT"}},
+						AliasIpRanges: []*compute.AliasIpRange{},
+					},
+				},
+			},
+		}
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{
+						{EnableExternalIPAccess: &disabled},
+						// second interface not listed — should be unmodified
+					},
+				},
+			},
+		}
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 2)
+		require.Empty(t, result[0].AccessConfigs, "first interface should have no external IP")
+		require.Len(t, result[1].AccessConfigs, 1, "second interface should inherit access config from template")
+	})
+
+	t.Run("NetworkConfig present with empty NetworkInterfaces inherits all template settings", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{},
+				},
+			},
+		}
+		template := makeTemplateWithAccessConfig()
+
+		result := p.setupNetworkInterfaces(template, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Len(t, result[0].AccessConfigs, 1, "empty NetworkInterfaces list must not override template")
+		require.Equal(t, "regions/us-central1/subnetworks/default", result[0].Subnetwork, "empty NetworkInterfaces list must not override template subnetwork")
+	})
+
+	t.Run("EnableExternalIPAccess=false does not duplicate AccessConfigs in ForceSendFields when already present", func(t *testing.T) {
+		t.Parallel()
+
+		disabled := false
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{
+						{EnableExternalIPAccess: &disabled},
+					},
+				},
+			},
+		}
+		tmpl := makeTemplateWithAccessConfig()
+		tmpl.Properties.NetworkInterfaces[0].ForceSendFields = []string{"AccessConfigs"}
+
+		result := p.setupNetworkInterfaces(tmpl, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Empty(t, result[0].AccessConfigs, "access configs must be removed for private node")
+		count := 0
+		for _, f := range result[0].ForceSendFields {
+			if f == "AccessConfigs" {
+				count++
+			}
+		}
+		require.Equal(t, 1, count, "AccessConfigs must appear exactly once in ForceSendFields")
+	})
 }
 
 // TestSetupScheduling_DoesNotMutateTemplate guards against setupScheduling mutating the shared
