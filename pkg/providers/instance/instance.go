@@ -82,13 +82,14 @@ type DefaultProvider struct {
 	instanceCache *cache.Cache
 
 	clusterName           string
+	clusterLocation       string
 	region                string
 	projectID             string
 	defaultServiceAccount string
 	computeService        *compute.Service
 }
 
-func NewProvider(clusterName, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
+func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
 	unavailableOfferings *pkgcache.UnavailableOfferings,
 ) Provider {
 	return &DefaultProvider{
@@ -96,6 +97,7 @@ func NewProvider(clusterName, region, projectID, defaultServiceAccount string, c
 		unavailableOfferings:  unavailableOfferings,
 		instanceCache:         cache.New(instanceCacheExpiration, instanceCacheExpiration),
 		clusterName:           clusterName,
+		clusterLocation:       clusterLocation,
 		region:                region,
 		projectID:             projectID,
 		defaultServiceAccount: defaultServiceAccount,
@@ -911,17 +913,39 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 	}
 }
 
-// setupInstanceLabels configures all labels for the instance
+// setupInstanceLabels writes all GCE labels for a new instance. Cluster-identity labels
+// (goog-k8s-cluster-name and goog-k8s-cluster-location) are always written last so that
+// user-supplied NodePool requirement labels with the same key cannot overwrite them.
 func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) {
-	// Set common Karpenter labels
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
 
-	// Add instance type requirement labels
 	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
 		instance.Labels[entry.Key] = entry.Value
 	})
+
+	// Stamp both cluster-identity labels last so NodePool labels cannot overwrite them.
+	// LabelClusterNameKey is used by the syncInstances API filter; LabelClusterLocationKey
+	// is checked by belongsToCluster to distinguish same-named clusters in different locations.
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
+	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
+}
+
+// belongsToCluster reports whether inst should be tracked in this controller's instance
+// cache. An instance with goog-k8s-cluster-location present must match this cluster's
+// location. An instance without the label (created by an older Karpenter version) is
+// treated as ours for backward compatibility — the GC controller separately skips
+// label-less instances to prevent cross-cluster deletion. Cluster-name is enforced by the
+// GCE API label filter in syncInstances.
+//
+// TODO: once all instances carry goog-k8s-cluster-location (i.e. after all clusters have
+// been upgraded past this release and all pre-existing nodes have been rotated), replace
+// the !ok fallback with strict matching (ok && loc == p.clusterLocation) and add the
+// label as a server-side filter in syncInstances. Until then the fallback must stay to
+// avoid making pre-label instances invisible to Karpenter.
+func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
+	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
+	return !ok || loc == p.clusterLocation
 }
 
 func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
@@ -1188,8 +1212,10 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 		}
 	}
 
-	for _, instance := range instances {
-		p.instanceCache.Set(instance.InstanceID, instance, cache.DefaultExpiration)
+	for _, inst := range instances {
+		if p.belongsToCluster(inst) {
+			p.instanceCache.Set(inst.InstanceID, inst, cache.DefaultExpiration)
+		}
 	}
 	return nil
 }
