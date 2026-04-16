@@ -59,7 +59,7 @@ type initialPricesFile struct {
 type regionEntry = instanceprice.Prices
 
 type DefaultProvider struct {
-	region    string
+	region string
 	client PricingClient
 
 	mu             sync.RWMutex
@@ -72,7 +72,7 @@ type DefaultProvider struct {
 func NewDefaultProvider(ctx context.Context, client PricingClient, region string) (*DefaultProvider, error) {
 	p := &DefaultProvider{
 		region:         region,
-		client:      client,
+		client:         client,
 		onDemandPrices: make(pricesStorage),
 		spotPrices:     make(pricesStorage),
 	}
