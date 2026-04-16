@@ -151,11 +151,7 @@ Verified against GKE 1.35.1 (COS `default-pool` vs Ubuntu `ubuntu-pool` on the s
 
 - **`KUBE_PROXY_TOKEN`** — **identical across pools**. Cluster-scoped; cross-pool reuse is safe with no patching needed.
 - **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`** — **different per pool** (unique x509 cert and RSA key pair per pool). Verified on GKE 1.35.1: the cert Subject encodes the pool name (`O=gke:nodepool:name:{pool}`, `CN=kubelet-nodepool-bootstrap`), and each pool has its own RSA key pair. The Issuer is the cluster CA UUID. Since Karpenter today uses `karpenter-default`'s cert/key for both COS and Ubuntu nodes without bootstrap failures (different OS, same pool cert), GKE likely validates CA signature only — not pool membership in the Subject. Cross-pool reuse (cert Subject names a different pool than the provisioned node belongs to) is expected to work on the same basis. Must be validated with an explicit cross-pool PoC in Phase 0.
-- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`** — **different per pool**. The audience URL and credential_source URL both embed the pool name:
-  ```
-  https://.../nodePools/{pool-name}/systemComponents/node-problem-detector/generateNodeServiceAccountToken
-  ```
-  `PatchNodeProblemDetectorConfig` (new function) must replace the embedded pool name with the correct source pool name for provisioned nodes. The patch is required, not optional.
+- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`** — **different per pool** (audience URL embeds pool name), but **no patch needed**. Verified empirically (GKE 1.35.1): `generateClusterNodeAgentToken` validates only the token's cryptographic signature, not whether the referenced pool exists. Token exchange succeeds with a non-existent pool name in the audience. Use the source pool's config unchanged.
 
 #### Code Changes
 
@@ -163,7 +159,7 @@ Verified against GKE 1.35.1 (COS `default-pool` vs Ubuntu `ubuntu-pool` on the s
 |---|---|
 | `pkg/providers/nodepooltemplate/nodepooltemplate.go` | `Create()` → no-op unless no RUNNING pool found (fallback only). Add `discoverSourcePool()` with priority-based selection. |
 | `pkg/providers/instance/instance.go` | `resolveNodePoolName()` → `resolveSourcePoolName()`. Single source pool for all OS families and both arches. |
-| `pkg/providers/metadata/utils.go` | Add `PatchKubeEnvForOSType`, `PatchKubeEnvForArch`, `PatchNodeProblemDetectorConfig`. |
+| `pkg/providers/metadata/utils.go` | Add `PatchKubeEnvForOSType`, `PatchKubeEnvForArch`. |
 | `pkg/operator/options/options.go` | Add `DEFAULT_NODEPOOL_TEMPLATE_NAME` env var (optional, default empty). |
 
 Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManagerName`, `resolveInstanceTemplateName`, `PatchKubeEnvForInstanceType`, `SetProvisioningModel`, `SetMaxPodsPerNode`, `RemoveGKEBuiltinLabels` — are reused unchanged.
@@ -215,9 +211,9 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Scenario**: GKE validates that the audience URL's embedded pool name corresponds to a pool the node is a member of. Karpenter nodes using another pool's NPD config fail authentication.
 
-**Finding**: Confirmed that `NODE_PROBLEM_DETECTOR_ADC_CONFIG` embeds the source pool name in both the audience URL and credential_source URL (verified against GKE 1.35.1). The patch is therefore required, not conditional.
+**Finding**: `NODE_PROBLEM_DETECTOR_ADC_CONFIG` embeds the source pool name in the OIDC audience URL. However, GKE's `generateClusterNodeAgentToken` endpoint validates only the cryptographic signature of the identity token — it does **not** check whether the referenced pool exists. Verified empirically (GKE 1.35.1): token exchange succeeds with a deleted pool's audience URL. The config can be used from any pool without patching.
 
-**Mitigation**: `PatchNodeProblemDetectorConfig` replaces the embedded pool name with the name of the actual source pool Karpenter selected. Validate in e2e that NPD pods reach Running state on Karpenter-provisioned nodes.
+**Mitigation**: No patch required. Use the source pool's `NODE_PROBLEM_DETECTOR_ADC_CONFIG` unchanged. NPD will function correctly regardless of whether the source pool still exists.
 
 ### `KUBE_PROXY_TOKEN` pool-scoped RBAC
 
@@ -242,7 +238,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 - `discoverSourcePool` selection: mock pool lists with various combinations (no pools, `default-pool` present, no `default-pool` → first by name, `DEFAULT_NODEPOOL_TEMPLATE_NAME` set, non-RUNNING pools skipped)
 - `PatchKubeEnvForOSType`: COS→Ubuntu OS distribution replacement, BFQ field removal, no-op on COS input
 - `PatchKubeEnvForArch`: URL substitution, hash replacement from mock HTTP server returning `.sha256` content, cache hit avoids second HTTP call
-- `PatchNodeProblemDetectorConfig`: pool name replacement in audience URL, no-op when field absent
+- `PatchNodeProblemDetectorConfig`: not required (GKE validates token signature only, not pool name in audience URL)
 
 ### E2E Test Matrix
 
@@ -329,7 +325,7 @@ Add `PatchKubeEnvForOSType`. Add Ubuntu image resolver (query `ubuntu-os-gke-clo
 Add `PatchKubeEnvForArch`. Eliminates `karpenter-cos-arm64` pool. At this point, only `karpenter-default` remains.
 
 ### Phase 3 — Pool discovery and selection
-Replace `Create()` pool creation with priority-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Add `PatchNodeProblemDetectorConfig` if Phase 2 e2e requires it. At this point, 0 Karpenter-specific pools in normal operation.
+Replace `Create()` pool creation with priority-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. At this point, 0 Karpenter-specific pools in normal operation.
 
 ---
 
@@ -375,7 +371,7 @@ Once this proposal is stable, the remaining dependency on reading any pool templ
 
 ## Open Questions
 
-1. **`NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name**: ~~Does GKE validate the embedded pool name?~~ **Resolved**: the field embeds the pool name in both audience and credential_source URLs. `PatchNodeProblemDetectorConfig` is required (not optional). Validate in e2e that NPD reaches Running.
+1. **`NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name**: **Resolved**. GKE's `generateClusterNodeAgentToken` validates only the cryptographic signature of the identity token — pool existence in the audience URL is not checked. Verified empirically: token exchange succeeds after pool deletion. No patch needed; use source pool's config unchanged.
 
 2. **`KUBE_PROXY_TOKEN` RBAC scope**: Is the token bound to a pool-scoped RBAC subject? **Partially resolved**: token is cluster-scoped (identical across pools on GKE 1.35.1). Validate in e2e by confirming kube-proxy reaches Running on a node provisioned from a non-owning pool.
 
@@ -385,4 +381,4 @@ Once this proposal is stable, the remaining dependency on reading any pool templ
 
 5. **`RENDERED_INSTALLABLES` consistency**: ~~Verify holds across OS types and GKE versions.~~ **Resolved for OQ**: identical between COS and Ubuntu pools on GKE 1.35.1 (byte-for-byte diff clean). Cross-version confirmation still recommended before Stable.
 
-6. **Bootstrap pool change is not a drift event**: When Karpenter switches to a different bootstrap source pool (e.g., original pool was deleted), existing nodes retain their original `NODE_PROBLEM_DETECTOR_ADC_CONFIG` pointing to the old pool name. Since bootstrap source pool is an internal provider detail (not reflected in `GCENodeClass` or `NodePool` spec), this does not trigger drift — existing nodes keep running with broken NPD until replaced for another reason. Three options to address this: (a) store the bootstrap pool name in a node annotation (`karpenter.gcp/bootstrap-pool-name`) and add a drift condition that fires when the selected pool changes; (b) always patch NPD config to point at `karpenter-default` (stable reference, but requires keeping that pool alive); (c) accept as known limitation and document that the bootstrap source pool must remain alive for the lifetime of nodes created from it. **Decision needed before Phase 3.**
+6. **Bootstrap pool change is not a drift event**: ~~When Karpenter switches bootstrap source pool, existing nodes have stale `NODE_PROBLEM_DETECTOR_ADC_CONFIG`.~~ **Resolved** (see OQ 1). GKE does not validate pool existence in the audience URL, so NPD continues working on all existing nodes regardless of source pool changes or deletions. No drift event needed.
