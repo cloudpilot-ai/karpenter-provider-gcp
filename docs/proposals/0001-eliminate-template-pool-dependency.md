@@ -9,9 +9,9 @@
 
 ## Summary
 
-Karpenter today creates and manages up to four GKE node pools (`karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, `karpenter-ubuntu-arm64`) solely to read back the bootstrap metadata (kube-env) that GKE generates for them. This design fails in environments with org policies like `constraints/compute.requireShieldedVm` or `constraints/gcp.restrictNonCmekServices` because Karpenter lacks the configuration to create policy-compliant pools.
+Karpenter currently creates up to four GKE node pools solely to read back the bootstrap metadata (kube-env) GKE embeds in their instance templates. This breaks in clusters with org policies such as `constraints/compute.requireShieldedVm` or `constraints/gcp.restrictNonCmekServices` because Karpenter cannot create compliant pools.
 
-This proposal replaces that approach: stop creating pools, and instead read bootstrap metadata from whichever node pool already exists in the cluster, using a scoring-based selection algorithm. Since all arch-specific binary metadata is patched at provisioning time regardless of the source pool's architecture, no arch-based filtering of candidate pools is needed. The architecture-specific binary hash for arm64 nodes is fetched from a publicly available GCS sidecar file (65 bytes). GKE Standard clusters always have at least one node pool, so a fallback create path is not required.
+This proposal replaces pool creation with discovery: Karpenter selects an existing RUNNING cluster pool as the bootstrap source, and patches kube-env for OS type and architecture at provisioning time. A fallback pool is created only as a last resort when no RUNNING pool is available.
 
 ---
 
@@ -287,9 +287,20 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 ## Implementation Phases
 
-### Phase 0 — E2E test coverage baseline
+### Phase 0 — Research: credential viability
 
-Before any implementation begins, add e2e tests for all node variant scenarios that the subsequent phases will touch. These tests act as a regression gate: they must pass before Phase 0 is considered complete, and must continue passing after each subsequent phase.
+Before any implementation begins, validate how Group 4 credentials behave when reused across pools and whether they can be eliminated entirely:
+
+- **`KUBE_PROXY_TOKEN`**: check whether the token is scoped to a specific pool or is cluster-wide. If cluster-wide, cross-pool reuse is safe. If pool-scoped, investigate whether stripping it (letting the node self-generate) or replacing it with a self-generated credential is viable.
+- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`**: same question — pool-scoped or cluster-wide? Can a node bootstrap without them if TPM attestation is not in use?
+- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`**: check whether GKE validates the embedded pool name against node pool membership. If not, no patch is needed. If it is validated, confirm whether removing the field entirely is safe (NPD falls back to workload identity / node SA).
+- **GKE cluster API**: check whether any Group 4 credentials are exposed directly by `clusters.get` or a related API, which would eliminate the need to read a pool template at all.
+
+This research phase produces a decision record that gates Phase 1. If credentials can be safely stripped or are already cluster-scoped, the credential-patching complexity in later phases may be significantly reduced.
+
+### Phase 0.5 — E2E test coverage baseline
+
+Before any implementation begins, add e2e tests for all node variant scenarios that the subsequent phases will touch. These tests act as a regression gate: they must pass before Phase 0.5 is considered complete, and must continue passing after each subsequent phase.
 
 Scenarios to cover (that are not yet covered or only partially covered):
 
@@ -357,7 +368,7 @@ Achievable for Groups 1–3 (all fields available from `clusters.get` or derivab
 Once this proposal is stable, the remaining dependency on reading any pool template is Group 4 (`TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`). All other groups are either patched in code or available from public GCS endpoints. Possible paths for eventually eliminating pool reads entirely:
 
 - **GKE Confidential Nodes / hardware TPM**: clusters using TPM attestation do not require software bootstrap credentials; Group 4 becomes unnecessary
-- **Static install-time credentials**: a `configure-values.sh` helper reads Group 4 from a cluster pool once at install and stores in Helm values (same approach as Azure Karpenter); requires rotation on pool recreation
+- **Direct cluster API credentials**: if GKE exposes Group 4 credentials (`TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`) via a cluster-level API, pool reads could be eliminated entirely without any install-time helper
 - **GKE bootstrap API**: a future GKE feature exposing per-cluster bootstrap credentials via a privileged API
 
 ---
