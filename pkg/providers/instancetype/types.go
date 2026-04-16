@@ -164,7 +164,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		requirements.Get(v1alpha1.LabelInstanceFamily).Insert(instanceTypeParts[0])
 		requirements.Get(v1alpha1.LabelInstanceShape).Insert(instanceTypeParts[1])
 
-		requirements.Get(corev1.LabelArchStable).Insert(extractArch(instanceTypeParts[0]))
+		requirements.Get(corev1.LabelArchStable).Insert(machineTypeArch(mt))
 	}
 
 	return requirements
@@ -185,12 +185,15 @@ func extractGeneration(instanceTypePrefix string) string {
 	return string(instanceTypePrefix[len(instanceTypePrefix)-offset])
 }
 
-func extractArch(instanceTypePrefix string) string {
-	// referring to https://cloud.google.com/compute/docs/instances/arm-on-compute
-	if instanceTypePrefix == "a4x" || instanceTypePrefix == "c4a" || instanceTypePrefix == "t2a" {
+func machineTypeArch(mt *computepb.MachineType) string {
+	switch mt.GetArchitecture() {
+	case "ARM64":
 		return "arm64"
+	case "X86_64":
+		return "amd64"
+	default:
+		return "amd64"
 	}
-	return "amd64"
 }
 
 func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass, totalStorageBytes int64) corev1.ResourceList {
