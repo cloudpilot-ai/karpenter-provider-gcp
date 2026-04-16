@@ -42,6 +42,12 @@ type Provider interface {
 	UpdatePrices(context.Context) error
 }
 
+// PricingClient is the interface used to fetch live prices from the GCP Billing API.
+// Pass nil to NewDefaultProvider to disable live updates (embedded prices only).
+type PricingClient interface {
+	FetchRegionPrices(ctx context.Context, region string) (instanceprice.Prices, error)
+}
+
 type pricesStorage = map[string]float64
 
 // initialPricesFile matches the price_validate computed.json / update-pricing CI
@@ -53,16 +59,20 @@ type initialPricesFile struct {
 type regionEntry = instanceprice.Prices
 
 type DefaultProvider struct {
-	region string
+	region    string
+	gcpClient PricingClient
 
 	mu             sync.RWMutex
 	onDemandPrices pricesStorage
 	spotPrices     pricesStorage
 }
 
-func NewDefaultProvider(ctx context.Context, region string) (*DefaultProvider, error) {
+// NewDefaultProvider creates a pricing provider for region. Pass a non-nil client to
+// enable live price updates via UpdatePrices; pass nil to rely on embedded prices only.
+func NewDefaultProvider(ctx context.Context, client PricingClient, region string) (*DefaultProvider, error) {
 	p := &DefaultProvider{
 		region:         region,
+		gcpClient:      client,
 		onDemandPrices: make(pricesStorage),
 		spotPrices:     make(pricesStorage),
 	}
@@ -129,13 +139,11 @@ func (p *DefaultProvider) SpotPrice(instanceType string, _ string) (float64, boo
 }
 
 func (p *DefaultProvider) UpdatePrices(ctx context.Context) error {
-	client, err := instanceprice.New(ctx)
-	if err != nil {
-		return fmt.Errorf("creating instanceprice client: %w", err)
+	if p.gcpClient == nil {
+		return fmt.Errorf("gcpClient is nil: cannot update prices")
 	}
-	defer client.Close()
 
-	prices, err := client.FetchRegionPrices(ctx, p.region)
+	prices, err := p.gcpClient.FetchRegionPrices(ctx, p.region)
 	if err != nil {
 		return fmt.Errorf("fetching prices for %s: %w", p.region, err)
 	}
