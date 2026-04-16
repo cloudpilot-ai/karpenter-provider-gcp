@@ -47,6 +47,7 @@ Creating pools to access the first three categories is unnecessary. The fourth c
 - Full kube-env reconstruction from GKE APIs alone with no pool reads (future direction, not this proposal).
 - Changes to the `GCENodeClass` or `NodePool` API surface.
 - Support for Windows nodes (not currently supported regardless of this change).
+- GKE Autopilot clusters (node pool API surface differs; explicit non-goal for this proposal).
 
 ---
 
@@ -91,31 +92,34 @@ On startup and on each template refresh cycle, Karpenter selects a bootstrap sou
    If retry limit exceeded → create karpenter-default as last-resort fallback (see below).
 ```
 
-The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name.
+The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name. The selected pool name is logged at INFO on every refresh cycle so operators can observe which pool is in use, including across restarts.
 
 No arch-based or OS-based filtering is needed. `PatchKubeEnvForArch` and `PatchKubeEnvForOSType` handle all differences at provisioning time regardless of the source pool's architecture or image type.
 
 #### Last-Resort Fallback Pool
 
-In the unlikely event that no RUNNING pool is available after retries (e.g., unusual cluster state), Karpenter creates a single `karpenter-default` pool. This pool must be configured to avoid triggering org policy violations — it is a read-only bootstrap source, not a workload pool, so its config should be as minimal as possible:
+In the unlikely event that no RUNNING pool is available after retries (e.g., unusual cluster state), Karpenter creates a single `karpenter-default` pool. The implementation will make a best effort to be compatible with all known optional GCE org policies:
 
 - Minimal `NodeConfig`: only `imageType` (COS_CONTAINERD) and `serviceAccount`; no explicit machine type, no custom labels or taints
-- Shielded VM config enabled by default (`enableSecureBoot`, `enableIntegrityMonitoring`) to satisfy `compute.requireShieldedVm` without requiring operator input
+- Shielded VM config enabled by default (`enableSecureBoot`, `enableIntegrityMonitoring`) to satisfy `compute.requireShieldedVm`
+- CMEK-related options left unset to avoid triggering `gcp.restrictNonCmekServices`
 - 0 initial nodes — pool is never used to run workloads
 
-`karpenter-default` is **not preferred** over existing cluster pools in the scoring algorithm. It scores as any other non-default pool (score 1). Preferring it would reintroduce the dependency on a Karpenter-created resource as the default path, which defeats the purpose of this proposal. It is only used when the fallback creation path fires — at which point it is the only candidate.
+If the fallback creation still fails due to an org policy that cannot be automatically satisfied, Karpenter logs a clear error and halts provisioning. The operator can then create any RUNNING pool manually and set `DEFAULT_NODEPOOL_TEMPLATE_NAME` to point Karpenter at it.
+
+`karpenter-default` is not preferred over existing cluster pools. It is only used when the fallback creation path fires — at which point it is the only candidate.
 
 #### Architecture-Specific Binary Metadata (Group 2)
 
-GCS publishes `.sha256` sidecar files alongside every GKE release tarball:
+GCS publishes `.sha512` sidecar files alongside every GKE release tarball:
 
 ```
 https://storage.googleapis.com/gke-release/kubernetes/release/{VERSION}/
-  kubernetes-server-linux-{ARCH}.tar.gz        ← ~100 MB tarball
-  kubernetes-server-linux-{ARCH}.tar.gz.sha256 ← 65 bytes, SHA-256 hex
+  kubernetes-server-linux-{ARCH}.tar.gz        ← tarball
+  kubernetes-server-linux-{ARCH}.tar.gz.sha512 ← 128-char raw hex SHA-512
 ```
 
-Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-asia`).
+Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-asia`). `SERVER_BINARY_TAR_HASH` in kube-env is raw 128-char SHA-512 hex with no prefix (verified against GKE 1.35.1 live kube-env).
 
 `PatchKubeEnvForArch` (new function in `pkg/providers/metadata/utils.go`) patches `SERVER_BINARY_TAR_URL` and `SERVER_BINARY_TAR_HASH` to match the target node's architecture, regardless of the source pool's architecture:
 
@@ -128,7 +132,7 @@ Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-as
 
 > **Pre-implementation check**: Verify the exact format of `SERVER_BINARY_TAR_HASH` in a live kube-env before writing the replacement regex (raw hex vs `sha256:`-prefixed).
 
-This approach is structurally equivalent to AWS Karpenter's use of SSM Parameter Store for per-arch AMI IDs — a "query a known public endpoint by version and arch" pattern rather than creating a template resource.
+This follows a "query a known public endpoint by version and arch" pattern, avoiding the need to create a template resource. Note: the GCS URL scheme (`gke-release` bucket path layout) has no documented stability contract. If Google changes the path format, `PatchKubeEnvForArch` will require an update. Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-asia`) as of GKE 1.35.
 
 #### OS-Type Patching (Group 3)
 
@@ -145,18 +149,23 @@ This follows the same pattern as the existing `PatchKubeEnvForInstanceType` and 
 
 #### Group 4 Credential Reuse
 
-`TPM_BOOTSTRAP_CERT`, `TPM_BOOTSTRAP_KEY`, and `KUBE_PROXY_TOKEN` are unique per pool but not per cluster member type. Evidence that cross-pool reuse works:
+Verified against GKE 1.35.1 (COS `default-pool` vs Ubuntu `ubuntu-pool` on the same cluster):
 
-- Karpenter today uses `karpenter-default`'s credentials for both COS and Ubuntu nodes (different OS, same pool credentials). No bootstrap failures observed.
-- Karpenter VMs join the cluster via the Compute API, not through the GKE node pool API. They are not pool members and GKE does not enforce pool membership at bootstrap time.
+- **`KUBE_PROXY_TOKEN`** — **identical across pools**. Cluster-scoped; cross-pool reuse is safe with no patching needed.
+- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`** — **different per pool** (unique x509 cert and RSA key pair per pool). Cross-pool reuse is the central hypothesis of this proposal; whether GKE enforces pool-bound identity at bootstrap time must be validated in the Phase 0 PoC.
+- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`** — **different per pool**. The audience URL and credential_source URL both embed the pool name:
+  ```
+  https://.../nodePools/{pool-name}/systemComponents/node-problem-detector/generateNodeServiceAccountToken
+  ```
+  `PatchNodeProblemDetectorConfig` (new function) must replace the embedded pool name with the correct source pool name for provisioned nodes. The patch is required, not optional.
 
-`NODE_PROBLEM_DETECTOR_ADC_CONFIG` contains the source pool name in its audience URL. If GKE validates this, NPD authentication will fail on Karpenter-provisioned nodes. `PatchNodeProblemDetectorConfig` (new function) replaces the embedded pool name with a stable synthetic value. This will be validated in e2e and wired in if confirmed necessary.
+Karpenter today uses `karpenter-default`'s `TPM_BOOTSTRAP_CERT`/`KEY` for both COS and Ubuntu nodes (different OS, same pool credentials) without bootstrap failures, which establishes OS-crossover within one pool as working. Cross-pool reuse of these credentials is the key open question for Phase 0.
 
 #### Code Changes
 
 | File | Change |
 |---|---|
-| `pkg/providers/nodepooltemplate/nodepooltemplate.go` | `Create()` → no-op unless no RUNNING pool found (fallback only). Add `discoverSourcePool()` with scoring algorithm. |
+| `pkg/providers/nodepooltemplate/nodepooltemplate.go` | `Create()` → no-op unless no RUNNING pool found (fallback only). Add `discoverSourcePool()` with priority-based selection. |
 | `pkg/providers/instance/instance.go` | `resolveNodePoolName()` → `resolveSourcePoolName()`. Single source pool for all OS families and both arches. |
 | `pkg/providers/metadata/utils.go` | Add `PatchKubeEnvForOSType`, `PatchKubeEnvForArch`, `PatchNodeProblemDetectorConfig`. |
 | `pkg/operator/options/options.go` | Add `DEFAULT_NODEPOOL_TEMPLATE_NAME` env var (optional, default empty). |
@@ -204,15 +213,15 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Impact**: Group 1 (cluster constants) and Group 4 (credentials) are identical across pools — verified across four pools on a live GKE 1.35.1 cluster. Custom `Properties.Metadata` keys set by operators are the only divergence risk.
 
-**Mitigation**: Selection is deterministic — `default-pool` is preferred, then alphabetical by name. Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Document this option clearly.
+**Mitigation**: Selection is deterministic — `default-pool` is preferred, then alphabetical by name. The selected pool name is logged at INFO on every refresh cycle, so operators can observe the current source pool and detect changes. Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`.
 
 ### `NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name validation
 
 **Scenario**: GKE validates that the audience URL's embedded pool name corresponds to a pool the node is a member of. Karpenter nodes using another pool's NPD config fail authentication.
 
-**Likelihood**: Low — Karpenter already cross-uses credentials for different OS families without NPD failures.
+**Finding**: Confirmed that `NODE_PROBLEM_DETECTOR_ADC_CONFIG` embeds the source pool name in both the audience URL and credential_source URL (verified against GKE 1.35.1). The patch is therefore required, not conditional.
 
-**Mitigation**: `PatchNodeProblemDetectorConfig` replaces the embedded name with a stable synthetic value (`karpenter`). Wire in after e2e validation of NPD pod status on provisioned nodes.
+**Mitigation**: `PatchNodeProblemDetectorConfig` replaces the embedded pool name with the name of the actual source pool Karpenter selected. Validate in e2e that NPD pods reach Running state on Karpenter-provisioned nodes.
 
 ### `KUBE_PROXY_TOKEN` pool-scoped RBAC
 
@@ -263,36 +272,37 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 ---
 
-## Graduation Criteria
+## Acceptance Criteria
 
-**Alpha** (implementation complete, feature-gated or opt-in):
-- Pool discovery and selection implemented and passing unit tests
-- `PatchKubeEnvForArch` (Group 2), `PatchKubeEnvForOSType` (Group 3) implemented and tested
-- E2E coverage for all 8 node variants above on the project e2e cluster
+The feature is considered complete when:
 
-**Beta** (default behavior, existing pool-creation retained as fallback):
-- Open questions 1–2 (NPD pool name, kube-proxy token scope) validated in e2e
-- `PatchNodeProblemDetectorConfig` wired in if required
-- No regressions in existing e2e suite
-
-**Stable** (pool creation code path fully deprecated):
-- Two release cycles of Beta with no reported regressions
-- Document the fallback behavior in user-facing docs
+- Phase 0 credential research is documented and green-lights the approach
+- Pool discovery, `PatchKubeEnvForOSType`, and `PatchKubeEnvForArch` are implemented with unit tests
+- E2E coverage for all 8 node variants passes on the project e2e cluster
+- Open questions 1–2 (NPD pool name, kube-proxy token scope) are validated in e2e; `PatchNodeProblemDetectorConfig` wired in if required
+- Old Karpenter-managed pool creation code is removed (no parallel code paths)
 
 ---
 
 ## Implementation Phases
 
-### Phase 0 — Research: credential viability
+### Phase 0 — Research: credential viability and pool discovery PoC
 
-Before any implementation begins, validate how Group 4 credentials behave when reused across pools and whether they can be eliminated entirely:
+Before any implementation begins:
 
-- **`KUBE_PROXY_TOKEN`**: check whether the token is scoped to a specific pool or is cluster-wide. If cluster-wide, cross-pool reuse is safe. If pool-scoped, investigate whether stripping it (letting the node self-generate) or replacing it with a self-generated credential is viable.
-- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`**: same question — pool-scoped or cluster-wide? Can a node bootstrap without them if TPM attestation is not in use?
-- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`**: check whether GKE validates the embedded pool name against node pool membership. If not, no patch is needed. If it is validated, confirm whether removing the field entirely is safe (NPD falls back to workload identity / node SA).
-- **GKE cluster API**: check whether any Group 4 credentials are exposed directly by `clusters.get` or a related API, which would eliminate the need to read a pool template at all.
+**Credential research** — validate how Group 4 credentials behave when reused across pools:
+- **`KUBE_PROXY_TOKEN`**: pool-scoped or cluster-wide? If pool-scoped, can it be safely stripped or self-generated?
+- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`**: same — pool-scoped or cluster-wide?
+- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`**: does GKE validate the embedded pool name against pool membership? If not, no patch needed. If yes, confirm whether removing the field entirely is safe.
+- **GKE cluster API**: do `clusters.get` or related APIs expose any Group 4 credentials directly?
 
-This research phase produces a decision record that gates Phase 1. If credentials can be safely stripped or are already cluster-scoped, the credential-patching complexity in later phases may be significantly reduced.
+**Prerequisites (blockers before Phase 2)**:
+- **`SERVER_BINARY_TAR_HASH` format** (OQ 3): confirm raw hex vs `sha256:`-prefixed against a live kube-env dump before `PatchKubeEnvForArch` can be written.
+- **`RENDERED_INSTALLABLES` consistency** (OQ 5): confirm the field is identical across pool types (COS, Ubuntu, mixed) on at least two GKE versions. If it differs, cross-pool reuse of the template is invalid and the approach must be reconsidered.
+
+**Pool discovery PoC**: run a minimal proof-of-concept of pool discovery on the e2e cluster to validate that a node provisioned using a non-owning pool's credentials bootstraps and registers correctly. This gates Phases 1–3.
+
+This phase produces a decision record. If any blocker cannot be resolved, the proposal must be revised before implementation proceeds.
 
 ### Phase 0.5 — E2E test coverage baseline
 
@@ -333,13 +343,11 @@ Clusters upgrading from a version that created the four Karpenter template pools
 
 ### Should Karpenter delete them automatically?
 
-**Yes.** Karpenter created these pools itself and owns them; cleaning them up on upgrade is correct and expected. These pools carry zero nodes, so deletion has no workload impact.
-
-Karpenter should delete the four known Karpenter-named pools during its startup reconciliation after upgrading, once it has successfully selected and validated an existing cluster pool as the bootstrap source. Deletion order does not matter since none carry nodes.
+**No.** Karpenter will not auto-delete legacy pools. They are data-source only and carry zero workload nodes, but auto-deletion on startup introduces risk without benefit. At startup, Karpenter logs the names of any detected legacy Karpenter-managed pools so operators are aware of them. Operators can delete them manually at their own pace once the new version is confirmed stable.
 
 ### Rollback consideration
 
-If Karpenter is rolled back to the previous version after the pools have been deleted, the old version will re-create them on startup — the same path it follows for a fresh install. Rollback is therefore clean, just slightly slower on first start.
+Rolling back to the previous version will re-create the pools on startup if they were already deleted — the same path it follows for a fresh install.
 
 ---
 
@@ -371,12 +379,12 @@ Once this proposal is stable, the remaining dependency on reading any pool templ
 
 ## Open Questions
 
-1. **`NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name**: Does GKE validate the embedded pool name in the audience URL against node pool membership? Validate in e2e (Phase 2). Patch function ready to wire in.
+1. **`NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name**: ~~Does GKE validate the embedded pool name?~~ **Resolved**: the field embeds the pool name in both audience and credential_source URLs. `PatchNodeProblemDetectorConfig` is required (not optional). Validate in e2e that NPD reaches Running.
 
-2. **`KUBE_PROXY_TOKEN` RBAC scope**: Is the token bound to a pool-scoped RBAC subject? Validate by checking kube-proxy logs on Karpenter nodes provisioned using a non-owning pool's credentials.
+2. **`KUBE_PROXY_TOKEN` RBAC scope**: Is the token bound to a pool-scoped RBAC subject? **Partially resolved**: token is cluster-scoped (identical across pools on GKE 1.35.1). Validate in e2e by confirming kube-proxy reaches Running on a node provisioned from a non-owning pool.
 
-3. **`SERVER_BINARY_TAR_HASH` format**: Raw 64-char hex or `sha256:`-prefixed? Must be confirmed against a live kube-env dump before writing the replacement regex in `PatchKubeEnvForArch`.
+3. **`SERVER_BINARY_TAR_HASH` format**: ~~Raw hex or `sha256:`-prefixed?~~ **Resolved**: raw 128-char SHA-512 hex; sidecar file is `.sha512` (not `.sha256`). Verified against GKE 1.35.1.
 
 4. **arm64 COS image source without arm64 pool**: Can `gke-node-images` project provide arm64 COS images via `compute.images.list` filtering on architecture? Or must the image URL be derived from an arm64 pool's boot disk? Needs API testing.
 
-5. **`RENDERED_INSTALLABLES` consistency**: Verified identical across 4 pools on a single GKE 1.35.1 cluster. Confirm this holds across diverse cluster configurations (Autopilot-converted, custom node images, etc.).
+5. **`RENDERED_INSTALLABLES` consistency**: ~~Verify holds across OS types and GKE versions.~~ **Resolved for OQ**: identical between COS and Ubuntu pools on GKE 1.35.1 (byte-for-byte diff clean). Cross-version confirmation still recommended before Stable.
