@@ -71,7 +71,7 @@ delete: ## Delete the controller from your kubeconfig cluster
 	kubectl delete ns ${KARPENTER_NAMESPACE}
 
 ut-test: ## Run unit tests
-	go test ./pkg/... \
+	go test -race ./pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
@@ -150,13 +150,20 @@ tidy: ## Run "go mod tidy"
 download: ## Run "go mod download"
 	go mod download
 
+update-pricing:
+	@tmpdir=$$(mktemp -d); \
+	trap "rm -rf $$tmpdir" EXIT; \
+	go run ./hack/tools/price_validate --work-dir=$$tmpdir && \
+	cp $$tmpdir/computed.json pkg/providers/pricing/initial-prices.json && \
+	echo "Updated pkg/providers/pricing/initial-prices.json"
+
 codegen: ## Auto generate files based on GCP APIs
 	./hack/codegen.sh
 
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify image apply delete toolchain tidy download
 
 define newline
 
