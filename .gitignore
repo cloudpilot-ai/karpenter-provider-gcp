@@ -48,3 +48,11 @@ demo
 _go
 .worktrees/
 lefthook.yml
+
+# price_validate cache, output, and compiled binary
+hack/tools/price_validate/data/
+data/
+/price_validate
+
+# google-github-actions/auth@v2 temporary credentials file
+gha-creds-*.json
