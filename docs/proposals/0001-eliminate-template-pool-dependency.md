@@ -81,17 +81,13 @@ The table below maps each kube-env field group to its source after this change. 
 
 #### Pool Selection Algorithm
 
-On startup and on each template refresh cycle, Karpenter enumerates all node pools in the cluster and selects one as the bootstrap source:
+On startup and on each template refresh cycle, Karpenter selects a bootstrap source pool using the following priority order:
 
 ```
 1. If DEFAULT_NODEPOOL_TEMPLATE_NAME is set → use that pool; error if not RUNNING.
-2. List all pools: containerService.NodePools.List(cluster)
-3. Filter: status == RUNNING
-4. Score remaining pools:
-     default-pool  → 10
-     any other     →  1
-5. Pick highest score. On tie, sort by name (deterministic).
-6. If no RUNNING pools found → retry with backoff (transient during cluster upgrades).
+2. If default-pool exists and is RUNNING → use it.
+3. Sort remaining pools by name; use the first RUNNING pool.
+4. If no RUNNING pool found → retry with backoff (transient during cluster upgrades).
    If retry limit exceeded → create karpenter-default as last-resort fallback (see below).
 ```
 
@@ -208,7 +204,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Impact**: Group 1 (cluster constants) and Group 4 (credentials) are identical across pools — verified across four pools on a live GKE 1.35.1 cluster. Custom `Properties.Metadata` keys set by operators are the only divergence risk.
 
-**Mitigation**: The scoring algorithm is deterministic (stable sort by name on tie). Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Document this option clearly.
+**Mitigation**: Selection is deterministic — `default-pool` is preferred, then alphabetical by name. Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Document this option clearly.
 
 ### `NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name validation
 
@@ -238,7 +234,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 ### Unit Tests
 
-- `discoverSourcePool` selection: mock pool lists with various combinations (no pools, only arm64, `default-pool` present, tie between equal-score pools, `DEFAULT_NODEPOOL_TEMPLATE_NAME` set)
+- `discoverSourcePool` selection: mock pool lists with various combinations (no pools, `default-pool` present, no `default-pool` → first by name, `DEFAULT_NODEPOOL_TEMPLATE_NAME` set, non-RUNNING pools skipped)
 - `PatchKubeEnvForOSType`: COS→Ubuntu OS distribution replacement, BFQ field removal, no-op on COS input
 - `PatchKubeEnvForArch`: URL substitution, hash replacement from mock HTTP server returning `.sha256` content, cache hit avoids second HTTP call
 - `PatchNodeProblemDetectorConfig`: pool name replacement in audience URL, no-op when field absent
