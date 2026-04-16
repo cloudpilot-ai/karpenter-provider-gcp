@@ -44,6 +44,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
@@ -105,7 +106,12 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).NodeLocation,
 	)
 	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
-	pricingProvider, err := pricing.NewDefaultProvider(ctx, region)
+	billingClient, err := instanceprice.New(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to create GCP billing client")
+		os.Exit(1)
+	}
+	pricingProvider, err := pricing.NewDefaultProvider(ctx, billingClient, region)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create pricing provider")
 		os.Exit(1)
