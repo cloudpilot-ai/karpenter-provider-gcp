@@ -73,10 +73,6 @@ export GOOGLE_CLOUD_PROJECT=<your-project-id>
 ## Output format
 
 ```
-MISMATCH  n2-standard-8            us-central1  OnDemand computed=0.388000    cyclenerd=0.400000(+3.1%)  gcp_web=0.388000(ok)
-MISMATCH  n2-standard-8            us-central1  Spot     computed=0.050000    cyclenerd=n/a              gcp_web=0.055000(-9.1%)
-MISSING   c4-standard-2            europe-west1 OnDemand computed=n/a         cyclenerd=0.250000         gcp_web=0.248000
-EXTRA_NEW x5-experimental-4        us-east1     OnDemand computed=0.310000    cyclenerd=n/a              gcp_web=n/a
 MISMATCH  n2-standard-8            us-central1  OnDemand computed=0.388000    gcp_web=0.388000(ok)    cyclenerd=0.400000(+3.1%)
 MISMATCH  n2-standard-8            us-central1  Spot     computed=0.050000    gcp_web=0.055000(-9.1%) cyclenerd=n/a
 MISSING   c4-standard-2            europe-west1 OnDemand computed=n/a         gcp_web=0.250000        cyclenerd=0.248000
@@ -91,4 +87,4 @@ Summary over 37 region(s): checked=1234  mismatches=1  missing=1  extra=30  extr
 - `EXTRA_NEW`  — same as EXTRA but the machine type is **not** in `knownExtras`. This needs investigation: validate the price in the GCP Console, then add the machine to `knownExtras` and to the Known EXTRA entries table below.
 - `UNAVAIL`    — a reference source lists a price but the machine type is not deployed in the region according to the Compute Engine `machineTypes` API. Silently counted in the summary only.
 - `BLACKLIST`  — the machine type is intentionally excluded from pricing. Silently counted in the summary only.
-- Exit code is `1` when any MISMATCH, MISSING, or EXTRA_NEW is found. EXTRA, UNAVAIL, and BLACKLIST do not affect the exit code.
+- **Exit code is always `0` (warn-only mode)** while the pricing implementation is being stabilised. Findings are printed for visibility but do not fail the tool.

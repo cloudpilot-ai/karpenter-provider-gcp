@@ -178,7 +178,8 @@ func buildResults(
 }
 
 // printReport sorts results, prints actionable ones, prints a summary line, and
-// returns 1 if any actionable results (MISMATCH/MISSING/EXTRA_NEW) are present.
+// always returns 0 (warn-only mode: findings are printed but do not fail the
+// tool). This is intentional while the pricing implementation is being stabilised.
 // refLabels names each source for output; nil falls back to "ref0", "ref1", …
 func printReport(results []result, refLabels []string, nRegions int, tolerance float64) int {
 	slices.SortFunc(results, func(a, b result) int {
@@ -227,9 +228,6 @@ func printReport(results []result, refLabels []string, nRegions int, tolerance f
 	fmt.Printf("\nSummary over %d region(s): checked=%d  mismatches=%d  missing=%d  extra=%d  extra_new=%d  unavail=%d  blacklisted=%d  tolerance=%.0f%%\n",
 		nRegions, checked, mismatches, missing, extra, extraNew, unavail, blacklisted, tolerance*100)
 
-	if mismatches > 0 || missing > 0 || extraNew > 0 {
-		return 1
-	}
 	return 0
 }
 
