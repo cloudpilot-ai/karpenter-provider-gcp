@@ -263,7 +263,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 **Alpha** (implementation complete, feature-gated or opt-in):
 - Pool discovery and selection implemented and passing unit tests
 - `PatchKubeEnvForArch` (Group 2), `PatchKubeEnvForOSType` (Group 3) implemented and tested
-- E2E coverage for all 8 node variants above on `dm3ch-karpenter-dev`
+- E2E coverage for all 8 node variants above on `dm3ch-karpenter-dev` (`us-central1-f`)
 
 **Beta** (default behavior, existing pool-creation retained as fallback):
 - Open questions 1–2 (NPD pool name, kube-proxy token scope) validated in e2e
@@ -288,36 +288,35 @@ Scenarios to cover (that are not yet covered or only partially covered):
 |---|---|
 | Ubuntu amd64 on-demand node provisions and registers | Phase 2 replaces the Ubuntu template pool |
 | Ubuntu amd64 spot node provisions and registers | same |
-| COS arm64 on-demand node provisions and registers | Phase 3 eliminates the arm64 COS pool |
-| Ubuntu arm64 on-demand node provisions and registers | Phase 3 eliminates the arm64 Ubuntu pool |
+| COS arm64 on-demand node provisions and registers | Phase 2 eliminates the arm64 COS pool |
+| Ubuntu arm64 on-demand node provisions and registers | Phase 2 eliminates the arm64 Ubuntu pool |
 | Node registers with correct `kubernetes.io/arch` label | Arch patching correctness |
 | Node registers with correct `cloud.google.com/machine-family` label | Machine-family patching correctness |
 | kube-proxy pod is Running on a Karpenter-provisioned node | Group 4 credential baseline |
 | node-problem-detector pod is Running on a Karpenter-provisioned node | NPD credential baseline |
 | Cluster with `compute.requireShieldedVm` policy — node provisions | Org-policy regression gate |
 
-These tests run against `dm3ch-karpenter-dev` (`us-central1-f`) using the existing e2e framework. Tests that require arm64 must be skipped if the zone does not support arm64 machine types (guard on `c4a` availability).
+These tests run in the project's dedicated e2e environment:
 
-### Phase 1 — Prerequisite (done / in progress)
-Merge PR #253 as stop-gap for org-policy failures.
+- **Cluster**: `dm3ch-karpenter-dev`
+- **Location**: `us-central1-f`
+- **Credentials**: `karpenter-e2e-key.json` (service account key, not committed)
+- **Framework**: existing e2e suite under `test/e2e/`
 
-### Phase 2 — OS-type patching
+Tests that require arm64 must guard on `c4a` availability in the zone and skip gracefully if unsupported.
+
+### Phase 1 — OS-type patching
 Add `PatchKubeEnvForOSType`. Add Ubuntu image resolver (query `ubuntu-os-gke-cloud`, cache by GKE version + arch). Eliminates `karpenter-ubuntu` and `karpenter-ubuntu-arm64` pools.
 
-### Phase 3 — Arm64 hash via GCS sidecar
+### Phase 2 — Arm64 hash via GCS sidecar
 Add `PatchKubeEnvForArch`. Eliminates `karpenter-cos-arm64` pool. At this point, only `karpenter-default` remains.
 
-### Phase 4 — Pool discovery and selection
-Replace `Create()` pool creation with scoring-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Add `PatchNodeProblemDetectorConfig` if Phase 3 e2e requires it. At this point, 0 Karpenter-specific pools in normal operation.
+### Phase 3 — Pool discovery and selection
+Replace `Create()` pool creation with scoring-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Add `PatchNodeProblemDetectorConfig` if Phase 2 e2e requires it. At this point, 0 Karpenter-specific pools in normal operation.
 
 ---
 
 ## Alternatives Considered
-
-### Controller-level env vars for org-policy fields
-_(PR #253)_
-
-Extends the `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` pattern to CMEK key and Shielded VM. Unblocks users but does not reduce pool count. CMEK and Shielded VM are org-policy concerns that should not require Karpenter Helm values. Accepted as stop-gap; not the target shape.
 
 ### Derive template config from GCENodeClass
 
@@ -345,7 +344,7 @@ Once this proposal is stable, the remaining dependency on reading any pool templ
 
 ## Open Questions
 
-1. **`NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name**: Does GKE validate the embedded pool name in the audience URL against node pool membership? Validate in e2e (Phase 3). Patch function ready to wire in.
+1. **`NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name**: Does GKE validate the embedded pool name in the audience URL against node pool membership? Validate in e2e (Phase 2). Patch function ready to wire in.
 
 2. **`KUBE_PROXY_TOKEN` RBAC scope**: Is the token bound to a pool-scoped RBAC subject? Validate by checking kube-proxy logs on Karpenter nodes provisioned using a non-owning pool's credentials.
 
