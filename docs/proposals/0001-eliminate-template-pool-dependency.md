@@ -72,7 +72,7 @@ The table below maps each kube-env field group to its source after this change. 
 | Group | Fields | Source |
 |---|---|---|
 | 1 — Cluster constants | CA cert, master endpoint, IP ranges, feature flags, … | Any pool's template |
-| 2 — Arch-specific binary | `SERVER_BINARY_TAR_URL`, `SERVER_BINARY_TAR_HASH` | Source arch detected from pool's URL; patched to target arch; hash from GCS `.sha256` sidecar |
+| 2 — Arch-specific binary | `SERVER_BINARY_TAR_URL`, `SERVER_BINARY_TAR_HASH` | Source arch detected from pool's URL; patched to target arch; hash from GCS `.sha512` sidecar |
 | 3 — OS-specific | `gke-os-distribution`, BFQ scheduler flags | Patched at provisioning time (`PatchKubeEnvForOSType`) |
 | 4 — Per-pool credentials | `TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`, NPD config | Any pool's template |
 | 5 — Node-specific | arch label, machine-family, provisioning model, max-pods | Patched at provisioning time (existing functions, no change) |
@@ -127,10 +127,8 @@ Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-as
 2. If source arch == target arch → no-op
 3. Otherwise substitutes `linux-{source}` → `linux-{target}` in each mirror URL
 4. Extracts GKE version from the URL path
-5. Fetches `{primary_url}.sha256` (65 bytes) using an HTTP client; caches by `{target-arch}:{version}` in a `sync.Map`
+5. Fetches `{primary_url}.sha512` (128-char raw hex) using an HTTP client; caches by `{target-arch}:{version}` in a `sync.Map`
 6. Replaces both `SERVER_BINARY_TAR_URL` and `SERVER_BINARY_TAR_HASH` in kube-env
-
-> **Pre-implementation check**: Verify the exact format of `SERVER_BINARY_TAR_HASH` in a live kube-env before writing the replacement regex (raw hex vs `sha256:`-prefixed).
 
 This follows a "query a known public endpoint by version and arch" pattern, avoiding the need to create a template resource. Note: the GCS URL scheme (`gke-release` bucket path layout) has no documented stability contract. If Google changes the path format, `PatchKubeEnvForArch` will require an update. Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-asia`) as of GKE 1.35.
 
@@ -152,14 +150,12 @@ This follows the same pattern as the existing `PatchKubeEnvForInstanceType` and 
 Verified against GKE 1.35.1 (COS `default-pool` vs Ubuntu `ubuntu-pool` on the same cluster):
 
 - **`KUBE_PROXY_TOKEN`** — **identical across pools**. Cluster-scoped; cross-pool reuse is safe with no patching needed.
-- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`** — **different per pool** (unique x509 cert and RSA key pair per pool). Cross-pool reuse is the central hypothesis of this proposal; whether GKE enforces pool-bound identity at bootstrap time must be validated in the Phase 0 PoC.
+- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`** — **different per pool** (unique x509 cert and RSA key pair per pool). Verified on GKE 1.35.1: the cert Subject encodes the pool name (`O=gke:nodepool:name:{pool}`, `CN=kubelet-nodepool-bootstrap`), and each pool has its own RSA key pair. The Issuer is the cluster CA UUID. Since Karpenter today uses `karpenter-default`'s cert/key for both COS and Ubuntu nodes without bootstrap failures (different OS, same pool cert), GKE likely validates CA signature only — not pool membership in the Subject. Cross-pool reuse (cert Subject names a different pool than the provisioned node belongs to) is expected to work on the same basis. Must be validated with an explicit cross-pool PoC in Phase 0.
 - **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`** — **different per pool**. The audience URL and credential_source URL both embed the pool name:
   ```
   https://.../nodePools/{pool-name}/systemComponents/node-problem-detector/generateNodeServiceAccountToken
   ```
   `PatchNodeProblemDetectorConfig` (new function) must replace the embedded pool name with the correct source pool name for provisioned nodes. The patch is required, not optional.
-
-Karpenter today uses `karpenter-default`'s `TPM_BOOTSTRAP_CERT`/`KEY` for both COS and Ubuntu nodes (different OS, same pool credentials) without bootstrap failures, which establishes OS-crossover within one pool as working. Cross-pool reuse of these credentials is the key open question for Phase 0.
 
 #### Code Changes
 
@@ -333,7 +329,7 @@ Add `PatchKubeEnvForOSType`. Add Ubuntu image resolver (query `ubuntu-os-gke-clo
 Add `PatchKubeEnvForArch`. Eliminates `karpenter-cos-arm64` pool. At this point, only `karpenter-default` remains.
 
 ### Phase 3 — Pool discovery and selection
-Replace `Create()` pool creation with scoring-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Add `PatchNodeProblemDetectorConfig` if Phase 2 e2e requires it. At this point, 0 Karpenter-specific pools in normal operation.
+Replace `Create()` pool creation with priority-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Add `PatchNodeProblemDetectorConfig` if Phase 2 e2e requires it. At this point, 0 Karpenter-specific pools in normal operation.
 
 ---
 
@@ -385,6 +381,6 @@ Once this proposal is stable, the remaining dependency on reading any pool templ
 
 3. **`SERVER_BINARY_TAR_HASH` format**: ~~Raw hex or `sha256:`-prefixed?~~ **Resolved**: raw 128-char SHA-512 hex; sidecar file is `.sha512` (not `.sha256`). Verified against GKE 1.35.1.
 
-4. **arm64 COS image source without arm64 pool**: Can `gke-node-images` project provide arm64 COS images via `compute.images.list` filtering on architecture? Or must the image URL be derived from an arm64 pool's boot disk? Needs API testing.
+4. **arm64 COS image source without arm64 pool**: **Resolved**. ARM64 COS images are available in the `gke-node-images` GCP project via `compute.images.list` filtering on `architecture=ARM64`. Family names exist for stable channels (`cos-arm64-stable`, `cos-arm64-lm-125-lts`, etc.) and can be used for version-agnostic image selection. GKE-version-pinned images (pattern `gke-{version}-gke{build}-cos-arm64-...`) have **no family name** and must be selected by matching the image name against the GKE cluster version. Strategy for `PatchKubeEnvForArch` when provisioning COS arm64: query `gke-node-images` by `architecture=ARM64` + GKE version prefix in the image name, pick the newest matching image.
 
 5. **`RENDERED_INSTALLABLES` consistency**: ~~Verify holds across OS types and GKE versions.~~ **Resolved for OQ**: identical between COS and Ubuntu pools on GKE 1.35.1 (byte-for-byte diff clean). Cross-version confirmation still recommended before Stable.
