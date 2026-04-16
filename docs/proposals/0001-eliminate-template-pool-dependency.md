@@ -271,7 +271,7 @@ The feature is considered complete when:
 - Phase 0 credential research is documented and green-lights the approach
 - Pool discovery, `PatchKubeEnvForOSType`, and `PatchKubeEnvForArch` are implemented with unit tests
 - E2E coverage for all 8 node variants passes on the project e2e cluster
-- Open questions 1–2 (NPD pool name, kube-proxy token scope) are validated in e2e; `PatchNodeProblemDetectorConfig` wired in if required
+- Open question 2 (kube-proxy token scope) validated in e2e by confirming kube-proxy reaches Running on a node provisioned from a non-owning pool
 - Old Karpenter-managed pool creation code is removed (no parallel code paths)
 
 ---
@@ -285,7 +285,7 @@ Before any implementation begins:
 **Credential research** — validate how Group 4 credentials behave when reused across pools:
 - **`KUBE_PROXY_TOKEN`**: pool-scoped or cluster-wide? If pool-scoped, can it be safely stripped or self-generated?
 - **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`**: same — pool-scoped or cluster-wide?
-- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`**: does GKE validate the embedded pool name against pool membership? If not, no patch needed. If yes, confirm whether removing the field entirely is safe.
+- **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`**: ~~does GKE validate the embedded pool name?~~ **Resolved** (see OQ 1): pool existence is not validated; use config unchanged.
 - **GKE cluster API**: do `clusters.get` or related APIs expose any Group 4 credentials directly?
 
 **Prerequisites (blockers before Phase 2)**:
