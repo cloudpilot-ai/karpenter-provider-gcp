@@ -88,9 +88,8 @@ On startup and on each template refresh cycle, Karpenter enumerates all node poo
 2. List all pools: containerService.NodePools.List(cluster)
 3. Filter: status == RUNNING
 4. Score remaining pools:
-     default-pool              → 10
-     COS_CONTAINERD image type →  5
-     any other pool            →  1
+     default-pool  → 10
+     any other     →  1
 5. Pick highest score. On tie, sort by name (deterministic).
 6. If no RUNNING pools found → retry with backoff (transient during cluster upgrades).
    If retry limit exceeded → create karpenter-default as last-resort fallback (see below).
@@ -98,7 +97,7 @@ On startup and on each template refresh cycle, Karpenter enumerates all node poo
 
 The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name.
 
-No arch-based filtering is needed because `PatchKubeEnvForArch` handles all arch differences at provisioning time regardless of the source pool's architecture.
+No arch-based or OS-based filtering is needed. `PatchKubeEnvForArch` and `PatchKubeEnvForOSType` handle all differences at provisioning time regardless of the source pool's architecture or image type.
 
 #### Last-Resort Fallback Pool
 
@@ -108,7 +107,7 @@ In the unlikely event that no RUNNING pool is available after retries (e.g., unu
 - Shielded VM config enabled by default (`enableSecureBoot`, `enableIntegrityMonitoring`) to satisfy `compute.requireShieldedVm` without requiring operator input
 - 0 initial nodes — pool is never used to run workloads
 
-`karpenter-default` is **not preferred** over existing cluster pools in the scoring algorithm. It scores as any other COS_CONTAINERD pool (score 5). Preferring it would reintroduce the dependency on a Karpenter-created resource as the default path, which defeats the purpose of this proposal. It is only used when the fallback creation path fires — at which point it is the only candidate.
+`karpenter-default` is **not preferred** over existing cluster pools in the scoring algorithm. It scores as any other non-default pool (score 1). Preferring it would reintroduce the dependency on a Karpenter-created resource as the default path, which defeats the purpose of this proposal. It is only used when the fallback creation path fires — at which point it is the only candidate.
 
 #### Architecture-Specific Binary Metadata (Group 2)
 
@@ -161,7 +160,7 @@ This follows the same pattern as the existing `PatchKubeEnvForInstanceType` and 
 
 | File | Change |
 |---|---|
-| `pkg/providers/nodepooltemplate/nodepooltemplate.go` | `Create()` → no-op unless no RUNNING amd64 pool found (fallback only). Add `discoverSourcePool()` with scoring algorithm. |
+| `pkg/providers/nodepooltemplate/nodepooltemplate.go` | `Create()` → no-op unless no RUNNING pool found (fallback only). Add `discoverSourcePool()` with scoring algorithm. |
 | `pkg/providers/instance/instance.go` | `resolveNodePoolName()` → `resolveSourcePoolName()`. Single source pool for all OS families and both arches. |
 | `pkg/providers/metadata/utils.go` | Add `PatchKubeEnvForOSType`, `PatchKubeEnvForArch`, `PatchNodeProblemDetectorConfig`. |
 | `pkg/operator/options/options.go` | Add `DEFAULT_NODEPOOL_TEMPLATE_NAME` env var (optional, default empty). |
@@ -181,8 +180,8 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 **Impact on new provisioning**: The next `GetInstanceTemplates()` call finds no pool. Provisioning halts until resolved.
 
 **Mitigation**:
-- The refresh cycle re-runs selection. If another RUNNING amd64 pool exists, it is promoted automatically with no operator action.
-- If no pool remains, the fallback creates `karpenter-default` (one COS amd64 pool, 0 nodes) — distinct from the current 4-pool creation path.
+- The refresh cycle re-runs selection. If another RUNNING pool exists, it is promoted automatically with no operator action.
+- If no pool remains, the fallback creates `karpenter-default` (COS, 0 nodes) — distinct from the current 4-pool creation path.
 - `DEFAULT_NODEPOOL_TEMPLATE_NAME` produces a clear error message naming the expected pool if it is missing.
 
 ### GKE control-plane or node-pool upgrade
@@ -205,7 +204,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 ### Multiple candidate pools — non-deterministic selection
 
-**Scenario**: Cluster has several RUNNING amd64 pools, each potentially with different custom metadata or image settings.
+**Scenario**: Cluster has several RUNNING pools, each potentially with different custom metadata or image settings.
 
 **Impact**: Group 1 (cluster constants) and Group 4 (credentials) are identical across pools — verified across four pools on a live GKE 1.35.1 cluster. Custom `Properties.Metadata` keys set by operators are the only divergence risk.
 
@@ -248,13 +247,13 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 | Variant | Bootstrap source | Image source | Patches |
 |---|---|---|---|
-| COS amd64 on-demand | discovered amd64 pool | pool template boot disk | arch, machine-family, provisioning |
+| COS amd64 on-demand | discovered pool | pool template boot disk | arch, machine-family, provisioning |
 | COS amd64 spot | same | same | + gke-provisioning=spot |
 | Ubuntu amd64 on-demand | same | `ubuntu-os-gke-cloud` lookup | + gke-os-distribution, -BFQ |
 | Ubuntu amd64 spot | same | same | + gke-provisioning=spot |
-| COS arm64 on-demand | same (amd64 pool) | `gke-node-images` arm64 | arch=arm64, URL/hash patch |
+| COS arm64 on-demand | same | `gke-node-images` arm64 | arch=arm64, URL/hash patch |
 | COS arm64 spot | same | same | + gke-provisioning=spot |
-| Ubuntu arm64 on-demand | same (amd64 pool) | `ubuntu-os-gke-cloud` arm64 | + gke-os-distribution, URL/hash patch |
+| Ubuntu arm64 on-demand | same | `ubuntu-os-gke-cloud` arm64 | + gke-os-distribution, URL/hash patch |
 | Ubuntu arm64 spot | same | same | + gke-provisioning=spot |
 
 ### Scenario Tests
