@@ -155,7 +155,7 @@ func fetchInstancePrices(ctx context.Context, regions []string) (RegionPrices, e
 
 	all, err := client.FetchAllPrices(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetching Cyclenerd CSV: %w", err)
+		return nil, fmt.Errorf("fetching prices: %w", err)
 	}
 
 	computed := make(RegionPrices, len(regions))

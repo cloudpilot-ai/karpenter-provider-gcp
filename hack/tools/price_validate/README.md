@@ -28,16 +28,15 @@ Every run automatically executes three phases:
 
 Fetches both reference sources in parallel and saves them to
 `data/cyclenerd.json` and `data/gcpweb.json`. Cached results are reused until
-they exceed `--cache-ttl` (default 6 h).
+they exceed `--cache-ttl` (default 12 h).
 
 **Phase 2 — Computed prices**
 
-Calls `instanceprice.Client.FetchPrices()` for every region using `--workers`
-parallel workers (default 16).
+Calls `instanceprice.FetchAllPrices()` and gets Karpenter calculated prices for each machine in every selected region.
 
 **Phase 3 — Compare**
 
-Diffs computed prices against both reference sources and prints any discrepancies.
+Diffs computed prices against both reference sources (GCP web is authoritative, Cyclenerd is secondary) and prints any discrepancies.
 
 ---
 
@@ -67,7 +66,7 @@ export GOOGLE_CLOUD_PROJECT=<your-project-id>
 | `--tolerance` | `0.01`   | Max fractional price diff (1%) before flagging                     |
 | `--no-cache`  | `false`  | Ignore all caches and fetch everything fresh                       |
 | `--work-dir`  | `./data` | Directory for cache and output files                               |
-| `--cache-ttl` | `6h`     | Max age of reference price caches before re-fetching               |
+| `--cache-ttl` | `12h`     | Max age of reference price caches before re-fetching               |
 
 ---
 
@@ -78,12 +77,18 @@ MISMATCH  n2-standard-8            us-central1  OnDemand computed=0.388000    cy
 MISMATCH  n2-standard-8            us-central1  Spot     computed=0.050000    cyclenerd=n/a              gcp_web=0.055000(-9.1%)
 MISSING   c4-standard-2            europe-west1 OnDemand computed=n/a         cyclenerd=0.250000         gcp_web=0.248000
 EXTRA_NEW x5-experimental-4        us-east1     OnDemand computed=0.310000    cyclenerd=n/a              gcp_web=n/a
+MISMATCH  n2-standard-8            us-central1  OnDemand computed=0.388000    gcp_web=0.388000(ok)    cyclenerd=0.400000(+3.1%)
+MISMATCH  n2-standard-8            us-central1  Spot     computed=0.050000    gcp_web=0.055000(-9.1%) cyclenerd=n/a
+MISSING   c4-standard-2            europe-west1 OnDemand computed=n/a         gcp_web=0.250000        cyclenerd=0.248000
+EXTRA_NEW x5-experimental-4        us-east1     OnDemand computed=0.310000    gcp_web=n/a             cyclenerd=n/a
 
 Summary over 37 region(s): checked=1234  mismatches=1  missing=1  extra=30  extra_new=1  unavail=335  blacklisted=0  tolerance=1%
 ```
 
-- `MISMATCH`  — our price deviates from a reference source by more than the tolerance. `(ok)` = agrees within tolerance; `n/a` = source has no data.
-- `MISSING`   — we have no computed price for a machine that a reference source lists **and** the Compute Engine API confirms the machine type is deployed in the region.
-- `EXTRA_NEW` — we computed a price for a machine that no reference source lists. Needs investigation: validate the price in the GCP Console.
-- `UNAVAIL`   — a reference source lists a price but the machine type is not deployed in the region according to the Compute Engine `machineTypes` API. Silently counted in the summary only.
-- Exit code is `1` when any MISMATCH, MISSING, or EXTRA_NEW is found.
+- `MISMATCH`   — our price deviates from the authoritative reference (GCP web) by more than the tolerance. `(ok)` = agrees within tolerance; `n/a` = source has no data.
+- `MISSING`    — we have no computed price for a machine that a reference source lists. This indicates a genuine pricing gap.
+- `EXTRA`      — we computed a price for a machine neither reference source lists, but the machine type is in the `knownExtras` set in `main.go` (manually validated). Silently counted in the summary only.
+- `EXTRA_NEW`  — same as EXTRA but the machine type is **not** in `knownExtras`. This needs investigation: validate the price in the GCP Console, then add the machine to `knownExtras` and to the Known EXTRA entries table below.
+- `UNAVAIL`    — a reference source lists a price but the machine type is not deployed in the region according to the Compute Engine `machineTypes` API. Silently counted in the summary only.
+- `BLACKLIST`  — the machine type is intentionally excluded from pricing. Silently counted in the summary only.
+- Exit code is `1` when any MISMATCH, MISSING, or EXTRA_NEW is found. EXTRA, UNAVAIL, and BLACKLIST do not affect the exit code.
