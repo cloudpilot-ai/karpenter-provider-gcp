@@ -36,10 +36,6 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 )
 
-// knownExtras lists machine types whose prices we compute correctly but that
-// neither reference source (Cyclenerd, GCP web) includes. Each entry here
-// must have a manual validation note in the README. New EXTRA entries that
-// are NOT in this set cause a non-zero exit code so they get investigated.
 var knownExtras = map[string]bool{
 	"a3-edgegpu-8g":         true,
 	"a3-edgegpu-8g-nolssd":  true,
