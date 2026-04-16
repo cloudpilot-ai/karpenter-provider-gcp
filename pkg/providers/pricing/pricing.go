@@ -60,7 +60,7 @@ type regionEntry = instanceprice.Prices
 
 type DefaultProvider struct {
 	region    string
-	gcpClient PricingClient
+	client PricingClient
 
 	mu             sync.RWMutex
 	onDemandPrices pricesStorage
@@ -72,7 +72,7 @@ type DefaultProvider struct {
 func NewDefaultProvider(ctx context.Context, client PricingClient, region string) (*DefaultProvider, error) {
 	p := &DefaultProvider{
 		region:         region,
-		gcpClient:      client,
+		client:      client,
 		onDemandPrices: make(pricesStorage),
 		spotPrices:     make(pricesStorage),
 	}
@@ -139,11 +139,11 @@ func (p *DefaultProvider) SpotPrice(instanceType string, _ string) (float64, boo
 }
 
 func (p *DefaultProvider) UpdatePrices(ctx context.Context) error {
-	if p.gcpClient == nil {
-		return fmt.Errorf("gcpClient is nil: cannot update prices")
+	if p.client == nil {
+		return fmt.Errorf("client is nil: cannot update prices")
 	}
 
-	prices, err := p.gcpClient.FetchRegionPrices(ctx, p.region)
+	prices, err := p.client.FetchRegionPrices(ctx, p.region)
 	if err != nil {
 		return fmt.Errorf("fetching prices for %s: %w", p.region, err)
 	}
