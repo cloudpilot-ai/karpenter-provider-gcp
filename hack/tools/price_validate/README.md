@@ -73,6 +73,13 @@ export GOOGLE_CLOUD_PROJECT=<your-project-id>
 ## Output format
 
 ```
+<<<<<<< HEAD
+=======
+MISMATCH  n2-standard-8            us-central1  OnDemand computed=0.388000    cyclenerd=0.400000(+3.1%)  gcp_web=0.388000(ok)
+MISMATCH  n2-standard-8            us-central1  Spot     computed=0.050000    cyclenerd=n/a              gcp_web=0.055000(-9.1%)
+MISSING   c4-standard-2            europe-west1 OnDemand computed=n/a         cyclenerd=0.250000         gcp_web=0.248000
+EXTRA_NEW x5-experimental-4        us-east1     OnDemand computed=0.310000    cyclenerd=n/a              gcp_web=n/a
+>>>>>>> 7c43a468 (docs(price_validate): update README to reflect new pricing model and API)
 MISMATCH  n2-standard-8            us-central1  OnDemand computed=0.388000    gcp_web=0.388000(ok)    cyclenerd=0.400000(+3.1%)
 MISMATCH  n2-standard-8            us-central1  Spot     computed=0.050000    gcp_web=0.055000(-9.1%) cyclenerd=n/a
 MISSING   c4-standard-2            europe-west1 OnDemand computed=n/a         gcp_web=0.250000        cyclenerd=0.248000
