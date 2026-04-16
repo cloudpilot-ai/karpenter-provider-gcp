@@ -293,6 +293,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 - `DEFAULT_NODEPOOL_TEMPLATE_NAME` set to non-default pool: that pool is used
 - All pools temporarily PROVISIONING: Karpenter retries with backoff; provisioning resumes once a pool reaches RUNNING without creating any new pools
 - GKE upgrade while Karpenter is running: post-cache-refresh nodes use new template
+- Source pool deleted after nodes are provisioned: NPD on existing nodes continues to reach Running (OQ1 end-to-end validation)
 
 ---
 
@@ -344,6 +345,7 @@ Scenarios to cover (that are not yet covered or only partially covered):
 | Node registers with correct `cloud.google.com/machine-family` label | Machine-family patching correctness |
 | kube-proxy pod is Running on a Karpenter-provisioned node | Group 4 credential baseline |
 | node-problem-detector pod is Running on a Karpenter-provisioned node | NPD credential baseline |
+| NPD remains Running after source pool is deleted (token exchange succeeds with non-existent pool in audience URL) | Validates OQ1 empirical finding end-to-end |
 | Cluster with `compute.requireShieldedVm` policy — node provisions | Org-policy regression gate |
 
 These tests run against the project's shared e2e cluster using the existing framework under `test/e2e/`. Env vars `E2E_PROJECT_ID`, `E2E_LOCATION`, and `GOOGLE_APPLICATION_CREDENTIALS` must be set; see `CLAUDE.md` for values.
