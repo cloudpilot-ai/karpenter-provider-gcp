@@ -11,11 +11,7 @@
 
 Karpenter today creates and manages up to four GKE node pools (`karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, `karpenter-ubuntu-arm64`) solely to read back the bootstrap metadata (kube-env) that GKE generates for them. This design fails in environments with org policies like `constraints/compute.requireShieldedVm` or `constraints/gcp.restrictNonCmekServices` because Karpenter lacks the configuration to create policy-compliant pools.
 
-This proposal replaces that approach in two stages:
-
-1. **Stage 2** (this proposal): Stop creating pools. Read bootstrap metadata from whichever amd64 node pool already exists in the cluster, using a scoring-based selection algorithm. Eliminate the arm64-specific pool requirement by fetching the architecture-specific binary hash from a publicly available GCS sidecar file. Fall back to creating one pool only if the cluster has no existing amd64 pool at all.
-
-2. **Stage 3** (future work, scoped here but not implemented): Assemble kube-env entirely from GKE APIs and public GCS endpoints without reading any pool at all.
+This proposal replaces that approach: stop creating pools, and instead read bootstrap metadata from whichever amd64 node pool already exists in the cluster, using a scoring-based selection algorithm. The architecture-specific binary hash required for arm64 nodes is fetched from a publicly available GCS sidecar file (65 bytes), eliminating the need for arm64-specific pools. A single fallback pool is created only when the cluster has no existing amd64 pool at all.
 
 ---
 
@@ -23,9 +19,9 @@ This proposal replaces that approach in two stages:
 
 ### Problem Statement
 
-The current architecture creates node pools as a workaround to obtain three categories of data that GKE embeds in pool instance templates:
+The current architecture creates node pools as a workaround to obtain data that GKE embeds in pool instance templates:
 
-- **Cluster-level constants** (CA certificate, master endpoint, IP ranges, feature flags) — identical across all pools, available from `clusters.get`
+- **Cluster-level constants** (CA certificate, master endpoint, IP ranges, feature flags) — identical across all pools
 - **Architecture-specific binary metadata** (`SERVER_BINARY_TAR_URL`/`SERVER_BINARY_TAR_HASH`) — derivable from GKE version string plus a 65-byte public GCS file
 - **OS-specific kube-env patches** (os-distribution label, BFQ scheduler flags) — simple regex replacements
 - **Per-pool identity credentials** (`TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`) — the only fields that genuinely require reading a pool
@@ -48,7 +44,7 @@ Creating pools to access the first three categories is unnecessary. The fourth c
 
 ### Non-Goals
 
-- Full kube-env reconstruction from GKE APIs alone (Stage 3 — future work).
+- Full kube-env reconstruction from GKE APIs alone with no pool reads (future direction, not this proposal).
 - Changes to the `GCENodeClass` or `NodePool` API surface.
 - Support for Windows nodes (not currently supported regardless of this change).
 - Removal of the fallback pool-creation code path.
@@ -70,13 +66,13 @@ After:
   (fallback: creates one pool if none exists)
 ```
 
-### Bootstrap Data Sources After This Change
+### Bootstrap Data Sources
 
-The table below maps each kube-env field group to its source in Stage 2. "Any amd64 pool" means whichever pool the selection algorithm picks — not necessarily `default-pool`.
+The table below maps each kube-env field group to its source after this change. "Any amd64 pool" means whichever pool the selection algorithm picks — not necessarily `default-pool`.
 
-| Group | Fields | Stage 2 source |
+| Group | Fields | Source |
 |---|---|---|
-| 1 — Cluster constants | CA cert, master endpoint, IP ranges, feature flags, … | Any amd64 pool's template (Stage 3: `clusters.get`) |
+| 1 — Cluster constants | CA cert, master endpoint, IP ranges, feature flags, … | Any amd64 pool's template |
 | 2 — Arch-specific binary | `SERVER_BINARY_TAR_URL`, `SERVER_BINARY_TAR_HASH` | amd64 from pool; arm64 URL derived, hash from GCS `.sha256` sidecar |
 | 3 — OS-specific | `gke-os-distribution`, BFQ scheduler flags | Patched at provisioning time (`PatchKubeEnvForOSType`) |
 | 4 — Per-pool credentials | `TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`, NPD config | Any amd64 pool's template |
@@ -92,13 +88,15 @@ On startup and on each template refresh cycle, Karpenter enumerates all node poo
 ```
 1. If DEFAULT_NODEPOOL_TEMPLATE_NAME is set → use that pool; error if not RUNNING.
 2. List all pools: containerService.NodePools.List(cluster)
-3. Filter: status == RUNNING, machine type not arm64 (not c4a-*, t2a-*, a4x-*)
+3. Filter: status == RUNNING, resolveArch(machineType) == "amd64"
+     (resolveArch uses the same prefix table as instancetype/types.go:
+      c4a-* | t2a-* | a4x-* → arm64; everything else → amd64)
 4. Score remaining pools:
      default-pool                           → 10
-     COS_CONTAINERD image type, not arm64   →  5
+     COS_CONTAINERD image type, amd64      →  5
      any other amd64 pool                   →  1
 5. Pick highest score. On tie, sort by name (deterministic).
-6. Fallback: if no candidates → create karpenter-default (existing code path)
+6. Fallback: if no candidates → create karpenter-default (one COS amd64 pool, 0 nodes)
 ```
 
 The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name.
@@ -174,7 +172,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Mitigation**:
 - The refresh cycle re-runs selection. If another RUNNING amd64 pool exists, it is promoted automatically with no operator action.
-- If no pool remains, the fallback creates `karpenter-default` — same as the current primary path.
+- If no pool remains, the fallback creates `karpenter-default` (one COS amd64 pool, 0 nodes) — distinct from the current 4-pool creation path.
 - `DEFAULT_NODEPOOL_TEMPLATE_NAME` produces a clear error message naming the expected pool if it is missing.
 
 ### GKE control-plane or node-pool upgrade
@@ -223,7 +221,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Scenario**: A cluster with only arm64 node pools, or a freshly drained cluster.
 
-**Mitigation**: Fallback creates `karpenter-default` (lightweight COS amd64 pool, 0 nodes). This is the current primary path — well-tested and unchanged.
+**Mitigation**: Fallback creates `karpenter-default` (one lightweight COS amd64 pool, 0 nodes). Unlike the current 4-pool creation path, only this single pool is created.
 
 ---
 
@@ -255,7 +253,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 - Cluster with org policy `gcp.restrictNonCmekServices`: same
 - `default-pool` deleted mid-run: selection promotes next candidate automatically
 - `DEFAULT_NODEPOOL_TEMPLATE_NAME` set to non-default pool: that pool is used
-- No RUNNING amd64 pool: fallback creates `karpenter-default`, provisioning succeeds
+- No RUNNING amd64 pool: fallback creates `karpenter-default` (single pool), provisioning succeeds
 - GKE upgrade while Karpenter is running: post-cache-refresh nodes use new template
 
 ---
@@ -309,7 +307,7 @@ Add `PatchKubeEnvForOSType`. Add Ubuntu image resolver (query `ubuntu-os-gke-clo
 ### Phase 3 — Arm64 hash via GCS sidecar
 Add `PatchKubeEnvForArch`. Eliminates `karpenter-cos-arm64` pool. At this point, only `karpenter-default` remains.
 
-### Phase 4 — Pool discovery and selection (Stage 2 target)
+### Phase 4 — Pool discovery and selection
 Replace `Create()` pool creation with scoring-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. Add `PatchNodeProblemDetectorConfig` if Phase 3 e2e requires it. At this point, 0 Karpenter-specific pools in normal operation.
 
 ---
@@ -325,9 +323,9 @@ Extends the `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` pattern to CMEK key and Shielded 
 
 `GCENodeClass` defines compute config for workload nodes. Template pools are bootstrap infrastructure — different concern, different lifecycle. A NodePool can span multiple arches and OS families, making per-NodeClass pool selection unworkable. Rejected.
 
-### Full kube-env reconstruction from GKE APIs (skip Stage 2)
+### Full kube-env reconstruction from GKE APIs with no pool reads
 
-Achievable today for Groups 1–3 (all fields available from `clusters.get` or derivable). Blocked on Group 4 (`TPM_BOOTSTRAP_CERT`/`KUBE_PROXY_TOKEN` — generated by GKE per pool, no public API). Stage 2 is the necessary intermediate step: it validates that Group 4 credentials from an arbitrary pool work for Karpenter nodes, which is the prerequisite for Stage 3.
+Achievable for Groups 1–3 (all fields available from `clusters.get` or derivable). Blocked on Group 4 (`TPM_BOOTSTRAP_CERT`/`KUBE_PROXY_TOKEN` — generated by GKE per pool, no public API). This proposal is the necessary intermediate step: it validates that Group 4 credentials from an arbitrary pool work for Karpenter nodes, which is a prerequisite for eliminating pool reads entirely.
 
 ### Hardcode `default-pool` as the source
 
@@ -335,19 +333,13 @@ Achievable today for Groups 1–3 (all fields available from `clusters.get` or d
 
 ---
 
-## Stage 3: Future Work
+## Future Direction
 
-After Stage 2 validates Group 4 credential reuse, Stage 3 eliminates the remaining dependency on reading any pool at all.
+Once this proposal is stable, the remaining dependency on reading any pool template is Group 4 (`TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`). All other groups are either patched in code or available from public GCS endpoints. Possible paths for eventually eliminating pool reads entirely:
 
-**What Stage 3 requires**:
-- Source Groups 1 and 3 from `clusters.get` directly (already mapped; all fields available)
-- Source Group 2 (arm64) from GCS `.sha256` sidecars (already resolved in Phase 3)
-- Source Group 4 credentials by one of:
-  - **Static install-time config** (Azure Karpenter pattern): `configure-values.sh` reads credentials from a cluster pool once at install and puts them in Helm values. Requires credential rotation on pool recreation.
-  - **GKE Confidential Nodes / hardware TPM**: clusters using TPM attestation do not require software bootstrap credentials. Karpenter detects this and skips Group 4. No Helm changes needed.
-  - **GKE bootstrap API** (feature request): GKE exposes per-cluster bootstrap credentials via a privileged API.
-
-Stage 3 target state: `clusters.get` + GCS `.sha256` sidecars + GKE image catalogs → kube-env assembled in memory → node provisioned with no pool read.
+- **GKE Confidential Nodes / hardware TPM**: clusters using TPM attestation do not require software bootstrap credentials; Group 4 becomes unnecessary
+- **Static install-time credentials**: a `configure-values.sh` helper reads Group 4 from a cluster pool once at install and stores in Helm values (same approach as Azure Karpenter); requires rotation on pool recreation
+- **GKE bootstrap API**: a future GKE feature exposing per-cluster bootstrap credentials via a privileged API
 
 ---
 
