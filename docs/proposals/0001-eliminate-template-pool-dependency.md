@@ -316,6 +316,28 @@ Replace `Create()` pool creation with scoring-based discovery. Add `DEFAULT_NODE
 
 ---
 
+## Migration: Existing Karpenter-Managed Pools
+
+Clusters upgrading from a version that created the four Karpenter template pools will have `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64` present after the upgrade.
+
+### Should Karpenter delete them automatically?
+
+**Recommendation: No.** Karpenter should not delete node pools it did not create in this version — that is a destructive action with no rollback, performed on resources that the operator may be relying on for other purposes or that may still be serving nodes (if node pools somehow have nodes attached). Automatic deletion of infrastructure on upgrade is a footgun.
+
+### Recommended approach: document, don't automate
+
+- After upgrading, the four pools become unused. Karpenter will discover an existing amd64 pool (e.g., `default-pool`) and use that instead; the Karpenter-specific pools are ignored.
+- Document in the upgrade guide: once the new version is running and healthy, operators can safely delete `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64` manually.
+- Provide an optional `make delete-template-pools` target (or equivalent `kubectl`/`gcloud` one-liner) in the upgrade guide to make the cleanup easy.
+
+### Rollback consideration
+
+If an operator rolls back to the previous Karpenter version, the old version will attempt to re-create the pools. Since the pools were not deleted by the upgrade, rollback is clean: the old version finds the existing pools and continues as before.
+
+This is an additional argument against automatic deletion on upgrade — preserving the pools keeps the rollback path open.
+
+---
+
 ## Alternatives Considered
 
 ### Derive template config from GCENodeClass
