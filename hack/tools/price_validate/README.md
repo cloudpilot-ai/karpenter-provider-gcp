@@ -95,3 +95,42 @@ Summary over 37 region(s): checked=1234  mismatches=1  missing=1  extra=30  extr
 - `UNAVAIL`    — a reference source lists a price but the machine type is not deployed in the region according to the Compute Engine `machineTypes` API. Silently counted in the summary only.
 - `BLACKLIST`  — the machine type is intentionally excluded from pricing. Silently counted in the summary only.
 - **Exit code is always `0` (warn-only mode)** while the pricing implementation is being stabilised. Findings are printed for visibility but do not fail the tool.
+---
+
+## Known EXTRA entries
+
+EXTRA means we compute a price but neither Cyclenerd nor GCP web has one. These
+are legitimate machine types whose prices cannot be cross-validated automatically.
+Each entry in `knownExtras` (in `main.go`) must have a row in this table.
+
+| Machine type | Notes |
+|---|---|
+| `a3-edgegpu-8g` | A3 Edge — 8× NVIDIA H100 for serving. Documented but not on standard pricing page. Ref: https://cloud.google.com/compute/docs/gpus |
+| `a3-edgegpu-8g-nolssd` | Variant without local SSD. Same VM-level price as base — see note below. |
+| `a3-megagpu-8g` | Priced correctly; some regions not yet in reference sources. |
+| `a3-ultragpu-8g-nolssd` | Variant without local SSD. Base price differs by ~$1.3/hr (local SSD component) — see note below. |
+| `g4-standard-6` | New G4 family. Billing SKUs exist but neither Cyclenerd nor GCP web list them yet. Cannot validate until reference sources catch up. |
+| `g4-standard-12` | Same as above. |
+| `g4-standard-24` | Same as above. |
+
+### `-nolssd` variant pricing
+
+The Compute API returns both `a3-*-8g` and `a3-*-8g-nolssd` variants. The
+`-nolssd` variant has no local SSD in its machine spec, so the local SSD billing
+component is $0. This means:
+
+- `a3-edgegpu-8g` = `a3-edgegpu-8g-nolssd` ($87.83) — base has no SSD in the
+  Compute API `scratchDisks` field either, so both are identical.
+- `a3-ultragpu-8g` ($84.81) > `a3-ultragpu-8g-nolssd` ($83.49) — base includes
+  local SSD at ~$1.3/hr (varies by region).
+
+### Manual validation results (GCP Console, 2026-03-25)
+
+| Machine type | Region | Console $/hr | Computed $/hr | Diff | Status |
+|---|---|---|---|---|---|
+| `a3-edgegpu-8g` | us-central1 | $88.49 | $87.83 | −0.74% | ✅ (SSD component underpriced by ~$0.66/hr) |
+| `a3-edgegpu-8g-nolssd` | us-central1 | $87.83 | $87.83 | 0.00% | ✅ |
+| `a3-ultragpu-8g` | us-central1 | $84.81 | $84.81 | 0.00% | ✅ |
+| `a3-ultragpu-8g-nolssd` | us-central1 | $83.49 | $83.49 | 0.00% | ✅ |
+| `a3-ultragpu-8g` | europe-west4 | $10.91 | $10.90 | −0.09% | ✅ ($0 GPU — reservation-bound region) |
+| `a3-ultragpu-8g-nolssd` | europe-west4 | $9.46 | $9.46 | 0.00% | ✅ ($0 GPU — see note above) |

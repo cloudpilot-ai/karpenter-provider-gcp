@@ -36,7 +36,18 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 )
 
+// knownExtras lists machine types whose prices we compute correctly but that
+// neither reference source (Cyclenerd, GCP web) includes. Each entry here
+// must have a manual validation note in the README. New EXTRA entries that
+// are NOT in this set cause a non-zero exit code so they get investigated.
 var knownExtras = map[string]bool{
+	"a3-edgegpu-8g":         true,
+	"a3-edgegpu-8g-nolssd":  true,
+	"a3-megagpu-8g":         true,
+	"a3-ultragpu-8g-nolssd": true,
+	"g4-standard-6":         true,
+	"g4-standard-12":        true,
+	"g4-standard-24":        true,
 }
 
 func main() {
