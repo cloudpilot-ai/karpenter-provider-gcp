@@ -92,7 +92,21 @@ On startup and on each template refresh cycle, Karpenter selects a bootstrap sou
    If retry limit exceeded → create karpenter-default as last-resort fallback (see below).
 ```
 
-The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name. The selected pool name is logged at INFO on every refresh cycle so operators can observe which pool is in use, including across restarts.
+The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name. Observability:
+- Logged at INFO on startup and whenever the selected pool changes (not on every refresh cycle).
+- A `karpenter_gcp_bootstrap_source_pool` Prometheus gauge (label: `pool_name`) is updated on each selection, enabling alerts on unexpected changes via `rate()`.
+
+NodePool status treatment for selection purposes:
+
+| Status | Treatment |
+|---|---|
+| `RUNNING` | Eligible |
+| `RUNNING_WITH_ERROR` | Eligible — pool is functional; per-node failures do not affect the bootstrap template |
+| `PROVISIONING` | Skip — transient; retried on next cycle |
+| `RECONCILING` | Skip — transient (same as PROVISIONING) |
+| `STOPPING` | Skip — pool is being deleted |
+| `ERROR` | Skip |
+| `STATUS_UNSPECIFIED` | Skip |
 
 No arch-based or OS-based filtering is needed. `PatchKubeEnvForArch` and `PatchKubeEnvForOSType` handle all differences at provisioning time regardless of the source pool's architecture or image type.
 
@@ -205,7 +219,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Impact**: Group 1 (cluster constants) and Group 4 (credentials) are identical across pools — verified across four pools on a live GKE 1.35.1 cluster. Custom `Properties.Metadata` keys set by operators are the only divergence risk.
 
-**Mitigation**: Selection is deterministic — `default-pool` is preferred, then alphabetical by name. The selected pool name is logged at INFO on every refresh cycle, so operators can observe the current source pool and detect changes. Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`.
+**Mitigation**: Selection is deterministic — `default-pool` is preferred, then alphabetical by name. The selected pool name is logged at INFO on startup and on any change; a `karpenter_gcp_bootstrap_source_pool` Prometheus gauge tracks the current selection. Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`.
 
 ### `NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name validation
 
@@ -229,6 +243,24 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Mitigation**: Retry with backoff — the normal case (upgrade in progress) resolves within minutes. If retries are exhausted, create `karpenter-default` as a last-resort fallback with minimal, policy-safe config (see Pool Selection Algorithm above). Log pool states clearly at each retry so operators can diagnose the situation.
 
+### GKE Container API quota
+
+**Scenario**: `projects.locations.clusters.nodePools.list` is called once per refresh cycle (not per NodeClaim). High-throughput clusters running many Karpenter instances (e.g., multiple regions or namespaces) may approach GKE Container API per-project quota limits.
+
+**Impact**: HTTP 429 from the API on a refresh cycle causes pool list to fail. If the cache is empty (first startup), provisioning halts. If a previous selection is cached, provisioning continues with the stale template.
+
+**Mitigation**: On HTTP 429, use the cached template and log a warning. Rate-limit refresh calls if needed (the 5-minute TTL already keeps calls infrequent). Document the quota implications in the operator guide.
+
+### TPM credential rotation
+
+**Scenario**: GKE rotates `TPM_BOOTSTRAP_CERT`/`TPM_BOOTSTRAP_KEY` for a pool during a cluster upgrade or manual rotation. The Karpenter cache holds the pre-rotation credentials.
+
+**Impact on running nodes**: None. `TPM_BOOTSTRAP_CERT`/`KEY` are used only at bootstrap time (VM first-boot). Already-registered nodes are not affected by credential rotation.
+
+**Impact on new provisioning**: Nodes provisioned during the window between rotation and the next cache refresh use the stale credentials. Whether stale bootstrap credentials are accepted by the GKE API depends on GKE's rotation grace period (GKE typically keeps old credentials valid for a short overlap window during upgrades).
+
+**Mitigation**: The 5-minute refresh TTL bounds the stale window. No special handling is required beyond the existing cache TTL behaviour.
+
 ---
 
 ## Test Plan
@@ -237,7 +269,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 - `discoverSourcePool` selection: mock pool lists with various combinations (no pools, `default-pool` present, no `default-pool` → first by name, `DEFAULT_NODEPOOL_TEMPLATE_NAME` set, non-RUNNING pools skipped)
 - `PatchKubeEnvForOSType`: COS→Ubuntu OS distribution replacement, BFQ field removal, no-op on COS input
-- `PatchKubeEnvForArch`: URL substitution, hash replacement from mock HTTP server returning `.sha256` content, cache hit avoids second HTTP call
+- `PatchKubeEnvForArch`: URL substitution, hash replacement from mock HTTP server returning `.sha512` content, cache hit avoids second HTTP call
 - `PatchNodeProblemDetectorConfig`: not required (GKE validates token signature only, not pool name in audience URL)
 
 ### E2E Test Matrix
@@ -353,9 +385,15 @@ Rolling back to the previous version will re-create the pools on startup if they
 
 Achievable for Groups 1–3 (all fields available from `clusters.get` or derivable). Blocked on Group 4 (`TPM_BOOTSTRAP_CERT`/`KUBE_PROXY_TOKEN` — generated by GKE per pool, no public API). This proposal is the necessary intermediate step: it validates that Group 4 credentials from an arbitrary pool work for Karpenter nodes, which is a prerequisite for eliminating pool reads entirely.
 
+### Install-time credential collection (Azure-style)
+
+Azure Karpenter uses a `configure-values.sh` helper that reads bootstrap credentials once at install time and stores them in Helm values. This avoids any runtime pool reads.
+
+GKE Group 4 credentials are fundamentally different from Azure's equivalent. In Azure, the bootstrap material is a cluster endpoint and a static registration token with a known rotation cadence — collected once and re-collected on rotation. In GKE, Group 4 credentials (`TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`) are per-pool, embedded in instance templates, and rotate whenever a pool is recreated or upgraded. An install-time collection would need to be re-run on every such event, which is operationally indistinguishable from runtime discovery — except it requires explicit operator action each time. Rejected in favour of runtime discovery, which handles rotation transparently.
+
 ### Hardcode `default-pool` as the source
 
-`default-pool` is a GKE convention, not a contract. Operators can delete it, never have it (Autopilot → Standard migration), or prefer a different pool. The scoring-based selection algorithm handles all these cases while still preferring `default-pool` when present.
+`default-pool` is a GKE convention, not a contract. Operators can delete it, never have it (Autopilot → Standard migration), or prefer a different pool. Hardcoding it as the *only* source is rejected for these reasons. The priority-based selection algorithm is different: it *prefers* `default-pool` as a heuristic (it is the most common name operators expect Karpenter to use) but degrades gracefully to alphabetical-first when it is absent. `DEFAULT_NODEPOOL_TEMPLATE_NAME` provides explicit control for operators who need it.
 
 ---
 
@@ -373,7 +411,7 @@ Once this proposal is stable, the remaining dependency on reading any pool templ
 
 1. **`NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name**: **Resolved**. GKE's `generateClusterNodeAgentToken` validates only the cryptographic signature of the identity token — pool existence in the audience URL is not checked. Verified empirically: token exchange succeeds after pool deletion. No patch needed; use source pool's config unchanged.
 
-2. **`KUBE_PROXY_TOKEN` RBAC scope**: Is the token bound to a pool-scoped RBAC subject? **Partially resolved**: token is cluster-scoped (identical across pools on GKE 1.35.1). Validate in e2e by confirming kube-proxy reaches Running on a node provisioned from a non-owning pool.
+2. **`KUBE_PROXY_TOKEN` RBAC scope**: **Resolved** (pending e2e sanity check). Token is cluster-scoped — identical across pools on GKE 1.35.1; cross-pool reuse is safe. Validate in e2e by confirming kube-proxy reaches Running on a node provisioned from a non-owning pool.
 
 3. **`SERVER_BINARY_TAR_HASH` format**: ~~Raw hex or `sha256:`-prefixed?~~ **Resolved**: raw 128-char SHA-512 hex; sidecar file is `.sha512` (not `.sha256`). Verified against GKE 1.35.1.
 
