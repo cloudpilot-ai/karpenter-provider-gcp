@@ -48,6 +48,7 @@ Creating pools to access the first three categories is unnecessary. The fourth c
 - Changes to the `GCENodeClass` or `NodePool` API surface.
 - Support for Windows nodes (not currently supported regardless of this change).
 - GKE Autopilot clusters (node pool API surface differs; explicit non-goal for this proposal).
+- Arm64 node provisioning in fully air-gapped environments with no access to `storage.googleapis.com` (Private Google Access not enabled). See Risks for the mitigation path.
 
 ---
 
@@ -145,6 +146,8 @@ Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-as
 6. Replaces both `SERVER_BINARY_TAR_URL` and `SERVER_BINARY_TAR_HASH` in kube-env
 
 This follows a "query a known public endpoint by version and arch" pattern, avoiding the need to create a template resource. Note: the GCS URL scheme (`gke-release` bucket path layout) has no documented stability contract. If Google changes the path format, `PatchKubeEnvForArch` will require an update. Confirmed on all three mirrors (`gke-release`, `gke-release-eu`, `gke-release-asia`) as of GKE 1.35.
+
+In clusters where `storage.googleapis.com` is not reachable (VPC Service Controls perimeter excluding the `gke-release` bucket, or fully air-gapped environments), arm64 provisioning will fail at the hash-fetch step. [Private Google Access](https://cloud.google.com/vpc/docs/private-google-access) covers the typical restricted-network GKE deployment and is sufficient; see Risks for details.
 
 #### OS-Type Patching (Group 3)
 
@@ -260,6 +263,14 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 **Impact on new provisioning**: Nodes provisioned during the window between rotation and the next cache refresh use the stale credentials. Whether stale bootstrap credentials are accepted by the GKE API depends on GKE's rotation grace period (GKE typically keeps old credentials valid for a short overlap window during upgrades).
 
 **Mitigation**: The 5-minute refresh TTL bounds the stale window. No special handling is required beyond the existing cache TTL behaviour.
+
+### Arm64 provisioning in air-gapped environments
+
+**Scenario**: The cluster VPC has no route to `storage.googleapis.com` — either via a VPC Service Controls perimeter that excludes the `gke-release` bucket, or a fully air-gapped environment with no Private Google Access. `PatchKubeEnvForArch` attempts to fetch the `.sha512` sidecar at arm64 provisioning time.
+
+**Impact**: The HTTP fetch times out or is rejected. Arm64 node provisioning fails. Amd64 provisioning is unaffected (hash patch is a no-op when source arch matches target arch).
+
+**Mitigation**: Enable [Private Google Access](https://cloud.google.com/vpc/docs/private-google-access) on the cluster subnet — this provides access to `storage.googleapis.com` without a public internet route and covers the typical enterprise restricted-network GKE deployment. Fully air-gapped environments (no Private Google Access) must retain an arm64 pool and either set `DEFAULT_NODEPOOL_TEMPLATE_NAME` to point at it (so the arm64 hash is read from the pool's template directly), or avoid arm64 workloads.
 
 ---
 
