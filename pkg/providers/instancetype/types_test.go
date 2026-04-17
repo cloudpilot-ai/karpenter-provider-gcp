@@ -238,9 +238,10 @@ func TestComputeRequirements(t *testing.T) {
 		{
 			name: "ARM Instance (t2a-standard-1)",
 			mt: &computepb.MachineType{
-				Name:      aws.String("t2a-standard-1"),
-				GuestCpus: aws.Int32(1),
-				MemoryMb:  aws.Int32(4096),
+				Name:         aws.String("t2a-standard-1"),
+				GuestCpus:    aws.Int32(1),
+				MemoryMb:     aws.Int32(4096),
+				Architecture: aws.String("ARM64"),
 			},
 			offerings: cloudprovider.Offerings{
 				{
