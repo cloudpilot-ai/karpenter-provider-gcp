@@ -45,4 +45,23 @@ var _ = Describe("On-Demand Provisioning", func() {
 			InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
 		})
 	}, SpecTimeout(15*time.Minute))
+
+	// Ubuntu tests validate OS-type patching (Group 3) and Group 4 credential reuse.
+	It("should provision an Ubuntu amd64 on-demand node", func(ctx SpecContext) {
+		runUbuntuProvisioningTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
+		})
+	}, SpecTimeout(15*time.Minute))
+
+	It("should provision an Ubuntu arm64 on-demand node", func(ctx SpecContext) {
+		runUbuntuProvisioningTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureArm64,
+			Families:      []string{"c4a", "t2a"},
+			InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
+		})
+	}, SpecTimeout(15*time.Minute))
 })

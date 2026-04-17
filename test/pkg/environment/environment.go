@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	compute "google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -140,7 +141,17 @@ func NewEnvironment() *Environment {
 	}
 
 	env.waitForControllerReady()
+	env.ensureTestNamespace()
 	return env
+}
+
+// ensureTestNamespace creates the test namespace if it doesn't already exist.
+func (e *Environment) ensureTestNamespace() {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: TestNamespace}}
+	_, err := e.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred(), "creating test namespace %s", TestNamespace)
+	}
 }
 
 // Must be called after successfully creating a NodePool so that Cleanup deletes it.
@@ -255,24 +266,25 @@ func (e *Environment) waitForControllerReady() {
 			"karpenter Deployment has no available replicas yet")
 	}).WithTimeout(ControllerStartTimeout).WithPolling(5 * time.Second).Should(Succeed())
 
-	// Wait for karpenter's template node pools to reach RUNNING state, which
-	// confirms the controller has initialized and the GKE node pool templates
-	// are ready to back instance provisioning. Without this, GetInstanceTemplates
-	// returns an empty map and every provisioning attempt fails immediately.
-	// Both pools are checked in a single Eventually so they poll concurrently
-	// rather than blocking sequentially on each one.
+	// Wait for at least one RUNNING node pool, which confirms the Karpenter
+	// nodepooltemplate controller has completed pool discovery and bootstrap metadata
+	// is available for instance provisioning.
 	poolCtx, poolCancel := context.WithTimeout(context.Background(), NodePoolReadyTimeout)
 	defer poolCancel()
+	clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
+		e.ProjectID, e.ClusterLocation, e.ClusterName)
 	Eventually(func(g Gomega) {
-		for _, poolName := range []string{"karpenter-default", "karpenter-ubuntu"} {
-			poolPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s/nodePools/%s",
-				e.ProjectID, e.ClusterLocation, e.ClusterName, poolName)
-			pool, err := e.containerSvc.Projects.Locations.Clusters.NodePools.
-				Get(poolPath).Context(poolCtx).Do()
-			g.Expect(err).NotTo(HaveOccurred(), "getting GKE node pool %s", poolName)
-			g.Expect(pool.Status).To(Equal("RUNNING"),
-				"GKE node pool %s is not RUNNING (status=%s)", poolName, pool.Status)
+		resp, err := e.containerSvc.Projects.Locations.Clusters.NodePools.
+			List(clusterPath).Context(poolCtx).Do()
+		g.Expect(err).NotTo(HaveOccurred(), "listing GKE node pools")
+		var running int
+		for _, pool := range resp.NodePools {
+			if pool.Status == "RUNNING" || pool.Status == "RUNNING_WITH_ERROR" {
+				running++
+			}
 		}
+		g.Expect(running).To(BeNumerically(">=", 1),
+			"expected at least one RUNNING node pool for bootstrap source discovery")
 	}).WithTimeout(NodePoolReadyTimeout).WithPolling(10 * time.Second).Should(Succeed())
 }
 

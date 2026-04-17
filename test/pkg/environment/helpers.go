@@ -104,6 +104,30 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name string) {
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithUbuntu creates a GCENodeClass using the Ubuntu image family.
+// Ubuntu nodes require a larger boot disk (50 GiB) than COS to accommodate the
+// OS packages; 30 GiB is below the minimum for ubuntu-gke images.
+func (e *Environment) CreateNodeClassWithUbuntu(ctx context.Context, name string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "Ubuntu@latest"},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": int64(50), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating Ubuntu GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
 // CreateNodeClass but with networkConfig.networkInterfaces[0].enableExternalIPAccess
 // set to false, so Karpenter provisions nodes with no external (public) IP.
@@ -535,6 +559,65 @@ func toAny(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// WaitForKubeProxyRunning polls until the kube-proxy DaemonSet pod on the given
+// node is Running and Ready. This validates that Group 4 bootstrap credentials
+// (KUBE_PROXY_TOKEN) from the source pool are accepted by the API server for a
+// node that does not belong to that pool.
+func (e *Environment) WaitForKubeProxyRunning(ctx context.Context, nodeName string) {
+	Eventually(func(g Gomega) {
+		// GKE kube-proxy pods use "component=kube-proxy" (not the upstream "k8s-app=kube-proxy").
+		pods, err := e.KubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+			LabelSelector: "component=kube-proxy",
+			FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
+		})
+		if err != nil {
+			// Transient API/network errors (e.g. TLS connection drops) are logged and
+			// retried via the Eventually loop — they do not immediately fail the test.
+			GinkgoWriter.Printf("[retry] transient error listing kube-proxy pods on %s: %v\n", nodeName, err)
+		}
+		g.Expect(err).NotTo(HaveOccurred(), "listing kube-proxy pods on node %s", nodeName)
+		g.Expect(pods.Items).NotTo(BeEmpty(), "no kube-proxy pod on node %s", nodeName)
+		g.Expect(isRunningAndReady(&pods.Items[0])).To(BeTrue(),
+			"kube-proxy pod on %s is not Running/Ready (phase=%s)",
+			nodeName, pods.Items[0].Status.Phase)
+	}).WithTimeout(ProvisioningTimeout).WithPolling(10 * time.Second).Should(Succeed())
+}
+
+// NodeClassReadyTimeout is how long to wait for a GCENodeClass to become Ready
+// before aborting. This is shorter than ProvisioningTimeout so tests fail fast
+// when Karpenter cannot resolve images (e.g. due to API errors).
+const NodeClassReadyTimeout = 3 * time.Minute
+
+// WaitForNodeClassReady polls until the named GCENodeClass reports Ready=True,
+// failing the test immediately if it does not become ready within NodeClassReadyTimeout.
+// Call this after CreateNodeClass/CreateNodeClassWithUbuntu and before creating the
+// deployment so that image-resolution failures surface immediately rather than after
+// the full ProvisioningTimeout.
+func (e *Environment) WaitForNodeClassReady(ctx context.Context, name string) {
+	GinkgoWriter.Printf("[setup] waiting for GCENodeClass %s to become Ready\n", name)
+	Eventually(func(g Gomega) {
+		obj, err := e.DynamicClient.Resource(gceNodeClassGVR).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred(), "getting GCENodeClass %s", name)
+
+		conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+		g.Expect(found).To(BeTrue(), "GCENodeClass %s has no status conditions yet", name)
+
+		for _, c := range conditions {
+			cond, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			if cond["type"] == "Ready" {
+				g.Expect(cond["status"]).To(Equal("True"),
+					"GCENodeClass %s Ready condition is %s: %s",
+					name, cond["status"], cond["message"])
+				return
+			}
+		}
+		g.Expect(false).To(BeTrue(), "GCENodeClass %s has no Ready condition", name)
+	}).WithTimeout(NodeClassReadyTimeout).WithPolling(5 * time.Second).Should(Succeed())
 }
 
 // deleteIfExists deletes a resource if it exists and waits for it to be fully

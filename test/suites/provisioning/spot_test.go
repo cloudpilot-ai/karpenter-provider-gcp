@@ -43,4 +43,14 @@ var _ = Describe("Spot Provisioning", func() {
 			InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
 		})
 	}, SpecTimeout(15*time.Minute))
+
+	// Ubuntu spot tests validate OS-type patching + spot provisioning model.
+	It("should provision an Ubuntu amd64 spot node", func(ctx SpecContext) {
+		runUbuntuProvisioningTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeSpot,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
+		})
+	}, SpecTimeout(15*time.Minute))
 })

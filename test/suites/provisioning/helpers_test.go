@@ -31,13 +31,26 @@ import (
 
 // runProvisioningTest creates a NodePool/NodeClass/Deployment, waits for a pod to run
 // on a newly provisioned node, and asserts the node carries the expected labels.
+// kube-proxy Running is checked on every node as a baseline health assertion.
 func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
+	runProvisioningTestWithOptions(ctx, tc, false)
+}
+
+// runUbuntuProvisioningTest is like runProvisioningTest but creates a GCENodeClass
+// with the Ubuntu image family.
+func runUbuntuProvisioningTest(ctx context.Context, tc environment.TestCase) {
+	runProvisioningTestWithOptions(ctx, tc, true)
+}
+
+// runProvisioningTestWithOptions is the shared implementation for provisioning tests.
+// When ubuntu is true a Ubuntu GCENodeClass is created instead of the default COS one.
+func runProvisioningTestWithOptions(ctx context.Context, tc environment.TestCase, ubuntu bool) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "provisioning")
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 
-	GinkgoWriter.Printf("[setup] arch=%s capacityType=%s nodePool=%s\n",
-		tc.Arch, tc.CapacityType, name)
+	GinkgoWriter.Printf("[setup] arch=%s capacityType=%s ubuntu=%v nodePool=%s\n",
+		tc.Arch, tc.CapacityType, ubuntu, name)
 
 	initialNodes := env.AllNodeNames(ctx)
 
@@ -51,7 +64,14 @@ func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
 		}
 	})
 
-	env.CreateNodeClass(ctx, name)
+	if ubuntu {
+		env.CreateNodeClassWithUbuntu(ctx, name)
+	} else {
+		env.CreateNodeClass(ctx, name)
+	}
+	// Fail fast: if Karpenter can't resolve images the NodeClass never becomes
+	// Ready, and the test would otherwise spin for the full ProvisioningTimeout.
+	env.WaitForNodeClassReady(ctx, name)
 	env.CreateNodePool(ctx, name, name, tc)
 	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
@@ -71,4 +91,9 @@ func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
 	Expect(node.Labels[corev1.LabelArchStable]).To(Equal(tc.Arch))
 	Expect(tc.Families).To(ContainElement(node.Labels[gcpv1alpha1.LabelInstanceFamily]))
 	Expect(tc.InstanceTypes).To(ContainElement(node.Labels[corev1.LabelInstanceTypeStable]))
+
+	// Verify kube-proxy is Running on every provisioned node. For COS this confirms
+	// bootstrap credentials are accepted; for Ubuntu it additionally validates
+	// Group 4 cross-pool credential reuse (KUBE_PROXY_TOKEN from the source pool).
+	env.WaitForKubeProxyRunning(ctx, provisionedNodeName)
 }
