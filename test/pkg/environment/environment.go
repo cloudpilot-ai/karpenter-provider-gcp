@@ -27,7 +27,6 @@ import (
 	. "github.com/onsi/gomega"
 	compute "google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -45,22 +44,21 @@ const (
 	// TestNamespace is the namespace used by all e2e test suites for workloads.
 	TestNamespace = "karpenter-e2e-test"
 
-	// Timeouts — ordered from shortest to longest.
-	NodePoolReadyTimeout   = 3 * time.Minute         // Karpenter NodePool Ready condition
-	NodeClassReadyTimeout  = 3 * time.Minute         // GCENodeClass Ready condition
-	NodeClaimLaunchTimeout = 3 * time.Minute         // NodeClaim reaches Launched=True
-	NodeCleanupTimeout     = 3 * time.Minute         // karpenter-provisioned VM terminated after NodePool deletion
-	ControllerStartTimeout = 5 * time.Minute         // karpenter controller Deployment becomes available
-	ProvisioningTimeout    = 10 * time.Minute        // VM created, booted, registered, pod Running
-	ReplacementTimeout     = 2 * ProvisioningTimeout // node replacement (drift, expiration): drain + reprovision
-	// GKENodePoolReadyTimeout is for GKE template node pools reaching RUNNING
-	// state, which can take up to 10 minutes on first start.
-	GKENodePoolReadyTimeout = 10 * time.Minute
-
-	// DefaultPollInterval is the Gomega Eventually polling cadence used across all e2e waits.
-	DefaultPollInterval = 5 * time.Second
-
-	PauseImage = "registry.k8s.io/pause:3.10"
+	ControllerStartTimeout = 5 * time.Minute
+	// NodePoolReadyTimeout is used when waiting for GKE template node pools to
+	// reach RUNNING state. Pool creation (triggered by karpenter on first start)
+	// can take up to 10 minutes, longer than a plain Deployment rollout.
+	NodePoolReadyTimeout = 10 * time.Minute
+	// NodeCleanupTimeout is the budget for a karpenter-provisioned VM to be
+	// terminated after the owning NodePool is deleted. GCP VM deletion typically
+	// completes in 60–90 s. Test nodes carry a per-nodepool taint so no system
+	// pods land on them; there is nothing to evict before deletion.
+	NodeCleanupTimeout = 3 * time.Minute
+	// ProvisioningTimeout is the maximum time for a GCP VM to be created, boot,
+	// register with the cluster, and for the pod to reach Running. GCP typically
+	// takes 4–7 minutes; 10 minutes gives a comfortable margin.
+	ProvisioningTimeout = 10 * time.Minute
+	PauseImage          = "registry.k8s.io/pause:3.10"
 )
 
 var (
@@ -130,7 +128,7 @@ func NewEnvironment() *Environment {
 
 	// Fast-fail: verify the cluster exists at the configured location before
 	// entering any Eventually loop. Without this, a wrong CLUSTER_LOCATION
-	// silently times out for up to GKENodePoolReadyTimeout minutes and makes all
+	// silently times out for up to NodePoolReadyTimeout minutes and makes all
 	// specs appear to pass (0 specs ran = no failures in ginkgo).
 	clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
 		env.ProjectID, env.ClusterLocation, env.ClusterName)
@@ -142,16 +140,7 @@ func NewEnvironment() *Environment {
 	}
 
 	env.waitForControllerReady()
-	env.ensureTestNamespace()
 	return env
-}
-
-func (e *Environment) ensureTestNamespace() {
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: TestNamespace}}
-	_, err := e.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		Expect(err).NotTo(HaveOccurred(), "creating test namespace %s", TestNamespace)
-	}
 }
 
 // Must be called after successfully creating a NodePool so that Cleanup deletes it.
@@ -220,7 +209,7 @@ func (e *Environment) Cleanup() {
 					c.GetName(), poolName)
 			}
 		}
-	}).WithTimeout(NodeCleanupTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+	}).WithTimeout(NodeCleanupTimeout).WithPolling(10 * time.Second).Should(Succeed())
 }
 
 // WaitForNodeRemoval polls until the named node no longer exists. Transient
@@ -264,12 +253,12 @@ func (e *Environment) waitForControllerReady() {
 			"getting karpenter Deployment — did e2e-setup.sh run successfully?")
 		g.Expect(dep.Status.AvailableReplicas).To(BeNumerically(">=", 1),
 			"karpenter Deployment has no available replicas yet")
-	}).WithTimeout(ControllerStartTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+	}).WithTimeout(ControllerStartTimeout).WithPolling(5 * time.Second).Should(Succeed())
 
 	// Wait for at least one RUNNING node pool, which confirms the Karpenter
 	// nodepooltemplate controller has completed pool discovery and bootstrap metadata
 	// is available for instance provisioning.
-	poolCtx, poolCancel := context.WithTimeout(context.Background(), GKENodePoolReadyTimeout)
+	poolCtx, poolCancel := context.WithTimeout(context.Background(), NodePoolReadyTimeout)
 	defer poolCancel()
 	clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
 		e.ProjectID, e.ClusterLocation, e.ClusterName)
@@ -285,7 +274,7 @@ func (e *Environment) waitForControllerReady() {
 		}
 		g.Expect(running).To(BeNumerically(">=", 1),
 			"expected at least one RUNNING node pool for bootstrap source discovery")
-	}).WithTimeout(GKENodePoolReadyTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+	}).WithTimeout(NodePoolReadyTimeout).WithPolling(10 * time.Second).Should(Succeed())
 }
 
 func mustEnv(key string) string {

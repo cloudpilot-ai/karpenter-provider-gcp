@@ -19,8 +19,11 @@ package metadata
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/go-openapi/swag"
 	"github.com/samber/lo"
@@ -39,7 +42,20 @@ var (
 	gkeProvisioningRegex = regexp.MustCompile(`gke-provisioning=\w+`)
 	kubeEnvArchRegex     = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
 	kubeEnvFamilyRegex   = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+
+	// osDistributionCOSRegex matches gke-os-distribution=cos in kube-env values.
+	osDistributionCOSRegex = regexp.MustCompile(`\bgke-os-distribution=cos\b`)
+
+	// serverBinaryArchRegex matches the architecture portion of a GKE binary URL.
+	serverBinaryArchRegex = regexp.MustCompile(`kubernetes-server-linux-(amd64|arm64)\.tar\.gz`)
+
+	// gkeReleaseVersionRegex extracts the GKE release version from a binary URL.
+	// Matches paths like: /release/v1.34.3-gke.1444000/
+	gkeReleaseVersionRegex = regexp.MustCompile(`/release/(v[^/]+)/`)
 )
+
+// archHashCache caches GCS-fetched SHA-512 hashes keyed by "arch:version".
+var archHashCache sync.Map
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
 	// Get cluster name
@@ -311,6 +327,154 @@ func GetSecondaryDiskImageName(image string) string {
 
 func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootDiskMode) string {
 	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
+}
+
+// PatchKubeEnvForOSType patches the kube-env metadata item for Ubuntu nodes provisioned
+// from a COS source pool template. It is a no-op when imageFamily is ContainerOptimizedOS.
+//
+// Fields modified for Ubuntu:
+//   - gke-os-distribution=cos → gke-os-distribution=ubuntu  (in AUTOSCALER_ENV_VARS and KUBELET_ARGS)
+//   - ENABLE_NODE_BFQ_IO_SCHEDULER line removed
+//   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT line removed
+func PatchKubeEnvForOSType(metaData *compute.Metadata, imageFamily string) error {
+	if imageFamily != v1alpha1.ImageFamilyUbuntu {
+		return nil
+	}
+
+	for _, item := range metaData.Items {
+		if item.Key != "kube-env" {
+			continue
+		}
+		kubeEnv := swag.StringValue(item.Value)
+		if kubeEnv == "" {
+			return fmt.Errorf("kube-env metadata is empty")
+		}
+
+		updated := osDistributionCOSRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=ubuntu")
+		updated = removeKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER")
+		updated = removeKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT")
+		item.Value = swag.String(updated)
+	}
+
+	return nil
+}
+
+// removeKubeEnvLine removes any line whose key (text before the first colon) matches
+// the given key. This handles the kube-env YAML-style "KEY: value" line format.
+func removeKubeEnvLine(kubeEnv, key string) string {
+	lines := strings.Split(kubeEnv, "\n")
+	filtered := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, key+":") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.Join(filtered, "\n")
+}
+
+// PatchKubeEnvForArch patches SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH in the
+// kube-env metadata item so that the target node bootstraps with the correct binary for
+// its architecture, regardless of the source pool's architecture.
+//
+// It is a no-op when the source URL already carries the target architecture.
+// The SHA-512 hash for the target binary is fetched from the public GCS sidecar file
+// (e.g. .sha512 next to each release tarball) and cached by "arch:version" to avoid
+// repeated network calls.
+func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch string, httpClient *http.Client) error {
+	for _, item := range metaData.Items {
+		if item.Key != "kube-env" {
+			continue
+		}
+		kubeEnv := swag.StringValue(item.Value)
+		if kubeEnv == "" {
+			return fmt.Errorf("kube-env metadata is empty")
+		}
+		updated, err := patchServerBinaryForArch(kubeEnv, targetArch, httpClient)
+		if err != nil {
+			return err
+		}
+		item.Value = swag.String(updated)
+	}
+	return nil
+}
+
+// patchServerBinaryForArch performs the actual string replacement on a kube-env string.
+func patchServerBinaryForArch(kubeEnv, targetArch string, httpClient *http.Client) (string, error) {
+	// Locate SERVER_BINARY_TAR_URL to detect source arch and GKE version.
+	urlMatch := serverBinaryArchRegex.FindStringSubmatch(kubeEnv)
+	if urlMatch == nil {
+		// Field absent — nothing to patch.
+		return kubeEnv, nil
+	}
+	sourceArch := urlMatch[1]
+	if sourceArch == targetArch {
+		return kubeEnv, nil
+	}
+
+	// Extract GKE release version from the URL (used to locate the hash sidecar).
+	versionMatch := gkeReleaseVersionRegex.FindStringSubmatch(kubeEnv)
+	if versionMatch == nil {
+		return "", fmt.Errorf("could not extract GKE release version from SERVER_BINARY_TAR_URL")
+	}
+	version := versionMatch[1]
+
+	// Fetch (or return cached) SHA-512 hash for the target arch.
+	hash, err := getArchHash(version, targetArch, httpClient)
+	if err != nil {
+		return "", fmt.Errorf("fetching %s binary hash for version %s: %w", targetArch, version, err)
+	}
+
+	// Replace linux-{sourceArch} with linux-{targetArch} everywhere in the URL block.
+	updated := strings.ReplaceAll(kubeEnv,
+		"linux-"+sourceArch+".tar.gz",
+		"linux-"+targetArch+".tar.gz")
+
+	// Replace SERVER_BINARY_TAR_HASH value.
+	lines := strings.Split(updated, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "SERVER_BINARY_TAR_HASH:") {
+			// Preserve leading whitespace from the original line.
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			lines[i] = indent + "SERVER_BINARY_TAR_HASH: " + hash
+		}
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// getArchHash returns the SHA-512 hash for the given GKE binary tarball, fetching
+// it from the public GCS sidecar file if not already cached.
+func getArchHash(version, arch string, httpClient *http.Client) (string, error) {
+	cacheKey := arch + ":" + version
+	if cached, ok := archHashCache.Load(cacheKey); ok {
+		return cached.(string), nil
+	}
+
+	url := fmt.Sprintf(
+		"https://storage.googleapis.com/gke-release/kubernetes/release/%s/kubernetes-server-linux-%s.tar.gz.sha512",
+		version, arch,
+	)
+	resp, err := httpClient.Get(url) //nolint:noctx
+	if err != nil {
+		return "", fmt.Errorf("GET %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s returned %d", url, resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading hash response: %w", err)
+	}
+	hash := strings.TrimSpace(string(body))
+	if len(hash) != 128 {
+		return "", fmt.Errorf("unexpected hash length %d (want 128) from %s", len(hash), url)
+	}
+
+	archHashCache.Store(cacheKey, hash)
+	return hash, nil
 }
 
 // ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.

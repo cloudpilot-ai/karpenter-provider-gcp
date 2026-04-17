@@ -56,7 +56,7 @@ func NewDefaultProvider(computeService *compute.Service, nodePoolTemplateProvide
 			nodePoolTemplateProvider: nodePoolTemplateProvider,
 		},
 		ubuntuOSProvider: &Ubuntu{
-			nodePoolTemplateProvider: nodePoolTemplateProvider,
+			computeService: computeService,
 		},
 	}
 }

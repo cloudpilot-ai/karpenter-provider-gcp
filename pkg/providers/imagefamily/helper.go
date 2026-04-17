@@ -37,15 +37,20 @@ func resolveSourceImage(selfLink string) (string, error) {
 	return matches[1], nil
 }
 
-func getSourceImage(ctx context.Context, provider nodepooltemplate.Provider, nodePoolTemplateName string) (string, error) {
+// getSourceImage retrieves the boot-disk image path from the single instance template
+// returned by the nodepooltemplate provider (post-discovery). The pool name argument has
+// been removed — there is now always exactly one template in the map.
+func getSourceImage(ctx context.Context, provider nodepooltemplate.Provider) (string, error) {
 	templates, err := provider.GetInstanceTemplates(ctx)
 	if err != nil {
 		return "", err
 	}
-	defaultNodeTemplate, ok := templates[nodePoolTemplateName]
-	if !ok {
-		return "", fmt.Errorf("default node template not found")
+	if len(templates) == 0 {
+		return "", fmt.Errorf("no instance templates available")
 	}
+
+	// Single-entry map after pool discovery.
+	defaultNodeTemplate := lo.Values(templates)[0]
 
 	systemDisk, ok := lo.Find(defaultNodeTemplate.Properties.Disks, func(item *compute.AttachedDisk) bool {
 		return item.Boot

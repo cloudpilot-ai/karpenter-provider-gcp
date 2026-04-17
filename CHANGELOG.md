@@ -6,7 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+### Breaking Changes
+
+- Karpenter no longer creates `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`,
+  or `karpenter-ubuntu-arm64` GKE node pools on startup. Bootstrap metadata is now read from
+  an existing RUNNING cluster pool selected by the new pool discovery algorithm. See the
+  **Migration guide** below for cleanup steps.
+
 ### New features
+
+- **Eliminate template node pool dependency** (#255): Karpenter now discovers an existing
+  RUNNING cluster pool as its bootstrap source instead of creating dedicated template pools.
+  This unblocks clusters under org policies such as `compute.requireShieldedVm` or
+  `gcp.restrictNonCmekServices` that prevented Karpenter from creating pools.
+  - Ubuntu and arm64 nodes are now provisioned by patching the kube-env from any COS source
+    pool, eliminating the need for OS- or arch-specific template pools.
+  - A last-resort `karpenter-default` pool (with shielded VM options enabled) is created only
+    when no RUNNING pool is available.
+  - The bootstrap source pool can be pinned by setting the `DEFAULT_NODEPOOL_TEMPLATE_NAME`
+    env var (or `--default-nodepool-template-name` flag).
+  - A `karpenter_gcp_bootstrap_source_pool` Prometheus gauge records the current source pool.
 
 - Added a garbage-collection controller (`instance.garbagecollection`) that periodically
   detects and deletes GCE VM instances with no corresponding NodeClaim, preventing orphaned
@@ -20,6 +39,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   migrated.
 
 ### Migration guide
+
+#### Template node pool cleanup
+
+Karpenter no longer creates or relies on `karpenter-default`, `karpenter-ubuntu`,
+`karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. After upgrading:
+
+1. Karpenter logs any detected legacy pools at INFO level on startup. Confirm provisioning
+   works correctly with the new version before deleting them.
+2. Delete the legacy pools manually at your own pace:
+   ```bash
+   for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpenter-default; do
+     gcloud container node-pools delete "$pool" --cluster=<CLUSTER> --region=<REGION> --quiet
+   done
+   ```
+3. Rolling back to the previous version will re-create the pools automatically.
+
+If your cluster has no pre-existing RUNNING pools at upgrade time, Karpenter will create a
+new minimal `karpenter-default` pool as a last resort. This pool is compatible with common
+org policies (`compute.requireShieldedVm`, etc.) by default.
 
 No action is required to upgrade. Existing nodes stay fully managed until they are
 naturally replaced by the new version, at which point they receive the location label and
