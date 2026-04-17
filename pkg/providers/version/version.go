@@ -34,7 +34,7 @@ const (
 	// MinK8sVersion defines the min K8s version which has tested on gke
 	MinK8sVersion = "1.28.1"
 	// MaxK8sVersion defines the max K8s version which has tested on gke
-	MaxK8sVersion = "1.33.1"
+	MaxK8sVersion = "1.35.99"
 )
 
 type Provider interface {
