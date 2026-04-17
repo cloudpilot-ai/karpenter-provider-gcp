@@ -877,7 +877,7 @@ func (p *DefaultProvider) patchKubeEnvForArch(ctx context.Context, instanceMetad
 		arch = imagefamily.OSArchAMD64Requirement
 	}
 	gkeVersion := p.resolveGKEVersion(ctx)
-	if err := metadata.PatchKubeEnvForArch(instanceMetadata, arch, gkeVersion, http.DefaultClient); err != nil {
+	if err := metadata.PatchKubeEnvForArch(ctx, instanceMetadata, arch, gkeVersion, http.DefaultClient); err != nil {
 		return fmt.Errorf("failed to patch kube-env for arch %s: %w", arch, err)
 	}
 	return nil

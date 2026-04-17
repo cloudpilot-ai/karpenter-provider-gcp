@@ -17,6 +17,7 @@ limitations under the License.
 package metadata
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-openapi/swag"
 	"github.com/samber/lo"
@@ -45,6 +47,8 @@ var (
 
 	// osDistributionCOSRegex matches gke-os-distribution=cos in kube-env values.
 	osDistributionCOSRegex = regexp.MustCompile(`\bgke-os-distribution=cos\b`)
+	// osDistributionUbuntuRegex matches gke-os-distribution=ubuntu in kube-env values.
+	osDistributionUbuntuRegex = regexp.MustCompile(`\bgke-os-distribution=ubuntu\b`)
 
 	// serverBinaryArchRegex matches the architecture portion of a GKE binary URL.
 	serverBinaryArchRegex = regexp.MustCompile(`kubernetes-server-linux-(amd64|arm64)\.tar\.gz`)
@@ -330,17 +334,18 @@ func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootD
 }
 
 // PatchKubeEnvForOSType patches the kube-env metadata item for Ubuntu nodes provisioned
-// from a COS source pool template. It is a no-op when imageFamily is ContainerOptimizedOS.
+// Patching is bidirectional: Ubuntu→COS and COS→Ubuntu.
 //
-// Fields modified for Ubuntu:
-//   - gke-os-distribution=cos → gke-os-distribution=ubuntu  (in AUTOSCALER_ENV_VARS and KUBELET_ARGS)
+// Fields modified for Ubuntu target (source is COS):
+//   - gke-os-distribution=cos → gke-os-distribution=ubuntu
 //   - ENABLE_NODE_BFQ_IO_SCHEDULER line removed
 //   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT line removed
+//
+// Fields modified for ContainerOptimizedOS target (source is Ubuntu):
+//   - gke-os-distribution=ubuntu → gke-os-distribution=cos
+//   - ENABLE_NODE_BFQ_IO_SCHEDULER: "true" added (if absent)
+//   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT: "1200" added (if absent)
 func PatchKubeEnvForOSType(metaData *compute.Metadata, imageFamily string) error {
-	if imageFamily != v1alpha1.ImageFamilyUbuntu {
-		return nil
-	}
-
 	for _, item := range metaData.Items {
 		if item.Key != "kube-env" {
 			continue
@@ -350,13 +355,34 @@ func PatchKubeEnvForOSType(metaData *compute.Metadata, imageFamily string) error
 			return fmt.Errorf("kube-env metadata is empty")
 		}
 
-		updated := osDistributionCOSRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=ubuntu")
-		updated = removeKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER")
-		updated = removeKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT")
+		var updated string
+		switch imageFamily {
+		case v1alpha1.ImageFamilyUbuntu:
+			updated = osDistributionCOSRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=ubuntu")
+			updated = removeKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER")
+			updated = removeKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT")
+		case v1alpha1.ImageFamilyContainerOptimizedOS:
+			updated = osDistributionUbuntuRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=cos")
+			updated = ensureKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER", `"true"`)
+			updated = ensureKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT", `"1200"`)
+		default:
+			continue
+		}
 		item.Value = swag.String(updated)
 	}
 
 	return nil
+}
+
+// ensureKubeEnvLine adds "key: value" to the kube-env string if no line with that key
+// already exists. This is used when patching from an Ubuntu source template to a COS node.
+func ensureKubeEnvLine(kubeEnv, key, value string) string {
+	for _, line := range strings.Split(kubeEnv, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), key+":") {
+			return kubeEnv
+		}
+	}
+	return kubeEnv + "\n" + key + ": " + value
 }
 
 // removeKubeEnvLine removes any line whose key (text before the first colon) matches
@@ -384,10 +410,10 @@ func removeKubeEnvLine(kubeEnv, key string) string {
 // repeated network calls.
 //
 // gkeVersion is the authoritative GKE release version string (e.g. "v1.34.3-gke.1444000"),
-// read from the Kubernetes API server. When non-empty it is used directly as the release
-// version for hash URL construction instead of parsing the version from the kube-env URL.
-// Pass an empty string to fall back to the URL-parsing behavior (useful for tests).
-func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch, gkeVersion string, httpClient *http.Client) error {
+// read from the Kubernetes API server. It is used only as a fallback when the version
+// cannot be parsed from the kube-env URL.
+// Pass an empty string to rely solely on the URL-parsing behavior (useful for tests).
+func PatchKubeEnvForArch(ctx context.Context, metaData *compute.Metadata, targetArch, gkeVersion string, httpClient *http.Client) error {
 	for _, item := range metaData.Items {
 		if item.Key != "kube-env" {
 			continue
@@ -396,7 +422,7 @@ func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch, gkeVersion stri
 		if kubeEnv == "" {
 			return fmt.Errorf("kube-env metadata is empty")
 		}
-		updated, err := patchServerBinaryForArch(kubeEnv, targetArch, gkeVersion, httpClient)
+		updated, err := patchServerBinaryForArch(ctx, kubeEnv, targetArch, gkeVersion, httpClient)
 		if err != nil {
 			return err
 		}
@@ -406,7 +432,7 @@ func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch, gkeVersion stri
 }
 
 // patchServerBinaryForArch performs the actual string replacement on a kube-env string.
-func patchServerBinaryForArch(kubeEnv, targetArch, gkeVersion string, httpClient *http.Client) (string, error) {
+func patchServerBinaryForArch(ctx context.Context, kubeEnv, targetArch, gkeVersion string, httpClient *http.Client) (string, error) {
 	// Locate SERVER_BINARY_TAR_URL to detect source arch and GKE version.
 	urlMatch := serverBinaryArchRegex.FindStringSubmatch(kubeEnv)
 	if urlMatch == nil {
@@ -418,19 +444,23 @@ func patchServerBinaryForArch(kubeEnv, targetArch, gkeVersion string, httpClient
 		return kubeEnv, nil
 	}
 
-	// Determine GKE release version. Prefer the authoritative value supplied by the
-	// caller (read from the Kubernetes API server); fall back to parsing the URL.
+	// Determine GKE release version for the hash fetch.
+	// Always prefer the version embedded in the SOURCE URL so that the fetched hash
+	// matches the binary the URL points to. During a GKE control-plane upgrade the
+	// API-server version (gkeVersion) is already at the new minor, but the node pool
+	// template URL still references the old minor — using gkeVersion for the hash
+	// would produce a URL/hash mismatch that causes bootstrap verification failure.
+	// Fall back to the caller-supplied gkeVersion only when the URL cannot be parsed.
+	versionMatch := gkeReleaseVersionRegex.FindStringSubmatch(kubeEnv)
 	version := gkeVersion
-	if version == "" {
-		versionMatch := gkeReleaseVersionRegex.FindStringSubmatch(kubeEnv)
-		if versionMatch == nil {
-			return "", fmt.Errorf("could not extract GKE release version from SERVER_BINARY_TAR_URL")
-		}
+	if versionMatch != nil {
 		version = versionMatch[1]
+	} else if version == "" {
+		return "", fmt.Errorf("could not extract GKE release version from SERVER_BINARY_TAR_URL")
 	}
 
 	// Fetch (or return cached) SHA-512 hash for the target arch.
-	hash, err := getArchHash(version, targetArch, httpClient)
+	hash, err := getArchHash(ctx, version, targetArch, httpClient)
 	if err != nil {
 		return "", fmt.Errorf("fetching %s binary hash for version %s: %w", targetArch, version, err)
 	}
@@ -453,9 +483,12 @@ func patchServerBinaryForArch(kubeEnv, targetArch, gkeVersion string, httpClient
 	return strings.Join(lines, "\n"), nil
 }
 
+// archHashHTTPTimeout is the per-request deadline for fetching a GKE binary hash from GCS.
+const archHashHTTPTimeout = 30 * time.Second
+
 // getArchHash returns the SHA-512 hash for the given GKE binary tarball, fetching
 // it from the public GCS sidecar file if not already cached.
-func getArchHash(version, arch string, httpClient *http.Client) (string, error) {
+func getArchHash(ctx context.Context, version, arch string, httpClient *http.Client) (string, error) {
 	cacheKey := arch + ":" + version
 	if cached, ok := archHashCache.Load(cacheKey); ok {
 		return cached.(string), nil
@@ -465,7 +498,13 @@ func getArchHash(version, arch string, httpClient *http.Client) (string, error) 
 		"https://storage.googleapis.com/gke-release/kubernetes/release/%s/kubernetes-server-linux-%s.tar.gz.sha512",
 		version, arch,
 	)
-	resp, err := httpClient.Get(url) //nolint:noctx
+	reqCtx, cancel := context.WithTimeout(ctx, archHashHTTPTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("building request for %s: %w", url, err)
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("GET %s: %w", url, err)
 	}

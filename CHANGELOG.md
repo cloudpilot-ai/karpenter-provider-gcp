@@ -25,7 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
     when no RUNNING pool is available.
   - The bootstrap source pool can be pinned by setting the `DEFAULT_NODEPOOL_TEMPLATE_NAME`
     env var (or `--default-nodepool-template-name` flag).
-  - A `karpenter_gcp_bootstrap_source_pool` Prometheus gauge records the current source pool.
+  - Bootstrap source pool selection is logged at INFO level when the pool changes; a
+    `karpenter_gcp_bootstrap_source_pool` Prometheus gauge is planned for a future release.
 
 - Added a garbage-collection controller (`instance.garbagecollection`) that periodically
   detects and deletes GCE VM instances with no corresponding NodeClaim, preventing orphaned

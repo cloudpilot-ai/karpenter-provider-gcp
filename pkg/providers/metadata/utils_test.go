@@ -17,6 +17,7 @@ limitations under the License.
 package metadata
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -172,7 +173,7 @@ OTHER: val
 func TestPatchKubeEnvForArch_SameArchIsNoop(t *testing.T) {
 	kubeEnv := fmt.Sprintf(amd64KubeEnv, strings.Repeat("0", 124))
 	meta := metaWithKubeEnv(kubeEnv)
-	require.NoError(t, PatchKubeEnvForArch(meta, "amd64", "", http.DefaultClient))
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "amd64", "", http.DefaultClient))
 	require.Equal(t, kubeEnv, swag.StringValue(meta.Items[0].Value), "same-arch should be no-op")
 }
 
@@ -196,7 +197,7 @@ func TestPatchKubeEnvForArch_CrossArch(t *testing.T) {
 	archHashCache.Delete("arm64:v1.34.3-gke.1444000")
 
 	meta := metaWithKubeEnv(kubeEnv)
-	require.NoError(t, PatchKubeEnvForArch(meta, "arm64", "", client))
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "", client))
 	got := swag.StringValue(meta.Items[0].Value)
 
 	require.NotContains(t, got, "linux-amd64.tar.gz")
@@ -221,7 +222,7 @@ func TestPatchKubeEnvForArch_CrossArch_WithExplicitVersion(t *testing.T) {
 	kubeEnv := fmt.Sprintf(amd64KubeEnv, strings.Repeat("0", 124))
 	meta := metaWithKubeEnv(kubeEnv)
 	// Pass the version explicitly (GKE API source) — should not parse it from URL.
-	require.NoError(t, PatchKubeEnvForArch(meta, "arm64", "v1.34.3-gke.1444000", client))
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "v1.34.3-gke.1444000", client))
 	got := swag.StringValue(meta.Items[0].Value)
 	require.Contains(t, got, "linux-arm64.tar.gz")
 	require.Contains(t, got, fakeHash)
@@ -244,7 +245,7 @@ func TestPatchKubeEnvForArch_CachesHash(t *testing.T) {
 
 	kubeEnv := fmt.Sprintf(amd64KubeEnv, strings.Repeat("0", 124))
 	meta := metaWithKubeEnv(kubeEnv)
-	require.NoError(t, PatchKubeEnvForArch(meta, "arm64", "", client))
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "", client))
 	require.Equal(t, 0, calls, "hash should be served from cache; no HTTP call expected")
 }
 
