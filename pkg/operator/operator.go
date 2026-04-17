@@ -109,7 +109,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		log.FromContext(ctx).Error(fmt.Errorf("zone resolution failed at startup"), "failed to create node pool template provider")
 		os.Exit(1)
 	}
-	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
+	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider, versionProvider)
 	pricingProvider, err := pricing.NewDefaultProvider(ctx, region)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create pricing provider")
