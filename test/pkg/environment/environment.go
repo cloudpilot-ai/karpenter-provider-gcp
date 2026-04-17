@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	compute "google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -140,7 +141,17 @@ func NewEnvironment() *Environment {
 	}
 
 	env.waitForControllerReady()
+	env.ensureTestNamespace()
 	return env
+}
+
+// ensureTestNamespace creates the test namespace if it doesn't already exist.
+func (e *Environment) ensureTestNamespace() {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: TestNamespace}}
+	_, err := e.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred(), "creating test namespace %s", TestNamespace)
+	}
 }
 
 // Must be called after successfully creating a NodePool so that Cleanup deletes it.

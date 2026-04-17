@@ -62,26 +62,37 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 // non-deprecated Ubuntu GKE image for amd64. The arm64 variant is derived from it
 // by resolveImages using the existing regex replacement.
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
-	// GCP does not support Filter + OrderBy together, so we filter only and sort in code.
-	resp, err := u.computeService.Images.List(ubuntuGKEImageProject).
-		Filter(`name:"ubuntu-gke-2204"`).
-		MaxResults(500).
-		Context(ctx).Do()
+	// GCP does not support Filter + OrderBy together, and there are thousands of
+	// ubuntu-gke-2204 images (most deprecated). We page through all of them,
+	// collect non-deprecated amd64 candidates, then sort in code.
+	// Note: the GCP Compute API only supports "=" (with glob wildcards) for string
+	// field filters; the ":" (has) operator is reserved for multi-valued fields.
+	var candidates []*compute.Image
+	err := u.computeService.Images.List(ubuntuGKEImageProject).
+		Filter(`name=ubuntu-gke-2204*`).
+		Pages(ctx, func(page *compute.ImageList) error {
+			for _, img := range page.Items {
+				// Skip images that are deprecated, obsolete, or deleted.
+				// ACTIVE state (or no deprecated object) means the image is usable.
+				if img.Deprecated != nil {
+					state := img.Deprecated.State
+					if state == "DEPRECATED" || state == "OBSOLETE" || state == "DELETED" {
+						continue
+					}
+				}
+				if strings.Contains(img.Name, "arm64") {
+					continue
+				}
+				if strings.Contains(img.Name, "cgroupsv1") {
+					continue
+				}
+				img := img
+				candidates = append(candidates, img)
+			}
+			return nil
+		})
 	if err != nil {
 		return "", fmt.Errorf("listing Ubuntu GKE images in %s: %w", ubuntuGKEImageProject, err)
-	}
-
-	// Collect eligible images: non-deprecated amd64 images.
-	var candidates []*compute.Image
-	for _, img := range resp.Items {
-		if img.Deprecated != nil && img.Deprecated.State != "" {
-			continue
-		}
-		if strings.Contains(img.Name, "arm64") {
-			continue
-		}
-		img := img
-		candidates = append(candidates, img)
 	}
 
 	if len(candidates) == 0 {
