@@ -28,20 +28,22 @@ import (
 )
 
 const (
-	projectIDEnvVarName               = "PROJECT_ID"
-	projectIDFlagName                 = "project-id"
-	clusterLocationEnvVarName         = "CLUSTER_LOCATION"
-	clusterLocationFlagName           = "cluster-location"
-	nodeLocationEnvVarName            = "NODE_LOCATION"
-	nodeLocationFlagName              = "node-location"
-	gkeClusterNameEnvVarName          = "CLUSTER_NAME"
-	gkeClusterFlagName                = "cluster-name"
-	vmMemoryOverheadPercentEnvVarName = "VM_MEMORY_OVERHEAD_PERCENT"
-	vmMemoryOverheadPercentFlagName   = "vm-memory-overhead-percent"
-	gkeEnableInterruption             = "INTERRUPTION"
-	GCPAuth                           = "GOOGLE_APPLICATION_CREDENTIALS"
-	nodePoolServiceAccountEnvVarName  = "DEFAULT_NODEPOOL_SERVICE_ACCOUNT"
-	nodePoolServiceAccountFlagName    = "default-nodepool-service-account"
+	projectIDEnvVarName                   = "PROJECT_ID"
+	projectIDFlagName                     = "project-id"
+	clusterLocationEnvVarName             = "CLUSTER_LOCATION"
+	clusterLocationFlagName               = "cluster-location"
+	nodeLocationEnvVarName                = "NODE_LOCATION"
+	nodeLocationFlagName                  = "node-location"
+	gkeClusterNameEnvVarName              = "CLUSTER_NAME"
+	gkeClusterFlagName                    = "cluster-name"
+	vmMemoryOverheadPercentEnvVarName     = "VM_MEMORY_OVERHEAD_PERCENT"
+	vmMemoryOverheadPercentFlagName       = "vm-memory-overhead-percent"
+	gkeEnableInterruption                 = "INTERRUPTION"
+	GCPAuth                               = "GOOGLE_APPLICATION_CREDENTIALS"
+	nodePoolServiceAccountEnvVarName      = "DEFAULT_NODEPOOL_SERVICE_ACCOUNT"
+	nodePoolServiceAccountFlagName        = "default-nodepool-service-account"
+	defaultNodePoolTemplateNameEnvVarName = "DEFAULT_NODEPOOL_TEMPLATE_NAME"
+	defaultNodePoolTemplateNameFlagName   = "default-nodepool-template-name"
 )
 
 func init() {
@@ -58,9 +60,10 @@ type Options struct {
 	VMMemoryOverheadPercent float64
 	// GCPAuth is the path to the Google Application Credentials JSON file.
 	// https://cloud.google.com/docs/authentication/application-default-credentials
-	GCPAuth                string
-	NodePoolServiceAccount string
-	Interruption           bool
+	GCPAuth                     string
+	NodePoolServiceAccount      string
+	DefaultNodePoolTemplateName string
+	Interruption                bool
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -71,6 +74,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.Float64Var(&o.VMMemoryOverheadPercent, vmMemoryOverheadPercentFlagName, utils.WithDefaultFloat64(vmMemoryOverheadPercentEnvVarName, 0.07), "Percentage of memory overhead for VM. If not set, the controller will use the default value 7%.")
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
 	fs.StringVar(&o.NodePoolServiceAccount, nodePoolServiceAccountFlagName, env.WithDefaultString(nodePoolServiceAccountEnvVarName, ""), "Service account to use for default node pool templates. If not set, uses <project number>-compute@developer.gserviceaccount.com")
+	fs.StringVar(&o.DefaultNodePoolTemplateName, defaultNodePoolTemplateNameFlagName, env.WithDefaultString(defaultNodePoolTemplateNameEnvVarName, ""), "Pin the bootstrap source pool by name. If set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }
 

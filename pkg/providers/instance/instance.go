@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -45,6 +46,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -75,8 +77,10 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
-	gkeProvider          gke.Provider
-	unavailableOfferings *pkgcache.UnavailableOfferings
+	gkeProvider              gke.Provider
+	nodePoolTemplateProvider nodepooltemplate.Provider
+	versionProvider          version.Provider
+	unavailableOfferings     *pkgcache.UnavailableOfferings
 
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
@@ -89,19 +93,25 @@ type DefaultProvider struct {
 	computeService        *compute.Service
 }
 
-func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
+func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount string,
+	computeService *compute.Service,
+	gkeProvider gke.Provider,
+	nodePoolTemplateProvider nodepooltemplate.Provider,
+	versionProvider version.Provider,
 	unavailableOfferings *pkgcache.UnavailableOfferings,
 ) Provider {
 	return &DefaultProvider{
-		gkeProvider:           gkeProvider,
-		unavailableOfferings:  unavailableOfferings,
-		instanceCache:         cache.New(instanceCacheExpiration, instanceCacheExpiration),
-		clusterName:           clusterName,
-		clusterLocation:       clusterLocation,
-		region:                region,
-		projectID:             projectID,
-		defaultServiceAccount: defaultServiceAccount,
-		computeService:        computeService,
+		gkeProvider:              gkeProvider,
+		nodePoolTemplateProvider: nodePoolTemplateProvider,
+		versionProvider:          versionProvider,
+		unavailableOfferings:     unavailableOfferings,
+		instanceCache:            cache.New(instanceCacheExpiration, instanceCacheExpiration),
+		clusterName:              clusterName,
+		clusterLocation:          clusterLocation,
+		region:                   region,
+		projectID:                projectID,
+		defaultServiceAccount:    defaultServiceAccount,
+		computeService:           computeService,
 	}
 }
 
@@ -344,25 +354,18 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, "", nil, &retryableError{err}
 	}
 
-	imageFamily := nodeClass.ImageFamily()
-	arch := instanceType.Requirements.Get(corev1.LabelArchStable).Any()
-	if arch == "" {
-		arch = imagefamily.OSArchAMD64Requirement
-	}
-	nodePoolName := resolveNodePoolName(imageFamily, arch)
-	if nodePoolName == "" {
-		err := fmt.Errorf("failed to resolve node pool name for image family %q", imageFamily)
-		log.FromContext(ctx).Error(err, "failed to resolve node pool name for image family", "imageFamily", imageFamily)
-		return nil, "", nil, err
+	sourcePoolName, err := p.nodePoolTemplateProvider.GetSourcePoolName(ctx)
+	if err != nil {
+		return nil, "", nil, &retryableError{fmt.Errorf("getting source pool name: %w", err)}
 	}
 
-	template, err := p.findTemplateByNodePoolName(ctx, nodePoolName)
+	template, err := p.findTemplateByNodePoolName(ctx, sourcePoolName)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to find template for alias", "alias", nodeClass.Spec.ImageSelectorTerms[0].Alias)
 		return nil, "", nil, &retryableError{err}
 	}
 
-	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, capacityType)
+	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, sourcePoolName, zone, capacityType)
 	if err != nil {
 		if retryable {
 			return nil, "", nil, &retryableError{err}
@@ -385,7 +388,7 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		return instance, false, nil
 	}
 
-	instance, err = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName, capacityType)
+	instance, err = p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName, capacityType)
 	if err != nil {
 		return nil, false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
@@ -543,23 +546,6 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 	return cheapestCompatibleZone(zones, reqs, instanceType.Offerings), nil
 }
 
-func resolveNodePoolName(imageFamily, arch string) string {
-	switch imageFamily {
-	case v1alpha1.ImageFamilyContainerOptimizedOS:
-		if arch == imagefamily.OSArchARM64Requirement {
-			return nodepooltemplate.KarpenterCOSARM64NodePoolTemplate
-		}
-		return nodepooltemplate.KarpenterDefaultNodePoolTemplate
-	case v1alpha1.ImageFamilyUbuntu:
-		if arch == imagefamily.OSArchARM64Requirement {
-			return nodepooltemplate.KarpenterUbuntuARM64NodePoolTemplate
-		}
-		return nodepooltemplate.KarpenterUbuntuNodePoolTemplate
-	}
-
-	return ""
-}
-
 //nolint:gocyclo
 func (p *DefaultProvider) findTemplateByNodePoolName(ctx context.Context, nodePoolName string) (*compute.InstanceTemplate, error) {
 	if nodePoolName == "" {
@@ -655,14 +641,14 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName, capacityType string) (*compute.Instance, error) {
+func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName, capacityType string) (*compute.Instance, error) {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
 
 	// Setup metadata
-	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType); err != nil {
+	if err := p.setupInstanceMetadata(ctx, template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType); err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
@@ -817,9 +803,11 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 	return networkInterfaces
 }
 
-// setupInstanceMetadata configures all metadata-related settings for the instance
-func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string, capacityType string) error {
-	if err := metadata.RemoveGKEBuiltinLabels(instanceMetadata, nodePoolName); err != nil {
+// setupInstanceMetadata configures all metadata-related settings for the instance.
+// sourcePoolName is the pool whose template was used as the bootstrap source; it is
+// stripped from GKE built-in labels so the provisioned node is not associated with it.
+func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, sourcePoolName string, capacityType string) error {
+	if err := metadata.RemoveGKEBuiltinLabels(instanceMetadata, sourcePoolName); err != nil {
 		return fmt.Errorf("failed to remove GKE builtin labels from metadata: %w", err)
 	}
 
@@ -839,6 +827,16 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 		return fmt.Errorf("failed to patch kube-env for instance type: %w", err)
 	}
 
+	// Patch OS-specific kube-env fields when provisioning Ubuntu nodes from a COS source pool.
+	if err := metadata.PatchKubeEnvForOSType(instanceMetadata, nodeClass.ImageFamily()); err != nil {
+		return fmt.Errorf("failed to patch kube-env for OS type: %w", err)
+	}
+
+	// Patch SERVER_BINARY_TAR_URL/HASH when the target arch differs from the source pool's arch.
+	if err := p.patchKubeEnvForArch(ctx, instanceMetadata, instanceType); err != nil {
+		return err
+	}
+
 	if capacityType == karpv1.CapacityTypeSpot {
 		if err := metadata.SetProvisioningModel(instanceMetadata, capacityType); err != nil {
 			return fmt.Errorf("failed to set provisioning model in metadata: %w", err)
@@ -851,6 +849,36 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
 
 	return nil
+}
+
+// patchKubeEnvForArch patches SERVER_BINARY_TAR_URL/HASH in the kube-env when the
+// target arch differs from the source pool's arch. The GKE release version is read
+// from the Kubernetes API server (Group 2 via GKE API) rather than parsed from the
+// pool template's kube-env URL, making the patch independent of the URL format.
+func (p *DefaultProvider) patchKubeEnvForArch(ctx context.Context, instanceMetadata *compute.Metadata, instanceType *cloudprovider.InstanceType) error {
+	arch := instanceType.Requirements.Get(corev1.LabelArchStable).Any()
+	if arch == "" {
+		arch = imagefamily.OSArchAMD64Requirement
+	}
+	gkeVersion := p.resolveGKEVersion(ctx)
+	if err := metadata.PatchKubeEnvForArch(ctx, instanceMetadata, arch, gkeVersion, http.DefaultClient); err != nil {
+		return fmt.Errorf("failed to patch kube-env for arch %s: %w", arch, err)
+	}
+	return nil
+}
+
+// resolveGKEVersion returns the GKE release version string from the version provider,
+// or empty string on error (caller falls back to URL-based version detection).
+func (p *DefaultProvider) resolveGKEVersion(ctx context.Context) string {
+	if p.versionProvider == nil {
+		return ""
+	}
+	v, err := p.versionProvider.Get(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to get GKE version for arch patching; falling back to URL parsing")
+		return ""
+	}
+	return v
 }
 
 // setupServiceAccounts configures service accounts for the instance
