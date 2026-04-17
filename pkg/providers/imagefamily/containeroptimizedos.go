@@ -18,6 +18,7 @@ package imagefamily
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -33,11 +34,23 @@ type ContainerOptimizedOS struct {
 	nodePoolTemplateProvider nodepooltemplate.Provider
 }
 
+// cosImageProject is the GCP project that owns all Container-Optimized OS GKE images.
+const cosImageProject = "gke-node-images"
+
 func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
 	sourceImage, err := getSourceImage(ctx, c.nodePoolTemplateProvider)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "unable to get sourceImage")
 		return nil, err
+	}
+
+	// The source pool may use Ubuntu images (e.g. operator pinned DEFAULT_NODEPOOL_TEMPLATE_NAME
+	// to an Ubuntu pool). In that case the COS regexes below are no-ops and we would silently
+	// return Ubuntu images for a COS NodeClass. Detect and reject that early.
+	if !strings.Contains(sourceImage, cosImageProject) {
+		return nil, fmt.Errorf("source pool image %q is not a COS image (expected project %s); "+
+			"set DEFAULT_NODEPOOL_TEMPLATE_NAME to a COS node pool or use a Ubuntu image family instead",
+			sourceImage, cosImageProject)
 	}
 
 	if version == "latest" {

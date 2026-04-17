@@ -630,41 +630,6 @@ func (e *Environment) WaitForNodeClassReady(ctx context.Context, name string) {
 	e.waitForReadyCondition(ctx, gceNodeClassGVR, name, NodeClassReadyTimeout)
 }
 
-// NodeClassReadyTimeout is how long to wait for a GCENodeClass to become Ready
-// before aborting. This is shorter than ProvisioningTimeout so tests fail fast
-// when Karpenter cannot resolve images (e.g. due to API errors).
-const NodeClassReadyTimeout = 3 * time.Minute
-
-// WaitForNodeClassReady polls until the named GCENodeClass reports Ready=True,
-// failing the test immediately if it does not become ready within NodeClassReadyTimeout.
-// Call this after CreateNodeClass/CreateNodeClassWithUbuntu and before creating the
-// deployment so that image-resolution failures surface immediately rather than after
-// the full ProvisioningTimeout.
-func (e *Environment) WaitForNodeClassReady(ctx context.Context, name string) {
-	GinkgoWriter.Printf("[setup] waiting for GCENodeClass %s to become Ready\n", name)
-	Eventually(func(g Gomega) {
-		obj, err := e.DynamicClient.Resource(gceNodeClassGVR).Get(ctx, name, metav1.GetOptions{})
-		g.Expect(err).NotTo(HaveOccurred(), "getting GCENodeClass %s", name)
-
-		conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
-		g.Expect(found).To(BeTrue(), "GCENodeClass %s has no status conditions yet", name)
-
-		for _, c := range conditions {
-			cond, ok := c.(map[string]any)
-			if !ok {
-				continue
-			}
-			if cond["type"] == "Ready" {
-				g.Expect(cond["status"]).To(Equal("True"),
-					"GCENodeClass %s Ready condition is %s: %s",
-					name, cond["status"], cond["message"])
-				return
-			}
-		}
-		g.Expect(false).To(BeTrue(), "GCENodeClass %s has no Ready condition", name)
-	}).WithTimeout(NodeClassReadyTimeout).WithPolling(5 * time.Second).Should(Succeed())
-}
-
 // deleteIfExists deletes a resource if it exists and waits for it to be fully
 // removed before returning. This prevents "object is being deleted" errors when
 // a resource from a previous run still has its finalizer running.
