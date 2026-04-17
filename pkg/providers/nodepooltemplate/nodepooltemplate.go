@@ -239,7 +239,7 @@ func (p *DefaultProvider) selectFromClusterPools(ctx context.Context) (string, e
 }
 
 // logLegacyPools emits a single INFO line when legacy Karpenter-managed pools are found.
-func (p *DefaultProvider) logLegacyPools(logger interface{ Info(string, ...interface{}) }, pools []*container.NodePool) {
+func (p *DefaultProvider) logLegacyPools(logger interface{ Info(string, ...any) }, pools []*container.NodePool) {
 	var legacy []string
 	for _, pool := range pools {
 		if legacyKarpenterPools[pool.Name] {

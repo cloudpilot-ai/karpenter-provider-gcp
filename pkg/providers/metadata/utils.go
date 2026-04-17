@@ -382,7 +382,12 @@ func removeKubeEnvLine(kubeEnv, key string) string {
 // The SHA-512 hash for the target binary is fetched from the public GCS sidecar file
 // (e.g. .sha512 next to each release tarball) and cached by "arch:version" to avoid
 // repeated network calls.
-func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch string, httpClient *http.Client) error {
+//
+// gkeVersion is the authoritative GKE release version string (e.g. "v1.34.3-gke.1444000"),
+// read from the Kubernetes API server. When non-empty it is used directly as the release
+// version for hash URL construction instead of parsing the version from the kube-env URL.
+// Pass an empty string to fall back to the URL-parsing behavior (useful for tests).
+func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch, gkeVersion string, httpClient *http.Client) error {
 	for _, item := range metaData.Items {
 		if item.Key != "kube-env" {
 			continue
@@ -391,7 +396,7 @@ func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch string, httpClie
 		if kubeEnv == "" {
 			return fmt.Errorf("kube-env metadata is empty")
 		}
-		updated, err := patchServerBinaryForArch(kubeEnv, targetArch, httpClient)
+		updated, err := patchServerBinaryForArch(kubeEnv, targetArch, gkeVersion, httpClient)
 		if err != nil {
 			return err
 		}
@@ -401,7 +406,7 @@ func PatchKubeEnvForArch(metaData *compute.Metadata, targetArch string, httpClie
 }
 
 // patchServerBinaryForArch performs the actual string replacement on a kube-env string.
-func patchServerBinaryForArch(kubeEnv, targetArch string, httpClient *http.Client) (string, error) {
+func patchServerBinaryForArch(kubeEnv, targetArch, gkeVersion string, httpClient *http.Client) (string, error) {
 	// Locate SERVER_BINARY_TAR_URL to detect source arch and GKE version.
 	urlMatch := serverBinaryArchRegex.FindStringSubmatch(kubeEnv)
 	if urlMatch == nil {
@@ -413,12 +418,16 @@ func patchServerBinaryForArch(kubeEnv, targetArch string, httpClient *http.Clien
 		return kubeEnv, nil
 	}
 
-	// Extract GKE release version from the URL (used to locate the hash sidecar).
-	versionMatch := gkeReleaseVersionRegex.FindStringSubmatch(kubeEnv)
-	if versionMatch == nil {
-		return "", fmt.Errorf("could not extract GKE release version from SERVER_BINARY_TAR_URL")
+	// Determine GKE release version. Prefer the authoritative value supplied by the
+	// caller (read from the Kubernetes API server); fall back to parsing the URL.
+	version := gkeVersion
+	if version == "" {
+		versionMatch := gkeReleaseVersionRegex.FindStringSubmatch(kubeEnv)
+		if versionMatch == nil {
+			return "", fmt.Errorf("could not extract GKE release version from SERVER_BINARY_TAR_URL")
+		}
+		version = versionMatch[1]
 	}
-	version := versionMatch[1]
 
 	// Fetch (or return cached) SHA-512 hash for the target arch.
 	hash, err := getArchHash(version, targetArch, httpClient)
