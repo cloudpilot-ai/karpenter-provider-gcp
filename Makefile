@@ -72,7 +72,7 @@ delete: ## Delete the controller from your kubeconfig cluster
 
 ut-test: ## Run unit tests
 	go test ./pkg/... \
-		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
+		-cover -coverprofile=coverage.out -outputdir=.
 
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
 # between the setup script and the test binary.
