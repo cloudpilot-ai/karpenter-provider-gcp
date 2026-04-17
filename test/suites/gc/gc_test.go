@@ -35,7 +35,7 @@ import (
 const gcTimeout = 6 * time.Minute
 
 var _ = Describe("GarbageCollection", func() {
-	XIt("should delete an orphaned VM after its NodeClaim is force-removed", func(ctx SpecContext) {
+	It("should delete an orphaned VM after its NodeClaim is force-removed", func(ctx SpecContext) {
 		runGCTest(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,

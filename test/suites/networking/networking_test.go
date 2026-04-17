@@ -26,8 +26,7 @@ import (
 )
 
 var _ = Describe("Networking", func() {
-	// Disabled until PR #229 (networkConfig / private nodes) is merged.
-	XIt("should provision a node with no external IP when enableExternalIPAccess is false", func(ctx SpecContext) {
+	It("should provision a node with no external IP when enableExternalIPAccess is false", func(ctx SpecContext) {
 		runPrivateNodeTest(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,
