@@ -59,17 +59,20 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 }
 
 // resolveLatestUbuntuImage queries the ubuntu-os-gke-cloud project for the most recent
-// non-deprecated Ubuntu GKE image for amd64. The arm64 variant is derived from it
-// by resolveImages using the existing regex replacement.
+// non-deprecated Ubuntu 24.04 GKE image for amd64. The arm64 variant is derived from it
+// by resolveImages via a simple string replacement.
+//
+// ubuntu-gke-2404 images use explicit arch in the name (e.g. ubuntu-gke-2404-1-35-amd64-v20260416),
+// unlike the older ubuntu-gke-2204 series which had no arch suffix on amd64 images.
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
-	// GCP does not support Filter + OrderBy together, and there are thousands of
-	// ubuntu-gke-2204 images (most deprecated). We page through all of them,
+	// GCP does not support Filter + OrderBy together, and there can be thousands of
+	// ubuntu-gke-2404 images (most deprecated). We page through all of them,
 	// collect non-deprecated amd64 candidates, then sort in code.
 	// Note: the GCP Compute API only supports "=" (with glob wildcards) for string
 	// field filters; the ":" (has) operator is reserved for multi-valued fields.
 	var candidates []*compute.Image
 	err := u.computeService.Images.List(ubuntuGKEImageProject).
-		Filter(`name=ubuntu-gke-2204*`).
+		Filter(`name=ubuntu-gke-2404*`).
 		Pages(ctx, func(page *compute.ImageList) error {
 			for _, img := range page.Items {
 				// Skip images that are deprecated, obsolete, or deleted.
@@ -80,10 +83,15 @@ func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 						continue
 					}
 				}
-				if strings.Contains(img.Name, "arm64") {
+				// 2404 images have explicit "-amd64-" in name; skip non-amd64 variants.
+				if !strings.Contains(img.Name, "-amd64-") {
 					continue
 				}
-				if strings.Contains(img.Name, "cgroupsv1") {
+				// Skip specialised variants that are not general-purpose.
+				if strings.Contains(img.Name, "cgroupsv1") ||
+					strings.Contains(img.Name, "linux64k") ||
+					strings.Contains(img.Name, "-tpu-") ||
+					strings.Contains(img.Name, "-test-") {
 					continue
 				}
 				img := img
@@ -96,7 +104,7 @@ func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 	}
 
 	if len(candidates) == 0 {
-		return "", fmt.Errorf("no non-deprecated ubuntu-gke-2204 image found in %s", ubuntuGKEImageProject)
+		return "", fmt.Errorf("no non-deprecated ubuntu-gke-2404 amd64 image found in %s", ubuntuGKEImageProject)
 	}
 
 	// Sort descending by CreationTimestamp so the newest image is first.
@@ -108,12 +116,6 @@ func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 	return fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, img.Name), nil
 }
 
-var (
-	ubuntuArm64Pattern     = `(projects\/ubuntu-os-gke-cloud\/global\/images\/ubuntu-gke-.*?)(?:-amd64)?-v(\d+)`
-	ubuntuArm64Replacement = `$1-arm64-$2`
-	ubuntuArm64Re          = regexp.MustCompile(ubuntuArm64Pattern)
-)
-
 func (u *Ubuntu) resolveImages(sourceImage string) Images {
 	ret := Images{}
 
@@ -124,8 +126,8 @@ func (u *Ubuntu) resolveImages(sourceImage string) Images {
 			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement)),
 	})
 
-	// arm64
-	arm64Image := ubuntuArm64Re.ReplaceAllString(sourceImage, ubuntuArm64Replacement)
+	// arm64: ubuntu-gke-2404 uses explicit "-amd64-" in the name; replace it with "-arm64-".
+	arm64Image := strings.Replace(sourceImage, "-amd64-", "-arm64-", 1)
 	ret = append(ret, Image{
 		SourceImage: arm64Image,
 		Requirements: scheduling.NewRequirements(
