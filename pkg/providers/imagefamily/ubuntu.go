@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"google.golang.org/api/compute/v1"
@@ -61,29 +62,39 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 // non-deprecated Ubuntu GKE image for amd64. The arm64 variant is derived from it
 // by resolveImages using the existing regex replacement.
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
-	// List images in ubuntu-os-gke-cloud, filter to ubuntu-gke prefix (amd64), most recent first.
+	// GCP does not support Filter + OrderBy together, so we filter only and sort in code.
 	resp, err := u.computeService.Images.List(ubuntuGKEImageProject).
 		Filter(`name:"ubuntu-gke-2204"`).
-		OrderBy("creationTimestamp desc").
-		MaxResults(50).
+		MaxResults(500).
 		Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("listing Ubuntu GKE images in %s: %w", ubuntuGKEImageProject, err)
 	}
 
+	// Collect eligible images: non-deprecated amd64 images.
+	var candidates []*compute.Image
 	for _, img := range resp.Items {
-		// Skip deprecated images.
 		if img.Deprecated != nil && img.Deprecated.State != "" {
 			continue
 		}
-		// Skip arm64 images; amd64 is the source from which arm64 is derived.
 		if strings.Contains(img.Name, "arm64") {
 			continue
 		}
-		return fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, img.Name), nil
+		img := img
+		candidates = append(candidates, img)
 	}
 
-	return "", fmt.Errorf("no non-deprecated ubuntu-gke-2204 image found in %s", ubuntuGKEImageProject)
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no non-deprecated ubuntu-gke-2204 image found in %s", ubuntuGKEImageProject)
+	}
+
+	// Sort descending by CreationTimestamp so the newest image is first.
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].CreationTimestamp > candidates[j].CreationTimestamp
+	})
+
+	img := candidates[0]
+	return fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, img.Name), nil
 }
 
 var (
