@@ -160,8 +160,12 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	requirements := []any{
 		map[string]any{"key": karpv1.CapacityTypeLabelKey, "operator": "In", "values": []any{tc.CapacityType}},
 		map[string]any{"key": gcpv1alpha1.LabelInstanceFamily, "operator": "In", "values": toAny(tc.Families)},
-		map[string]any{"key": corev1.LabelInstanceTypeStable, "operator": "In", "values": toAny(tc.InstanceTypes)},
 		map[string]any{"key": corev1.LabelArchStable, "operator": "In", "values": []any{tc.Arch}},
+	}
+	if len(tc.InstanceTypes) > 0 {
+		requirements = append(requirements, map[string]any{
+			"key": corev1.LabelInstanceTypeStable, "operator": "In", "values": toAny(tc.InstanceTypes),
+		})
 	}
 	templateSpec := map[string]any{
 		"nodeClassRef": map[string]any{
