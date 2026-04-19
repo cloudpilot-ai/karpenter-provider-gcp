@@ -279,10 +279,10 @@ github.com/samber/lo/internal/constraints
 github.com/samber/lo/internal/rand
 github.com/samber/lo/mutable
 github.com/samber/lo/parallel
-# github.com/spf13/cobra v1.9.1
+# github.com/spf13/cobra v1.10.1
 ## explicit; go 1.15
 github.com/spf13/cobra
-# github.com/spf13/pflag v1.0.6
+# github.com/spf13/pflag v1.0.10
 ## explicit; go 1.12
 github.com/spf13/pflag
 # github.com/stretchr/testify v1.11.1
@@ -1011,18 +1011,19 @@ k8s.io/client-go/util/homedir
 k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/workqueue
-# k8s.io/cloud-provider v0.34.0
+# k8s.io/cloud-provider v0.34.1
 ## explicit; go 1.24.0
 k8s.io/cloud-provider/api
 # k8s.io/component-base v0.35.0-alpha.0
 ## explicit; go 1.24.0
 k8s.io/component-base/cli/flag
-# k8s.io/component-helpers v0.34.0
+# k8s.io/component-helpers v0.34.1
 ## explicit; go 1.24.0
+k8s.io/component-helpers/resource
 k8s.io/component-helpers/scheduling/corev1
 k8s.io/component-helpers/scheduling/corev1/nodeaffinity
 k8s.io/component-helpers/storage/volume
-# k8s.io/csi-translation-lib v0.34.0
+# k8s.io/csi-translation-lib v0.34.1
 ## explicit; go 1.24.0
 k8s.io/csi-translation-lib
 k8s.io/csi-translation-lib/plugins
@@ -1115,7 +1116,7 @@ sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics
 ## explicit; go 1.23
 sigs.k8s.io/json
 sigs.k8s.io/json/internal/golang/encoding/json
-# sigs.k8s.io/karpenter v1.7.0
+# sigs.k8s.io/karpenter v1.8.0
 ## explicit; go 1.24.6
 sigs.k8s.io/karpenter/pkg/apis
 sigs.k8s.io/karpenter/pkg/apis/v1
@@ -1150,6 +1151,8 @@ sigs.k8s.io/karpenter/pkg/controllers/provisioning
 sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling
 sigs.k8s.io/karpenter/pkg/controllers/state
 sigs.k8s.io/karpenter/pkg/controllers/state/informer
+sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning
+sigs.k8s.io/karpenter/pkg/controllers/static/provisioning
 sigs.k8s.io/karpenter/pkg/events
 sigs.k8s.io/karpenter/pkg/metrics
 sigs.k8s.io/karpenter/pkg/operator
@@ -1157,7 +1160,9 @@ sigs.k8s.io/karpenter/pkg/operator/injection
 sigs.k8s.io/karpenter/pkg/operator/logging
 sigs.k8s.io/karpenter/pkg/operator/options
 sigs.k8s.io/karpenter/pkg/scheduling
+sigs.k8s.io/karpenter/pkg/state/nodepoolhealth
 sigs.k8s.io/karpenter/pkg/utils/controller
+sigs.k8s.io/karpenter/pkg/utils/daemonset
 sigs.k8s.io/karpenter/pkg/utils/disruption
 sigs.k8s.io/karpenter/pkg/utils/env
 sigs.k8s.io/karpenter/pkg/utils/node
@@ -1168,6 +1173,7 @@ sigs.k8s.io/karpenter/pkg/utils/pod
 sigs.k8s.io/karpenter/pkg/utils/pretty
 sigs.k8s.io/karpenter/pkg/utils/resources
 sigs.k8s.io/karpenter/pkg/utils/result
+sigs.k8s.io/karpenter/pkg/utils/ringbuffer
 sigs.k8s.io/karpenter/pkg/utils/volume
 # sigs.k8s.io/randfill v1.0.0
 ## explicit; go 1.18
