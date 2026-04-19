@@ -46,12 +46,12 @@ const (
 	TestNamespace = "karpenter-e2e-test"
 
 	// Timeouts — ordered from shortest to longest.
-	NodePoolReadyTimeout   = 3 * time.Minute  // Karpenter NodePool Ready condition
-	NodeClassReadyTimeout  = 3 * time.Minute  // GCENodeClass Ready condition
-	NodeClaimLaunchTimeout = 3 * time.Minute  // NodeClaim reaches Launched=True
-	NodeCleanupTimeout     = 3 * time.Minute  // karpenter-provisioned VM terminated after NodePool deletion
-	ControllerStartTimeout = 5 * time.Minute  // karpenter controller Deployment becomes available
-	ProvisioningTimeout    = 10 * time.Minute // VM created, booted, registered, pod Running
+	NodePoolReadyTimeout   = 3 * time.Minute         // Karpenter NodePool Ready condition
+	NodeClassReadyTimeout  = 3 * time.Minute         // GCENodeClass Ready condition
+	NodeClaimLaunchTimeout = 3 * time.Minute         // NodeClaim reaches Launched=True
+	NodeCleanupTimeout     = 3 * time.Minute         // karpenter-provisioned VM terminated after NodePool deletion
+	ControllerStartTimeout = 5 * time.Minute         // karpenter controller Deployment becomes available
+	ProvisioningTimeout    = 10 * time.Minute        // VM created, booted, registered, pod Running
 	ReplacementTimeout     = 2 * ProvisioningTimeout // node replacement (drift, expiration): drain + reprovision
 	// GKENodePoolReadyTimeout is for GKE template node pools reaching RUNNING
 	// state, which can take up to 10 minutes on first start.
