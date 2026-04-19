@@ -541,11 +541,9 @@ func toAny(ss []string) []any {
 	return out
 }
 
-// PatchNodeCondition sets or upserts a node status condition directly via the
-// Kubernetes API. Use this in e2e tests to simulate unhealthy node states
-// without requiring actual kernel or OS failures on the underlying GCE VM.
-// LastTransitionTime is set to now on every call so the repair toleration
-// window starts counting from the moment the test patches the condition.
+// PatchNodeCondition sets or upserts a node status condition to simulate an
+// unhealthy state without inducing actual OS failures on the GCE VM.
+// LastTransitionTime is set to now so the repair toleration starts immediately.
 func (e *Environment) PatchNodeCondition(ctx context.Context, nodeName string,
 	condType corev1.NodeConditionType, status corev1.ConditionStatus,
 	reason, message string) {

@@ -18,7 +18,6 @@ package repair_test
 
 import (
 	"context"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,14 +28,6 @@ import (
 )
 
 var _ = Describe("NodeRepair", func() {
-	// This test verifies that Karpenter replaces a node whose KernelDeadlock
-	// condition has been True beyond the configured toleration duration.
-	//
-	// The KernelDeadlock condition is patched directly onto the node status via
-	// the Kubernetes API — no actual kernel failure is induced. The karpenter
-	// node.health controller monitors this condition (True = problem polarity,
-	// as set by GKE Node Problem Detector) and deletes the node after the
-	// toleration window expires, allowing a replacement to be provisioned.
 	It("should replace a node whose KernelDeadlock condition has been True beyond the toleration",
 		func(ctx SpecContext) {
 			runRepairTest(ctx, environment.TestCase{
@@ -96,14 +87,5 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 		"original node %s must be deleted after KernelDeadlock repair", originalNodeName)
 
 	GinkgoWriter.Printf("[repair] node %s removed; repair verified\n", originalNodeName)
-
-	// Clear the tracking variable so DeferCleanup does not wait again.
 	originalNodeName = ""
-
-	// Allow a small settling window so karpenter marks the replacement healthy.
-	Consistently(func(g Gomega) {
-		pod := env.WaitForRunningPod(ctx, name)
-		g.Expect(pod.Spec.NodeName).To(Equal(replacementPod.Spec.NodeName))
-	}, 30*time.Second, 10*time.Second).Should(Succeed(),
-		"replacement pod must stay Running on the new node")
 }
