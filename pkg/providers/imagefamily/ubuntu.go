@@ -103,7 +103,7 @@ func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 					strings.Contains(img.Name, "-test-") {
 					continue
 				}
-				img := img
+
 				candidates = append(candidates, img)
 			}
 			return nil
