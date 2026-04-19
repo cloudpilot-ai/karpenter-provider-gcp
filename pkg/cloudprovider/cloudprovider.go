@@ -258,9 +258,7 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 //   - Node Problem Detector conditions (KernelDeadlock, etc.): True = problem
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
-		// Standard Kubernetes kubelet conditions.
-		// NodeReady=False/Unknown covers the broadest failure mode: an unresponsive kubelet.
-		// GKE nodes boot in ~2 min; 10 min matches Azure managed K8s and avoids 15× boot-time waits.
+		// Standard kubelet conditions — NodeReady=False/Unknown means the node is unresponsive.
 		{
 			ConditionType:      corev1.NodeReady,
 			ConditionStatus:    corev1.ConditionFalse,
@@ -272,10 +270,7 @@ func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 			TolerationDuration: 10 * time.Minute,
 		},
 		// GKE Node Problem Detector — kernel-monitor conditions (enabled by default on all node pools).
-		// KernelDeadlock and ReadonlyFilesystem are unrecoverable OS failures; short toleration
-		// avoids keeping a broken node alive longer than necessary.
-		// Note: NPD owns these conditions, not the kubelet. The kubelet will not reset them between
-		// heartbeats, so a patch setting KernelDeadlock=True is stable until NPD clears it.
+		// KernelDeadlock and ReadonlyFilesystem are unrecoverable OS failures.
 		{
 			ConditionType:      "KernelDeadlock",
 			ConditionStatus:    corev1.ConditionTrue,

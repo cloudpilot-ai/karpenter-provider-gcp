@@ -92,17 +92,16 @@ func TestRepairPolicies_PositiveTolerationDuration(t *testing.T) {
 
 func TestRepairPolicies_ContainsNodeReady(t *testing.T) {
 	t.Parallel()
-	policies := (&CloudProvider{}).RepairPolicies()
-	contains := func(status corev1.ConditionStatus) bool {
-		for _, p := range policies {
-			if p.ConditionType == corev1.NodeReady && p.ConditionStatus == status {
-				return true
-			}
+	var hasReadyFalse, hasReadyUnknown bool
+	for _, p := range (&CloudProvider{}).RepairPolicies() {
+		if p.ConditionType != corev1.NodeReady {
+			continue
 		}
-		return false
+		hasReadyFalse = hasReadyFalse || p.ConditionStatus == corev1.ConditionFalse
+		hasReadyUnknown = hasReadyUnknown || p.ConditionStatus == corev1.ConditionUnknown
 	}
-	require.True(t, contains(corev1.ConditionFalse), "must have NodeReady=False repair policy")
-	require.True(t, contains(corev1.ConditionUnknown), "must have NodeReady=Unknown repair policy")
+	require.True(t, hasReadyFalse, "must have NodeReady=False repair policy")
+	require.True(t, hasReadyUnknown, "must have NodeReady=Unknown repair policy")
 }
 
 func TestRepairPolicies_ContainsGKENPDConditions(t *testing.T) {

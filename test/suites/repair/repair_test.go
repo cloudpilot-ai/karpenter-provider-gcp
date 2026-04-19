@@ -32,11 +32,9 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-// nodeRepairTimeout is the budget for node.health to detect the pre-expired
-// KernelDeadlock condition and provision a replacement. The condition is
-// back-dated by 6 minutes so karpenter fires within ~30 s of the patch; 3
-// minutes gives ample headroom for reconciliation lag and replacement
-// provisioning startup before WaitForPodOnDifferentNode takes over.
+// nodeRepairTimeout is the budget for node.health to detect the back-dated
+// KernelDeadlock condition and delete the NodeClaim. WaitForPodOnDifferentNode
+// then has the remaining ProvisioningTimeout to boot the replacement.
 const nodeRepairTimeout = 3 * time.Minute
 
 var _ = Describe("NodeRepair", func() {
@@ -74,15 +72,9 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
 	originalNodeName = firstPod.Spec.NodeName
 
-	// Back-date the transition time by 6 minutes — one minute past the 5-minute
-	// KernelDeadlock toleration. node.health computes terminationTime as
-	// LastTransitionTime + TolerationDuration; with a 6-minute-old transition the
-	// toleration is already expired and repair fires within one reconcile cycle
-	// (~10–30 s) rather than waiting 5 real minutes.
-	//
-	// The hold goroutine below reuses this fixed time on every re-patch so that
-	// GKE's embedded node monitoring cannot reset LastTransitionTime to a future
-	// value and restart the clock.
+	// Back-date by 6 min (1 min past the 5-min KernelDeadlock toleration) so
+	// node.health fires in ~30 s instead of waiting 5 real minutes.
+	// The hold goroutine reuses this fixed time so GKE can't reset the clock.
 	transitionTime := metav1.NewTime(time.Now().Add(-6 * time.Minute))
 
 	GinkgoWriter.Printf("patching KernelDeadlock=True on node %s (transitionTime=%s)\n",
@@ -106,13 +98,9 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 	originalNodeName = ""
 }
 
-// holdNodeCondition launches a background goroutine that re-patches the given
-// node condition every 30 s using the fixed transitionTime. GKE's embedded node
-// monitoring periodically overwrites NPD-owned conditions to False; this keeps
-// the condition stable so the node.health toleration clock runs from transitionTime.
-// The goroutine exits when ctx is done or the node no longer exists.
-// It is safe to call from a Ginkgo spec goroutine; no Gomega assertions are made
-// inside the goroutine.
+// holdNodeCondition re-patches the condition every 30 s with a fixed transitionTime.
+// GKE's embedded node monitoring periodically resets NPD conditions to False; this
+// keeps the condition alive until ctx is cancelled or the node is gone.
 func holdNodeCondition(ctx context.Context, client kubernetes.Interface, nodeName string,
 	condType corev1.NodeConditionType, status corev1.ConditionStatus,
 	transitionTime metav1.Time, reason, message string) {
