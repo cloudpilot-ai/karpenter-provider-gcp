@@ -32,10 +32,12 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-// nodeRepairTimeout covers the KernelDeadlock toleration window (5m) plus
-// controller reconciliation lag and new node provisioning time. 15m gives
-// headroom while keeping SpecTimeout at 25m — within the 30m go test budget.
-const nodeRepairTimeout = 15 * time.Minute
+// nodeRepairTimeout is the budget for node.health to detect the pre-expired
+// KernelDeadlock condition and provision a replacement. The condition is
+// back-dated by 6 minutes so karpenter fires within ~30 s of the patch; 3
+// minutes gives ample headroom for reconciliation lag and replacement
+// provisioning startup before WaitForPodOnDifferentNode takes over.
+const nodeRepairTimeout = 3 * time.Minute
 
 var _ = Describe("NodeRepair", func() {
 	It("should replace a node whose KernelDeadlock condition has been True beyond the toleration",
@@ -72,12 +74,16 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
 	originalNodeName = firstPod.Spec.NodeName
 
-	// Record the transition time once. GKE's embedded node monitoring periodically
-	// resets NPD-owned conditions (KernelDeadlock, etc.) to False. To prevent the
-	// node.health toleration clock from being reset each time GKE overwrites the
-	// condition, all re-patches must reuse the same transition time so that
-	// LastTransitionTime remains stable from the controller's perspective.
-	transitionTime := metav1.Now()
+	// Back-date the transition time by 6 minutes — one minute past the 5-minute
+	// KernelDeadlock toleration. node.health computes terminationTime as
+	// LastTransitionTime + TolerationDuration; with a 6-minute-old transition the
+	// toleration is already expired and repair fires within one reconcile cycle
+	// (~10–30 s) rather than waiting 5 real minutes.
+	//
+	// The hold goroutine below reuses this fixed time on every re-patch so that
+	// GKE's embedded node monitoring cannot reset LastTransitionTime to a future
+	// value and restart the clock.
+	transitionTime := metav1.NewTime(time.Now().Add(-6 * time.Minute))
 
 	GinkgoWriter.Printf("patching KernelDeadlock=True on node %s (transitionTime=%s)\n",
 		originalNodeName, transitionTime.Format(time.RFC3339))
