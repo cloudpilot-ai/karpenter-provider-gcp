@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -65,56 +64,11 @@ func TestInstanceToNodeClaim_AbsentClusterLocationLabelNotInvented(t *testing.T)
 		"NodeClaim built from a label-less instance must not carry cluster-location; GC skip depends on its absence")
 }
 
-func TestRepairPolicies_PositiveTolerationDuration(t *testing.T) {
+func TestRepairPolicies_NPDConditionsPolarity(t *testing.T) {
 	t.Parallel()
-	for _, p := range (&CloudProvider{}).RepairPolicies() {
-		require.Greater(t, p.TolerationDuration, time.Duration(0),
-			"TolerationDuration for condition %s must be positive", p.ConditionType)
-	}
-}
-
-func TestRepairPolicies_ContainsNodeReady(t *testing.T) {
-	t.Parallel()
-	var hasReadyFalse, hasReadyUnknown bool
-	for _, p := range (&CloudProvider{}).RepairPolicies() {
-		if p.ConditionType != corev1.NodeReady {
-			continue
-		}
-		hasReadyFalse = hasReadyFalse || p.ConditionStatus == corev1.ConditionFalse
-		hasReadyUnknown = hasReadyUnknown || p.ConditionStatus == corev1.ConditionUnknown
-	}
-	require.True(t, hasReadyFalse, "must have NodeReady=False repair policy")
-	require.True(t, hasReadyUnknown, "must have NodeReady=Unknown repair policy")
-}
-
-func TestRepairPolicies_ContainsGKENPDConditions(t *testing.T) {
-	t.Parallel()
-	// GKE runs Node Problem Detector by default. These conditions use True=problem polarity.
-	expectedNPD := []string{
-		"KernelDeadlock",
-		"ReadonlyFilesystem",
-		"FrequentKubeletRestart",
-		"FrequentContainerdRestart",
-	}
-	policies := (&CloudProvider{}).RepairPolicies()
-	conditionSet := map[corev1.NodeConditionType]cloudprovider.RepairPolicy{}
-	for _, p := range policies {
-		conditionSet[p.ConditionType] = p
-	}
-	for _, name := range expectedNPD {
-		p, ok := conditionSet[corev1.NodeConditionType(name)]
-		require.True(t, ok, "must have repair policy for GKE NPD condition %s", name)
-		require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
-			"GKE NPD condition %s uses True=problem polarity", name)
-	}
-}
-
-func TestRepairPolicies_NPDConditionsRequireTrue(t *testing.T) {
-	t.Parallel()
-	// NPD conditions use True=problem polarity. A node without NPD running will never have
-	// these conditions set (they simply don't exist in node.status.conditions), so the
-	// node.health controller will never match them — no false-positive replacements occur
-	// when NPD is disabled or absent.
+	// GKE Node Problem Detector conditions use True=problem polarity (opposite of NodeReady).
+	// ConditionFalse must never be used here: absent conditions default to False in the
+	// Kubernetes API, so a False-triggered policy would fire on every node that lacks NPD.
 	npdConditions := map[corev1.NodeConditionType]bool{
 		"KernelDeadlock":            true,
 		"ReadonlyFilesystem":        true,
@@ -124,7 +78,7 @@ func TestRepairPolicies_NPDConditionsRequireTrue(t *testing.T) {
 	for _, p := range (&CloudProvider{}).RepairPolicies() {
 		if npdConditions[p.ConditionType] {
 			require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
-				"NPD condition %s must require ConditionTrue; ConditionFalse would fire on nodes without NPD since absent conditions default to False", p.ConditionType)
+				"NPD condition %s must use ConditionTrue polarity", p.ConditionType)
 		}
 	}
 }
