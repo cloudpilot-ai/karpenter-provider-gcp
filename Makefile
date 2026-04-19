@@ -120,16 +120,7 @@ require-e2e-vars: ## Fail fast if required e2e variables are not set
 	@test -n "$(E2E_LOCATION)"    || (echo "ERROR: E2E_LOCATION is not set"    >&2 && exit 1)
 
 GINKGO_PROCS ?= 4
-E2E_LOCK := /tmp/karpenter-e2e-$(E2E_PROJECT_ID).lock
-
 e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
-	@if [ -f "$(E2E_LOCK)" ]; then \
-		echo "e2e: cluster in use: $$(cat $(E2E_LOCK))"; \
-		echo "e2e: remove $(E2E_LOCK) if the session is stale"; \
-		exit 1; \
-	fi; \
-	printf '%s pid=%d target=e2e-tests\n' "$$(date -u +%FT%TZ)" "$$$$" > "$(E2E_LOCK)"; \
-	trap "rm -f $(E2E_LOCK)" EXIT INT TERM; \
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -137,25 +128,8 @@ e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
 
-SUITE ?=
-e2e-suite: require-e2e-vars ## Run one e2e suite in parallel (SUITE=provisioning, GINKGO_PROCS=N)
-	@test -n "$(SUITE)" || (echo "ERROR: SUITE is not set (e.g. make e2e-suite SUITE=provisioning)" >&2 && exit 1)
-	@if [ -f "$(E2E_LOCK)" ]; then \
-		echo "e2e: cluster in use: $$(cat $(E2E_LOCK))"; \
-		echo "e2e: remove $(E2E_LOCK) if the session is stale"; \
-		exit 1; \
-	fi; \
-	printf '%s pid=%d suite=$(SUITE)\n' "$$(date -u +%FT%TZ)" "$$$$" > "$(E2E_LOCK)"; \
-	trap "rm -f $(E2E_LOCK)" EXIT INT TERM; \
-	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
-	PROJECT_ID=$(E2E_PROJECT_ID) \
-	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
-	CLUSTER_LOCATION=$(E2E_LOCATION) \
-	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
-	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=60m -v \
-	./test/suites/$(SUITE)/
-
 FOCUS ?=
+SUITE ?=
 e2e-test: require-e2e-vars ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite-dir>)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
