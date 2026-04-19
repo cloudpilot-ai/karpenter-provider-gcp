@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -230,4 +231,150 @@ func TestDiscoverSourcePool_NonLegacyKarpenterPool(t *testing.T) {
 	selected, err := p.discoverSourcePool(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "karpenter-workload", selected)
+}
+
+// --- ensureKarpenterNodePoolTemplate tests ---
+
+// ensureSrv builds a test server for ensureKarpenterNodePoolTemplate tests.
+// clusterResp is returned for Cluster.Get; if nil, an empty cluster is returned.
+// clusterStatus overrides the HTTP status for Cluster.Get (0 = 200 OK).
+// createStatus overrides the HTTP status for NodePool.Create (0 = 200 OK).
+// captured receives the decoded CreateNodePoolRequest when non-nil.
+func ensureSrv(t *testing.T,
+	clusterResp *container.Cluster,
+	clusterStatus int,
+	createStatus int,
+	captured **container.CreateNodePoolRequest,
+) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(path, "/nodePools/"):
+			// NodePool.Get — return 404 so the creation path is exercised.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"code":404,"message":"not found","status":"NOT_FOUND"}}`))
+		case strings.HasSuffix(path, "/nodePools") && r.Method == http.MethodPost:
+			// NodePool.Create
+			if captured != nil {
+				var req container.CreateNodePoolRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				*captured = &req
+			}
+			if createStatus != 0 && createStatus != http.StatusOK {
+				w.WriteHeader(createStatus)
+				_, _ = w.Write([]byte(`{"error":{"code":403,"message":"permission denied","status":"PERMISSION_DENIED"}}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(&container.Operation{Status: "RUNNING", Name: "op-1"})
+		default:
+			// Cluster.Get
+			if clusterStatus != 0 && clusterStatus != http.StatusOK {
+				w.WriteHeader(clusterStatus)
+				_, _ = w.Write([]byte(`{"error":{"code":500,"message":"internal error","status":"INTERNAL"}}`))
+				return
+			}
+			c := clusterResp
+			if c == nil {
+				c = &container.Cluster{}
+			}
+			_ = json.NewEncoder(w).Encode(c)
+		}
+	}))
+}
+
+func TestEnsureKarpenterNodePoolTemplate_AlwaysSetFields(t *testing.T) {
+	var captured *container.CreateNodePoolRequest
+	srv := ensureSrv(t, nil, 0, 0, &captured)
+	defer srv.Close()
+
+	p := provider(t, srv, "")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+
+	cfg := captured.NodePool.Config
+	require.NotNil(t, cfg.ShieldedInstanceConfig)
+	require.True(t, cfg.ShieldedInstanceConfig.EnableSecureBoot)
+	require.True(t, cfg.ShieldedInstanceConfig.EnableIntegrityMonitoring)
+	require.NotNil(t, cfg.KubeletConfig)
+	require.False(t, cfg.KubeletConfig.InsecureKubeletReadonlyPortEnabled)
+	require.Equal(t, "true", cfg.Metadata["block-project-ssh-keys"])
+	require.Nil(t, cfg.WorkloadMetadataConfig, "WI mode should not be set when cluster has no WI")
+	require.Nil(t, captured.NodePool.NetworkConfig, "NetworkConfig should not be set for non-private cluster")
+}
+
+func TestEnsureKarpenterNodePoolTemplate_PrivateNodes_NetworkConfig(t *testing.T) {
+	cluster := &container.Cluster{
+		NetworkConfig: &container.NetworkConfig{DefaultEnablePrivateNodes: true},
+	}
+	var captured *container.CreateNodePoolRequest
+	srv := ensureSrv(t, cluster, 0, 0, &captured)
+	defer srv.Close()
+
+	p := provider(t, srv, "")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	require.NoError(t, err)
+	require.NotNil(t, captured.NodePool.NetworkConfig)
+	require.True(t, captured.NodePool.NetworkConfig.EnablePrivateNodes)
+}
+
+func TestEnsureKarpenterNodePoolTemplate_PrivateNodes_LegacyField(t *testing.T) {
+	cluster := &container.Cluster{
+		PrivateClusterConfig: &container.PrivateClusterConfig{EnablePrivateNodes: true},
+	}
+	var captured *container.CreateNodePoolRequest
+	srv := ensureSrv(t, cluster, 0, 0, &captured)
+	defer srv.Close()
+
+	p := provider(t, srv, "")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	require.NoError(t, err)
+	require.NotNil(t, captured.NodePool.NetworkConfig)
+	require.True(t, captured.NodePool.NetworkConfig.EnablePrivateNodes)
+}
+
+func TestEnsureKarpenterNodePoolTemplate_WorkloadIdentity(t *testing.T) {
+	cluster := &container.Cluster{
+		WorkloadIdentityConfig: &container.WorkloadIdentityConfig{WorkloadPool: "proj.svc.id.goog"},
+	}
+	var captured *container.CreateNodePoolRequest
+	srv := ensureSrv(t, cluster, 0, 0, &captured)
+	defer srv.Close()
+
+	p := provider(t, srv, "")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	require.NoError(t, err)
+	require.NotNil(t, captured.NodePool.Config.WorkloadMetadataConfig)
+	require.Equal(t, "GKE_METADATA", captured.NodePool.Config.WorkloadMetadataConfig.Mode)
+}
+
+func TestEnsureKarpenterNodePoolTemplate_ClusterFetchFails_ProceedsWithDefaults(t *testing.T) {
+	var captured *container.CreateNodePoolRequest
+	// clusterStatus=500 simulates a transient cluster.Get failure.
+	srv := ensureSrv(t, nil, http.StatusInternalServerError, 0, &captured)
+	defer srv.Close()
+
+	p := provider(t, srv, "")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	require.NoError(t, err, "cluster fetch failure should not abort fallback creation")
+	require.NotNil(t, captured)
+	// Unconditional fields must still be set.
+	require.NotNil(t, captured.NodePool.Config.KubeletConfig)
+	require.Equal(t, "true", captured.NodePool.Config.Metadata["block-project-ssh-keys"])
+	// Conditional fields must be absent when cluster config is unavailable.
+	require.Nil(t, captured.NodePool.NetworkConfig)
+	require.Nil(t, captured.NodePool.Config.WorkloadMetadataConfig)
+}
+
+func TestEnsureKarpenterNodePoolTemplate_CreateError_IncludesSAName(t *testing.T) {
+	// createStatus=403 simulates a service account policy violation.
+	srv := ensureSrv(t, nil, 0, http.StatusForbidden, nil)
+	defer srv.Close()
+
+	p := provider(t, srv, "")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "bad-sa@developer.gserviceaccount.com")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bad-sa@developer.gserviceaccount.com", "error should name the service account")
 }

@@ -304,9 +304,16 @@ func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]
 }
 
 // ensureKarpenterNodePoolTemplate creates the fallback pool if it does not already exist.
-// The pool config is intentionally minimal and compatible with common org policies:
-// shielded VM options are enabled to satisfy compute.requireShieldedVm; CMEK options are
-// left unset to avoid triggering gcp.restrictNonCmekServices.
+// The pool config is hardened against known GCP org policy constraints:
+//   - compute.requireShieldedVm / container.managed.enableShieldedNodes: Shielded VM always on.
+//   - container.managed.enablePrivateNodes: mirrored from cluster config.
+//   - container.managed.disableInsecureKubeletReadOnlyPort: always disabled.
+//   - container.managed.enableWorkloadIdentityFederation: GKE_METADATA mode set when WI is active.
+//   - compute.managed.blockProjectSshKeys: always set in node metadata.
+//
+// gcp.restrictNonCmekServices cannot be auto-satisfied (requires a pre-existing customer-managed
+// KMS key). Fallback creation will fail on such clusters; the operator must pre-create a RUNNING
+// pool and set DEFAULT_NODEPOOL_TEMPLATE_NAME.
 func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, imageType, nodePoolName, serviceAccount string) error {
 	logger := log.FromContext(ctx)
 
@@ -334,38 +341,89 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 		return err
 	}
 
+	// Fetch cluster config to apply policy-aware settings. Non-fatal: if unavailable,
+	// conditional fields (private nodes, Workload Identity) are omitted and safe defaults apply.
+	cluster, clusterErr := p.fetchClusterConfig(ctx)
+	if clusterErr != nil {
+		logger.Error(clusterErr, "failed to fetch cluster config; fallback pool will use minimal defaults")
+	}
+
+	nodePool := buildFallbackNodePool(cluster, nodePoolName, imageType, serviceAccount)
+
 	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
 		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
-	nodePoolOpts := &container.CreateNodePoolRequest{
-		NodePool: &container.NodePool{
-			Name:             nodePoolName,
-			Autoscaling:      &container.NodePoolAutoscaling{Enabled: false},
-			InitialNodeCount: 0,
-			Config: &container.NodeConfig{
-				ImageType:      imageType,
-				ServiceAccount: serviceAccount,
-				ShieldedInstanceConfig: &container.ShieldedInstanceConfig{
-					EnableSecureBoot:          true,
-					EnableIntegrityMonitoring: true,
-				},
-			},
-		},
-	}
 
 	logger.Info("creating fallback node pool", "name", nodePoolName)
 	_, err = p.containerService.Projects.Locations.Clusters.NodePools.
-		Create(clusterSelfLink, nodePoolOpts).Context(ctx).Do()
+		Create(clusterSelfLink, &container.CreateNodePoolRequest{NodePool: nodePool}).Context(ctx).Do()
 	if err != nil {
 		if errors.As(err, &gcpErr) && gcpErr.Code == http.StatusConflict {
 			logger.Info("fallback node pool already created concurrently", "name", nodePoolName)
 			return nil
 		}
-		logger.Error(err, "failed to create fallback node pool", "name", nodePoolName)
-		return err
+		logger.Error(err, "failed to create fallback node pool", "name", nodePoolName, "serviceAccount", serviceAccount)
+		return fmt.Errorf("creating fallback pool (serviceAccount=%s): %w", serviceAccount, err)
 	}
 
 	logger.Info("fallback node pool created successfully", "name", nodePoolName)
 	return nil
+}
+
+// fetchClusterConfig retrieves the cluster object from the GKE API to read cluster-level
+// policy settings (private nodes, Workload Identity) for fallback pool configuration.
+func (p *DefaultProvider) fetchClusterConfig(ctx context.Context) (*container.Cluster, error) {
+	selfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
+		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
+	return p.containerService.Projects.Locations.Clusters.Get(selfLink).Context(ctx).Do()
+}
+
+// buildFallbackNodePool constructs the NodePool definition for the last-resort fallback pool,
+// applying cluster-aware policy settings when cluster config is available.
+func buildFallbackNodePool(cluster *container.Cluster, poolName, imageType, serviceAccount string) *container.NodePool {
+	nodeConfig := &container.NodeConfig{
+		ImageType:      imageType,
+		ServiceAccount: serviceAccount,
+		ShieldedInstanceConfig: &container.ShieldedInstanceConfig{
+			EnableSecureBoot:          true,
+			EnableIntegrityMonitoring: true,
+		},
+		KubeletConfig: &container.NodeKubeletConfig{
+			InsecureKubeletReadonlyPortEnabled: false,
+		},
+		Metadata: map[string]string{
+			"block-project-ssh-keys": "true",
+		},
+	}
+	if clusterWorkloadPool(cluster) != "" {
+		nodeConfig.WorkloadMetadataConfig = &container.WorkloadMetadataConfig{Mode: "GKE_METADATA"}
+	}
+	nodePool := &container.NodePool{
+		Name:             poolName,
+		Autoscaling:      &container.NodePoolAutoscaling{Enabled: false},
+		InitialNodeCount: 0,
+		Config:           nodeConfig,
+	}
+	if clusterHasPrivateNodes(cluster) {
+		nodePool.NetworkConfig = &container.NodeNetworkConfig{EnablePrivateNodes: true}
+	}
+	return nodePool
+}
+
+// clusterHasPrivateNodes reports whether the cluster requires private nodes.
+func clusterHasPrivateNodes(cluster *container.Cluster) bool {
+	if cluster == nil {
+		return false
+	}
+	return (cluster.NetworkConfig != nil && cluster.NetworkConfig.DefaultEnablePrivateNodes) ||
+		(cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes)
+}
+
+// clusterWorkloadPool returns the cluster's Workload Identity pool name, or "" if not configured.
+func clusterWorkloadPool(cluster *container.Cluster) string {
+	if cluster == nil || cluster.WorkloadIdentityConfig == nil {
+		return ""
+	}
+	return cluster.WorkloadIdentityConfig.WorkloadPool
 }
 
 func (p *DefaultProvider) getNodePool(ctx context.Context, nodePoolName string) (*container.NodePool, error) {
