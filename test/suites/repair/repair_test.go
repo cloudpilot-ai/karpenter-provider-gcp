@@ -89,7 +89,7 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 		"KernelDeadlock", corev1.ConditionTrue, transitionTime,
 		"TestSimulation", "e2e repair test: simulated kernel deadlock")
 
-	replacementPod := env.WaitForPodOnDifferentNode(ctx, name, originalNodeName, nodeRepairTimeout)
+	replacementPod := env.WaitForPodOnDifferentNode(ctx, name, originalNodeName, environment.ProvisioningTimeout)
 	Expect(replacementPod.Spec.NodeName).NotTo(Equal(originalNodeName),
 		"pod must move to a replacement node after KernelDeadlock repair")
 
