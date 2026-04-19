@@ -61,6 +61,12 @@ controller:
     # -- nodeOverlay is ALPHA and is disabled by default.
     # Setting this will allow the use of node overlay to impact scheduling decisions
     nodeOverlay: false
+    # -- nodeRepair is ALPHA and is disabled by default.
+    # When enabled, Karpenter monitors node health conditions and replaces nodes that have been
+    # unhealthy beyond the configured toleration duration. On GKE, this monitors NodeReady
+    # and Node Problem Detector conditions (KernelDeadlock, ReadonlyFilesystem, etc.).
+    # Up to 20% of nodes in a NodePool may be unhealthy simultaneously before repairs are blocked.
+    nodeRepair: false
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
