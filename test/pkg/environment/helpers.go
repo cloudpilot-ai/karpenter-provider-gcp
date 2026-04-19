@@ -62,6 +62,7 @@ type TestCase struct {
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
 	ImageFamily string
+	ConsolidationPolicy string // defaults to WhenEmptyOrUnderutilized when empty
 }
 
 // UniqueSuffix returns a 6-character random hex string safe for use in k8s names.
@@ -164,8 +165,12 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	requirements := []any{
 		map[string]any{"key": karpv1.CapacityTypeLabelKey, "operator": "In", "values": []any{tc.CapacityType}},
 		map[string]any{"key": gcpv1alpha1.LabelInstanceFamily, "operator": "In", "values": toAny(tc.Families)},
-		map[string]any{"key": corev1.LabelInstanceTypeStable, "operator": "In", "values": toAny(tc.InstanceTypes)},
 		map[string]any{"key": corev1.LabelArchStable, "operator": "In", "values": []any{tc.Arch}},
+	}
+	if len(tc.InstanceTypes) > 0 {
+		requirements = append(requirements, map[string]any{
+			"key": corev1.LabelInstanceTypeStable, "operator": "In", "values": toAny(tc.InstanceTypes),
+		})
 	}
 	templateSpec := map[string]any{
 		"nodeClassRef": map[string]any{
@@ -185,11 +190,14 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	if expireAfter != "" {
 		templateSpec["expireAfter"] = expireAfter
 	}
-	// When expireAfter is set we use WhenEmpty rather than WhenEmptyOrUnderutilized
-	// so that node replacement is driven solely by expiration, not by concurrent
-	// utilization-based consolidation which would interfere with the test.
+	// Use WhenEmpty when: expireAfter is set (so expiration drives replacement, not
+	// consolidation), or the caller explicitly requests it (e.g. repair tests, where
+	// WhenEmptyOrUnderutilized could consolidate the node before the health toleration
+	// expires and mask whether the node.health controller actually fired).
 	consolidationPolicy := "WhenEmptyOrUnderutilized"
-	if expireAfter != "" {
+	if tc.ConsolidationPolicy != "" {
+		consolidationPolicy = tc.ConsolidationPolicy
+	} else if expireAfter != "" {
 		consolidationPolicy = "WhenEmpty"
 	}
 	deleteIfExists(ctx, e.DynamicClient, nodePoolGVR, name)
