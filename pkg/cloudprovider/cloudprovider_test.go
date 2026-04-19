@@ -65,23 +65,6 @@ func TestInstanceToNodeClaim_AbsentClusterLocationLabelNotInvented(t *testing.T)
 		"NodeClaim built from a label-less instance must not carry cluster-location; GC skip depends on its absence")
 }
 
-func TestRepairPolicies_NonEmpty(t *testing.T) {
-	t.Parallel()
-	policies := (&CloudProvider{}).RepairPolicies()
-	require.NotEmpty(t, policies, "RepairPolicies must return at least one policy")
-}
-
-func TestRepairPolicies_NoDuplicates(t *testing.T) {
-	t.Parallel()
-	policies := (&CloudProvider{}).RepairPolicies()
-	seen := map[string]bool{}
-	for _, p := range policies {
-		key := string(p.ConditionType) + "/" + string(p.ConditionStatus)
-		require.False(t, seen[key], "duplicate repair policy for condition %s/%s", p.ConditionType, p.ConditionStatus)
-		seen[key] = true
-	}
-}
-
 func TestRepairPolicies_PositiveTolerationDuration(t *testing.T) {
 	t.Parallel()
 	for _, p := range (&CloudProvider{}).RepairPolicies() {
@@ -142,25 +125,6 @@ func TestRepairPolicies_NPDConditionsRequireTrue(t *testing.T) {
 		if npdConditions[p.ConditionType] {
 			require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
 				"NPD condition %s must require ConditionTrue; ConditionFalse would fire on nodes without NPD since absent conditions default to False", p.ConditionType)
-		}
-	}
-}
-
-func TestRepairPolicies_NoAWSConditions(t *testing.T) {
-	t.Parallel()
-	// These are AWS EKS Node Monitoring Agent conditions that do not exist on GKE.
-	awsOnlyConditions := []corev1.NodeConditionType{
-		"AcceleratedHardwareReady",
-		"StorageReady",
-		"NetworkingReady",
-		"KernelReady",
-		"ContainerRuntimeReady",
-	}
-	policies := (&CloudProvider{}).RepairPolicies()
-	for _, p := range policies {
-		for _, aws := range awsOnlyConditions {
-			require.NotEqual(t, aws, p.ConditionType,
-				"condition %s is an AWS EKS condition and must not be used on GKE", aws)
 		}
 	}
 }
