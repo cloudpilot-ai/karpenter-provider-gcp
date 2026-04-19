@@ -124,6 +124,14 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 			if waitCtx.Err() != nil {
 				return fmt.Errorf("waiting for operation %s: %w", operationName, waitCtx.Err())
 			}
+			if isTransientError(err) {
+				log.FromContext(ctx).V(1).Info("transient error polling operation, retrying",
+					"operation", operationName, "zone", zone, "error", err)
+				if tickErr := waitForNextTick(waitCtx, ticker); tickErr != nil {
+					return fmt.Errorf("waiting for operation %s: %w", operationName, tickErr)
+				}
+				continue
+			}
 			return fmt.Errorf("getting operation: %w", err)
 		}
 
@@ -167,6 +175,14 @@ func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *comp
 		return e.Message
 	})
 	return fmt.Errorf("operation failed: %s", strings.Join(errorMsgs, "; "))
+}
+
+func isTransientError(err error) bool {
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.Code >= 500
+	}
+	return false
 }
 
 func isInsufficientCapacityError(operationError *compute.OperationErrorErrors) bool {

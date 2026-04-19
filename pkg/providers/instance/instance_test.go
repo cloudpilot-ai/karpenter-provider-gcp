@@ -19,8 +19,10 @@ package instance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1215,6 +1217,62 @@ func TestSetupInstanceLabels_ClusterLocationNotOverwrittenByRequirements(t *test
 	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
 	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
 		"cluster location must not be overwritten by a NodePool label with the same key")
+}
+
+func TestIsTransientError_TrueFor5xx(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isTransientError(&googleapi.Error{Code: 503}))
+	require.True(t, isTransientError(&googleapi.Error{Code: 500}))
+}
+
+func TestIsTransientError_FalseForNon5xx(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, isTransientError(&googleapi.Error{Code: 404}))
+	require.False(t, isTransientError(&googleapi.Error{Code: 429}))
+}
+
+func TestIsTransientError_FalseForNonAPIError(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, isTransientError(fmt.Errorf("plain error")))
+}
+
+func TestWaitOperationDone_RetriesOnTransient503(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := callCount.Add(1)
+		if n <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, &googleapi.Error{Code: http.StatusServiceUnavailable, Message: "Visibility check was unavailable"})
+			return
+		}
+		writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+	}))
+
+	err := p.waitOperationDone(context.Background(), "n1-standard-1", "us-central1-a", "on-demand", "op-123")
+
+	require.NoError(t, err)
+	require.Equal(t, int32(3), callCount.Load())
+}
+
+func TestWaitOperationDone_FailsOnPersistent503(t *testing.T) {
+	t.Parallel()
+
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		writeJSON(w, &googleapi.Error{Code: http.StatusServiceUnavailable, Message: "Visibility check was unavailable"})
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := p.waitOperationDone(ctx, "n1-standard-1", "us-central1-a", "on-demand", "op-123")
+
+	require.Error(t, err)
 }
 
 func TestBelongsToCluster(t *testing.T) {
