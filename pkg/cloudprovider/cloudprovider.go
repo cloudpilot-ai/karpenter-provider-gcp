@@ -252,44 +252,52 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 	return c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass), nil
 }
 
+// RepairPolicies returns the node health conditions that trigger node replacement.
+// Polarity on GKE differs by source:
+//   - kubelet conditions (NodeReady, etc.): False/Unknown = problem
+//   - Node Problem Detector conditions (KernelDeadlock, etc.): True = problem
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
-		// Supported Kubelet Node Conditions
+		// Standard Kubernetes kubelet conditions.
+		// NodeReady=False/Unknown covers the broadest failure mode: an unresponsive kubelet.
+		// GKE nodes boot in ~2 min; 10 min matches Azure managed K8s and avoids 15× boot-time waits.
 		{
 			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 30 * time.Minute,
-		},
-		{
-			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionUnknown,
-			TolerationDuration: 30 * time.Minute,
-		},
-		// Support Node Monitoring Agent Conditions
-		//
-		{
-			ConditionType:      "AcceleratedHardwareReady",
 			ConditionStatus:    corev1.ConditionFalse,
 			TolerationDuration: 10 * time.Minute,
 		},
 		{
-			ConditionType:      "StorageReady",
-			ConditionStatus:    corev1.ConditionFalse,
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionUnknown,
+			TolerationDuration: 10 * time.Minute,
+		},
+		// GKE Node Problem Detector — kernel-monitor conditions (enabled by default on all node pools).
+		// KernelDeadlock and ReadonlyFilesystem are unrecoverable OS failures; short toleration
+		// avoids keeping a broken node alive longer than necessary.
+		// Note: NPD owns these conditions, not the kubelet. The kubelet will not reset them between
+		// heartbeats, so a patch setting KernelDeadlock=True is stable until NPD clears it.
+		{
+			ConditionType:      "KernelDeadlock",
+			ConditionStatus:    corev1.ConditionTrue,
+			TolerationDuration: 5 * time.Minute,
+		},
+		{
+			ConditionType:      "ReadonlyFilesystem",
+			ConditionStatus:    corev1.ConditionTrue,
+			TolerationDuration: 5 * time.Minute,
+		},
+		// GKE Node Problem Detector — restart-monitor conditions. Longer toleration
+		// lets transient restarts self-heal before triggering replacement.
+		// FrequentDockerRestart is intentionally omitted: GKE node pools use containerd
+		// since GKE 1.24 and Docker is no longer shipped on standard node images.
+		{
+			ConditionType:      "FrequentKubeletRestart",
+			ConditionStatus:    corev1.ConditionTrue,
 			TolerationDuration: 30 * time.Minute,
 		},
 		{
-			ConditionType:      "NetworkingReady",
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 30 * time.Minute,
-		},
-		{
-			ConditionType:      "KernelReady",
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 30 * time.Minute,
-		},
-		{
-			ConditionType:      "ContainerRuntimeReady",
-			ConditionStatus:    corev1.ConditionFalse,
+			ConditionType:      "FrequentContainerdRestart",
+			ConditionStatus:    corev1.ConditionTrue,
 			TolerationDuration: 30 * time.Minute,
 		},
 	}

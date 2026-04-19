@@ -66,6 +66,9 @@ controller:
     # regardless of pod demand (static node pool). consolidationPolicy and consolidateAfter
     # are ignored on static NodePools.
     staticCapacity: false
+    # -- nodeRepair is ALPHA and is disabled by default.
+    # When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions.
+    nodeRepair: false
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -61,4 +63,105 @@ func TestInstanceToNodeClaim_AbsentClusterLocationLabelNotInvented(t *testing.T)
 	_, hasLabel := nc.Labels[utils.LabelClusterLocationKey]
 	require.False(t, hasLabel,
 		"NodeClaim built from a label-less instance must not carry cluster-location; GC skip depends on its absence")
+}
+
+func TestRepairPolicies_NonEmpty(t *testing.T) {
+	t.Parallel()
+	policies := (&CloudProvider{}).RepairPolicies()
+	require.NotEmpty(t, policies, "RepairPolicies must return at least one policy")
+}
+
+func TestRepairPolicies_NoDuplicates(t *testing.T) {
+	t.Parallel()
+	policies := (&CloudProvider{}).RepairPolicies()
+	seen := map[string]bool{}
+	for _, p := range policies {
+		key := string(p.ConditionType) + "/" + string(p.ConditionStatus)
+		require.False(t, seen[key], "duplicate repair policy for condition %s/%s", p.ConditionType, p.ConditionStatus)
+		seen[key] = true
+	}
+}
+
+func TestRepairPolicies_PositiveTolerationDuration(t *testing.T) {
+	t.Parallel()
+	for _, p := range (&CloudProvider{}).RepairPolicies() {
+		require.Greater(t, p.TolerationDuration, time.Duration(0),
+			"TolerationDuration for condition %s must be positive", p.ConditionType)
+	}
+}
+
+func TestRepairPolicies_ContainsNodeReady(t *testing.T) {
+	t.Parallel()
+	policies := (&CloudProvider{}).RepairPolicies()
+	contains := func(status corev1.ConditionStatus) bool {
+		for _, p := range policies {
+			if p.ConditionType == corev1.NodeReady && p.ConditionStatus == status {
+				return true
+			}
+		}
+		return false
+	}
+	require.True(t, contains(corev1.ConditionFalse), "must have NodeReady=False repair policy")
+	require.True(t, contains(corev1.ConditionUnknown), "must have NodeReady=Unknown repair policy")
+}
+
+func TestRepairPolicies_ContainsGKENPDConditions(t *testing.T) {
+	t.Parallel()
+	// GKE runs Node Problem Detector by default. These conditions use True=problem polarity.
+	expectedNPD := []string{
+		"KernelDeadlock",
+		"ReadonlyFilesystem",
+		"FrequentKubeletRestart",
+		"FrequentContainerdRestart",
+	}
+	policies := (&CloudProvider{}).RepairPolicies()
+	conditionSet := map[corev1.NodeConditionType]cloudprovider.RepairPolicy{}
+	for _, p := range policies {
+		conditionSet[p.ConditionType] = p
+	}
+	for _, name := range expectedNPD {
+		p, ok := conditionSet[corev1.NodeConditionType(name)]
+		require.True(t, ok, "must have repair policy for GKE NPD condition %s", name)
+		require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
+			"GKE NPD condition %s uses True=problem polarity", name)
+	}
+}
+
+func TestRepairPolicies_NPDConditionsRequireTrue(t *testing.T) {
+	t.Parallel()
+	// NPD conditions use True=problem polarity. A node without NPD running will never have
+	// these conditions set (they simply don't exist in node.status.conditions), so the
+	// node.health controller will never match them — no false-positive replacements occur
+	// when NPD is disabled or absent.
+	npdConditions := map[corev1.NodeConditionType]bool{
+		"KernelDeadlock":            true,
+		"ReadonlyFilesystem":        true,
+		"FrequentKubeletRestart":    true,
+		"FrequentContainerdRestart": true,
+	}
+	for _, p := range (&CloudProvider{}).RepairPolicies() {
+		if npdConditions[p.ConditionType] {
+			require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
+				"NPD condition %s must require ConditionTrue; ConditionFalse would fire on nodes without NPD since absent conditions default to False", p.ConditionType)
+		}
+	}
+}
+
+func TestRepairPolicies_NoAWSConditions(t *testing.T) {
+	t.Parallel()
+	// These are AWS EKS Node Monitoring Agent conditions that do not exist on GKE.
+	awsOnlyConditions := []corev1.NodeConditionType{
+		"AcceleratedHardwareReady",
+		"StorageReady",
+		"NetworkingReady",
+		"KernelReady",
+		"ContainerRuntimeReady",
+	}
+	policies := (&CloudProvider{}).RepairPolicies()
+	for _, p := range policies {
+		for _, aws := range awsOnlyConditions {
+			require.NotEqual(t, aws, p.ConditionType,
+				"condition %s is an AWS EKS condition and must not be used on GKE", aws)
+		}
+	}
 }
