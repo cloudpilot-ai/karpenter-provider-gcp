@@ -537,6 +537,41 @@ func toAny(ss []string) []any {
 	return out
 }
 
+// PatchNodeCondition sets or upserts a node status condition directly via the
+// Kubernetes API. Use this in e2e tests to simulate unhealthy node states
+// without requiring actual kernel or OS failures on the underlying GCE VM.
+// LastTransitionTime is set to now on every call so the repair toleration
+// window starts counting from the moment the test patches the condition.
+func (e *Environment) PatchNodeCondition(ctx context.Context, nodeName string,
+	condType corev1.NodeConditionType, status corev1.ConditionStatus,
+	reason, message string) {
+	node, err := e.KubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "PatchNodeCondition: get node %s", nodeName)
+
+	now := metav1.Now()
+	newCond := corev1.NodeCondition{
+		Type:               condType,
+		Status:             status,
+		LastHeartbeatTime:  now,
+		LastTransitionTime: now,
+		Reason:             reason,
+		Message:            message,
+	}
+	found := false
+	for i, c := range node.Status.Conditions {
+		if c.Type == condType {
+			node.Status.Conditions[i] = newCond
+			found = true
+			break
+		}
+	}
+	if !found {
+		node.Status.Conditions = append(node.Status.Conditions, newCond)
+	}
+	_, err = e.KubeClient.CoreV1().Nodes().UpdateStatus(ctx, node, metav1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "PatchNodeCondition: update status for node %s", nodeName)
+}
+
 // deleteIfExists deletes a resource if it exists and waits for it to be fully
 // removed before returning. This prevents "object is being deleted" errors when
 // a resource from a previous run still has its finalizer running.

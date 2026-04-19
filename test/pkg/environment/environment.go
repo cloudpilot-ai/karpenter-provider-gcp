@@ -58,7 +58,10 @@ const (
 	// register with the cluster, and for the pod to reach Running. GCP typically
 	// takes 4–7 minutes; 10 minutes gives a comfortable margin.
 	ProvisioningTimeout = 10 * time.Minute
-	PauseImage          = "registry.k8s.io/pause:3.10"
+	// NodeRepairTimeout covers the KernelDeadlock toleration window (5m) plus
+	// controller reconciliation lag and new node provisioning time (~10m).
+	NodeRepairTimeout = 20 * time.Minute
+	PauseImage        = "registry.k8s.io/pause:3.10"
 )
 
 var (

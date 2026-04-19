@@ -267,15 +267,16 @@ func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
 		// Standard Kubernetes kubelet conditions.
 		// NodeReady=False/Unknown covers the broadest failure mode: an unresponsive kubelet.
+		// GKE nodes boot in ~2 min; 10 min matches Azure managed K8s and avoids 15× boot-time waits.
 		{
 			ConditionType:      corev1.NodeReady,
 			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 30 * time.Minute,
+			TolerationDuration: 10 * time.Minute,
 		},
 		{
 			ConditionType:      corev1.NodeReady,
 			ConditionStatus:    corev1.ConditionUnknown,
-			TolerationDuration: 30 * time.Minute,
+			TolerationDuration: 10 * time.Minute,
 		},
 		// GKE Node Problem Detector — log-based conditions (kernel-monitor, enabled by default).
 		// True = problem is active. These indicate low-level OS failures that prevent the node
