@@ -84,7 +84,7 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 		"TestSimulation", "e2e repair test: simulated kernel deadlock")
 
 	// Hold the condition True against GKE's periodic resets. The goroutine
-	// exits when the context is cancelled (spec completion) or the node is gone.
+	// exits when the context is canceled (spec completion) or the node is gone.
 	holdNodeCondition(ctx, env.KubeClient, originalNodeName,
 		"KernelDeadlock", corev1.ConditionTrue, transitionTime,
 		"TestSimulation", "e2e repair test: simulated kernel deadlock")
@@ -100,7 +100,7 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 
 // holdNodeCondition re-patches the condition every 30 s with a fixed transitionTime.
 // GKE's embedded node monitoring periodically resets NPD conditions to False; this
-// keeps the condition alive until ctx is cancelled or the node is gone.
+// keeps the condition alive until ctx is canceled or the node is gone.
 func holdNodeCondition(ctx context.Context, client kubernetes.Interface, nodeName string,
 	condType corev1.NodeConditionType, status corev1.ConditionStatus,
 	transitionTime metav1.Time, reason, message string) {
