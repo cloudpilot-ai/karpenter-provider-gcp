@@ -38,7 +38,8 @@ Creating pools to access the first three categories is unnecessary. The fourth c
 
 - Karpenter provisions nodes without creating GKE node pools under normal operating conditions.
 - All existing node variants (COS amd64, Ubuntu amd64, COS arm64, Ubuntu arm64, spot, on-demand) continue to work.
-- Clusters under `compute.requireShieldedVm` and `gcp.restrictNonCmekServices` work without additional configuration.
+- Clusters under `compute.requireShieldedVm` work without additional configuration (Shielded VM is enabled on the fallback pool by default).
+- Clusters under `gcp.restrictNonCmekServices` work without additional configuration **when at least one RUNNING pool already exists** (the discovery path is taken; no fallback pool is created). If no RUNNING pool exists and the fallback path fires, `gcp.restrictNonCmekServices` cannot be automatically satisfied — the operator must pre-create any RUNNING pool (see Last-Resort Fallback Pool below).
 - Operator can optionally pin the pool used as a bootstrap source.
 - Graceful handling when all pools are temporarily unavailable (e.g., cluster upgrade in progress).
 
@@ -117,7 +118,7 @@ In the unlikely event that no RUNNING pool is available after retries (e.g., unu
 
 - Minimal `NodeConfig`: only `imageType` (COS_CONTAINERD) and `serviceAccount`; no explicit machine type, no custom labels or taints
 - Shielded VM config enabled by default (`enableSecureBoot`, `enableIntegrityMonitoring`) to satisfy `compute.requireShieldedVm`
-- CMEK-related options left unset to avoid triggering `gcp.restrictNonCmekServices`
+- `gcp.restrictNonCmekServices` **cannot** be automatically satisfied: this constraint requires a pre-existing customer-managed KMS key at pool creation time; auto-provisioning a key ring and key is out of scope (requires additional IAM permissions and may itself be restricted by `gcp.restrictCmekCryptoKeyProjects`). If this policy is active and no RUNNING pool exists, fallback pool creation will fail — the operator must pre-create any RUNNING pool and optionally set `DEFAULT_NODEPOOL_TEMPLATE_NAME`
 - 0 initial nodes — pool is never used to run workloads
 
 If the fallback creation still fails due to an org policy that cannot be automatically satisfied, Karpenter logs a clear error and halts provisioning. The operator can then create any RUNNING pool manually and set `DEFAULT_NODEPOOL_TEMPLATE_NAME` to point Karpenter at it.
