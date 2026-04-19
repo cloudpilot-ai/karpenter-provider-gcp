@@ -67,8 +67,8 @@ func TestInstanceToNodeClaim_AbsentClusterLocationLabelNotInvented(t *testing.T)
 func TestRepairPolicies_NPDConditionsPolarity(t *testing.T) {
 	t.Parallel()
 	// GKE Node Problem Detector conditions use True=problem polarity (opposite of NodeReady).
-	// ConditionFalse must never be used here: absent conditions default to False in the
-	// Kubernetes API, so a False-triggered policy would fire on every node that lacks NPD.
+	// NPD sets a condition to True when a problem is detected and omits it otherwise.
+	// ConditionFalse would never match and ConditionTrue must be used to trigger repair.
 	npdConditions := map[corev1.NodeConditionType]bool{
 		"KernelDeadlock":            true,
 		"ReadonlyFilesystem":        true,
