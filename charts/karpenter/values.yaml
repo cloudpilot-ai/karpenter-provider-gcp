@@ -61,6 +61,11 @@ controller:
     # -- nodeOverlay is ALPHA and is disabled by default.
     # Setting this will allow the use of node overlay to impact scheduling decisions
     nodeOverlay: false
+    # -- staticCapacity is ALPHA and is disabled by default.
+    # When enabled, a NodePool with spec.replicas set maintains a fixed number of nodes
+    # regardless of pod demand (static node pool). consolidationPolicy and consolidateAfter
+    # are ignored on static NodePools.
+    staticCapacity: false
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
