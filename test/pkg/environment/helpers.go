@@ -50,9 +50,6 @@ const (
 	DefaultNodePoolWeight = 10
 	// DefaultConsolidateAfter is how quickly Karpenter reclaims idle test nodes.
 	DefaultConsolidateAfter = "30s"
-	// ReplacementTimeout is the budget for node replacement tests (drift, expiration).
-	// 2× ProvisioningTimeout accounts for draining the old node before the new one is ready.
-	ReplacementTimeout = 2 * ProvisioningTimeout
 )
 
 // TestCase describes a provisioning scenario: capacity type, architecture,
@@ -62,6 +59,9 @@ type TestCase struct {
 	Arch          string
 	Families      []string
 	InstanceTypes []string
+	// ImageFamily selects the OS image family for the NodeClass.
+	// Defaults to ContainerOptimizedOS when empty.
+	ImageFamily string
 }
 
 // UniqueSuffix returns a 6-character random hex string safe for use in k8s names.
@@ -80,10 +80,14 @@ func TestPrefix(arch, capacityType string, parts ...string) string {
 	return strings.Join(append([]string{arch, ct}, parts...), "-")
 }
 
-// CreateNodeClass creates a GCENodeClass with ContainerOptimizedOS image and a
-// 30 GiB boot disk, using the environment's pods range. If a resource with the
-// same name already exists (leftover from a previous run), it is deleted first.
-func (e *Environment) CreateNodeClass(ctx context.Context, name string) {
+// CreateNodeClass creates a GCENodeClass for the given imageFamily. If a resource
+// with the same name already exists (leftover from a previous run), it is deleted first.
+// Ubuntu requires a 50 GiB boot disk; all other families use DefaultE2EDiskGiB.
+func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		diskGiB = 50 // ubuntu-gke images require more space than COS
+	}
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
@@ -91,10 +95,10 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name string) {
 		"metadata":   map[string]any{"name": name},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
-				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+				map[string]any{"alias": imageFamily + "@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -258,7 +262,7 @@ func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, node
 	Eventually(func(g Gomega) {
 		_, err := e.KubeClient.AppsV1().Deployments(TestNamespace).Get(ctx, name, metav1.GetOptions{})
 		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "waiting for stale Deployment %s to be deleted", name)
-	}).WithTimeout(NodeCleanupTimeout).WithPolling(5 * time.Second).Should(Succeed())
+	}).WithTimeout(NodeCleanupTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 
 	_, err := e.KubeClient.AppsV1().Deployments(TestNamespace).Create(ctx, dep, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating Deployment %s", name)
@@ -281,7 +285,7 @@ func (e *Environment) WaitForRunningPod(ctx context.Context, appLabel string) *c
 		}
 		e.logWaitStatus(ctx, appLabel, pods.Items)
 		g.Expect(found).NotTo(BeNil(), "no running pod with label app=%s", appLabel)
-	}).WithTimeout(ProvisioningTimeout).WithPolling(5 * time.Second).Should(Succeed())
+	}).WithTimeout(ProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 	return found
 }
 
@@ -355,7 +359,7 @@ func (e *Environment) WaitForPodOnDifferentNode(ctx context.Context, appLabel, e
 		}
 		g.Expect(found).NotTo(BeNil(),
 			"no running pod with label app=%s on a node other than %s", appLabel, excludeNode)
-	}).WithTimeout(timeout).WithPolling(5 * time.Second).Should(Succeed())
+	}).WithTimeout(timeout).WithPolling(DefaultPollInterval).Should(Succeed())
 	return found
 }
 
@@ -537,6 +541,87 @@ func toAny(ss []string) []any {
 	return out
 }
 
+// waitForReadyCondition polls until the named resource has Ready=True in its
+// status.conditions, retrying while the object exists but has no conditions yet.
+func (e *Environment) waitForReadyCondition(ctx context.Context, gvr schema.GroupVersionResource, name string, timeout time.Duration) {
+	Eventually(func(g Gomega) {
+		obj, err := e.DynamicClient.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred(), "getting %s %s", gvr.Resource, name)
+		conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+		g.Expect(found).To(BeTrue(), "%s %s has no status conditions yet", gvr.Resource, name)
+		for _, c := range conditions {
+			cond, ok := c.(map[string]any)
+			if !ok || cond["type"] != "Ready" {
+				continue
+			}
+			g.Expect(cond["status"]).To(Equal("True"),
+				"%s %s Ready=%s: %s", gvr.Resource, name, cond["status"], cond["message"])
+			return
+		}
+		Fail(fmt.Sprintf("%s %s has no Ready condition", gvr.Resource, name))
+	}).WithTimeout(timeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+// WaitForNodePoolReady polls until the named NodePool reports Ready=True.
+func (e *Environment) WaitForNodePoolReady(ctx context.Context, name string) {
+	e.waitForReadyCondition(ctx, nodePoolGVR, name, NodePoolReadyTimeout)
+}
+
+// WaitForNodeClaimLaunched polls NodeClaims owned by nodePoolName and fails
+// the test immediately if any claim reports LaunchFailed. It succeeds as soon
+// as at least one claim reaches Launched=True.
+func (e *Environment) WaitForNodeClaimLaunched(ctx context.Context, nodePoolName string) {
+	Eventually(func(g Gomega) {
+		claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(ctx, metav1.ListOptions{
+			LabelSelector: "karpenter.sh/nodepool=" + nodePoolName,
+		})
+		g.Expect(err).NotTo(HaveOccurred(), "listing NodeClaims for pool %s", nodePoolName)
+		g.Expect(claims.Items).NotTo(BeEmpty(), "no NodeClaims for pool %s yet", nodePoolName)
+
+		for i := range claims.Items {
+			conditions, _, _ := unstructured.NestedSlice(claims.Items[i].Object, "status", "conditions")
+			for _, c := range conditions {
+				cond, ok := c.(map[string]any)
+				if !ok || cond["type"] != "Launched" {
+					continue
+				}
+				if cond["reason"] == "LaunchFailed" {
+					Fail(fmt.Sprintf("NodeClaim %s LaunchFailed: %s",
+						claims.Items[i].GetName(), cond["message"]))
+				}
+				if cond["status"] == "True" {
+					return // at least one claim launched successfully
+				}
+			}
+		}
+		g.Expect(false).To(BeTrue(), "no NodeClaim for pool %s has Launched=True yet", nodePoolName)
+	}).WithTimeout(NodeClaimLaunchTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+// WaitForKubeProxyRunning polls until the kube-proxy DaemonSet pod on the given
+// node is Running and Ready. GKE uses "component=kube-proxy" (not the upstream
+// "k8s-app=kube-proxy" label), so we query by that selector.
+func (e *Environment) WaitForKubeProxyRunning(ctx context.Context, nodeName string) {
+	Eventually(func(g Gomega) {
+		pods, err := e.KubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+			LabelSelector: "component=kube-proxy",
+			FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
+		})
+		g.Expect(err).NotTo(HaveOccurred(), "listing kube-proxy pods on node %s", nodeName)
+		g.Expect(pods.Items).NotTo(BeEmpty(), "no kube-proxy pod on node %s", nodeName)
+		g.Expect(isRunningAndReady(&pods.Items[0])).To(BeTrue(),
+			"kube-proxy pod on %s is not Running/Ready (phase=%s)",
+			nodeName, pods.Items[0].Status.Phase)
+	}).WithTimeout(ProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+// WaitForNodeClassReady polls until the named GCENodeClass reports Ready=True.
+// Shorter than ProvisioningTimeout so image-resolution failures surface fast.
+func (e *Environment) WaitForNodeClassReady(ctx context.Context, name string) {
+	GinkgoWriter.Printf("[setup] waiting for GCENodeClass %s to become Ready\n", name)
+	e.waitForReadyCondition(ctx, gceNodeClassGVR, name, NodeClassReadyTimeout)
+}
+
 // deleteIfExists deletes a resource if it exists and waits for it to be fully
 // removed before returning. This prevents "object is being deleted" errors when
 // a resource from a previous run still has its finalizer running.
@@ -554,5 +639,5 @@ func deleteIfExists(ctx context.Context, client dynamic.Interface, gvr schema.Gr
 		_, err := client.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
 		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
 			"waiting for %s/%s to be fully deleted", gvr.Resource, name)
-	}).WithTimeout(NodeCleanupTimeout).WithPolling(5 * time.Second).Should(Succeed())
+	}).WithTimeout(NodeCleanupTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 }

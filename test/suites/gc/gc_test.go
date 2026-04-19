@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
+	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
@@ -66,10 +67,12 @@ func runGCTest(ctx context.Context, tc environment.TestCase) {
 		}
 	})
 
-	env.CreateNodeClass(ctx, name)
+	env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+	env.WaitForNodeClassReady(ctx, name)
 	env.CreateNodePool(ctx, name, name, tc)
+	env.WaitForNodePoolReady(ctx, name)
 	env.CreateDeployment(ctx, name, name, name, tc.Arch)
-
+	env.WaitForNodeClaimLaunched(ctx, name)
 	pod := env.WaitForRunningPod(ctx, name)
 	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 	provisionedNodeName = pod.Spec.NodeName

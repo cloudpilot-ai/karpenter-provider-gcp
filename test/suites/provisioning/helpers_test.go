@@ -29,15 +29,20 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-// runProvisioningTest creates a NodePool/NodeClass/Deployment, waits for a pod to run
-// on a newly provisioned node, and asserts the node carries the expected labels.
+func osSlug(imageFamily string) string {
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		return "ubuntu"
+	}
+	return "cos"
+}
+
 func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
-	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "provisioning")
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, osSlug(tc.ImageFamily), "provisioning")
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 
-	GinkgoWriter.Printf("[setup] arch=%s capacityType=%s nodePool=%s\n",
-		tc.Arch, tc.CapacityType, name)
+	GinkgoWriter.Printf("[setup] arch=%s capacityType=%s os=%s nodePool=%s\n",
+		tc.Arch, tc.CapacityType, tc.ImageFamily, name)
 
 	initialNodes := env.AllNodeNames(ctx)
 
@@ -51,10 +56,17 @@ func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
 		}
 	})
 
-	env.CreateNodeClass(ctx, name)
+	imageFamily := tc.ImageFamily
+	if imageFamily == "" {
+		imageFamily = gcpv1alpha1.ImageFamilyContainerOptimizedOS
+	}
+	env.CreateNodeClass(ctx, name, imageFamily)
+	env.WaitForNodeClassReady(ctx, name)
 	env.CreateNodePool(ctx, name, name, tc)
+	env.WaitForNodePoolReady(ctx, name)
 	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
+	env.WaitForNodeClaimLaunched(ctx, name)
 	pod := env.WaitForRunningPod(ctx, name)
 	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 
@@ -71,4 +83,6 @@ func runProvisioningTest(ctx context.Context, tc environment.TestCase) {
 	Expect(node.Labels[corev1.LabelArchStable]).To(Equal(tc.Arch))
 	Expect(tc.Families).To(ContainElement(node.Labels[gcpv1alpha1.LabelInstanceFamily]))
 	Expect(tc.InstanceTypes).To(ContainElement(node.Labels[corev1.LabelInstanceTypeStable]))
+
+	env.WaitForKubeProxyRunning(ctx, provisionedNodeName)
 }
