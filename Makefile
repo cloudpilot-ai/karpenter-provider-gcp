@@ -48,6 +48,9 @@ update: tidy download ## Update go files header, CRD and generated code
 verify-codegen: update ## Verify generated code is up to date
 	git diff --exit-code || (echo "Generated files are out of date — run 'make update' and commit the changes" && exit 1)
 
+chart-lint: ## Lint the Helm chart (validates values.schema.json and templates)
+	helm lint charts/karpenter/
+
 verify: ## Verify code. Includes linting, formatting, etc
 	golangci-lint run --new-from-rev=origin/main --timeout=20m
 	git diff --exit-code || (echo "golangci-lint reformatted files above — stage and commit them" && exit 1)

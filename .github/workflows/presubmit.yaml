@@ -35,3 +35,7 @@ jobs:
       - name: Presubmit check
         run: |
           make presubmit
+
+      - name: Lint Helm chart
+        run: |
+          make chart-lint
