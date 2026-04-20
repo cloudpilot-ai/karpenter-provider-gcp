@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "nameOverride": {
+      "type": "string",
+      "description": "Override the default chart name."
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "Override the full release name."
+    },
+    "logLevel": {
+      "type": "string",
+      "enum": ["debug", "info", "warn", "error"],
+      "description": "Global log level.",
+      "default": "info"
+    },
+    "logOutputPaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Log output paths.",
+      "default": ["stdout"]
+    },
+    "logErrorOutputPaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Log error output paths.",
+      "default": ["stderr"]
+    },
+    "additionalAnnotations": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Additional annotations added to all resources."
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "description": "Image pull secrets for the controller pod."
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Annotations added to the controller pod."
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Labels added to the controller pod."
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minAvailable": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string" }
+          ],
+          "description": "Minimum number of available pods (integer or percentage string).",
+          "default": 1
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Whether to create a ServiceAccount.",
+          "default": true
+        },
+        "automount": {
+          "type": "boolean",
+          "description": "Automatically mount the ServiceAccount token.",
+          "default": true
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Annotations added to the ServiceAccount (e.g. Workload Identity binding)."
+        },
+        "name": {
+          "type": "string",
+          "description": "ServiceAccount name. Generated from the release name if empty."
+        }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of controller replicas.",
+          "default": 2
+        },
+        "revisionHistoryLimit": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of old ReplicaSets to retain.",
+          "default": 10
+        },
+        "strategy": {
+          "type": "object",
+          "description": "Deployment update strategy."
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "description": "Controller image repository.",
+              "default": "public.ecr.aws/cloudpilotai/gcp/karpenter"
+            },
+            "tag": {
+              "type": "string",
+              "description": "Controller image tag. Defaults to the chart appVersion."
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": ["Always", "IfNotPresent", "Never"],
+              "description": "Image pull policy.",
+              "default": "IfNotPresent"
+            }
+          }
+        },
+        "priorityClassName": {
+          "type": "string",
+          "description": "PriorityClass for the controller pod.",
+          "default": "gmp-critical"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Termination grace period in seconds.",
+          "default": 30
+        },
+        "env": {
+          "type": "array",
+          "description": "Extra environment variables for the controller container.",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "value": { "type": "string" },
+              "valueFrom": { "type": "object" }
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Resource requests and limits for the controller container.",
+          "properties": {
+            "requests": {
+              "type": "object",
+              "properties": {
+                "cpu": { "type": "string" },
+                "memory": { "type": "string" }
+              }
+            },
+            "limits": {
+              "type": "object",
+              "properties": {
+                "cpu": { "type": "string" },
+                "memory": { "type": "string" }
+              }
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Metrics server port.",
+              "default": 8080
+            }
+          }
+        },
+        "healthProbe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "Health probe port.",
+              "default": 8081
+            }
+          }
+        },
+        "featureGates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "spotToSpotConsolidation": {
+              "type": "boolean",
+              "description": "Enable spot-to-spot consolidation.",
+              "default": true
+            },
+            "nodeOverlay": {
+              "type": "boolean",
+              "description": "Enable NodeOverlay (alpha). Allows node overlay to influence scheduling decisions.",
+              "default": false
+            }
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Affinity rules for the controller pod."
+        },
+        "tolerations": {
+          "type": "array",
+          "description": "Tolerations for the controller pod.",
+          "items": { "type": "object" }
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["projectID", "clusterName", "clusterLocation"],
+          "properties": {
+            "projectID": {
+              "type": "string",
+              "description": "GCP project ID."
+            },
+            "clusterLocation": {
+              "type": "string",
+              "description": "GCP region for instance type discovery (e.g. us-central1)."
+            },
+            "nodeLocation": {
+              "type": "string",
+              "description": "Exact GCP cluster location for GKE API calls (e.g. us-central1-a). Defaults to clusterLocation."
+            },
+            "clusterName": {
+              "type": "string",
+              "description": "GKE cluster name."
+            },
+            "vmMemoryOverheadPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Fraction of VM memory reserved as overhead (e.g. 0.065 = 6.5%).",
+              "default": 0.065
+            },
+            "batchMaxDuration": {
+              "type": "string",
+              "description": "Maximum duration of a provisioning batch window (e.g. 10s).",
+              "default": "10s"
+            },
+            "batchIdleDuration": {
+              "type": "string",
+              "description": "Idle timeout that ends a batch window when no new pods arrive (e.g. 1s).",
+              "default": "1s"
+            }
+          }
+        }
+      }
+    },
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Mount a GCP credentials secret. Set to false when using Workload Identity.",
+          "default": true
+        },
+        "secretName": {
+          "type": "string",
+          "description": "Name of the existing secret containing the GCP service account key. Defaults to <release-name>-gcp-credentials."
+        },
+        "secretKey": {
+          "type": "string",
+          "description": "Key within the secret that holds the service account JSON.",
+          "default": "key.json"
+        }
+      }
+    }
+  }
+}
