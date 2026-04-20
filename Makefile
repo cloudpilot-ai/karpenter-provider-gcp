@@ -44,6 +44,7 @@ run: ## Run Karpenter controller binary against your local cluster
 update: tidy download ## Update go files header, CRD and generated code
 	hack/boilerplate.sh
 	hack/update-generated.sh
+	hack/docs-generate.sh
 
 verify-codegen: update ## Verify generated code is up to date
 	git diff --exit-code || (echo "Generated files are out of date — run 'make update' and commit the changes" && exit 1)
@@ -51,6 +52,14 @@ verify-codegen: update ## Verify generated code is up to date
 verify: ## Verify code. Includes linting, formatting, etc
 	golangci-lint run --new-from-rev=origin/main --timeout=20m
 	git diff --exit-code || (echo "golangci-lint reformatted files above — stage and commit them" && exit 1)
+
+DOCS_FILES = $(shell find docs -name "*.md" ! -path "docs/reference/*")
+
+docs-lint: ## Check docs markdown formatting (excludes generated reference docs)
+	mdox fmt --check $(DOCS_FILES)
+
+docs-fix: ## Auto-fix docs markdown formatting
+	mdox fmt $(DOCS_FILES)
 
 image: ## Build the Karpenter controller images using ko build
 	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KOCACHE=$(KOCACHE) KO_DOCKER_REPO="$(KO_DOCKER_REPO)" ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller))

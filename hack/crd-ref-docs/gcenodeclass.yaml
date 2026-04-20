@@ -1,0 +1,4 @@
+processor:
+  ignoreTypes:
+    - "^GCENodeClassList$"
+    - "^Alias$"
