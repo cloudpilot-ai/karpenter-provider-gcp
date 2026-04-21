@@ -87,17 +87,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch existing Pages index
+        env:
+          PAGES_URL: "https://cloudpilot-ai.github.io/karpenter-provider-gcp"
+        run: |
+          if ! curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml; then
+            echo "No existing index on Pages — first deployment."
+          fi
+
+      - name: Package chart
+        run: helm package charts/karpenter --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
+
+      - name: Update Helm repo index
+        run: |
+          if [ -f /tmp/merge-index.yaml ]; then
+            helm repo index charts/ --merge /tmp/merge-index.yaml
+          else
+            helm repo index charts/
+          fi
+
       - name: Restore previously published chart versions
         env:
           PAGES_URL: "https://cloudpilot-ai.github.io/karpenter-provider-gcp"
         run: |
-          # Download existing index; on first-ever deployment this 404s and we skip restore
-          if ! curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml; then
-            echo "No existing index on Pages — first deployment, skipping restore."
+          if [ ! -f /tmp/merge-index.yaml ]; then
             exit 0
           fi
 
-          # Parse expected versions directly from the downloaded index (no helm search needed)
           VERSIONS=$(grep '^    version:' /tmp/merge-index.yaml | awk '{print $2}')
           EXPECTED=$(echo "${VERSIONS}" | grep -c .)
 
@@ -114,17 +130,6 @@ jobs:
           if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
             echo "ERROR: Expected ${EXPECTED} chart versions but only have ${ACTUAL}. Aborting."
             exit 1
-          fi
-
-      - name: Package chart
-        run: helm package charts/karpenter --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
-
-      - name: Update Helm repo index
-        run: |
-          if [ -f /tmp/merge-index.yaml ]; then
-            helm repo index charts/ --merge /tmp/merge-index.yaml
-          else
-            helm repo index charts/
           fi
 
       - name: Setup Pages
