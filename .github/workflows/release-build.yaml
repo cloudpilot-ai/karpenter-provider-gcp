@@ -20,13 +20,15 @@ jobs:
         id: set-tag
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+            TAG="${{ github.event.inputs.tag }}"
           elif [ "${{ github.event_name }}" == "push" ]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+            TAG="${GITHUB_REF#refs/tags/}"
           else
             echo "No valid trigger for building an image."
             exit 1
           fi
+          echo "tag=${TAG}" >> $GITHUB_ENV
+          echo "tag_semver=${TAG#v}" >> $GITHUB_ENV
         shell: bash
 
       - uses: actions/checkout@v4
@@ -68,6 +70,20 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Set tag from inputs or Git tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            echo "No valid trigger for building a chart."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> $GITHUB_ENV
+          echo "tag_semver=${TAG#v}" >> $GITHUB_ENV
+        shell: bash
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -101,7 +117,7 @@ jobs:
           fi
 
       - name: Package chart
-        run: helm package charts/karpenter -d charts/
+        run: helm package charts/karpenter --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
 
       - name: Update Helm repo index
         run: |
