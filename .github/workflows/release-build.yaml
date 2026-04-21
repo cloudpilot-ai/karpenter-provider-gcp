@@ -88,12 +88,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Fetch existing Pages index
-        env:
-          PAGES_URL: "https://cloudpilot-ai.github.io/karpenter-provider-gcp"
         run: |
-          if ! curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml; then
-            echo "No existing index on Pages — first deployment."
-          fi
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml || true
 
       - name: Package chart
         run: helm package charts/karpenter --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
@@ -107,15 +104,10 @@ jobs:
           fi
 
       - name: Restore previously published chart versions
-        env:
-          PAGES_URL: "https://cloudpilot-ai.github.io/karpenter-provider-gcp"
         run: |
-          if [ ! -f /tmp/merge-index.yaml ]; then
-            exit 0
-          fi
-
-          VERSIONS=$(grep '^    version:' /tmp/merge-index.yaml | awk '{print $2}')
-          EXPECTED=$(echo "${VERSIONS}" | grep -c .)
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          VERSIONS=$(grep '^    version:' /tmp/merge-index.yaml 2>/dev/null | awk '{print $2}')
+          [ -z "${VERSIONS}" ] && exit 0
 
           helm repo add karpenter-gcp "${PAGES_URL}" --force-update
           echo "${VERSIONS}" | while read VERSION; do
@@ -126,6 +118,7 @@ jobs:
           done
 
           # Fail rather than deploy an incomplete repo
+          EXPECTED=$(echo "${VERSIONS}" | grep -c .)
           ACTUAL=$(ls charts/karpenter-*.tgz 2>/dev/null | wc -l | tr -d ' ')
           if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
             echo "ERROR: Expected ${EXPECTED} chart versions but only have ${ACTUAL}. Aborting."
