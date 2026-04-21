@@ -1,0 +1,36 @@
+name: Create release tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag (e.g., v0.3.0). Chart.yaml must already have this version on main.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify Chart.yaml version matches
+        run: |
+          CHART_VERSION=$(grep '^version:' charts/karpenter/Chart.yaml | awk '{print $2}')
+          if [ "${CHART_VERSION}" != "${{ github.event.inputs.version }}" ]; then
+            echo "ERROR: Chart.yaml version (${CHART_VERSION}) does not match input (${{ github.event.inputs.version }})"
+            echo "Run 'make release VERSION=${{ github.event.inputs.version }}' locally, open a PR, and merge it first."
+            exit 1
+          fi
+
+      - name: Create and push release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ github.event.inputs.version }}" -m "Release ${{ github.event.inputs.version }}"
+          git push origin "${{ github.event.inputs.version }}"
