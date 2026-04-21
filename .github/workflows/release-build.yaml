@@ -57,3 +57,61 @@ jobs:
         run: |
           export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
           ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags ${{ env.tag }}
+
+  package-chart:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore previously published chart versions
+        env:
+          PAGES_URL: "https://cloudpilot-ai.github.io/karpenter-provider-gcp"
+        run: |
+          # Use index.yaml from git if present (has correct timestamps), otherwise fall back to Pages
+          if [ -f "charts/index.yaml" ]; then
+            cp charts/index.yaml /tmp/merge-index.yaml
+          else
+            curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml 2>/dev/null || true
+          fi
+
+          # Pull any chart .tgz versions from Pages not present in the local checkout
+          helm repo add karpenter-gcp "${PAGES_URL}" 2>/dev/null || true
+          helm search repo karpenter-gcp --versions --output json | \
+            jq -r '.[].version' | \
+            while read VERSION; do
+              if [ ! -f "charts/karpenter-${VERSION}.tgz" ]; then
+                echo "Pulling karpenter ${VERSION}..."
+                helm pull karpenter-gcp/karpenter --version "${VERSION}" --destination charts/
+              fi
+            done
+
+      - name: Package chart
+        run: helm package charts/karpenter -d charts/
+
+      - name: Update Helm repo index
+        run: |
+          if [ -f /tmp/merge-index.yaml ]; then
+            helm repo index charts/ --merge /tmp/merge-index.yaml
+          else
+            helm repo index charts/
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: charts/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
