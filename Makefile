@@ -27,10 +27,6 @@ help: ## Display help
 
 presubmit: verify-codegen verify ut-test ## Run all steps in the developer loop
 
-release: ## Bump chart version locally. Usage: make release VERSION=v0.3.0
-	@test -n "$(VERSION)" || (echo "ERROR: VERSION is required. Usage: make release VERSION=v0.3.0" >&2 && exit 1)
-	hack/release.sh $(VERSION)
-
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
 

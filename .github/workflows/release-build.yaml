@@ -75,23 +75,30 @@ jobs:
         env:
           PAGES_URL: "https://cloudpilot-ai.github.io/karpenter-provider-gcp"
         run: |
-          # Use index.yaml from git if present (has correct timestamps), otherwise fall back to Pages
-          if [ -f "charts/index.yaml" ]; then
-            cp charts/index.yaml /tmp/merge-index.yaml
-          else
-            curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml 2>/dev/null || true
+          # Download existing index; on first-ever deployment this 404s and we skip restore
+          if ! curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml; then
+            echo "No existing index on Pages — first deployment, skipping restore."
+            exit 0
           fi
 
-          # Pull any chart .tgz versions from Pages not present in the local checkout
-          helm repo add karpenter-gcp "${PAGES_URL}" 2>/dev/null || true
-          helm search repo karpenter-gcp --versions --output json | \
-            jq -r '.[].version' | \
-            while read VERSION; do
-              if [ ! -f "charts/karpenter-${VERSION}.tgz" ]; then
-                echo "Pulling karpenter ${VERSION}..."
-                helm pull karpenter-gcp/karpenter --version "${VERSION}" --destination charts/
-              fi
-            done
+          # Parse expected versions directly from the downloaded index (no helm search needed)
+          VERSIONS=$(grep '^    version:' /tmp/merge-index.yaml | awk '{print $2}')
+          EXPECTED=$(echo "${VERSIONS}" | grep -c .)
+
+          helm repo add karpenter-gcp "${PAGES_URL}" --force-update
+          echo "${VERSIONS}" | while read VERSION; do
+            if [ ! -f "charts/karpenter-${VERSION}.tgz" ]; then
+              echo "Pulling karpenter ${VERSION}..."
+              helm pull karpenter-gcp/karpenter --version "${VERSION}" --destination charts/
+            fi
+          done
+
+          # Fail rather than deploy an incomplete repo
+          ACTUAL=$(ls charts/karpenter-*.tgz 2>/dev/null | wc -l | tr -d ' ')
+          if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
+            echo "ERROR: Expected ${EXPECTED} chart versions but only have ${ACTUAL}. Aborting."
+            exit 1
+          fi
 
       - name: Package chart
         run: helm package charts/karpenter -d charts/
