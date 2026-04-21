@@ -1,6 +1,6 @@
 apiVersion: v2
 name: karpenter
-description: A Helm chart for Kubernetes
+description: Karpenter GCP Cloud Provider — cost-efficient autoscaling for GKE clusters
 
 # A chart can be either an 'application' or a 'library' chart.
 #
