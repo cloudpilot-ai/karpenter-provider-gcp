@@ -90,7 +90,15 @@ jobs:
       - name: Fetch existing Pages index
         run: |
           PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          curl -fsSL "${PAGES_URL}/index.yaml" -o /tmp/merge-index.yaml || true
+          # Fail on any error except 404 (first-ever deployment has no index yet)
+          HTTP_CODE=$(curl -sSL -o /tmp/merge-index.yaml -w "%{http_code}" "${PAGES_URL}/index.yaml")
+          if [ "${HTTP_CODE}" = "404" ]; then
+            rm -f /tmp/merge-index.yaml
+            echo "No existing index (first deployment)."
+          elif [ "${HTTP_CODE}" != "200" ]; then
+            echo "ERROR: Failed to fetch Pages index — HTTP ${HTTP_CODE}. Aborting to avoid losing old chart versions."
+            exit 1
+          fi
 
       - name: Package chart
         run: helm package charts/karpenter --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
