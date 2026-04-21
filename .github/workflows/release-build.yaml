@@ -10,7 +10,7 @@ on:
   # Trigger on push for new tags
   push:
     tags:
-      - '*'
+      - 'v*'
 
 jobs:
   image-publish:
