@@ -1,32 +1,17 @@
 name: Release image build
 
 on:
-  # Trigger on workflow_dispatch (manual trigger)
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to build (e.g., v1.0.0)'
-        required: false
-  # Trigger on push for new tags
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]*'
 
 jobs:
   image-publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Set tag from inputs or Git tag
-        id: set-tag
+      - name: Set tag
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            echo "No valid trigger for building an image."
-            exit 1
-          fi
+          TAG="${GITHUB_REF#refs/tags/}"
           echo "tag=${TAG}" >> $GITHUB_ENV
           echo "tag_semver=${TAG#v}" >> $GITHUB_ENV
         shell: bash
@@ -70,16 +55,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Set tag from inputs or Git tag
+      - name: Set tag
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            echo "No valid trigger for building a chart."
-            exit 1
-          fi
+          TAG="${GITHUB_REF#refs/tags/}"
           echo "tag=${TAG}" >> $GITHUB_ENV
           echo "tag_semver=${TAG#v}" >> $GITHUB_ENV
         shell: bash
@@ -105,6 +83,9 @@ jobs:
 
       - name: Update Helm repo index
         run: |
+          # Old .tgz files are intentionally absent here: --merge only preserves 'created'
+          # timestamps for versions NOT found on disk. Running index before restoring old
+          # archives ensures historical timestamps are copied from the Pages index as-is.
           if [ -f /tmp/merge-index.yaml ]; then
             helm repo index charts/ --merge /tmp/merge-index.yaml
           else
