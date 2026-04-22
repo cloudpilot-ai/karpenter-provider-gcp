@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
+	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
@@ -64,7 +65,7 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 		}
 	})
 
-	env.CreateNodeClass(ctx, name)
+	env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
 	env.CreateNodePool(ctx, name, name, tc)
 	env.CreateDeployment(ctx, name, name, name, tc.Arch)
 
