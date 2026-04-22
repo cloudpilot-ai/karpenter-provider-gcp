@@ -126,6 +126,20 @@ gcloud compute machine-types list --zones=ZONE --filter="name:t2a OR name:c4a"
 
 ---
 
+## Orphaned GCE instances
+
+Karpenter runs a garbage-collection controller that periodically finds GCE instances tagged as Karpenter-managed but not tracked by any NodeClaim, and deletes them. This handles the case where a node was partially provisioned before a crash or where a NodeClaim was deleted without the underlying instance being cleaned up.
+
+If you see unexpected GCE instances being terminated, check the Karpenter controller logs for GC-related messages:
+
+```sh
+kubectl logs -n karpenter-system deployment/karpenter | grep -i "garbage\|orphan"
+```
+
+GC only deletes instances that carry the Karpenter cluster tag and have no corresponding NodeClaim. Instances created outside Karpenter are not affected.
+
+---
+
 ## Insufficient capacity errors
 
 When Karpenter cannot provision an instance due to insufficient capacity (spot or on-demand), it logs the error and marks the zone/instance-type combination as unavailable for a short backoff period before retrying.
