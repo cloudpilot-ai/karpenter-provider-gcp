@@ -33,4 +33,4 @@ When set, Karpenter uses this pool exclusively and returns an error if it is not
 
 ## Legacy pools
 
-Older Karpenter versions created pools named `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64`. These are no longer created. See [MIGRATION.md](../../MIGRATION.md) for cleanup steps.
+Older Karpenter versions created pools named `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64`. These are no longer created. See [MIGRATION.md](../MIGRATION.md) for cleanup steps.
