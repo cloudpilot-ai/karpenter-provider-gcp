@@ -1,0 +1,8 @@
+processor:
+  ignoreTypes:
+    - "^NodeClaim$"
+    - "^NodeClaimList$"
+    - "^NodeClaimSpec$"
+    - "^NodeClaimStatus$"
+    - "^NodePoolList$"
+    - "^ResourceRequirements$"

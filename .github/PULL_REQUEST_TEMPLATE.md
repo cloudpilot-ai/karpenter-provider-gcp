@@ -30,6 +30,10 @@ _If PR is about `failing-tests or flakes`, please post the related issues/tests 
 -->
 Fixes #
 
+#### Docs and examples
+
+- [ ] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+
 #### Special notes for your reviewer:
 
 #### Does this PR introduce a user-facing change?

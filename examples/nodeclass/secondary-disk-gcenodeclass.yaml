@@ -12,5 +12,5 @@ spec:
       sizeGiB: 60
       boot: true
     - category: pd-balanced
-      secondaryImage: global/images/my-secondary-disk
+      secondaryBootImage: global/images/my-secondary-disk
       secondaryBootMode: CONTAINER_IMAGE_CACHE

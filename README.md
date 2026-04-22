@@ -11,11 +11,11 @@
 [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/LICENSE)
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
 
-> [!NOTE]  
-> A live version is now available. Please visit [the charts directory](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/charts/README.md) for more information.
-> 
+> [!NOTE]
+> A live version is now available.
+>
 > **Feedback welcome!** Join our [Slack](https://join.slack.com/t/cloudpilotaicommunity/shared_invite/zt-37rwpf8k7-Rx4BjrhuWtk9U0MXBKYL7A) or [Discord](https://discord.gg/WxFWc87QWr) to share your ideas, ask questions, and discuss with the community.
-> 
+>
 > Need enterprise support? [Get in touch](https://www.cloudpilot.ai/en/contact/)
 
 ## Introduction
@@ -27,6 +27,10 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 * **Evaluating** scheduling constraints (resource requests, nodeselectors, affinities, tolerations, and topology spread constraints) requested by the pods
 * **Provisioning** nodes that meet the requirements of the pods
 * **Removing** the nodes when the nodes are no longer needed
+
+## Documentation
+
+See [`docs/`](docs/) for installation, configuration, networking, troubleshooting, and contributing guides.
 
 ## Release notes / upgrades
 
