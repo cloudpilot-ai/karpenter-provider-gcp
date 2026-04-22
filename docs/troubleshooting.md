@@ -67,14 +67,6 @@ This is a known limitation tracked in [GitHub issue #245](https://github.com/clo
 
 ---
 
-## Private node clusters
-
-Karpenter detects cluster-level private nodes automatically by reading `DefaultEnablePrivateNodes` and `PrivateClusterConfig.EnablePrivateNodes` from the GKE API. When either flag is set, the fallback pool (`karpenter-default`) is created with `EnablePrivateNodes: true`. No extra configuration is needed.
-
-For selectively provisioning nodes without a public IP on a public cluster, see [Networking examples — Private nodes](examples/networking.md#private-nodes-no-external-ip).
-
----
-
 ## CSR (Certificate Signing Request) not approved
 
 Karpenter runs a CSR approver controller that automatically approves node bootstrap CSRs. If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
@@ -108,18 +100,6 @@ disks:
     sizeGiB: 60
     boot: true
     kmsKeyName: projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key
-```
-
----
-
-## arm64 provisioning not available
-
-arm64 node provisioning is unavailable if no arm64 machine types exist in the cluster's region. Check Karpenter startup logs for instance type discovery errors.
-
-If arm64 support is needed, verify that arm64 machine types (e.g. `c4a`, `t2a`) are available in your cluster's region:
-
-```sh
-gcloud compute machine-types list --zones=ZONE --filter="name:t2a OR name:c4a"
 ```
 
 ---
