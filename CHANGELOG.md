@@ -10,8 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Karpenter no longer creates `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`,
   or `karpenter-ubuntu-arm64` GKE node pools on startup. Bootstrap metadata is now read from
-  an existing RUNNING cluster pool selected by the new pool discovery algorithm. See the
-  **Migration guide** below for cleanup steps.
+  an existing RUNNING cluster pool selected by the new pool discovery algorithm. See
+  [MIGRATION.md](MIGRATION.md) for cleanup steps.
 
 ### New features
 
@@ -39,32 +39,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   controller. The label will be enforced strictly in a future release once all clusters have
   migrated.
 
-### Migration guide
-
-#### Template node pool cleanup
-
-Karpenter no longer creates or relies on `karpenter-default`, `karpenter-ubuntu`,
-`karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. After upgrading:
-
-1. Karpenter logs any detected legacy pools at INFO level on startup. Confirm provisioning
-   works correctly with the new version before deleting them.
-2. Delete the legacy pools manually at your own pace:
-   ```bash
-   for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpenter-default; do
-     gcloud container node-pools delete "$pool" --cluster=<CLUSTER> --region=<REGION> --quiet
-   done
-   ```
-3. Rolling back to the previous version will re-create the pools automatically.
-
-If your cluster has no pre-existing RUNNING pools at upgrade time, Karpenter will create a
-new minimal `karpenter-default` pool as a last resort. This pool is compatible with common
-org policies (`compute.requireShieldedVm`, etc.) by default.
-
 No action is required to upgrade. Existing nodes stay fully managed until they are
 naturally replaced by the new version, at which point they receive the location label and
 become eligible for automatic GC. See [MIGRATION.md](MIGRATION.md) for optional steps to
-rotate nodes early and clean up any orphaned instances that may have accumulated before
-this release.
+rotate nodes early, clean up legacy template pools, and delete any orphaned instances that
+may have accumulated before this release.
 
 ## v0.2.0
 

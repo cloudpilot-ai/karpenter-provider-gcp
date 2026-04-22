@@ -1,5 +1,26 @@
 # Migration Guide
 
+## Upgrading to vNext — Template pool elimination
+
+Karpenter no longer creates or relies on `karpenter-default`, `karpenter-ubuntu`,
+`karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. The upgrade itself requires
+no action — Karpenter discovers an existing RUNNING cluster pool automatically.
+
+After confirming provisioning works correctly with the new version, delete the legacy pools
+at your own pace:
+
+```bash
+for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpenter-default; do
+  gcloud container node-pools delete "$pool" --cluster=<CLUSTER> --region=<REGION> --quiet
+done
+```
+
+Karpenter logs any detected legacy pools at INFO level on startup as a reminder.
+
+Rolling back to the previous version will re-create the pools automatically.
+
+---
+
 ## Upgrading to vNext — GC controller and cluster identity labels
 
 ### Background

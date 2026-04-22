@@ -118,7 +118,7 @@
         },
         "image": {
           "type": "object",
-          "additionalProperties": true,
+          "additionalProperties": false,
           "properties": {
             "repository": {
               "type": "string",
@@ -244,7 +244,7 @@
         },
         "settings": {
           "type": "object",
-          "additionalProperties": true,
+          "additionalProperties": false,
           "required": ["projectID", "clusterName", "clusterLocation"],
           "properties": {
             "projectID": {
