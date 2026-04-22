@@ -77,7 +77,9 @@ helm install karpenter karpenter-gcp/karpenter \
 | controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey | string | `"kubernetes.io/hostname"` |  |
 | controller.env | list | `[]` |  |
 | controller.featureGates.nodeOverlay | bool | `false` | nodeOverlay is ALPHA and is disabled by default. Setting this will allow the use of node overlay to impact scheduling decisions |
+| controller.featureGates.nodeRepair | bool | `false` | nodeRepair is ALPHA and is disabled by default. When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions. |
 | controller.featureGates.spotToSpotConsolidation | bool | `true` |  |
+| controller.featureGates.staticCapacity | bool | `false` | staticCapacity is ALPHA and is disabled by default. When enabled, a NodePool with spec.replicas set maintains a fixed number of nodes regardless of pod demand (static node pool). consolidationPolicy and consolidateAfter are ignored on static NodePools. |
 | controller.healthProbe.port | int | `8081` |  |
 | controller.image.pullPolicy | string | `"IfNotPresent"` |  |
 | controller.image.repository | string | `"public.ecr.aws/cloudpilotai/gcp/karpenter"` |  |
