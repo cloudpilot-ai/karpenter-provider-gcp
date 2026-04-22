@@ -69,81 +69,74 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 // ubuntu-gke-2404 images use explicit arch in the name (e.g. ubuntu-gke-2404-1-35-amd64-v20260416),
 // unlike the older ubuntu-gke-2204 series which had no arch suffix on amd64 images.
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
-	filter, err := u.buildImageFilter(ctx)
-	if err != nil {
-		return "", err
-	}
+	filter := u.buildImageFilter(ctx)
 
 	// GCP does not support Filter + OrderBy together, and there can be thousands of
 	// ubuntu-gke-2404 images (most deprecated). We page through all of them,
 	// collect non-deprecated amd64 candidates, then sort in code.
-	// Note: the GCP Compute API only supports "=" (with glob wildcards) for string
-	// field filters; the ":" (has) operator is reserved for multi-valued fields.
 	var candidates []*compute.Image
-	err = u.computeService.Images.List(ubuntuGKEImageProject).
+	err := u.computeService.Images.List(ubuntuGKEImageProject).
 		Filter(filter).
 		Pages(ctx, func(page *compute.ImageList) error {
 			for _, img := range page.Items {
-				// Skip images that are deprecated, obsolete, or deleted.
-				// ACTIVE state (or no deprecated object) means the image is usable.
-				if img.Deprecated != nil {
-					state := img.Deprecated.State
-					if state == "DEPRECATED" || state == "OBSOLETE" || state == "DELETED" {
-						continue
-					}
+				if isUsableUbuntuImage(img) {
+					candidates = append(candidates, img)
 				}
-				// 2404 images have explicit "-amd64-" in name; skip non-amd64 variants.
-				if !strings.Contains(img.Name, "-amd64-") {
-					continue
-				}
-				// Skip specialised variants that are not general-purpose.
-				if strings.Contains(img.Name, "cgroupsv1") ||
-					strings.Contains(img.Name, "linux64k") ||
-					strings.Contains(img.Name, "-tpu-") ||
-					strings.Contains(img.Name, "-test-") {
-					continue
-				}
-
-				candidates = append(candidates, img)
 			}
 			return nil
 		})
 	if err != nil {
 		return "", fmt.Errorf("listing Ubuntu GKE images in %s: %w", ubuntuGKEImageProject, err)
 	}
-
 	if len(candidates) == 0 {
 		return "", fmt.Errorf("no non-deprecated ubuntu-gke-2404 amd64 image found in %s (filter: %s)", ubuntuGKEImageProject, filter)
 	}
 
-	// Sort descending by CreationTimestamp so the newest image is first.
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].CreationTimestamp > candidates[j].CreationTimestamp
 	})
-
 	img := candidates[0]
 	return fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, img.Name), nil
 }
 
+// isUsableUbuntuImage reports whether img is a non-deprecated general-purpose amd64
+// ubuntu-gke-2404 image suitable for use as a GKE node image.
+func isUsableUbuntuImage(img *compute.Image) bool {
+	if img.Deprecated != nil {
+		switch img.Deprecated.State {
+		case "DEPRECATED", "OBSOLETE", "DELETED":
+			return false
+		}
+	}
+	if !strings.Contains(img.Name, "-amd64-") {
+		return false
+	}
+	for _, skip := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test-"} {
+		if strings.Contains(img.Name, skip) {
+			return false
+		}
+	}
+	return true
+}
+
 // buildImageFilter returns a GCP Images.List filter string scoped to the cluster's
 // K8s minor version (e.g. "name=ubuntu-gke-2404-1-35*").
-// If the version provider is unavailable it falls back to the broad "ubuntu-gke-2404*" filter.
-func (u *Ubuntu) buildImageFilter(ctx context.Context) (string, error) {
+// Falls back to "ubuntu-gke-2404*" if the version provider is unavailable.
+func (u *Ubuntu) buildImageFilter(ctx context.Context) string {
 	if u.versionProvider == nil {
-		return `name=ubuntu-gke-2404*`, nil
+		return `name=ubuntu-gke-2404*`
 	}
 	k8sVer, err := u.versionProvider.Get(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to get K8s version for Ubuntu image filter, using broad filter")
-		return `name=ubuntu-gke-2404*`, nil
+		return `name=ubuntu-gke-2404*`
 	}
 	parsed, err := k8sversion.ParseGeneric(k8sVer)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to parse K8s version for Ubuntu image filter, using broad filter", "version", k8sVer)
-		return `name=ubuntu-gke-2404*`, nil
+		return `name=ubuntu-gke-2404*`
 	}
-	// Image names encode the minor version with dashes: ubuntu-gke-2404-1-35-amd64-vYYYYMMDD
-	return fmt.Sprintf(`name=ubuntu-gke-2404-%d-%d*`, parsed.Major(), parsed.Minor()), nil
+	return fmt.Sprintf(`name=ubuntu-gke-2404-%d-%d*`, parsed.Major(), parsed.Minor())
 }
 
 func (u *Ubuntu) resolveImages(sourceImage string) Images {

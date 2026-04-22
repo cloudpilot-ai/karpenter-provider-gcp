@@ -290,7 +290,7 @@ func TestEnsureKarpenterNodePoolTemplate_AlwaysSetFields(t *testing.T) {
 	defer srv.Close()
 
 	p := provider(t, srv, "")
-	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "sa@proj.iam.gserviceaccount.com")
 	require.NoError(t, err)
 	require.NotNil(t, captured)
 
@@ -314,7 +314,7 @@ func TestEnsureKarpenterNodePoolTemplate_PrivateNodes_NetworkConfig(t *testing.T
 	defer srv.Close()
 
 	p := provider(t, srv, "")
-	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "sa@proj.iam.gserviceaccount.com")
 	require.NoError(t, err)
 	require.NotNil(t, captured.NodePool.NetworkConfig)
 	require.True(t, captured.NodePool.NetworkConfig.EnablePrivateNodes)
@@ -329,7 +329,7 @@ func TestEnsureKarpenterNodePoolTemplate_PrivateNodes_LegacyField(t *testing.T) 
 	defer srv.Close()
 
 	p := provider(t, srv, "")
-	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "sa@proj.iam.gserviceaccount.com")
 	require.NoError(t, err)
 	require.NotNil(t, captured.NodePool.NetworkConfig)
 	require.True(t, captured.NodePool.NetworkConfig.EnablePrivateNodes)
@@ -344,7 +344,7 @@ func TestEnsureKarpenterNodePoolTemplate_WorkloadIdentity(t *testing.T) {
 	defer srv.Close()
 
 	p := provider(t, srv, "")
-	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "sa@proj.iam.gserviceaccount.com")
 	require.NoError(t, err)
 	require.NotNil(t, captured.NodePool.Config.WorkloadMetadataConfig)
 	require.Equal(t, "GKE_METADATA", captured.NodePool.Config.WorkloadMetadataConfig.Mode)
@@ -357,7 +357,7 @@ func TestEnsureKarpenterNodePoolTemplate_ClusterFetchFails_ProceedsWithDefaults(
 	defer srv.Close()
 
 	p := provider(t, srv, "")
-	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "sa@proj.iam.gserviceaccount.com")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "sa@proj.iam.gserviceaccount.com")
 	require.NoError(t, err, "cluster fetch failure should not abort fallback creation")
 	require.NotNil(t, captured)
 	// Unconditional fields must still be set.
@@ -374,7 +374,7 @@ func TestEnsureKarpenterNodePoolTemplate_CreateError_IncludesSAName(t *testing.T
 	defer srv.Close()
 
 	p := provider(t, srv, "")
-	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "COS_CONTAINERD", "karpenter-default", "bad-sa@developer.gserviceaccount.com")
+	err := p.ensureKarpenterNodePoolTemplate(context.Background(), "bad-sa@developer.gserviceaccount.com")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bad-sa@developer.gserviceaccount.com", "error should name the service account")
 }

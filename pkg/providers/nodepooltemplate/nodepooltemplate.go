@@ -161,10 +161,7 @@ func (p *DefaultProvider) Create(ctx context.Context) error {
 	if err != nil {
 		logger.Error(err, "no RUNNING pool available; creating last-resort fallback pool",
 			"fallback", KarpenterDefaultNodePoolTemplate)
-		if createErr := p.ensureKarpenterNodePoolTemplate(ctx,
-			KarpenterDefaultNodePoolTemplateImageType,
-			KarpenterDefaultNodePoolTemplate,
-			p.defaultServiceAccount); createErr != nil {
+		if createErr := p.ensureKarpenterNodePoolTemplate(ctx, p.defaultServiceAccount); createErr != nil {
 			return fmt.Errorf("creating fallback pool: %w", createErr)
 		}
 		// Return original error so the controller requeues; the pool may not be RUNNING
@@ -314,8 +311,9 @@ func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]
 // gcp.restrictNonCmekServices cannot be auto-satisfied (requires a pre-existing customer-managed
 // KMS key). Fallback creation will fail on such clusters; the operator must pre-create a RUNNING
 // pool and set DEFAULT_NODEPOOL_TEMPLATE_NAME.
-func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, imageType, nodePoolName, serviceAccount string) error {
+func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, serviceAccount string) error {
 	logger := log.FromContext(ctx)
+	nodePoolName := KarpenterDefaultNodePoolTemplate
 
 	if p.ClusterInfo.Name == "" {
 		return fmt.Errorf("clusterName is required but was empty")
@@ -348,7 +346,7 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 		logger.Error(clusterErr, "failed to fetch cluster config; fallback pool will use minimal defaults")
 	}
 
-	nodePool := buildFallbackNodePool(cluster, nodePoolName, imageType, serviceAccount)
+	nodePool := buildFallbackNodePool(cluster, nodePoolName, serviceAccount)
 
 	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
 		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
@@ -379,9 +377,9 @@ func (p *DefaultProvider) fetchClusterConfig(ctx context.Context) (*container.Cl
 
 // buildFallbackNodePool constructs the NodePool definition for the last-resort fallback pool,
 // applying cluster-aware policy settings when cluster config is available.
-func buildFallbackNodePool(cluster *container.Cluster, poolName, imageType, serviceAccount string) *container.NodePool {
+func buildFallbackNodePool(cluster *container.Cluster, poolName, serviceAccount string) *container.NodePool {
 	nodeConfig := &container.NodeConfig{
-		ImageType:      imageType,
+		ImageType:      KarpenterDefaultNodePoolTemplateImageType,
 		ServiceAccount: serviceAccount,
 		ShieldedInstanceConfig: &container.ShieldedInstanceConfig{
 			EnableSecureBoot:          true,
