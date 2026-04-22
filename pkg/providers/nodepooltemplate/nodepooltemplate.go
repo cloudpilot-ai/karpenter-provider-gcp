@@ -35,10 +35,11 @@ import (
 
 // Provider is the interface for managing the bootstrap source pool and its instance template.
 type Provider interface {
-	// Create selects the bootstrap source pool (or creates a last-resort fallback) and
-	// caches the selected pool name. Called by the nodepooltemplate controller on a
-	// 12-minute reconciliation cycle.
-	Create(ctx context.Context) error
+	// Sync discovers the eligible bootstrap source pool and caches its name.
+	// Returns an error if no eligible pool is found; the caller decides when to create a fallback.
+	Sync(ctx context.Context) error
+	// EnsureFallbackPool creates the karpenter-fallback pool if it does not already exist.
+	EnsureFallbackPool(ctx context.Context) error
 	// GetInstanceTemplates returns a single-entry map keyed by the selected source pool
 	// name. Returns an error if no source pool has been discovered yet.
 	GetInstanceTemplates(ctx context.Context) (map[string]*compute.InstanceTemplate, error)
@@ -134,24 +135,12 @@ func resolveZones(ctx context.Context, computeService *compute.Service, projectI
 	return zones, nil
 }
 
-// Create discovers the bootstrap source pool and caches its name. If no RUNNING pool
-// is available, it creates a minimal last-resort fallback pool (karpenter-fallback) and
-// returns an error so the controller requeues for a faster retry.
-func (p *DefaultProvider) Create(ctx context.Context) error {
-	logger := log.FromContext(ctx)
-
+// Sync discovers the eligible bootstrap source pool and caches its name.
+// Returns an error if no eligible pool is found; the caller decides when to create a fallback.
+func (p *DefaultProvider) Sync(ctx context.Context) error {
 	selected, err := p.discoverSourcePool(ctx)
 	if err != nil {
-		// No eligible pool found. Kick off fallback creation and return an error so
-		// controller-runtime requeues this reconcile — there is no in-process retry
-		// loop because the fallback pool itself takes time to reach RUNNING, and
-		// controller-runtime's exponential backoff is the right retry mechanism here.
-		logger.Error(err, "no eligible pool found; creating last-resort fallback pool",
-			"fallback", KarpenterFallbackNodePoolTemplate)
-		if createErr := p.ensureKarpenterNodePoolTemplate(ctx, p.defaultServiceAccount); createErr != nil {
-			return fmt.Errorf("creating fallback pool: %w", createErr)
-		}
-		return fmt.Errorf("waiting for bootstrap pool to become eligible: %w", err)
+		return err
 	}
 
 	p.mu.Lock()
@@ -160,9 +149,14 @@ func (p *DefaultProvider) Create(ctx context.Context) error {
 	p.mu.Unlock()
 
 	if prev != selected {
-		logger.Info("bootstrap source pool selected", "pool", selected, "previous", prev)
+		log.FromContext(ctx).Info("bootstrap source pool selected", "pool", selected, "previous", prev)
 	}
 	return nil
+}
+
+// EnsureFallbackPool creates the karpenter-fallback pool if it does not already exist.
+func (p *DefaultProvider) EnsureFallbackPool(ctx context.Context) error {
+	return p.ensureKarpenterNodePoolTemplate(ctx, p.defaultServiceAccount)
 }
 
 // isPoolEligible returns true for statuses that mean the pool's instance template is

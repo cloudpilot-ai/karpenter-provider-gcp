@@ -92,7 +92,7 @@ func TestDiscoverSourcePool_PreferredPool_NotRunning(t *testing.T) {
 	p := provider(t, srv, "pinned-pool")
 	_, err := p.discoverSourcePool(context.Background())
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not RUNNING")
+	require.Contains(t, err.Error(), "must be RUNNING or RUNNING_WITH_ERROR")
 }
 
 func TestDiscoverSourcePool_DefaultPool(t *testing.T) {
@@ -160,7 +160,7 @@ func TestDiscoverSourcePool_NoPools(t *testing.T) {
 	p := provider(t, srv, "")
 	_, err := p.discoverSourcePool(context.Background())
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "no RUNNING")
+	require.Contains(t, err.Error(), "no eligible")
 }
 
 func TestDiscoverSourcePool_AllProvisioning(t *testing.T) {
