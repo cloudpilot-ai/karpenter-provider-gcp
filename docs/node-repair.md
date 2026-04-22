@@ -2,6 +2,8 @@
 
 Node repair automatically replaces nodes that fail health checks. It is disabled by default and must be opted into via a feature gate.
 
+> **Alpha:** This feature is controlled by the `nodeRepair` feature gate. Alpha features are off by default, may have known limitations, and their behaviour may change in future releases.
+
 ## Enabling node repair
 
 Set the `nodeRepair` feature gate when installing or upgrading Karpenter:

@@ -4,6 +4,8 @@ A NodePool with `spec.replicas` set maintains a fixed number of nodes regardless
 
 This feature is disabled by default and requires the `staticCapacity` feature gate.
 
+> **Alpha:** This feature is controlled by the `staticCapacity` feature gate. Alpha features are off by default, may have known limitations, and their behaviour may change in future releases.
+
 ## Enabling the feature gate
 
 ```sh
