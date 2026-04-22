@@ -20,15 +20,13 @@ controller:
     defaultNodePoolTemplateName: "my-existing-pool"
 ```
 
-## Cluster-level private nodes (untested)
+## Cluster-level private nodes
 
-Karpenter GCP has not been tested on clusters that enforce private nodes at the cluster level (e.g. `DefaultEnablePrivateNodes: true` or `PrivateClusterConfig.enablePrivateNodes: true`). It may not work.
+Karpenter automatically detects whether the cluster enforces private nodes (`DefaultEnablePrivateNodes: true` or `PrivateClusterConfig.enablePrivateNodes: true`) by reading the cluster config from the GKE API at startup. When private nodes are required, the fallback pool (`karpenter-default`) is created with `NodePool.NetworkConfig.enablePrivateNodes: true`, satisfying the org policy constraint.
 
-On such clusters, the fallback pool creation (`karpenter-default`) may be rejected by GKE because `NodePool.NetworkConfig` is not set to enforce private nodes. To avoid this, pin the bootstrap source to an existing RUNNING pool using `DEFAULT_NODEPOOL_TEMPLATE_NAME` — Karpenter will then discover that pool instead of creating a new one.
+No configuration is needed — Karpenter handles this transparently.
 
 The `enableExternalIPAccess: false` field on `GCENodeClass` controls the external IP of **provisioned instances** but does not affect pool discovery or fallback pool creation.
-
-Support for cluster-level private nodes is tracked in [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
 
 ## Selectively disabling external IPs via NodeClass
 
