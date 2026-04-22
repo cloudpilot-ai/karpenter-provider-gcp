@@ -69,11 +69,9 @@ This is a known limitation tracked in [GitHub issue #245](https://github.com/clo
 
 ## Private node clusters
 
-Karpenter GCP has not been tested on clusters that enforce private nodes at the cluster level (`enablePrivateNodes: true`). The node pool template creation request may be rejected on such clusters.
+Karpenter detects cluster-level private nodes automatically by reading `DefaultEnablePrivateNodes` and `PrivateClusterConfig.EnablePrivateNodes` from the GKE API. When either flag is set, the fallback pool (`karpenter-default`) is created with `EnablePrivateNodes: true`. No extra configuration is needed.
 
-For selectively provisioning nodes without a public IP on a standard cluster, see [Private Nodes](networking/private-nodes.md).
-
-Support for cluster-level private nodes is tracked in [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
+For selectively provisioning nodes without a public IP on a public cluster, see [Networking examples — Private nodes](examples/networking.md#private-nodes-no-external-ip).
 
 ---
 
