@@ -23,47 +23,9 @@ controller:
 
 ## Example: always-on warm pool
 
-Keep three on-demand nodes running at all times to absorb burst traffic without cold-start latency:
+Keep three on-demand nodes running at all times to absorb burst traffic without cold-start latency.
 
-```yaml
-apiVersion: karpenter.k8s.gcp/v1alpha1
-kind: GCENodeClass
-metadata:
-  name: warm-pool
-spec:
-  imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
-  disks:
-    - category: pd-balanced
-      sizeGiB: 60
-      boot: true
----
-apiVersion: karpenter.sh/v1
-kind: NodePool
-metadata:
-  name: warm-pool
-spec:
-  replicas: 3
-  template:
-    spec:
-      nodeClassRef:
-        group: karpenter.k8s.gcp
-        kind: GCENodeClass
-        name: warm-pool
-      requirements:
-        - key: karpenter.sh/capacity-type
-          operator: In
-          values: ["on-demand"]
-        - key: karpenter.k8s.gcp/instance-family
-          operator: In
-          values: ["n2", "n4"]
-        - key: kubernetes.io/arch
-          operator: In
-          values: ["amd64"]
-  disruption:
-    consolidationPolicy: WhenEmpty
-    consolidateAfter: 0s
-```
+See [`examples/nodepool/static-capacity-nodepool.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodepool/static-capacity-nodepool.yaml).
 
 ## Combining static and dynamic pools
 
