@@ -6,11 +6,13 @@ Karpenter requires a RUNNING GKE node pool at startup to read bootstrap metadata
 
 When Karpenter starts, it evaluates all node pools in the cluster and selects the bootstrap source using this priority order:
 
-1. The pool named by `DEFAULT_NODEPOOL_TEMPLATE_NAME` (if set and RUNNING)
-2. The pool named `default-pool` (if RUNNING)
-3. The first RUNNING pool in alphabetical order
+1. The pool named by `DEFAULT_NODEPOOL_TEMPLATE_NAME` (if set and eligible)
+2. The pool named `default-pool` (if eligible)
+3. The first eligible pool in alphabetical order
 
-If no RUNNING pool is found, Karpenter creates a minimal fallback pool named `karpenter-fallback` (COS, amd64, zero nodes) and retries. The fallback pool is hardened against common org policy constraints:
+A pool is eligible when its status is `RUNNING` or `RUNNING_WITH_ERROR`.
+
+If no eligible pool is found, Karpenter creates a minimal fallback pool named `karpenter-fallback` (COS, amd64, zero nodes) and retries. The fallback pool is hardened against common org policy constraints:
 
 - `compute.requireShieldedVm` — Shielded VM (Secure Boot + Integrity Monitoring) always enabled
 - `container.managed.enablePrivateNodes` — mirrored from cluster config automatically

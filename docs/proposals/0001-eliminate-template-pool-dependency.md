@@ -91,7 +91,7 @@ On startup and on each template refresh cycle, Karpenter selects a bootstrap sou
 2. If default-pool exists and is RUNNING → use it.
 3. Sort remaining pools by name; use the first RUNNING pool.
 4. If no RUNNING pool found → retry with backoff (transient during cluster upgrades).
-   If retry limit exceeded → create karpenter-default as last-resort fallback (see below).
+   If retry limit exceeded → create karpenter-fallback as last-resort fallback (see below).
 ```
 
 The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name. Observability:
@@ -114,7 +114,7 @@ No arch-based or OS-based filtering is needed. `PatchKubeEnvForArch` and `PatchK
 
 #### Last-Resort Fallback Pool
 
-In the unlikely event that no RUNNING pool is available after retries (e.g., unusual cluster state), Karpenter creates a single `karpenter-default` pool. The implementation will make a best effort to be compatible with all known optional GCE org policies:
+In the unlikely event that no RUNNING pool is available after retries (e.g., unusual cluster state), Karpenter creates a single `karpenter-fallback` pool. The implementation will make a best effort to be compatible with all known optional GCE org policies:
 
 - Minimal `NodeConfig`: only `imageType` (COS_CONTAINERD) and `serviceAccount`; no explicit machine type, no custom labels or taints
 - Shielded VM config enabled by default (`enableSecureBoot`, `enableIntegrityMonitoring`) to satisfy `compute.requireShieldedVm`
@@ -123,7 +123,7 @@ In the unlikely event that no RUNNING pool is available after retries (e.g., unu
 
 If the fallback creation still fails due to an org policy that cannot be automatically satisfied, Karpenter logs a clear error and halts provisioning. The operator can then create any RUNNING pool manually and set `DEFAULT_NODEPOOL_TEMPLATE_NAME` to point Karpenter at it.
 
-`karpenter-default` is not preferred over existing cluster pools. It is only used when the fallback creation path fires — at which point it is the only candidate.
+`karpenter-fallback` is not preferred over existing cluster pools. It is only used when the fallback creation path fires — at which point it is the only candidate.
 
 #### Architecture-Specific Binary Metadata (Group 2)
 
@@ -168,7 +168,7 @@ This follows the same pattern as the existing `PatchKubeEnvForInstanceType` and 
 Verified against GKE 1.35.1 (COS `default-pool` vs Ubuntu `ubuntu-pool` on the same cluster):
 
 - **`KUBE_PROXY_TOKEN`** — **identical across pools**. Cluster-scoped; cross-pool reuse is safe with no patching needed.
-- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`** — **different per pool** (unique x509 cert and RSA key pair per pool). Verified on GKE 1.35.1: the cert Subject encodes the pool name (`O=gke:nodepool:name:{pool}`, `CN=kubelet-nodepool-bootstrap`), and each pool has its own RSA key pair. The Issuer is the cluster CA UUID. Since Karpenter today uses `karpenter-default`'s cert/key for both COS and Ubuntu nodes without bootstrap failures (different OS, same pool cert), GKE likely validates CA signature only — not pool membership in the Subject. Cross-pool reuse (cert Subject names a different pool than the provisioned node belongs to) is expected to work on the same basis. Must be validated with an explicit cross-pool PoC in Phase 0.
+- **`TPM_BOOTSTRAP_CERT` / `TPM_BOOTSTRAP_KEY`** — **different per pool** (unique x509 cert and RSA key pair per pool). Verified on GKE 1.35.1: the cert Subject encodes the pool name (`O=gke:nodepool:name:{pool}`, `CN=kubelet-nodepool-bootstrap`), and each pool has its own RSA key pair. The Issuer is the cluster CA UUID. Since Karpenter today uses `karpenter-fallback`'s cert/key for both COS and Ubuntu nodes without bootstrap failures (different OS, same pool cert), GKE likely validates CA signature only — not pool membership in the Subject. Cross-pool reuse (cert Subject names a different pool than the provisioned node belongs to) is expected to work on the same basis. Must be validated with an explicit cross-pool PoC in Phase 0.
 - **`NODE_PROBLEM_DETECTOR_ADC_CONFIG`** — **different per pool** (audience URL embeds pool name), but **no patch needed**. Verified empirically (GKE 1.35.1): `generateClusterNodeAgentToken` validates only the token's cryptographic signature, not whether the referenced pool exists. Token exchange succeeds with a non-existent pool name in the audience. Use the source pool's config unchanged.
 
 #### Code Changes
@@ -196,7 +196,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Mitigation**:
 - The refresh cycle re-runs selection. If another RUNNING pool exists, it is promoted automatically with no operator action.
-- If no pool remains, the fallback creates `karpenter-default` (COS, 0 nodes) — distinct from the current 4-pool creation path.
+- If no pool remains, the fallback creates `karpenter-fallback` (COS, 0 nodes) — distinct from the current 4-pool creation path.
 - `DEFAULT_NODEPOOL_TEMPLATE_NAME` produces a clear error message naming the expected pool if it is missing.
 
 ### GKE control-plane or node-pool upgrade
@@ -245,7 +245,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Scenario**: All cluster pools are in PROVISIONING state during a GKE cluster upgrade (transient), or an unusual cluster state where all pools are unavailable.
 
-**Mitigation**: Retry with backoff — the normal case (upgrade in progress) resolves within minutes. If retries are exhausted, create `karpenter-default` as a last-resort fallback with minimal, policy-safe config (see Pool Selection Algorithm above). Log pool states clearly at each retry so operators can diagnose the situation.
+**Mitigation**: Retry with backoff — the normal case (upgrade in progress) resolves within minutes. If retries are exhausted, create `karpenter-fallback` as a last-resort fallback with minimal, policy-safe config (see Pool Selection Algorithm above). Log pool states clearly at each retry so operators can diagnose the situation.
 
 ### GKE Container API quota
 
@@ -370,7 +370,7 @@ Add `PatchKubeEnvForOSType`. Add Ubuntu image resolver (query `ubuntu-os-gke-clo
 
 ### Phase 2 — Arm64 hash via GCS sidecar
 
-Add `PatchKubeEnvForArch`. Eliminates `karpenter-cos-arm64` pool. At this point, only `karpenter-default` remains.
+Add `PatchKubeEnvForArch`. Eliminates `karpenter-cos-arm64` pool. At this point, only `karpenter-fallback` remains.
 
 ### Phase 3 — Pool discovery and selection
 
@@ -380,7 +380,7 @@ Replace `Create()` pool creation with priority-based discovery. Add `DEFAULT_NOD
 
 ## Migration: Existing Karpenter-Managed Pools
 
-Clusters upgrading from a version that created the four Karpenter template pools will have `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64` present after the upgrade.
+Clusters upgrading from a version that created the four Karpenter template pools will have `karpenter-fallback`, `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64` present after the upgrade.
 
 ### Should Karpenter delete them automatically?
 

@@ -142,14 +142,16 @@ func (p *DefaultProvider) Create(ctx context.Context) error {
 
 	selected, err := p.discoverSourcePool(ctx)
 	if err != nil {
-		logger.Error(err, "no RUNNING pool available; creating last-resort fallback pool",
+		// No eligible pool found. Kick off fallback creation and return an error so
+		// controller-runtime requeues this reconcile — there is no in-process retry
+		// loop because the fallback pool itself takes time to reach RUNNING, and
+		// controller-runtime's exponential backoff is the right retry mechanism here.
+		logger.Error(err, "no eligible pool found; creating last-resort fallback pool",
 			"fallback", KarpenterFallbackNodePoolTemplate)
 		if createErr := p.ensureKarpenterNodePoolTemplate(ctx, p.defaultServiceAccount); createErr != nil {
 			return fmt.Errorf("creating fallback pool: %w", createErr)
 		}
-		// Return original error so the controller requeues; the pool may not be RUNNING
-		// yet and will be picked up on the next reconcile.
-		return fmt.Errorf("waiting for bootstrap pool to reach RUNNING: %w", err)
+		return fmt.Errorf("waiting for bootstrap pool to become eligible: %w", err)
 	}
 
 	p.mu.Lock()
@@ -170,10 +172,12 @@ func isPoolEligible(status string) bool {
 }
 
 // discoverSourcePool implements the pool selection algorithm from the proposal:
-//  1. If DEFAULT_NODEPOOL_TEMPLATE_NAME is set → use that pool; error if not RUNNING.
-//  2. If default-pool exists and is RUNNING → use it.
-//  3. Sort remaining pools by name; use the first RUNNING pool.
-//  4. No RUNNING pool → return error (caller creates fallback).
+//  1. If DEFAULT_NODEPOOL_TEMPLATE_NAME is set → use that pool; error if not eligible.
+//  2. If default-pool exists and is eligible → use it.
+//  3. Sort remaining pools by name; use the first eligible pool.
+//  4. No eligible pool → return error (caller creates fallback).
+//
+// A pool is eligible when its status is RUNNING or RUNNING_WITH_ERROR.
 func (p *DefaultProvider) discoverSourcePool(ctx context.Context) (string, error) {
 	if p.preferredPoolName != "" {
 		return p.validatePreferredPool(ctx)
@@ -187,7 +191,7 @@ func (p *DefaultProvider) validatePreferredPool(ctx context.Context) (string, er
 		return "", fmt.Errorf("preferred pool %q not found: %w", p.preferredPoolName, err)
 	}
 	if !isPoolEligible(pool.Status) {
-		return "", fmt.Errorf("preferred pool %q has status %q, not RUNNING", p.preferredPoolName, pool.Status)
+		return "", fmt.Errorf("preferred pool %q has status %q (must be RUNNING or RUNNING_WITH_ERROR)", p.preferredPoolName, pool.Status)
 	}
 	return p.preferredPoolName, nil
 }
@@ -210,7 +214,7 @@ func (p *DefaultProvider) selectFromClusterPools(ctx context.Context) (string, e
 		return candidates[0], nil
 	}
 
-	return "", fmt.Errorf("no RUNNING node pool found in cluster %s/%s",
+	return "", fmt.Errorf("no eligible node pool found in cluster %s/%s (pools must be RUNNING or RUNNING_WITH_ERROR)",
 		p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
 }
 
@@ -260,7 +264,7 @@ func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]
 		return nil, err
 	}
 	if template == nil {
-		return nil, fmt.Errorf("source pool %q is not RUNNING or has no instance template", poolName)
+		return nil, fmt.Errorf("source pool %q has no instance template", poolName)
 	}
 	return map[string]*compute.InstanceTemplate{poolName: template}, nil
 }
