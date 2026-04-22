@@ -6,8 +6,8 @@ Karpenter no longer creates or relies on `karpenter-default`, `karpenter-ubuntu`
 `karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. The upgrade itself requires
 no action — Karpenter discovers an existing RUNNING cluster pool automatically.
 
-After confirming provisioning works correctly with the new version, delete the legacy pools
-at your own pace:
+After confirming provisioning works correctly with the new version, delete all four legacy
+pools at your own pace:
 
 ```bash
 for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpenter-default; do
@@ -15,9 +15,10 @@ for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpente
 done
 ```
 
-Karpenter logs any detected legacy pools at INFO level on startup as a reminder.
+> **Note:** the new last-resort fallback pool is named `karpenter-fallback` (not
+> `karpenter-default`), so deleting all four names above is safe and unambiguous.
 
-Rolling back to the previous version will re-create the pools automatically.
+Rolling back to the previous version will re-create the legacy pools automatically.
 
 ---
 

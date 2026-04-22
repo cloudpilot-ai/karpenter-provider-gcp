@@ -10,7 +10,7 @@ When Karpenter starts, it evaluates all node pools in the cluster and selects th
 2. The pool named `default-pool` (if RUNNING)
 3. The first RUNNING pool in alphabetical order
 
-If no RUNNING pool is found, Karpenter creates a minimal fallback pool named `karpenter-default` (COS, amd64, zero nodes) and retries. The fallback pool is hardened against common org policy constraints:
+If no RUNNING pool is found, Karpenter creates a minimal fallback pool named `karpenter-fallback` (COS, amd64, zero nodes) and retries. The fallback pool is hardened against common org policy constraints:
 
 - `compute.requireShieldedVm` — Shielded VM (Secure Boot + Integrity Monitoring) always enabled
 - `container.managed.enablePrivateNodes` — mirrored from cluster config automatically
