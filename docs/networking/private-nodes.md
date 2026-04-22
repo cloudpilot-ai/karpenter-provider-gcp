@@ -2,28 +2,31 @@
 
 This page explains how to control external IP assignment and subnetwork placement for nodes provisioned by Karpenter.
 
-## How Karpenter manages node pool templates
+## How Karpenter discovers the bootstrap source pool
 
-When Karpenter starts, it creates four zero-node GKE node pools that act as instance templates:
+When Karpenter starts, it selects an existing RUNNING GKE node pool to use as the bootstrap metadata source (kubelet configuration, instance template, network settings). The selection follows this priority order:
 
-| Pool name                | Image                  | Architecture |
-|--------------------------|------------------------|--------------|
-| `karpenter-default`      | Container-Optimized OS | amd64        |
-| `karpenter-ubuntu`       | Ubuntu                 | amd64        |
-| `karpenter-cos-arm64`    | Container-Optimized OS | arm64        |
-| `karpenter-ubuntu-arm64` | Ubuntu                 | arm64        |
+1. The pool named by the `DEFAULT_NODEPOOL_TEMPLATE_NAME` environment variable (if set and RUNNING)
+2. The pool named `default-pool` (if RUNNING)
+3. The first RUNNING pool in alphabetical order
 
-These pools have `InitialNodeCount: 0` — they hold no running nodes and exist purely to give Karpenter a GKE-managed instance template to clone from. The network configuration of these templates comes from the GKE cluster itself, not from Karpenter.
+If no RUNNING pool is found, Karpenter creates a minimal fallback pool named `karpenter-default` (COS, amd64) and waits for it to reach RUNNING state before proceeding. Unlike the old model, Karpenter does **not** create pools proactively at startup.
 
-The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created on a best-effort basis. If the cluster's region does not support arm64 machine types, those pools are skipped and arm64 provisioning is disabled for that image family.
+To pin the bootstrap source pool explicitly — for example on a cluster where org policies restrict pool creation — set `DEFAULT_NODEPOOL_TEMPLATE_NAME` in the Helm values:
+
+```yaml
+controller:
+  settings:
+    defaultNodePoolTemplateName: "my-existing-pool"
+```
 
 ## Cluster-level private nodes (untested)
 
 Karpenter GCP has not been tested on clusters that enforce private nodes at the cluster level (e.g. `DefaultEnablePrivateNodes: true` or `PrivateClusterConfig.enablePrivateNodes: true`). It may not work.
 
-When Karpenter starts it creates the four template node pools. The creation request sets only `ImageType` and `ServiceAccount` — `NodePool.NetworkConfig` is not set at all. On a cluster that restricts new node pools to private nodes only, this request may be rejected by GKE, preventing Karpenter from starting.
+On such clusters, the fallback pool creation (`karpenter-default`) may be rejected by GKE because `NodePool.NetworkConfig` is not set to enforce private nodes. To avoid this, pin the bootstrap source to an existing RUNNING pool using `DEFAULT_NODEPOOL_TEMPLATE_NAME` — Karpenter will then discover that pool instead of creating a new one.
 
-The `enableExternalIPAccess: false` field on `GCENodeClass` controls the external IP of **provisioned instances** but does not affect the template pool creation, so it does not address this.
+The `enableExternalIPAccess: false` field on `GCENodeClass` controls the external IP of **provisioned instances** but does not affect pool discovery or fallback pool creation.
 
 Support for cluster-level private nodes is tracked in [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
 

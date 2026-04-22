@@ -116,7 +116,7 @@ disks:
 
 ## arm64 provisioning not available
 
-arm64 node provisioning is skipped at startup if the cluster's region does not support arm64 machine types. Check Karpenter startup logs for a message indicating that arm64 template pools were not created.
+arm64 node provisioning is unavailable if no arm64 machine types exist in the cluster's region. Check Karpenter startup logs for instance type discovery errors.
 
 If arm64 support is needed, verify that arm64 machine types (e.g. `c4a`, `t2a`) are available in your cluster's region:
 

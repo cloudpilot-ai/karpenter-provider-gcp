@@ -96,6 +96,10 @@ controller:
     # faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods
     # will be batched separately.
     batchIdleDuration: 1s
+    # -- Pin the GKE node pool used as the bootstrap metadata source. When set, Karpenter uses this pool
+    # exclusively and returns an error if it is not RUNNING. Leave empty to use automatic discovery
+    # (default-pool → first alphabetical RUNNING pool → fallback karpenter-default creation).
+    defaultNodePoolTemplateName: ""
 
 # -- GCP credentials configuration
 credentials:

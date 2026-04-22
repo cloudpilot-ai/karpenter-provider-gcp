@@ -105,6 +105,10 @@ spec:
             - name: VM_MEMORY_OVERHEAD_PERCENT
               value: "{{ . }}"
             {{- end }}
+            {{- with .Values.controller.settings.defaultNodePoolTemplateName }}
+            - name: DEFAULT_NODEPOOL_TEMPLATE_NAME
+              value: "{{ . }}"
+            {{- end }}
             - name: METRICS_PORT
               value: "{{ .Values.controller.metrics.port }}"
             - name: KARPENTER_SERVICE
