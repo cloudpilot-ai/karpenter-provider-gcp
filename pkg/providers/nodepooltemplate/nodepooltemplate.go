@@ -76,20 +76,7 @@ const (
 	KarpenterDefaultNodePoolTemplate          = "karpenter-default"
 	KarpenterDefaultNodePoolTemplateImageType = "COS_CONTAINERD"
 
-	// Legacy pool name constants — kept for migration logging only.
-	// These pools are no longer created but may exist on clusters upgrading from older versions.
-	KarpenterUbuntuNodePoolTemplate      = "karpenter-ubuntu"
-	KarpenterCOSARM64NodePoolTemplate    = "karpenter-cos-arm64"
-	KarpenterUbuntuARM64NodePoolTemplate = "karpenter-ubuntu-arm64"
 )
-
-// legacyKarpenterPools is the set of pool names that older Karpenter versions created.
-// We log these at INFO to let operators know they can be cleaned up.
-var legacyKarpenterPools = map[string]bool{
-	KarpenterUbuntuNodePoolTemplate:      true,
-	KarpenterCOSARM64NodePoolTemplate:    true,
-	KarpenterUbuntuARM64NodePoolTemplate: true,
-}
 
 func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
 	containerService *container.Service,
@@ -206,8 +193,6 @@ func (p *DefaultProvider) validatePreferredPool(ctx context.Context) (string, er
 }
 
 func (p *DefaultProvider) selectFromClusterPools(ctx context.Context) (string, error) {
-	logger := log.FromContext(ctx)
-
 	clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
 		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
 	resp, err := p.containerService.Projects.Locations.Clusters.NodePools.
@@ -215,8 +200,6 @@ func (p *DefaultProvider) selectFromClusterPools(ctx context.Context) (string, e
 	if err != nil {
 		return "", fmt.Errorf("listing node pools: %w", err)
 	}
-
-	p.logLegacyPools(logger, resp.NodePools)
 
 	if name := firstEligibleNamedPool(resp.NodePools, "default-pool"); name != "" {
 		return name, nil
@@ -229,20 +212,6 @@ func (p *DefaultProvider) selectFromClusterPools(ctx context.Context) (string, e
 
 	return "", fmt.Errorf("no RUNNING node pool found in cluster %s/%s",
 		p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
-}
-
-// logLegacyPools emits a single INFO line when legacy Karpenter-managed pools are found.
-func (p *DefaultProvider) logLegacyPools(logger interface{ Info(string, ...any) }, pools []*container.NodePool) {
-	var legacy []string
-	for _, pool := range pools {
-		if legacyKarpenterPools[pool.Name] {
-			legacy = append(legacy, pool.Name)
-		}
-	}
-	if len(legacy) > 0 {
-		logger.Info("legacy Karpenter-managed pools detected; they can be deleted manually",
-			"pools", legacy)
-	}
 }
 
 // firstEligibleNamedPool returns name if a pool with that name is eligible, else "".

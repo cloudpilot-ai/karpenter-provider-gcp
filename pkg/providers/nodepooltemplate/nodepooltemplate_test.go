@@ -176,22 +176,6 @@ func TestDiscoverSourcePool_AllProvisioning(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestDiscoverSourcePool_LegacyPoolsLogged(t *testing.T) {
-	// Ensure legacy pool names don't interfere with selection.
-	pools := []*container.NodePool{
-		pool(KarpenterUbuntuNodePoolTemplate, "RUNNING"),
-		pool(KarpenterCOSARM64NodePoolTemplate, "RUNNING"),
-		pool("default-pool", "RUNNING"),
-	}
-	srv := httptest.NewServer(nodePoolsHandler(pools))
-	defer srv.Close()
-
-	p := provider(t, srv, "")
-	selected, err := p.discoverSourcePool(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, "default-pool", selected, "default-pool should still win")
-}
-
 func TestIsPoolEligible(t *testing.T) {
 	eligible := []string{"RUNNING", "RUNNING_WITH_ERROR"}
 	ineligible := []string{"PROVISIONING", "RECONCILING", "STOPPING", "ERROR", "STATUS_UNSPECIFIED", ""}
@@ -218,9 +202,7 @@ func TestGetSourcePoolName_AfterDiscovery(t *testing.T) {
 	require.Equal(t, "default-pool", name)
 }
 
-// Ensure no regression: non-legacy pool names that happen to start with "karpenter" are
-// not treated as legacy pools.
-func TestDiscoverSourcePool_NonLegacyKarpenterPool(t *testing.T) {
+func TestDiscoverSourcePool_KarpenterPrefixedPool(t *testing.T) {
 	pools := []*container.NodePool{
 		pool("karpenter-workload", "RUNNING"),
 	}
