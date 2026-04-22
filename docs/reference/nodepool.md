@@ -28,7 +28,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `reasons` _[DisruptionReason](#disruptionreason) array_ | Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.<br />Otherwise, this will apply to each reason defined.<br />allowed reasons are Underutilized, Empty, and Drifted. |  | Enum: [Underutilized Empty Drifted] <br />Optional: \{\} <br /> |
+| `reasons` _[DisruptionReason](#disruptionreason) array_ | Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.<br />Otherwise, this will apply to each reason defined.<br />allowed reasons are Underutilized, Empty, and Drifted. |  | Enum: [Underutilized Empty Drifted] <br />MaxItems: 50 <br />Optional: \{\} <br /> |
 | `nodes` _string_ | Nodes dictates the maximum number of NodeClaims owned by this NodePool<br />that can be terminating at once. This is calculated by counting nodes that<br />have a deletion timestamp set, or are actively being deleted by Karpenter.<br />This field is required when specifying a budget.<br />This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern<br />checking for int nodes for IntOrString nodes.<br />Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388 | 10% | Pattern: `^((100\|[0-9]\{1,2\})%\|[0-9]+)$` <br /> |
 | `schedule` _string_ | Schedule specifies when a budget begins being active, following<br />the upstream cronjob syntax. If omitted, the budget is always active.<br />Timezones are not supported.<br />This field is required if Duration is set. |  | Pattern: `^(@(annually\|yearly\|monthly\|weekly\|daily\|midnight\|hourly))\|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$` <br />Optional: \{\} <br /> |
 | `duration` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | Duration determines how long a Budget is active since each Schedule hit.<br />Only minutes and hours are accepted, as cron does not work in seconds.<br />If omitted, the budget is always active.<br />This is required if Schedule is set.<br />This regex has an optional 0s at the end since the duration.String() always adds<br />a 0s at the end. |  | Pattern: `^((([0-9]+(h\|m))\|([0-9]+h[0-9]+m))(0s)?)$` <br />Type: string <br />Optional: \{\} <br /> |
@@ -64,8 +64,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `consolidateAfter` _[NillableDuration](#nillableduration)_ | ConsolidateAfter is the duration the controller will wait<br />before attempting to terminate nodes that are underutilized.<br />Refer to ConsolidationPolicy for how underutilization is considered. |  | Pattern: `^(([0-9]+(s\|m\|h))+\|Never)$` <br />Schemaless: \{\} <br />Type: string <br />Required: \{\} <br /> |
-| `consolidationPolicy` _[ConsolidationPolicy](#consolidationpolicy)_ | ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation<br />algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified | WhenEmptyOrUnderutilized | Enum: [WhenEmpty WhenEmptyOrUnderutilized] <br />Optional: \{\} <br /> |
+| `consolidateAfter` _[NillableDuration](#nillableduration)_ | ConsolidateAfter is the duration the controller will wait<br />before attempting to terminate nodes that are underutilized.<br />Refer to ConsolidationPolicy for how underutilization is considered.<br />When replicas is set, ConsolidateAfter is simply ignored |  | Pattern: `^(([0-9]+(s\|m\|h))+\|Never)$` <br />Schemaless: \{\} <br />Type: string <br />Required: \{\} <br /> |
+| `consolidationPolicy` _[ConsolidationPolicy](#consolidationpolicy)_ | ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation<br />algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified<br />When replicas is set, ConsolidationPolicy is simply ignored | WhenEmptyOrUnderutilized | Enum: [WhenEmpty WhenEmptyOrUnderutilized] <br />Optional: \{\} <br /> |
 | `budgets` _[Budget](#budget) array_ | Budgets is a list of Budgets.<br />If there are multiple active budgets, Karpenter uses<br />the most restrictive value. If left undefined,<br />this will default to one budget with a value to 10%. | [map[nodes:10%]] | MaxItems: 50 <br />Optional: \{\} <br /> |
 
 
@@ -285,8 +285,9 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `template` _[NodeClaimTemplate](#nodeclaimtemplate)_ | Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.<br />NodeClaims launched from this NodePool will often be further constrained than the template specifies. |  | Required: \{\} <br /> |
 | `disruption` _[Disruption](#disruption)_ | Disruption contains the parameters that relate to Karpenter's disruption logic | \{ consolidateAfter:0s \} | Optional: \{\} <br /> |
-| `limits` _[Limits](#limits)_ | Limits define a set of bounds for provisioning capacity. |  | Optional: \{\} <br /> |
-| `weight` _integer_ | Weight is the priority given to the nodepool during scheduling. A higher<br />numerical weight indicates that this nodepool will be ordered<br />ahead of other nodepools with lower weights. A nodepool with no weight<br />will be treated as if it is a nodepool with a weight of 0. |  | Maximum: 100 <br />Minimum: 1 <br />Optional: \{\} <br /> |
+| `limits` _[Limits](#limits)_ | Limits define a set of bounds for provisioning capacity.<br />Limits other than limits.nodes is not supported when replicas is set. |  | Optional: \{\} <br /> |
+| `weight` _integer_ | Weight is the priority given to the nodepool during scheduling. A higher<br />numerical weight indicates that this nodepool will be ordered<br />ahead of other nodepools with lower weights. A nodepool with no weight<br />will be treated as if it is a nodepool with a weight of 0.<br />Weight is not supported when replicas is set. |  | Maximum: 100 <br />Minimum: 1 <br />Optional: \{\} <br /> |
+| `replicas` _integer_ | Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will<br />maintain this fixed number of replicas rather than scaling based on pod demand.<br />When replicas is set:<br />  - The following fields are ignored:<br />      * disruption.consolidationPolicy<br />      * disruption.consolidateAfter<br />  - Only limits.nodes is supported; other resource limits (e.g., CPU, memory) must not be specified.<br />  - Weight is not supported.<br />Note: This field is alpha. |  | Minimum: 0 <br />Optional: \{\} <br /> |
 
 
 #### NodePoolStatus
@@ -303,6 +304,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `resources` _[ResourceList](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#resourcelist-v1-core)_ | Resources is the list of resources that have been provisioned. |  | Optional: \{\} <br /> |
+| `nodes` _integer_ | Nodes is the count of nodes associated with this NodePool | 0 | Optional: \{\} <br /> |
 | `nodeClassObservedGeneration` _integer_ | NodeClassObservedGeneration represents the observed nodeClass generation for referenced nodeClass. If this does not match<br />the actual NodeClass Generation, NodeRegistrationHealthy status condition on the NodePool will be reset |  | Optional: \{\} <br /> |
 | `conditions` _Condition array_ | Conditions contains signals for health and readiness |  | Optional: \{\} <br /> |
 
