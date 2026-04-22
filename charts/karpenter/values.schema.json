@@ -134,6 +134,10 @@
               "enum": ["Always", "IfNotPresent", "Never"],
               "description": "Image pull policy.",
               "default": "IfNotPresent"
+            },
+            "digest": {
+              "type": "string",
+              "description": "Image digest (sha256:...). Overrides tag when set."
             }
           }
         },
@@ -283,6 +287,10 @@
             "defaultNodePoolTemplateName": {
               "type": "string",
               "description": "Pin the GKE node pool used as the bootstrap metadata source. Leave empty for automatic discovery."
+            },
+            "interruptionQueue": {
+              "type": "string",
+              "description": "GCP Pub/Sub subscription name for Spot interruption notifications."
             }
           }
         }
