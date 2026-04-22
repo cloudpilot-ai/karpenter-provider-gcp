@@ -22,3 +22,10 @@ version: v0.2.1
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
 appVersion: "v0.2.1"
+
+annotations:
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/cloudpilot-ai/karpenter-provider-gcp
+    - name: support
+      url: https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues
