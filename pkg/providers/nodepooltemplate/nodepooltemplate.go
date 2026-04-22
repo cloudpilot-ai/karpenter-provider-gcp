@@ -31,8 +31,6 @@ import (
 	"google.golang.org/api/googleapi"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
 // Provider is the interface for managing the bootstrap source pool and its instance template.
@@ -56,7 +54,6 @@ type DefaultProvider struct {
 	computeService        *compute.Service
 	containerService      *container.Service
 	kubeClient            client.Client
-	versionProvider       version.Provider
 	ClusterInfo           ClusterInfo
 	defaultServiceAccount string
 	// preferredPoolName is the operator-pinned pool name (DEFAULT_NODEPOOL_TEMPLATE_NAME).
@@ -95,7 +92,7 @@ var legacyKarpenterPools = map[string]bool{
 }
 
 func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
-	containerService *container.Service, versionProvider version.Provider,
+	containerService *container.Service,
 	clusterName, region, projectID, serviceAccount, clusterLocation, nodeLocation string,
 	preferredPoolName string) *DefaultProvider {
 
@@ -109,7 +106,6 @@ func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeSe
 		kubeClient:            kubeClient,
 		computeService:        computeService,
 		containerService:      containerService,
-		versionProvider:       versionProvider,
 		defaultServiceAccount: serviceAccount,
 		preferredPoolName:     preferredPoolName,
 		ClusterInfo: ClusterInfo{
