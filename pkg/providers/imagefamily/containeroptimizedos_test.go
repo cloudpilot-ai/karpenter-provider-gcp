@@ -126,13 +126,13 @@ func TestResolveImages_DrivesArm64AndGPUVariants(t *testing.T) {
 func TestBuildImageFilter_UsesVersionPrefix(t *testing.T) {
 	p := &ContainerOptimizedOS{versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
 	got := p.buildImageFilter(context.Background())
-	require.Equal(t, `name:gke-1351-*`, got)
+	require.Equal(t, `name=gke-1351-*`, got)
 }
 
 func TestBuildImageFilter_FallsBackOnNilProvider(t *testing.T) {
 	p := &ContainerOptimizedOS{}
 	got := p.buildImageFilter(context.Background())
-	require.Equal(t, `name:gke-*-cos-*-c-pre`, got)
+	require.Equal(t, `name=gke-*-cos-*-c-pre`, got)
 }
 
 func TestRenderVersion(t *testing.T) {

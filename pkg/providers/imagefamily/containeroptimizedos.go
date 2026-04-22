@@ -111,23 +111,24 @@ func isUsableCOSImage(img *compute.Image) bool {
 }
 
 // buildImageFilter returns a GCP Images.List filter string scoped to the cluster's
-// K8s patch version (e.g. "name:gke-1351-*"). Falls back to "name:gke-*-cos-*-c-pre"
-// if the version provider is unavailable.
+// K8s patch version (e.g. "name=gke-1351-*"). Falls back to "name=gke-*-cos-*-c-pre"
+// if the version provider is unavailable. Uses = (prefix match) not : (has-word), mirroring
+// the Ubuntu filter format which is confirmed to work with the GCP Compute REST API.
 func (c *ContainerOptimizedOS) buildImageFilter(ctx context.Context) string {
 	if c.versionProvider == nil {
-		return `name:gke-*-cos-*-c-pre`
+		return `name=gke-*-cos-*-c-pre`
 	}
 	k8sVer, err := c.versionProvider.Get(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to get K8s version for COS image filter, using broad filter")
-		return `name:gke-*-cos-*-c-pre`
+		return `name=gke-*-cos-*-c-pre`
 	}
 	parsed, err := k8sversion.ParseGeneric(k8sVer)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to parse K8s version for COS image filter, using broad filter", "version", k8sVer)
-		return `name:gke-*-cos-*-c-pre`
+		return `name=gke-*-cos-*-c-pre`
 	}
-	return fmt.Sprintf(`name:gke-%d%d%d-*`, parsed.Major(), parsed.Minor(), parsed.Patch())
+	return fmt.Sprintf(`name=gke-%d%d%d-*`, parsed.Major(), parsed.Minor(), parsed.Patch())
 }
 
 func renderVersion(version string) string {
