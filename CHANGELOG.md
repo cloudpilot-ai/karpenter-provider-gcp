@@ -6,27 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-### Breaking Changes
-
-- Karpenter no longer creates `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`,
-  or `karpenter-ubuntu-arm64` GKE node pools on startup. Bootstrap metadata is now read from
-  an existing RUNNING cluster pool selected by the new pool discovery algorithm. See
-  [MIGRATION.md](MIGRATION.md) for cleanup steps.
-
 ### New features
-
-- **Eliminate template node pool dependency** (#255): Karpenter now discovers an existing
-  RUNNING cluster pool as its bootstrap source instead of creating dedicated template pools.
-  This unblocks clusters under org policies such as `compute.requireShieldedVm` or
-  `gcp.restrictNonCmekServices` that prevented Karpenter from creating pools.
-  - Ubuntu and arm64 nodes are now provisioned by patching the kube-env from any COS source
-    pool, eliminating the need for OS- or arch-specific template pools.
-  - A last-resort `karpenter-default` pool (with shielded VM options enabled) is created only
-    when no RUNNING pool is available.
-  - The bootstrap source pool can be pinned by setting the `DEFAULT_NODEPOOL_TEMPLATE_NAME`
-    env var (or `--default-nodepool-template-name` flag).
-  - Bootstrap source pool selection is logged at INFO level when the pool changes; a
-    `karpenter_gcp_bootstrap_source_pool` Prometheus gauge is planned for a future release.
 
 - Added a garbage-collection controller (`instance.garbagecollection`) that periodically
   detects and deletes GCE VM instances with no corresponding NodeClaim, preventing orphaned
@@ -39,11 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   controller. The label will be enforced strictly in a future release once all clusters have
   migrated.
 
+### Migration guide
+
 No action is required to upgrade. Existing nodes stay fully managed until they are
 naturally replaced by the new version, at which point they receive the location label and
 become eligible for automatic GC. See [MIGRATION.md](MIGRATION.md) for optional steps to
-rotate nodes early, clean up legacy template pools, and delete any orphaned instances that
-may have accumulated before this release.
+rotate nodes early and clean up any orphaned instances that may have accumulated before
+this release.
 
 ## v0.2.0
 
