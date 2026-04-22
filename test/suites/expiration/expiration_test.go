@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
+	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
@@ -65,10 +66,12 @@ func runExpirationTest(ctx context.Context, tc environment.TestCase) {
 		}
 	})
 
-	env.CreateNodeClass(ctx, name)
+	env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+	env.WaitForNodeClassReady(ctx, name)
 	env.CreateNodePoolWithExpiry(ctx, name, name, tc, expireAfter)
+	env.WaitForNodePoolReady(ctx, name)
 	env.CreateDeployment(ctx, name, name, name, tc.Arch)
-
+	env.WaitForNodeClaimLaunched(ctx, name)
 	// Wait for the first pod to be running — the node is already expired at
 	// this point so karpenter starts a replacement shortly after.
 	firstPod := env.WaitForRunningPod(ctx, name)
