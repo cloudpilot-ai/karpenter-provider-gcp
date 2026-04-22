@@ -45,6 +45,7 @@ update: tidy download ## Update go files header, CRD and generated code
 	hack/boilerplate.sh
 	hack/update-generated.sh
 	hack/docs-generate.sh
+	helm-docs -c charts/karpenter
 
 verify-codegen: update ## Verify generated code is up to date
 	git diff --exit-code || (echo "Generated files are out of date — run 'make update' and commit the changes" && exit 1)
