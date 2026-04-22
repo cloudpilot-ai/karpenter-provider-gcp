@@ -9,6 +9,8 @@ on:
 jobs:
   image-publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Set tag
         run: |
