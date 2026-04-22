@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -61,4 +62,23 @@ func TestInstanceToNodeClaim_AbsentClusterLocationLabelNotInvented(t *testing.T)
 	_, hasLabel := nc.Labels[utils.LabelClusterLocationKey]
 	require.False(t, hasLabel,
 		"NodeClaim built from a label-less instance must not carry cluster-location; GC skip depends on its absence")
+}
+
+func TestRepairPolicies_NPDConditionsPolarity(t *testing.T) {
+	t.Parallel()
+	// GKE Node Problem Detector conditions use True=problem polarity (opposite of NodeReady).
+	// NPD sets a condition to True when a problem is detected and omits it otherwise.
+	// ConditionFalse would never match and ConditionTrue must be used to trigger repair.
+	npdConditions := map[corev1.NodeConditionType]bool{
+		"KernelDeadlock":            true,
+		"ReadonlyFilesystem":        true,
+		"FrequentKubeletRestart":    true,
+		"FrequentContainerdRestart": true,
+	}
+	for _, p := range (&CloudProvider{}).RepairPolicies() {
+		if npdConditions[p.ConditionType] {
+			require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
+				"NPD condition %s must use ConditionTrue polarity", p.ConditionType)
+		}
+	}
 }
