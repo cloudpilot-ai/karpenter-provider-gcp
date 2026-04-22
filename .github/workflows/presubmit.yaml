@@ -23,12 +23,16 @@ jobs:
           go-version-file: go.mod
 
       - name: Cache toolchain binaries
+        id: cache-toolchain
         uses: actions/cache@v4
         with:
-          path: ~/go/bin
+          path: |
+            ~/go/bin
+            ~/.local/kubebuilder
           key: toolchain-${{ runner.os }}-${{ hashFiles('hack/toolchain.sh') }}
 
       - name: Install toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
           make toolchain
 
