@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Hand-authored. Keep in sync with values.yaml. additionalProperties: false at root and all nested objects ensures `helm lint` (make chart-lint) fails if values.yaml contains a key not declared here.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
