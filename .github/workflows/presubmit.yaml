@@ -36,6 +36,3 @@ jobs:
         run: |
           make presubmit
 
-      - name: Lint Helm chart
-        run: |
-          make chart-lint

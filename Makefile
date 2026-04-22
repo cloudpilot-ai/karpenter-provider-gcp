@@ -25,7 +25,7 @@ KARPENTER_CORE_DIR = $(shell go list -m -f '{{ .Dir }}' sigs.k8s.io/karpenter)
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-presubmit: verify-codegen verify ut-test ## Run all steps in the developer loop
+presubmit: verify-codegen verify chart-lint ut-test ## Run all steps in the developer loop
 
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
