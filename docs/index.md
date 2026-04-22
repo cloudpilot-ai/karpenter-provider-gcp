@@ -42,6 +42,7 @@ Key capabilities:
 
 - [GCENodeClass](reference/gcenodeclass.md) — full field reference for the `GCENodeClass` resource
 - [NodePool](reference/nodepool.md) — full field reference for the `NodePool` resource
+- [Bootstrap pool selection](reference/bootstrap-pool.md) — how Karpenter selects the GKE node pool used as its bootstrap metadata source
 
 ## Examples
 
