@@ -111,7 +111,7 @@ func isUsableUbuntuImage(img *compute.Image) bool {
 	if !strings.Contains(img.Name, "-amd64-") {
 		return false
 	}
-	for _, skip := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test-"} {
+	for _, skip := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test"} {
 		if strings.Contains(img.Name, skip) {
 			return false
 		}

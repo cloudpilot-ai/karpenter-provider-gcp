@@ -102,7 +102,7 @@ func isUsableCOSImage(img *compute.Image) bool {
 		}
 	}
 	// Exclude arm64 and specialised variants.
-	for _, skip := range []string{"arm64", "kmod", "nvda", "gvisor", "-test-"} {
+	for _, skip := range []string{"arm64", "kmod", "nvda", "gvisor", "-test"} {
 		if strings.Contains(img.Name, skip) {
 			return false
 		}
