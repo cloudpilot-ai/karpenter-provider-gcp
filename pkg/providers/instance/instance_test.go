@@ -254,11 +254,9 @@ func TestSelectZone_OnDemandHonorsTopologyRequirement(t *testing.T) {
 		Spec: karpv1.NodeClaimSpec{
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelTopologyZone,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"europe-west4-b"},
-					},
+					Key:      corev1.LabelTopologyZone,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"europe-west4-b"},
 				},
 			},
 		},
@@ -296,11 +294,9 @@ func TestSelectZone_FailsWhenNoZonesMatchRequirement(t *testing.T) {
 		Spec: karpv1.NodeClaimSpec{
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelTopologyZone,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"europe-west4-b"},
-					},
+					Key:      corev1.LabelTopologyZone,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"europe-west4-b"},
 				},
 			},
 		},
@@ -405,11 +401,9 @@ func TestSelectZone_SpotChoosesCheapestWithinTopologyRequirement(t *testing.T) {
 		Spec: karpv1.NodeClaimSpec{
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelTopologyZone,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"europe-west4-a", "europe-west4-b"},
-					},
+					Key:      corev1.LabelTopologyZone,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"europe-west4-a", "europe-west4-b"},
 				},
 			},
 		},
@@ -1004,11 +998,9 @@ func spotOrOnDemandNodeClaim() *karpv1.NodeClaim {
 		Spec: karpv1.NodeClaimSpec{
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      karpv1.CapacityTypeLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand},
-					},
+					Key:      karpv1.CapacityTypeLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand},
 				},
 			},
 		},
@@ -1020,11 +1012,9 @@ func onDemandNodeClaim() *karpv1.NodeClaim {
 		Spec: karpv1.NodeClaimSpec{
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      karpv1.CapacityTypeLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{karpv1.CapacityTypeOnDemand},
-					},
+					Key:      karpv1.CapacityTypeLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{karpv1.CapacityTypeOnDemand},
 				},
 			},
 		},
