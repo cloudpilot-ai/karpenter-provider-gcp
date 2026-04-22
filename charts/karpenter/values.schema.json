@@ -118,7 +118,7 @@
         },
         "image": {
           "type": "object",
-          "additionalProperties": false,
+          "additionalProperties": true,
           "properties": {
             "repository": {
               "type": "string",
@@ -220,6 +220,16 @@
               "type": "boolean",
               "description": "Enable NodeOverlay (alpha). Allows node overlay to influence scheduling decisions.",
               "default": false
+            },
+            "staticCapacity": {
+              "type": "boolean",
+              "description": "ALPHA: static node pool support (spec.replicas).",
+              "default": false
+            },
+            "nodeRepair": {
+              "type": "boolean",
+              "description": "ALPHA: replace nodes failing GKE Node Problem Detector health checks.",
+              "default": false
             }
           }
         },
@@ -234,7 +244,7 @@
         },
         "settings": {
           "type": "object",
-          "additionalProperties": false,
+          "additionalProperties": true,
           "required": ["projectID", "clusterName", "clusterLocation"],
           "properties": {
             "projectID": {
@@ -269,6 +279,10 @@
               "type": "string",
               "description": "Idle timeout that ends a batch window when no new pods arrive (e.g. 1s).",
               "default": "1s"
+            },
+            "defaultNodePoolTemplateName": {
+              "type": "string",
+              "description": "Pin the GKE node pool used as the bootstrap metadata source. Leave empty for automatic discovery."
             }
           }
         }
