@@ -1,0 +1,3 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+# All approvers from OWNERS are codeowners for the entire repository.
+* @patrostkowski @jwcesign @thameezb @dm3ch

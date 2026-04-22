@@ -154,6 +154,15 @@ e2e-check-clean: ## Report any orphaned e2e GCP resources (does not delete)
 	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-check-clean.sh
 
+release: ## Cut a release. Usage: make release VERSION=vX.Y.Z
+	@test -n "$(VERSION)" || (echo "ERROR: VERSION is required. Usage: make release VERSION=vX.Y.Z" >&2 && exit 1)
+	./hack/release.sh $(VERSION)
+
+cherry-pick: ## Backport commits to a release branch. Usage: make cherry-pick BRANCH=release-v0.3.x COMMITS="sha1 sha2"
+	@test -n "$(BRANCH)"  || (echo "ERROR: BRANCH is required.  Usage: make cherry-pick BRANCH=release-vX.Y.x COMMITS=\"sha1 sha2\"" >&2 && exit 1)
+	@test -n "$(COMMITS)" || (echo "ERROR: COMMITS is required. Usage: make cherry-pick BRANCH=release-vX.Y.x COMMITS=\"sha1 sha2\"" >&2 && exit 1)
+	./hack/cherry-pick.sh $(BRANCH) $(COMMITS)
+
 coverage:
 	go tool cover -html coverage.out -o coverage.html
 
@@ -169,7 +178,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update verify-codegen verify image apply delete toolchain tidy download release cherry-pick
 
 define newline
 
