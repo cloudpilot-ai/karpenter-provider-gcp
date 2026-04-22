@@ -230,8 +230,18 @@
               "type": "boolean",
               "description": "Enable staticCapacity (alpha). When enabled, NodePools with spec.replicas maintain a fixed number of nodes regardless of pod demand.",
               "default": false
+            },
+            "reservedCapacity": {
+              "type": "boolean",
+              "description": "Enable scheduling to reserved/committed GCP capacity (beta).",
+              "default": true
             }
           }
+        },
+        "disableControllerWarmup": {
+          "type": "boolean",
+          "description": "When true, controllers do not pre-populate caches before leader election. Set to false for better HA failover.",
+          "default": true
         },
         "affinity": {
           "type": "object",

@@ -69,6 +69,12 @@ controller:
     # -- nodeRepair is ALPHA and is disabled by default.
     # When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions.
     nodeRepair: false
+    # -- reservedCapacity enables scheduling to reserved/committed GCP capacity (default on).
+    reservedCapacity: true
+  # -- disableControllerWarmup controls whether controller sources (watches/informers) start
+  # before leader election is won. Set to false to enable warmup, which pre-populates caches
+  # and improves leader failover time. Default true matches karpenter-core default (warmup disabled).
+  disableControllerWarmup: true
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
