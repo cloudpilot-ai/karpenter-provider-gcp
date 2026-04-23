@@ -39,7 +39,12 @@ func (f *fakeGKEProvider) ResolveClusterZones(_ context.Context) ([]string, erro
 }
 
 func (f *fakeGKEProvider) GetClusterConfig(_ context.Context) (*containerv1.Cluster, error) {
-	return &containerv1.Cluster{}, nil
+	return &containerv1.Cluster{
+		NetworkConfig: &containerv1.NetworkConfig{
+			Network:    "projects/test-project/global/networks/default",
+			Subnetwork: "projects/test-project/regions/us-central1/subnetworks/default",
+		},
+	}, nil
 }
 
 // fakePricingProvider returns a fixed price for every instance type without

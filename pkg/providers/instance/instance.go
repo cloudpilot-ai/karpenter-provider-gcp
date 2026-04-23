@@ -694,7 +694,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 
 	// Setup network interfaces
 	if clusterConfig.NetworkConfig == nil {
-		return nil, fmt.Errorf("cluster %q has no NetworkConfig; cannot build network interfaces", clusterConfig.Name)
+		return nil, fmt.Errorf("cluster %q has no NetworkConfig; cannot build network interfaces", p.clusterName)
 	}
 	networkInterfaces := p.setupNetworkInterfaces(clusterConfig, nodeClass)
 
