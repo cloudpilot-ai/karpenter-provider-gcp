@@ -27,20 +27,20 @@ To override the automatic external-IP behaviour on a per-NodeClass basis:
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false  # force private, even on a public cluster
+  networkInterface:
+    enableExternalIPAccess: false  # force private, even on a public cluster
     # or
-    - enableExternalIPAccess: true   # force public, even on a private cluster
+    enableExternalIPAccess: true   # force public, even on a private cluster
 ```
 
 ## Selectively disabling external IPs via NodeClass
 
-On a standard GKE cluster (public nodes), you may want Karpenter to provision nodes without external IPs while leaving other node pools public. Use `networkConfig.networkInterfaces` on a `GCENodeClass` to override the default derived from the cluster:
+On a standard GKE cluster (public nodes), you may want Karpenter to provision nodes without external IPs while leaving other node pools public. Use `networkConfig.networkInterface` on a `GCENodeClass` to override the default derived from the cluster:
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false
+  networkInterface:
+    enableExternalIPAccess: false
 ```
 
 Setting `enableExternalIPAccess: false` removes the `ONE_TO_ONE_NAT` access config from the primary interface of every node Karpenter provisions via that `GCENodeClass`.
@@ -59,12 +59,12 @@ See [NodePool examples — Private nodes](../examples/networking.md#private-node
 
 ## Overriding the subnetwork
 
-By default, nodes are placed in the cluster's primary subnetwork (read from `cluster.NetworkConfig.Subnetwork`). Use `networkConfig.networkInterfaces[].subnetwork` to place Karpenter nodes in a different subnetwork — for example one with a narrower CIDR or separate firewall rules.
+By default, nodes are placed in the cluster's primary subnetwork (read from `cluster.NetworkConfig.Subnetwork`). Use `networkConfig.networkInterface.subnetwork` to place Karpenter nodes in a different subnetwork — for example one with a narrower CIDR or separate firewall rules.
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - subnetwork: regions/us-central1/subnetworks/karpenter-nodes
+  networkInterface:
+    subnetwork: regions/us-central1/subnetworks/karpenter-nodes
 ```
 
 The value must be a [self-link or partial URL](https://cloud.google.com/compute/docs/reference/rest/v1/instances#networkinterface):
@@ -78,33 +78,38 @@ See [NodePool examples — Custom subnetwork](../examples/networking.md#custom-s
 
 ## Combining both overrides
 
-`enableExternalIPAccess` and `subnetwork` can be set together on the same interface entry:
+`enableExternalIPAccess` and `subnetwork` can be set together on the primary interface:
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false
-      subnetwork: regions/us-central1/subnetworks/private-nodes
+  networkInterface:
+    enableExternalIPAccess: false
+    subnetwork: regions/us-central1/subnetworks/private-nodes
 ```
 
 ## Multi-interface nodes
 
-`networkInterfaces` is an ordered list. Index 0 configures the primary interface (built from the cluster's network and subnetwork). Each subsequent entry adds a secondary interface — a `subnetwork` must be specified for each secondary entry; entries without one are skipped.
+Use `additionalNetworkInterfaces` to attach secondary network interfaces. Each entry must specify a `subnetwork` — this mirrors GKE's `additionalNodeNetworkConfigs` requirement and is enforced by the CRD schema.
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false          # primary: no external IP
+  networkInterface:
+    enableExternalIPAccess: false          # primary: no external IP
+  additionalNetworkInterfaces:
     - subnetwork: regions/us-central1/subnetworks/secondary-net  # secondary interface
 ```
 
+The primary interface always uses the cluster's network and subnetwork (unless overridden via `networkInterface`). Secondary interfaces inherit the cluster's VPC network but require an explicit subnetwork.
+
 ## Relationship to `networkTags` and `subnetRangeName`
 
-| Field                                                      | Scope                     | Purpose                          |
-|------------------------------------------------------------|---------------------------|----------------------------------|
-| `networkTags`                                              | Instance (all interfaces) | GCP firewall rule targets        |
-| `networkConfig.networkInterfaces[].subnetwork`             | Per interface             | Which subnetwork to attach       |
-| `networkConfig.networkInterfaces[].enableExternalIPAccess` | Per interface             | Whether to assign an external IP |
-| `subnetRangeName`                                          | Per interface (all)       | Secondary IP range for pod IPs   |
+| Field                                                                | Scope                     | Purpose                          |
+|----------------------------------------------------------------------|---------------------------|----------------------------------|
+| `networkTags`                                                        | Instance (all interfaces) | GCP firewall rule targets        |
+| `networkConfig.networkInterface.subnetwork`                          | Primary interface         | Which subnetwork to attach       |
+| `networkConfig.networkInterface.enableExternalIPAccess`              | Primary interface         | Whether to assign an external IP |
+| `networkConfig.additionalNetworkInterfaces[].subnetwork`             | Per secondary interface   | Which subnetwork to attach       |
+| `networkConfig.additionalNetworkInterfaces[].enableExternalIPAccess` | Per secondary interface   | Whether to assign an external IP |
+| `subnetRangeName`                                                    | Primary interface         | Secondary IP range for pod IPs   |
 
 `networkTags` is intentionally top-level because GCP's Compute API places tags on the `Instance` resource, not on individual `NetworkInterface` objects — they apply to all interfaces on the instance.

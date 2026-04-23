@@ -758,11 +758,11 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 		rangeName = cluster.IpAllocationPolicy.ClusterSecondaryRangeName
 	}
 
-	// Primary interface: built from cluster config, overrideable via NodeClass index 0.
+	// Primary interface: built from cluster config, overrideable via NodeClass networkInterface.
 	subnetwork := cluster.NetworkConfig.Subnetwork
 	disableExternal := clusterPrivate
-	if nodeClass.Spec.NetworkConfig != nil && len(nodeClass.Spec.NetworkConfig.NetworkInterfaces) > 0 {
-		override := nodeClass.Spec.NetworkConfig.NetworkInterfaces[0]
+	if nodeClass.Spec.NetworkConfig != nil && nodeClass.Spec.NetworkConfig.NetworkInterface != nil {
+		override := nodeClass.Spec.NetworkConfig.NetworkInterface
 		if override.Subnetwork != "" {
 			subnetwork = override.Subnetwork
 		}
@@ -784,11 +784,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 	ifaces := []*compute.NetworkInterface{primary}
 
 	if nodeClass.Spec.NetworkConfig != nil {
-		secondary, err := buildSecondaryInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.NetworkInterfaces[1:], clusterPrivate)
-		if err != nil {
-			return nil, err
-		}
-		ifaces = append(ifaces, secondary...)
+		ifaces = append(ifaces, buildAdditionalInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.AdditionalNetworkInterfaces, clusterPrivate)...)
 	}
 
 	return ifaces, nil
@@ -804,15 +800,11 @@ func applyAccessConfig(iface *compute.NetworkInterface, disableExternal bool) {
 	}
 }
 
-// buildSecondaryInterfaces builds secondary NetworkInterface objects from NodeClass overrides.
-// All secondary entries must specify a subnetwork — the CRD CEL rule enforces this for valid CRs;
-// the check here guards against CRs applied before the validation rule was introduced.
-func buildSecondaryInterfaces(network string, overrides []v1alpha1.NetworkInterface, clusterPrivate bool) ([]*compute.NetworkInterface, error) {
+// buildAdditionalInterfaces builds secondary NetworkInterface objects from additionalNetworkInterfaces.
+// Subnetwork is required by the CRD schema on each entry.
+func buildAdditionalInterfaces(network string, overrides []v1alpha1.AdditionalNetworkInterface, clusterPrivate bool) []*compute.NetworkInterface {
 	ifaces := make([]*compute.NetworkInterface, 0, len(overrides))
-	for i, override := range overrides {
-		if override.Subnetwork == "" {
-			return nil, fmt.Errorf("networkInterfaces[%d]: subnetwork is required for secondary interfaces", i+1)
-		}
+	for _, override := range overrides {
 		iface := &compute.NetworkInterface{
 			Network:    network,
 			Subnetwork: override.Subnetwork,
@@ -824,7 +816,7 @@ func buildSecondaryInterfaces(network string, overrides []v1alpha1.NetworkInterf
 		applyAccessConfig(iface, disableExternal)
 		ifaces = append(ifaces, iface)
 	}
-	return ifaces, nil
+	return ifaces
 }
 
 // podCIDRRange returns the /N alias IP range size for the given maxPods count,

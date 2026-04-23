@@ -756,7 +756,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		nodeClass := &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
 				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{{EnableExternalIPAccess: &disabled}},
+					NetworkInterface: &v1alpha1.NetworkInterface{EnableExternalIPAccess: &disabled},
 				},
 			},
 		}
@@ -776,7 +776,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		nodeClass := &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
 				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{{EnableExternalIPAccess: &enabled}},
+					NetworkInterface: &v1alpha1.NetworkInterface{EnableExternalIPAccess: &enabled},
 				},
 			},
 		}
@@ -794,7 +794,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		nodeClass := &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
 				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{{Subnetwork: "regions/us-central1/subnetworks/override"}},
+					NetworkInterface: &v1alpha1.NetworkInterface{Subnetwork: "regions/us-central1/subnetworks/override"},
 				},
 			},
 		}
@@ -848,15 +848,14 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 	})
 }
 
-func TestSetupNetworkInterfaces_SecondaryInterfaceWithSubnetwork(t *testing.T) {
+func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) {
 	t.Parallel()
 
 	p := &DefaultProvider{}
 	nodeClass := &v1alpha1.GCENodeClass{
 		Spec: v1alpha1.GCENodeClassSpec{
 			NetworkConfig: &v1alpha1.NetworkConfig{
-				NetworkInterfaces: []v1alpha1.NetworkInterface{
-					{},
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
 					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
 				},
 			},
@@ -872,35 +871,14 @@ func TestSetupNetworkInterfaces_SecondaryInterfaceWithSubnetwork(t *testing.T) {
 	require.Equal(t, "net", result[1].Network)
 }
 
-func TestSetupNetworkInterfaces_SecondaryInterfaceWithoutSubnetworkErrors(t *testing.T) {
+func TestSetupNetworkInterfaces_AdditionalInterfacePrivateCluster(t *testing.T) {
 	t.Parallel()
 
 	p := &DefaultProvider{}
 	nodeClass := &v1alpha1.GCENodeClass{
 		Spec: v1alpha1.GCENodeClassSpec{
 			NetworkConfig: &v1alpha1.NetworkConfig{
-				NetworkInterfaces: []v1alpha1.NetworkInterface{
-					{},
-					{}, // no subnetwork — should error
-				},
-			},
-		},
-	}
-	cluster := makeCluster("net", "subnet", "pods", false)
-	_, err := p.setupNetworkInterfaces(cluster, nodeClass)
-
-	require.ErrorContains(t, err, "networkInterfaces[1]: subnetwork is required")
-}
-
-func TestSetupNetworkInterfaces_SecondaryInterfacePrivateCluster(t *testing.T) {
-	t.Parallel()
-
-	p := &DefaultProvider{}
-	nodeClass := &v1alpha1.GCENodeClass{
-		Spec: v1alpha1.GCENodeClassSpec{
-			NetworkConfig: &v1alpha1.NetworkConfig{
-				NetworkInterfaces: []v1alpha1.NetworkInterface{
-					{},
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
 					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
 				},
 			},

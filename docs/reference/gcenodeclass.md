@@ -10,6 +10,23 @@
 
 
 
+#### AdditionalNetworkInterface
+
+
+
+AdditionalNetworkInterface defines a secondary network interface on provisioned nodes.
+
+
+
+_Appears in:_
+- [NetworkConfig](#networkconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `subnetwork` _string_ | Subnetwork is the self-link or partial URL of the subnetwork for this interface.<br />Required — secondary interfaces must always specify a subnetwork. |  | MinLength: 1 <br /> |
+| `enableExternalIPAccess` _boolean_ | EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added.<br />When unset, the cluster's EnablePrivateNodes setting determines the default. |  | Optional: \{\} <br /> |
+
+
 
 
 #### Disk
@@ -184,7 +201,7 @@ _Appears in:_
 
 
 
-NetworkConfig holds per-interface network settings for provisioned nodes.
+NetworkConfig holds network settings for provisioned nodes.
 
 
 
@@ -193,14 +210,15 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `networkInterfaces` _[NetworkInterface](#networkinterface) array_ | NetworkInterfaces is a list of per-interface settings. Index 0 configures the primary<br />interface (network and subnetwork default to the cluster's values). Each subsequent entry<br />adds a secondary interface and MUST specify a subnetwork. |  | MaxItems: 8 <br />Optional: \{\} <br /> |
+| `networkInterface` _[NetworkInterface](#networkinterface)_ | NetworkInterface configures the primary network interface. When unset, network and<br />subnetwork default to the cluster's values and external IP follows EnablePrivateNodes. |  | Optional: \{\} <br /> |
+| `additionalNetworkInterfaces` _[AdditionalNetworkInterface](#additionalnetworkinterface) array_ | AdditionalNetworkInterfaces adds secondary network interfaces to provisioned nodes.<br />Each entry must specify a subnetwork. Mirrors GKE's additionalNodeNetworkConfigs. |  | MaxItems: 7 <br />Optional: \{\} <br /> |
 
 
 #### NetworkInterface
 
 
 
-NetworkInterface defines settings for a single network interface on provisioned nodes.
+NetworkInterface configures the primary network interface on provisioned nodes.
 
 
 
@@ -209,8 +227,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `enableExternalIPAccess` _boolean_ | EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added to this<br />interface. When unset, the cluster's EnablePrivateNodes setting determines the default:<br />private clusters get no external IP, public clusters get one. |  | Optional: \{\} <br /> |
-| `subnetwork` _string_ | Subnetwork is the self-link or partial URL of the subnetwork to use for this interface<br />(e.g. "regions/us-central1/subnetworks/my-subnet"). When unset on the primary interface<br />(index 0), defaults to the cluster's primary subnetwork. Required for secondary interfaces.<br />Note: to override the pod IP range name, use spec.subnetRangeName instead. |  | Optional: \{\} <br /> |
+| `enableExternalIPAccess` _boolean_ | EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added.<br />When unset, the cluster's EnablePrivateNodes setting determines the default. |  | Optional: \{\} <br /> |
+| `subnetwork` _string_ | Subnetwork is the self-link or partial URL of the subnetwork<br />(e.g. "regions/us-central1/subnetworks/my-subnet"). When unset, defaults to the<br />cluster's primary subnetwork. To override the pod IP range name, use spec.subnetRangeName. |  | Optional: \{\} <br /> |
 
 
 #### NetworkTag

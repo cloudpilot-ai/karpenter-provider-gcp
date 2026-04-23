@@ -18,9 +18,9 @@ Combine with `enableExternalIPAccess: false` to put nodes in a private subnet:
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false
-      subnetwork: regions/us-central1/subnetworks/private-nodes
+  networkInterface:
+    enableExternalIPAccess: false
+    subnetwork: regions/us-central1/subnetworks/private-nodes
 ```
 
 ## Custom pod IP range

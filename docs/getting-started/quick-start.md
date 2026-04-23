@@ -24,6 +24,8 @@ spec:
       boot: true
 ```
 
+> **Node service account:** If `spec.serviceAccount` is not set, Karpenter falls back to the `--node-pool-service-account` operator flag, then to the project's Compute Engine default SA. For production clusters, GKE recommends a dedicated SA with only [`roles/container.nodeServiceAccount`](https://cloud.google.com/kubernetes-engine/docs/how-to/hardening-your-cluster#use_least_privilege_sa). Set `spec.serviceAccount` in the NodeClass or configure `NODE_POOL_SERVICE_ACCOUNT` on the Karpenter deployment.
+
 Apply it:
 
 ```sh
