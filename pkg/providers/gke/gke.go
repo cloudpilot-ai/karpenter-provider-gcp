@@ -22,9 +22,10 @@ import (
 	"strings"
 	"time"
 
-	container "cloud.google.com/go/container/apiv1"
+	containerapiv1 "cloud.google.com/go/container/apiv1"
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
+	containerv1 "google.golang.org/api/container/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
@@ -33,26 +34,41 @@ import (
 const (
 	zoneCacheExpiration      = 5 * time.Minute
 	zoneCacheCleanupInterval = 1 * time.Minute
+	clusterCacheTTL          = 30 * time.Minute
 
-	zoneCacheKey = "zone-cache"
+	zoneCacheKey    = "zone-cache"
+	clusterCacheKey = "cluster"
 )
 
 type Provider interface {
 	ResolveClusterZones(ctx context.Context) ([]string, error)
+	GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error)
 }
 
 type DefaultProvider struct {
-	gkeClient      *container.ClusterManagerClient
-	computeService *compute.Service
+	gkeClient        *containerapiv1.ClusterManagerClient
+	computeService   *compute.Service
+	containerService *containerv1.Service
 
-	zoneCache *cache.Cache
+	projectID    string
+	nodeLocation string
+	clusterName  string
+
+	zoneCache    *cache.Cache
+	clusterCache *cache.Cache
 }
 
-func NewDefaultProvider(gkeClient *container.ClusterManagerClient, computeService *compute.Service) Provider {
+func NewDefaultProvider(gkeClient *containerapiv1.ClusterManagerClient, computeService *compute.Service,
+	containerService *containerv1.Service, projectID, nodeLocation, clusterName string) Provider {
 	return &DefaultProvider{
-		gkeClient:      gkeClient,
-		computeService: computeService,
-		zoneCache:      cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
+		gkeClient:        gkeClient,
+		computeService:   computeService,
+		containerService: containerService,
+		projectID:        projectID,
+		nodeLocation:     nodeLocation,
+		clusterName:      clusterName,
+		zoneCache:        cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
+		clusterCache:     cache.New(clusterCacheTTL, clusterCacheTTL),
 	}
 }
 
@@ -92,4 +108,17 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 
 	p.zoneCache.Set(zoneCacheKey, zones, cache.DefaultExpiration)
 	return zones, nil
+}
+
+func (p *DefaultProvider) GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error) {
+	if v, ok := p.clusterCache.Get(clusterCacheKey); ok {
+		return v.(*containerv1.Cluster), nil
+	}
+	name := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.projectID, p.nodeLocation, p.clusterName)
+	cluster, err := p.containerService.Projects.Locations.Clusters.Get(name).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetching cluster config: %w", err)
+	}
+	p.clusterCache.SetDefault(clusterCacheKey, cluster)
+	return cluster, nil
 }
