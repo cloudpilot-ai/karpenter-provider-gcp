@@ -6,7 +6,7 @@
 
 Karpenter now builds the primary network interface from the cluster API (`cluster.NetworkConfig`) instead of copying it from a GKE node pool template. The network, subnetwork, and pod CIDR range are read directly from the cluster. NodeClass overrides (`subnetwork`, `enableExternalIPAccess`, `subnetRangeName`) continue to work as before.
 
-**Multi-interface:** Secondary interfaces (`networkInterfaces[1+]`) are supported but require an explicit `subnetwork` — entries without one are silently skipped. Previously, secondary interfaces were cloned from the node pool template; if they relied on template-inherited subnetworks, add the subnetwork explicitly to the NodeClass.
+**Multi-interface:** Secondary interfaces (`networkInterfaces[1+]`) require an explicit `subnetwork` in the NodeClass — entries without one are skipped. No action needed if you were not already configuring secondary interfaces in GCENodeClass.
 
 **Cluster-level private nodes** (`EnablePrivateNodes: true`) are now detected automatically — no NodeClass override is needed.
 
