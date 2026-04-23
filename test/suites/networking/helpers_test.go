@@ -27,8 +27,8 @@ import (
 )
 
 // runPrivateNodeTest provisions a node via a GCENodeClass with
-// enableExternalIPAccess: false and asserts the resulting GCE instance has no
-// access configs on its primary network interface (i.e. no external public IP).
+// networkConfig.enablePrivateNodes: true and asserts the resulting GCE instance
+// has no access configs on its primary network interface (i.e. no external public IP).
 func runPrivateNodeTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "networking")
 	suffix := environment.UniqueSuffix()
