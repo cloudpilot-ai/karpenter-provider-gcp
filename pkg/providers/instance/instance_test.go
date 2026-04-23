@@ -937,28 +937,20 @@ func TestSetupNetworkInterfaces_AdditionalInterfacePrivateCluster(t *testing.T) 
 	require.Contains(t, result[1].ForceSendFields, "AccessConfigs")
 }
 
-// TestSetupScheduling_DoesNotMutateTemplate guards against setupScheduling mutating the shared
-// template. The same template pointer is reused across zone and instance-type retries inside
-// Create(), so any in-place write to template.Properties.Scheduling would persist across
-// iterations and corrupt subsequent instances.
-func TestSetupScheduling_DoesNotMutateTemplate(t *testing.T) {
+func TestSetupScheduling(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
-	template := &compute.InstanceTemplate{
-		Properties: &compute.InstanceProperties{
-			Scheduling: &compute.Scheduling{OnHostMaintenance: "MIGRATE"},
-		},
-	}
+	t.Run("spot sets termination action", func(t *testing.T) {
+		t.Parallel()
+		sched := setupScheduling(karpv1.CapacityTypeSpot)
+		require.Equal(t, instanceTerminationActionDelete, sched.InstanceTerminationAction)
+	})
 
-	sched := p.setupScheduling(template, karpv1.CapacityTypeSpot)
-
-	require.Equal(t, instanceTerminationActionDelete, sched.InstanceTerminationAction,
-		"returned Scheduling must have InstanceTerminationAction set for spot")
-	require.Empty(t, template.Properties.Scheduling.InstanceTerminationAction,
-		"setupScheduling must not write to the original template Scheduling struct")
-	require.Equal(t, "MIGRATE", template.Properties.Scheduling.OnHostMaintenance,
-		"original template fields must be unchanged")
+	t.Run("on-demand leaves termination action empty", func(t *testing.T) {
+		t.Parallel()
+		sched := setupScheduling(karpv1.CapacityTypeOnDemand)
+		require.Empty(t, sched.InstanceTerminationAction)
+	})
 }
 
 func spotOrOnDemandNodeClaim() *karpv1.NodeClaim {

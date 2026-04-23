@@ -135,12 +135,21 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).ClusterName,
 	)
 
+	projectID := options.FromContext(ctx).ProjectID
+	proj, err := computeService.Projects.Get(projectID).Context(ctx).Do()
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to get Compute Engine default service account")
+		os.Exit(1)
+	}
+	computeDefaultSA := proj.DefaultServiceAccount
+
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,
 		options.FromContext(ctx).ClusterLocation,
 		region,
-		options.FromContext(ctx).ProjectID,
+		projectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
+		computeDefaultSA,
 		computeService,
 		gkeProvider,
 		unavailableOfferingsCache,

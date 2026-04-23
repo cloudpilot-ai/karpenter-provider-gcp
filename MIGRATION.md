@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Node service account
+
+The service account resolution order is now:
+
+1. `spec.serviceAccount` in GCENodeClass
+2. `--default-nodepool-service-account` operator flag / `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` env var
+3. No explicit SA — GCE uses the project's Compute Engine default service account (`<project-number>-compute@developer.gserviceaccount.com`), the same default GKE applies when no SA is specified at node pool creation
+
+The fallback to the template's service account list has been removed. If your NodeClass and operator flag are both unset, provisioned nodes will use the Compute Engine default SA. This matches GKE's own default, but GKE recommends using a dedicated SA with minimal permissions ([`roles/container.nodeServiceAccount`](https://cloud.google.com/kubernetes-engine/docs/how-to/hardening-your-cluster#use_least_privilege_sa)) for production clusters. Set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` or `spec.serviceAccount` accordingly.
+
 ## v0.3.0
 
 ### CRDs moved to a separate Helm chart (`karpenter-crd`)
