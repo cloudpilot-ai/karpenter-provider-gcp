@@ -755,16 +755,16 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 		rangeName = cluster.IpAllocationPolicy.ClusterSecondaryRangeName
 	}
 
-	// Primary interface: built from cluster config, overrideable via NodeClass networkInterface.
+	// Primary interface: built from cluster config, overrideable via NodeClass networkConfig.
 	subnetwork := cluster.NetworkConfig.Subnetwork
 	disableExternal := clusterPrivate
-	if nodeClass.Spec.NetworkConfig != nil && nodeClass.Spec.NetworkConfig.NetworkInterface != nil {
-		override := nodeClass.Spec.NetworkConfig.NetworkInterface
-		if override.Subnetwork != "" {
-			subnetwork = override.Subnetwork
+	if nodeClass.Spec.NetworkConfig != nil {
+		cfg := nodeClass.Spec.NetworkConfig
+		if cfg.Subnetwork != "" {
+			subnetwork = cfg.Subnetwork
 		}
-		if override.EnableExternalIPAccess != nil {
-			disableExternal = !*override.EnableExternalIPAccess
+		if cfg.EnablePrivateNodes != nil {
+			disableExternal = *cfg.EnablePrivateNodes
 		}
 	}
 
@@ -781,7 +781,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 	ifaces := []*compute.NetworkInterface{primary}
 
 	if nodeClass.Spec.NetworkConfig != nil {
-		ifaces = append(ifaces, buildAdditionalInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.AdditionalNetworkInterfaces, clusterPrivate)...)
+		ifaces = append(ifaces, buildAdditionalInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.AdditionalNetworkInterfaces, disableExternal)...)
 	}
 
 	return ifaces
@@ -798,17 +798,18 @@ func applyAccessConfig(iface *compute.NetworkInterface, disableExternal bool) {
 }
 
 // buildAdditionalInterfaces builds secondary NetworkInterface objects from additionalNetworkInterfaces.
-// Subnetwork is required by the CRD schema on each entry.
-func buildAdditionalInterfaces(network string, overrides []v1alpha1.AdditionalNetworkInterface, clusterPrivate bool) []*compute.NetworkInterface {
+// Subnetwork is required by the CRD schema on each entry. Network falls back to the cluster network
+// when not explicitly set, mirroring GKE's additional_node_network_configs behaviour.
+func buildAdditionalInterfaces(clusterNetwork string, overrides []v1alpha1.AdditionalNetworkInterface, disableExternal bool) []*compute.NetworkInterface {
 	ifaces := make([]*compute.NetworkInterface, 0, len(overrides))
 	for _, override := range overrides {
+		network := clusterNetwork
+		if override.Network != "" {
+			network = override.Network
+		}
 		iface := &compute.NetworkInterface{
 			Network:    network,
 			Subnetwork: override.Subnetwork,
-		}
-		disableExternal := clusterPrivate
-		if override.EnableExternalIPAccess != nil {
-			disableExternal = !*override.EnableExternalIPAccess
 		}
 		applyAccessConfig(iface, disableExternal)
 		ifaces = append(ifaces, iface)

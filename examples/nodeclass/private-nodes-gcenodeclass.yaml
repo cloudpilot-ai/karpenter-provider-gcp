@@ -2,10 +2,13 @@
 #
 # Background
 # ----------
-# Setting networkConfig.networkInterface.enableExternalIPAccess: false removes the
-# ONE_TO_ONE_NAT access config from every node Karpenter provisions via this NodeClass.
-# On private clusters (enablePrivateNodes: true), this is the default — no NodeClass
-# configuration is needed. Use this override to force private nodes on a public cluster.
+# Setting networkConfig.enablePrivateNodes: true removes the ONE_TO_ONE_NAT
+# access config from every node Karpenter provisions via this NodeClass.
+# On private clusters (cluster-level EnablePrivateNodes=true), this is the
+# default — no NodeClass configuration is needed. Use this override to force
+# private nodes on a public cluster, or to explicitly opt specific workloads
+# into private nodes.
+# Mirrors network_config.enable_private_nodes in google_container_node_pool.
 #
 # Prerequisites
 # -------------
@@ -27,8 +30,7 @@ spec:
   networkTags:
     - karpenter-private
   networkConfig:
-    networkInterface:
-      enableExternalIPAccess: false
+    enablePrivateNodes: true
   disks:
     - category: pd-balanced
       sizeGiB: 60

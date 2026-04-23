@@ -746,14 +746,13 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		require.Contains(t, result[0].ForceSendFields, "AccessConfigs")
 	})
 
-	t.Run("NodeClass EnableExternalIPAccess=false overrides public cluster", func(t *testing.T) {
+	t.Run("NodeClass EnablePrivateNodes=true overrides public cluster", func(t *testing.T) {
 		t.Parallel()
 
-		disabled := false
 		nodeClass := &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
 				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterface: &v1alpha1.NetworkInterface{EnableExternalIPAccess: &disabled},
+					EnablePrivateNodes: ptr.To(true),
 				},
 			},
 		}
@@ -765,14 +764,13 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		require.Contains(t, result[0].ForceSendFields, "AccessConfigs")
 	})
 
-	t.Run("NodeClass EnableExternalIPAccess=true overrides private cluster", func(t *testing.T) {
+	t.Run("NodeClass EnablePrivateNodes=false overrides private cluster", func(t *testing.T) {
 		t.Parallel()
 
-		enabled := true
 		nodeClass := &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
 				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterface: &v1alpha1.NetworkInterface{EnableExternalIPAccess: &enabled},
+					EnablePrivateNodes: ptr.To(false),
 				},
 			},
 		}
@@ -789,7 +787,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		nodeClass := &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
 				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterface: &v1alpha1.NetworkInterface{Subnetwork: "regions/us-central1/subnetworks/override"},
+					Subnetwork: "regions/us-central1/subnetworks/override",
 				},
 			},
 		}
@@ -859,6 +857,29 @@ func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) 
 	require.Equal(t, "subnet", result[0].Subnetwork)
 	require.Equal(t, "regions/us-central1/subnetworks/secondary", result[1].Subnetwork)
 	require.Equal(t, "net", result[1].Network)
+}
+
+func TestSetupNetworkInterfaces_AdditionalInterfaceNetworkOverride(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
+					{
+						Network:    "projects/p/global/networks/other-vpc",
+						Subnetwork: "regions/us-central1/subnetworks/secondary",
+					},
+				},
+			},
+		},
+	}
+	cluster := makeCluster("projects/p/global/networks/my-vpc", "subnet", "pods", false)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+	require.Len(t, result, 2)
+	require.Equal(t, "projects/p/global/networks/other-vpc", result[1].Network)
 }
 
 func TestSetupNetworkInterfaces_AdditionalInterfacePrivateCluster(t *testing.T) {

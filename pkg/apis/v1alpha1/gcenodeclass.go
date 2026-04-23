@@ -91,41 +91,38 @@ type GCENodeClassSpec struct {
 }
 
 // NetworkConfig holds network settings for provisioned nodes.
+// The shape mirrors the Terraform google_container_node_pool network_config block
+// so that operators already familiar with GKE node pools can transfer that knowledge directly.
 type NetworkConfig struct {
-	// NetworkInterface configures the primary network interface. When unset, network and
-	// subnetwork default to the cluster's values and external IP follows EnablePrivateNodes.
+	// EnablePrivateNodes controls whether provisioned nodes have internal IP addresses only
+	// (no external IP). When unset, defaults to the cluster's EnablePrivateNodes setting.
+	// Mirrors GKE node pool network_config.enable_private_nodes.
 	// +optional
-	NetworkInterface *NetworkInterface `json:"networkInterface,omitempty"`
+	EnablePrivateNodes *bool `json:"enablePrivateNodes,omitempty"`
+	// Subnetwork is the subnetwork for the primary network interface.
+	// Format: projects/{project}/regions/{region}/subnetworks/{name}
+	// When unset, defaults to the cluster's primary subnetwork.
+	// Mirrors GKE node pool network_config.subnetwork.
+	// +optional
+	Subnetwork string `json:"subnetwork,omitempty"`
 	// AdditionalNetworkInterfaces adds secondary network interfaces to provisioned nodes.
-	// Each entry must specify a subnetwork. Mirrors GKE's additionalNodeNetworkConfigs.
+	// Each entry must specify a subnetwork.
+	// Mirrors GKE node pool network_config.additional_node_network_configs.
 	// +kubebuilder:validation:MaxItems=7
 	// +optional
 	AdditionalNetworkInterfaces []AdditionalNetworkInterface `json:"additionalNetworkInterfaces,omitempty"`
 }
 
-// NetworkInterface configures the primary network interface on provisioned nodes.
-type NetworkInterface struct {
-	// EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added.
-	// When unset, the cluster's EnablePrivateNodes setting determines the default.
-	// +optional
-	EnableExternalIPAccess *bool `json:"enableExternalIPAccess,omitempty"`
-	// Subnetwork is the self-link or partial URL of the subnetwork
-	// (e.g. "regions/us-central1/subnetworks/my-subnet"). When unset, defaults to the
-	// cluster's primary subnetwork. To override the pod IP range name, use spec.subnetRangeName.
-	// +optional
-	Subnetwork string `json:"subnetwork,omitempty"`
-}
-
 // AdditionalNetworkInterface defines a secondary network interface on provisioned nodes.
+// Mirrors an entry in GKE node pool network_config.additional_node_network_configs.
 type AdditionalNetworkInterface struct {
-	// Subnetwork is the self-link or partial URL of the subnetwork for this interface.
-	// Required — secondary interfaces must always specify a subnetwork.
+	// Network is the VPC network for this interface.
+	// When unset, defaults to the cluster's network.
+	// +optional
+	Network string `json:"network,omitempty"`
+	// Subnetwork is the subnetwork for this interface. Required.
 	// +kubebuilder:validation:MinLength=1
 	Subnetwork string `json:"subnetwork"`
-	// EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added.
-	// When unset, the cluster's EnablePrivateNodes setting determines the default.
-	// +optional
-	EnableExternalIPAccess *bool `json:"enableExternalIPAccess,omitempty"`
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.

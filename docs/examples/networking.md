@@ -14,13 +14,12 @@ Place Karpenter nodes in a specific subnetwork, rather than the cluster's defaul
 
 See [`examples/nodeclass/subnetwork-override-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnetwork-override-gcenodeclass.yaml).
 
-Combine with `enableExternalIPAccess: false` to put nodes in a private subnet:
+Combine with `enablePrivateNodes: true` to put nodes in a private subnet:
 
 ```yaml
 networkConfig:
-  networkInterface:
-    enableExternalIPAccess: false
-    subnetwork: regions/us-central1/subnetworks/private-nodes
+  enablePrivateNodes: true
+  subnetwork: regions/us-central1/subnetworks/private-nodes
 ```
 
 ## Custom pod IP range

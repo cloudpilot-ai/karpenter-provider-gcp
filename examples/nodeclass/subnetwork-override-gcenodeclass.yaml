@@ -1,9 +1,9 @@
 # Example: overriding the subnetwork for nodes provisioned by Karpenter.
 #
 # By default nodes are placed in the cluster's primary subnetwork. Use
-# networkConfig.networkInterface.subnetwork to place Karpenter nodes in a
-# different subnetwork — for example a dedicated subnetwork with a smaller
-# CIDR or different firewall rules.
+# networkConfig.subnetwork to place Karpenter nodes in a different subnetwork —
+# for example a dedicated subnetwork with a smaller CIDR or different firewall rules.
+# Mirrors network_config.subnetwork in google_container_node_pool.
 #
 # The subnetwork value must be a self-link or partial URL in the form:
 #   regions/REGION/subnetworks/SUBNETWORK_NAME
@@ -20,8 +20,7 @@ spec:
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
   networkConfig:
-    networkInterface:
-      subnetwork: regions/us-central1/subnetworks/karpenter-nodes
+    subnetwork: regions/us-central1/subnetworks/karpenter-nodes
   disks:
     - category: pd-balanced
       sizeGiB: 60

@@ -4,14 +4,15 @@
 
 ### Network interfaces
 
-Karpenter now builds the primary network interface from the cluster API (`cluster.NetworkConfig`) instead of copying it from a GKE node pool template. The network, subnetwork, and pod CIDR range are read directly from the cluster. NodeClass overrides (`networkConfig.networkInterface.subnetwork`, `networkConfig.networkInterface.enableExternalIPAccess`, `subnetRangeName`) continue to work as before.
+Karpenter now builds the primary network interface from the cluster API (`cluster.NetworkConfig`) instead of copying it from a GKE node pool template. The network, subnetwork, and pod CIDR range are read directly from the cluster.
 
-The `networkConfig.networkInterfaces` list field has been replaced with two dedicated fields that mirror the GKE API design:
+The `networkConfig` API has been redesigned to mirror the `network_config` block in Terraform's `google_container_node_pool` resource, making it immediately familiar to operators who configure GKE node pools with Terraform:
 
-- `networkConfig.networkInterface` — primary interface overrides (optional; `subnetwork` and `enableExternalIPAccess`)
-- `networkConfig.additionalNetworkInterfaces` — secondary interfaces, each requiring an explicit `subnetwork`
+- `networkConfig.enablePrivateNodes` — whether provisioned nodes have internal IPs only (mirrors `network_config.enable_private_nodes`)
+- `networkConfig.subnetwork` — primary subnetwork override (mirrors `network_config.subnetwork`)
+- `networkConfig.additionalNetworkInterfaces` — secondary interfaces, each requiring a `subnetwork` and optionally a `network` (mirrors `network_config.additional_node_network_configs`)
 
-**Action required if you used `networkConfig.networkInterfaces`:** Update your NodeClass manifests:
+**Action required if you used `networkConfig.networkInterfaces`:**
 
 ```yaml
 # Before
@@ -22,9 +23,8 @@ networkConfig:
 
 # After
 networkConfig:
-  networkInterface:
-    enableExternalIPAccess: false
-    subnetwork: regions/us-central1/subnetworks/my-subnet
+  enablePrivateNodes: true
+  subnetwork: regions/us-central1/subnetworks/my-subnet
 ```
 
 For secondary interfaces (previously `networkInterfaces[1+]`):
@@ -40,6 +40,21 @@ networkConfig:
 networkConfig:
   additionalNetworkInterfaces:
     - subnetwork: regions/us-central1/subnetworks/secondary
+```
+
+**Action required if you used `networkConfig.networkInterface` (the intermediate wrapper form):**
+
+```yaml
+# Before
+networkConfig:
+  networkInterface:
+    enableExternalIPAccess: false
+    subnetwork: regions/us-central1/subnetworks/my-subnet
+
+# After
+networkConfig:
+  enablePrivateNodes: true
+  subnetwork: regions/us-central1/subnetworks/my-subnet
 ```
 
 **Cluster-level private nodes** (`EnablePrivateNodes: true`) are now detected automatically — no NodeClass override is needed.

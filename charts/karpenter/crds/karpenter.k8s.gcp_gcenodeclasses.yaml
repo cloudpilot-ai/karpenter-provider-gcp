@@ -345,20 +345,21 @@ spec:
                   additionalNetworkInterfaces:
                     description: |-
                       AdditionalNetworkInterfaces adds secondary network interfaces to provisioned nodes.
-                      Each entry must specify a subnetwork. Mirrors GKE's additionalNodeNetworkConfigs.
+                      Each entry must specify a subnetwork.
+                      Mirrors GKE node pool network_config.additional_node_network_configs.
                     items:
-                      description: AdditionalNetworkInterface defines a secondary
-                        network interface on provisioned nodes.
+                      description: |-
+                        AdditionalNetworkInterface defines a secondary network interface on provisioned nodes.
+                        Mirrors an entry in GKE node pool network_config.additional_node_network_configs.
                       properties:
-                        enableExternalIPAccess:
+                        network:
                           description: |-
-                            EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added.
-                            When unset, the cluster's EnablePrivateNodes setting determines the default.
-                          type: boolean
+                            Network is the VPC network for this interface.
+                            When unset, defaults to the cluster's network.
+                          type: string
                         subnetwork:
-                          description: |-
-                            Subnetwork is the self-link or partial URL of the subnetwork for this interface.
-                            Required — secondary interfaces must always specify a subnetwork.
+                          description: Subnetwork is the subnetwork for this interface.
+                            Required.
                           minLength: 1
                           type: string
                       required:
@@ -366,23 +367,19 @@ spec:
                       type: object
                     maxItems: 7
                     type: array
-                  networkInterface:
+                  enablePrivateNodes:
                     description: |-
-                      NetworkInterface configures the primary network interface. When unset, network and
-                      subnetwork default to the cluster's values and external IP follows EnablePrivateNodes.
-                    properties:
-                      enableExternalIPAccess:
-                        description: |-
-                          EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added.
-                          When unset, the cluster's EnablePrivateNodes setting determines the default.
-                        type: boolean
-                      subnetwork:
-                        description: |-
-                          Subnetwork is the self-link or partial URL of the subnetwork
-                          (e.g. "regions/us-central1/subnetworks/my-subnet"). When unset, defaults to the
-                          cluster's primary subnetwork. To override the pod IP range name, use spec.subnetRangeName.
-                        type: string
-                    type: object
+                      EnablePrivateNodes controls whether provisioned nodes have internal IP addresses only
+                      (no external IP). When unset, defaults to the cluster's EnablePrivateNodes setting.
+                      Mirrors GKE node pool network_config.enable_private_nodes.
+                    type: boolean
+                  subnetwork:
+                    description: |-
+                      Subnetwork is the subnetwork for the primary network interface.
+                      Format: projects/{project}/regions/{region}/subnetworks/{name}
+                      When unset, defaults to the cluster's primary subnetwork.
+                      Mirrors GKE node pool network_config.subnetwork.
+                    type: string
                 type: object
               networkTags:
                 description: NetworkTags is a list of network tags to apply to the
