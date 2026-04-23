@@ -692,11 +692,16 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
+	networkInterfaces, err := p.setupNetworkInterfaces(clusterConfig, nodeClass)
+	if err != nil {
+		return nil, fmt.Errorf("setting up network interfaces: %w", err)
+	}
+
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
-		NetworkInterfaces: p.setupNetworkInterfaces(clusterConfig, nodeClass),
+		NetworkInterfaces: networkInterfaces,
 		ServiceAccounts:   p.setupServiceAccounts(nodeClass),
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
@@ -741,7 +746,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	return instance, nil
 }
 
-func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
+func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) ([]*compute.NetworkInterface, error) {
 	targetRange := podCIDRRange(nodeClass.GetMaxPods())
 	clusterPrivate := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
 
@@ -783,11 +788,13 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 
 	ifaces := []*compute.NetworkInterface{primary}
 
-	// Secondary interfaces: require an explicit subnetwork; skip entries without one.
+	// Secondary interfaces: subnetwork is required (enforced by CRD validation).
 	if nodeClass.Spec.NetworkConfig != nil {
-		for _, override := range nodeClass.Spec.NetworkConfig.NetworkInterfaces[1:] {
+		for i, override := range nodeClass.Spec.NetworkConfig.NetworkInterfaces[1:] {
 			if override.Subnetwork == "" {
-				continue
+				// Should not reach here for valid CRs — CRD CEL rule enforces subnetwork on
+				// secondary entries. Guard against pre-validation CRs applied before this rule.
+				return nil, fmt.Errorf("networkInterfaces[%d]: subnetwork is required for secondary interfaces", i+1)
 			}
 			iface := &compute.NetworkInterface{
 				Network:    cluster.NetworkConfig.Network,
@@ -806,7 +813,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 		}
 	}
 
-	return ifaces
+	return ifaces, nil
 }
 
 // podCIDRRange returns the /N alias IP range size for the given maxPods count,

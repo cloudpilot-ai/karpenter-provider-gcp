@@ -717,7 +717,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
-		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		require.NoError(t, err)
 
 		require.Len(t, result, 1)
 		require.Equal(t, "projects/p/global/networks/my-vpc", result[0].Network)
@@ -728,7 +729,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("net", "subnet", "pods", false)
-		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		require.NoError(t, err)
 
 		require.Len(t, result, 1)
 		require.Len(t, result[0].AccessConfigs, 1)
@@ -739,7 +741,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("net", "subnet", "pods", true)
-		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		require.NoError(t, err)
 
 		require.Len(t, result, 1)
 		require.Empty(t, result[0].AccessConfigs)
@@ -758,7 +761,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "subnet", "pods", false)
-		result := p.setupNetworkInterfaces(cluster, nodeClass)
+		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
+		require.NoError(t, err)
 
 		require.Len(t, result, 1)
 		require.Empty(t, result[0].AccessConfigs)
@@ -777,7 +781,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "subnet", "pods", true)
-		result := p.setupNetworkInterfaces(cluster, nodeClass)
+		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
+		require.NoError(t, err)
 
 		require.Len(t, result, 1)
 		require.Len(t, result[0].AccessConfigs, 1)
@@ -794,7 +799,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "regions/us-central1/subnetworks/default", "pods", false)
-		result := p.setupNetworkInterfaces(cluster, nodeClass)
+		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
+		require.NoError(t, err)
 
 		require.Len(t, result, 1)
 		require.Equal(t, "regions/us-central1/subnetworks/override", result[0].Subnetwork)
@@ -804,7 +810,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
-		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+		require.NoError(t, err)
 
 		require.Len(t, result, 1)
 		require.Equal(t, "cluster-pods-range", result[0].AliasIpRanges[0].SubnetworkRangeName)
@@ -818,7 +825,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeName: &name},
 		}
 		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
-		result := p.setupNetworkInterfaces(cluster, nodeClass)
+		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
+		require.NoError(t, err)
 
 		require.Equal(t, "custom-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
@@ -833,7 +841,8 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "subnet", "pods", false)
-		result := p.setupNetworkInterfaces(cluster, nodeClass)
+		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
+		require.NoError(t, err)
 
 		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
 	})
@@ -854,7 +863,8 @@ func TestSetupNetworkInterfaces_SecondaryInterfaceWithSubnetwork(t *testing.T) {
 		},
 	}
 	cluster := makeCluster("net", "subnet", "pods", false)
-	result := p.setupNetworkInterfaces(cluster, nodeClass)
+	result, err := p.setupNetworkInterfaces(cluster, nodeClass)
+	require.NoError(t, err)
 
 	require.Len(t, result, 2)
 	require.Equal(t, "subnet", result[0].Subnetwork)
@@ -862,7 +872,7 @@ func TestSetupNetworkInterfaces_SecondaryInterfaceWithSubnetwork(t *testing.T) {
 	require.Equal(t, "net", result[1].Network)
 }
 
-func TestSetupNetworkInterfaces_SecondaryInterfaceWithoutSubnetworkIsSkipped(t *testing.T) {
+func TestSetupNetworkInterfaces_SecondaryInterfaceWithoutSubnetworkErrors(t *testing.T) {
 	t.Parallel()
 
 	p := &DefaultProvider{}
@@ -871,15 +881,15 @@ func TestSetupNetworkInterfaces_SecondaryInterfaceWithoutSubnetworkIsSkipped(t *
 			NetworkConfig: &v1alpha1.NetworkConfig{
 				NetworkInterfaces: []v1alpha1.NetworkInterface{
 					{},
-					{}, // no subnetwork — should be skipped
+					{}, // no subnetwork — should error
 				},
 			},
 		},
 	}
 	cluster := makeCluster("net", "subnet", "pods", false)
-	result := p.setupNetworkInterfaces(cluster, nodeClass)
+	_, err := p.setupNetworkInterfaces(cluster, nodeClass)
 
-	require.Len(t, result, 1)
+	require.ErrorContains(t, err, "networkInterfaces[1]: subnetwork is required")
 }
 
 func TestSetupNetworkInterfaces_SecondaryInterfacePrivateCluster(t *testing.T) {
@@ -897,7 +907,8 @@ func TestSetupNetworkInterfaces_SecondaryInterfacePrivateCluster(t *testing.T) {
 		},
 	}
 	cluster := makeCluster("net", "subnet", "pods", true)
-	result := p.setupNetworkInterfaces(cluster, nodeClass)
+	result, err := p.setupNetworkInterfaces(cluster, nodeClass)
+	require.NoError(t, err)
 
 	require.Len(t, result, 2)
 	require.Empty(t, result[1].AccessConfigs)

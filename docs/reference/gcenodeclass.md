@@ -184,7 +184,7 @@ _Appears in:_
 
 
 
-NetworkConfig holds per-interface network settings that override the node pool template.
+NetworkConfig holds per-interface network settings for provisioned nodes.
 
 
 
@@ -193,14 +193,14 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `networkInterfaces` _[NetworkInterface](#networkinterface) array_ | NetworkInterfaces is a list of per-interface overrides matched to the node pool template<br />interfaces by position (index 0 = primary interface). Interfaces beyond the end of this<br />list are left unchanged from the template. |  | MaxItems: 8 <br />Optional: \{\} <br /> |
+| `networkInterfaces` _[NetworkInterface](#networkinterface) array_ | NetworkInterfaces is a list of per-interface settings. Index 0 configures the primary<br />interface (network and subnetwork default to the cluster's values). Each subsequent entry<br />adds a secondary interface and MUST specify a subnetwork. |  | MaxItems: 8 <br />Optional: \{\} <br /> |
 
 
 #### NetworkInterface
 
 
 
-NetworkInterface defines overrides for a single network interface on provisioned nodes.
+NetworkInterface defines settings for a single network interface on provisioned nodes.
 
 
 
@@ -209,8 +209,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `enableExternalIPAccess` _boolean_ | EnableExternalIPAccess, when set to false, removes all access configs from this interface<br />so that the node has no external (public) IP address. Setting it to true or leaving it<br />unset inherits the template's access configs without modification — it does not add an<br />external IP if the template has none. |  | Optional: \{\} <br /> |
-| `subnetwork` _string_ | Subnetwork is the self-link or partial URL of the subnetwork to use for this interface<br />(e.g. "regions/us-central1/subnetworks/my-subnet").<br />When unset, the subnetwork is inherited from the node pool template.<br />Note: to override the pod IP range name on an interface, use spec.subnetRangeName instead. |  | Optional: \{\} <br /> |
+| `enableExternalIPAccess` _boolean_ | EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added to this<br />interface. When unset, the cluster's EnablePrivateNodes setting determines the default:<br />private clusters get no external IP, public clusters get one. |  | Optional: \{\} <br /> |
+| `subnetwork` _string_ | Subnetwork is the self-link or partial URL of the subnetwork to use for this interface<br />(e.g. "regions/us-central1/subnetworks/my-subnet"). When unset on the primary interface<br />(index 0), defaults to the cluster's primary subnetwork. Required for secondary interfaces.<br />Note: to override the pod IP range name, use spec.subnetRangeName instead. |  | Optional: \{\} <br /> |
 
 
 #### NetworkTag

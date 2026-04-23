@@ -90,28 +90,28 @@ type GCENodeClassSpec struct {
 	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
 }
 
-// NetworkConfig holds per-interface network settings that override the node pool template.
+// NetworkConfig holds per-interface network settings for provisioned nodes.
 type NetworkConfig struct {
-	// NetworkInterfaces is a list of per-interface overrides matched to the node pool template
-	// interfaces by position (index 0 = primary interface). Interfaces beyond the end of this
-	// list are left unchanged from the template.
+	// NetworkInterfaces is a list of per-interface settings. Index 0 configures the primary
+	// interface (network and subnetwork default to the cluster's values). Each subsequent entry
+	// adds a secondary interface and MUST specify a subnetwork.
 	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self[1:].all(x, x.subnetwork != '')",message="secondary networkInterfaces (index 1+) must specify a subnetwork"
 	// +optional
 	NetworkInterfaces []NetworkInterface `json:"networkInterfaces,omitempty"`
 }
 
-// NetworkInterface defines overrides for a single network interface on provisioned nodes.
+// NetworkInterface defines settings for a single network interface on provisioned nodes.
 type NetworkInterface struct {
-	// EnableExternalIPAccess, when set to false, removes all access configs from this interface
-	// so that the node has no external (public) IP address. Setting it to true or leaving it
-	// unset inherits the template's access configs without modification — it does not add an
-	// external IP if the template has none.
+	// EnableExternalIPAccess controls whether a ONE_TO_ONE_NAT access config is added to this
+	// interface. When unset, the cluster's EnablePrivateNodes setting determines the default:
+	// private clusters get no external IP, public clusters get one.
 	// +optional
 	EnableExternalIPAccess *bool `json:"enableExternalIPAccess,omitempty"`
 	// Subnetwork is the self-link or partial URL of the subnetwork to use for this interface
-	// (e.g. "regions/us-central1/subnetworks/my-subnet").
-	// When unset, the subnetwork is inherited from the node pool template.
-	// Note: to override the pod IP range name on an interface, use spec.subnetRangeName instead.
+	// (e.g. "regions/us-central1/subnetworks/my-subnet"). When unset on the primary interface
+	// (index 0), defaults to the cluster's primary subnetwork. Required for secondary interfaces.
+	// Note: to override the pod IP range name, use spec.subnetRangeName instead.
 	// +optional
 	Subnetwork string `json:"subnetwork,omitempty"`
 }
