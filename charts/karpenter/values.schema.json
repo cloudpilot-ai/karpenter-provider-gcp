@@ -220,6 +220,16 @@
               "type": "boolean",
               "description": "Enable NodeOverlay (alpha). Allows node overlay to influence scheduling decisions.",
               "default": false
+            },
+            "staticCapacity": {
+              "type": "boolean",
+              "description": "Enable StaticCapacity (alpha). Maintains a fixed number of nodes regardless of pod demand.",
+              "default": false
+            },
+            "nodeRepair": {
+              "type": "boolean",
+              "description": "Enable NodeRepair (alpha). Replaces nodes that fail GKE Node Problem Detector health conditions.",
+              "default": false
             }
           }
         },

@@ -24,7 +24,9 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
@@ -37,7 +39,10 @@ import (
 type Provider interface {
 	Create(ctx context.Context) error
 	GetInstanceTemplates(ctx context.Context) (map[string]*compute.InstanceTemplate, error)
+	GetClusterConfig(ctx context.Context) (*container.Cluster, error)
 }
+
+const clusterConfigCacheTTL = 30 * time.Minute
 
 type DefaultProvider struct {
 	computeService        *compute.Service
@@ -46,6 +51,7 @@ type DefaultProvider struct {
 	versionProvider       version.Provider
 	ClusterInfo           ClusterInfo
 	defaultServiceAccount string
+	clusterCache          *cache.Cache
 }
 
 type ClusterInfo struct {
@@ -90,6 +96,7 @@ func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeSe
 		containerService:      containerService,
 		versionProvider:       versionProvider,
 		defaultServiceAccount: serviceAccount,
+		clusterCache:          cache.New(clusterConfigCacheTTL, clusterConfigCacheTTL),
 		ClusterInfo: ClusterInfo{
 			ProjectID:       projectID,
 			ClusterLocation: clusterLocation,
@@ -248,6 +255,22 @@ func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]
 	}
 
 	return ret, nil
+}
+
+const clusterCacheKey = "cluster"
+
+func (p *DefaultProvider) GetClusterConfig(ctx context.Context) (*container.Cluster, error) {
+	if v, ok := p.clusterCache.Get(clusterCacheKey); ok {
+		return v.(*container.Cluster), nil
+	}
+	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
+		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
+	cluster, err := p.containerService.Projects.Locations.Clusters.Get(clusterSelfLink).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetching cluster config: %w", err)
+	}
+	p.clusterCache.SetDefault(clusterCacheKey, cluster)
+	return cluster, nil
 }
 
 func (p *DefaultProvider) getNodePool(ctx context.Context, nodePoolName string) (*container.NodePool, error) {
