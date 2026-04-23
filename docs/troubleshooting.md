@@ -67,6 +67,14 @@ This is a known limitation tracked in [GitHub issue #245](https://github.com/clo
 
 ---
 
+## Private node clusters (org policy)
+
+Karpenter correctly omits external IPs from **provisioned nodes** on clusters with `enablePrivateNodes: true`. However, Karpenter still creates zero-node bootstrap node pools at startup. On clusters where an org policy enforces private nodes (e.g. `container.managed.enablePrivateNodes`), this pool creation request may be rejected by GKE, preventing Karpenter from starting.
+
+Full support for such clusters — eliminating bootstrap pool creation entirely — is tracked in [GitHub issue #263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263).
+
+---
+
 ## CSR (Certificate Signing Request) not approved
 
 Karpenter runs a CSR approver controller that automatically approves node bootstrap CSRs. If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
@@ -101,14 +109,6 @@ disks:
     boot: true
     kmsKeyName: projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key
 ```
-
----
-
-## Private node clusters (org policy)
-
-Karpenter correctly omits external IPs from **provisioned nodes** on clusters with `enablePrivateNodes: true`. However, Karpenter still creates zero-node bootstrap node pools at startup. On clusters where an org policy enforces private nodes (e.g. `container.managed.enablePrivateNodes`), this pool creation request may be rejected by GKE, preventing Karpenter from starting.
-
-Full support for such clusters — eliminating bootstrap pool creation entirely — is tracked in [GitHub issue #263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263).
 
 ---
 
