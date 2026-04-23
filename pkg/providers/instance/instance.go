@@ -692,10 +692,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
-	networkInterfaces, err := p.setupNetworkInterfaces(clusterConfig, nodeClass)
-	if err != nil {
-		return nil, fmt.Errorf("setting up network interfaces: %w", err)
-	}
+	networkInterfaces := p.setupNetworkInterfaces(clusterConfig, nodeClass)
 
 	instance := &compute.Instance{
 		Name:              instanceName,
@@ -746,7 +743,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	return instance, nil
 }
 
-func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) ([]*compute.NetworkInterface, error) {
+func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
 	targetRange := podCIDRRange(nodeClass.GetMaxPods())
 	clusterPrivate := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
 
@@ -787,7 +784,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 		ifaces = append(ifaces, buildAdditionalInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.AdditionalNetworkInterfaces, clusterPrivate)...)
 	}
 
-	return ifaces, nil
+	return ifaces
 }
 
 // applyAccessConfig sets the ONE_TO_ONE_NAT access config on iface when external is enabled,

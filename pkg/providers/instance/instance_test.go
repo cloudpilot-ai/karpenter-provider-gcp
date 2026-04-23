@@ -216,8 +216,8 @@ func TestDelete_IssuesDeleteWhenInstanceIsRunning(t *testing.T) {
 	}))
 
 	err := p.Delete(context.Background(), "gce://test-project/us-central1-a/karpenter-node1")
-
 	require.NoError(t, err)
+
 	require.True(t, deleteCalled, "delete must be issued for a running instance")
 }
 
@@ -597,8 +597,8 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	nodeClass := bootDiskNodeClass("pd-ssd", nil, nil)
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedIops)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
@@ -611,8 +611,8 @@ func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
 	nodeClass := bootDiskNodeClass("pd-extreme", ptr.To(int64(5000)), nil)
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Equal(t, int64(5000), disks[0].InitializeParams.ProvisionedIops)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
@@ -625,8 +625,8 @@ func TestRenderDiskProperties_SetsProvisionedThroughput(t *testing.T) {
 	nodeClass := bootDiskNodeClass("hyperdisk-throughput", nil, ptr.To(int64(500)))
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedIops)
 	require.Equal(t, int64(500), disks[0].InitializeParams.ProvisionedThroughput)
@@ -639,8 +639,8 @@ func TestRenderDiskProperties_SetsBothIOPSAndThroughput(t *testing.T) {
 	nodeClass := bootDiskNodeClass("hyperdisk-balanced", ptr.To(int64(10000)), ptr.To(int64(400)))
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Equal(t, int64(10000), disks[0].InitializeParams.ProvisionedIops)
 	require.Equal(t, int64(400), disks[0].InitializeParams.ProvisionedThroughput)
@@ -683,8 +683,8 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 	}
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 2)
 	require.Equal(t, int64(10000), disks[0].InitializeParams.ProvisionedIops)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
@@ -717,8 +717,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
-		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
 
 		require.Len(t, result, 1)
 		require.Equal(t, "projects/p/global/networks/my-vpc", result[0].Network)
@@ -729,8 +728,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("net", "subnet", "pods", false)
-		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
 
 		require.Len(t, result, 1)
 		require.Len(t, result[0].AccessConfigs, 1)
@@ -741,8 +739,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("net", "subnet", "pods", true)
-		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
 
 		require.Len(t, result, 1)
 		require.Empty(t, result[0].AccessConfigs)
@@ -761,8 +758,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "subnet", "pods", false)
-		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Len(t, result, 1)
 		require.Empty(t, result[0].AccessConfigs)
@@ -781,8 +777,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "subnet", "pods", true)
-		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Len(t, result, 1)
 		require.Len(t, result[0].AccessConfigs, 1)
@@ -799,8 +794,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "regions/us-central1/subnetworks/default", "pods", false)
-		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Len(t, result, 1)
 		require.Equal(t, "regions/us-central1/subnetworks/override", result[0].Subnetwork)
@@ -810,8 +804,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		t.Parallel()
 
 		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
-		result, err := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
 
 		require.Len(t, result, 1)
 		require.Equal(t, "cluster-pods-range", result[0].AliasIpRanges[0].SubnetworkRangeName)
@@ -825,8 +818,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeName: &name},
 		}
 		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
-		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Equal(t, "custom-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
@@ -841,8 +833,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 			},
 		}
 		cluster := makeCluster("net", "subnet", "pods", false)
-		result, err := p.setupNetworkInterfaces(cluster, nodeClass)
-		require.NoError(t, err)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
 	})
@@ -862,8 +853,7 @@ func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) 
 		},
 	}
 	cluster := makeCluster("net", "subnet", "pods", false)
-	result, err := p.setupNetworkInterfaces(cluster, nodeClass)
-	require.NoError(t, err)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 	require.Len(t, result, 2)
 	require.Equal(t, "subnet", result[0].Subnetwork)
@@ -885,8 +875,7 @@ func TestSetupNetworkInterfaces_AdditionalInterfacePrivateCluster(t *testing.T) 
 		},
 	}
 	cluster := makeCluster("net", "subnet", "pods", true)
-	result, err := p.setupNetworkInterfaces(cluster, nodeClass)
-	require.NoError(t, err)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 	require.Len(t, result, 2)
 	require.Empty(t, result[1].AccessConfigs)
@@ -1059,8 +1048,8 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		"default-pool", "us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
 	)
-
 	require.NoError(t, err)
+
 	require.NotNil(t, instance)
 	require.Equal(t, "SPOT", instance.Scheduling.ProvisioningModel,
 		"buildInstance must use the passed capacityType, not recompute it from instanceType offerings")
@@ -1166,8 +1155,8 @@ func TestWaitOperationDone_RetriesOnTransient503(t *testing.T) {
 	}))
 
 	err := p.waitOperationDone(context.Background(), "n1-standard-1", "us-central1-a", "on-demand", "op-123")
-
 	require.NoError(t, err)
+
 	require.Equal(t, int32(3), callCount.Load())
 }
 
