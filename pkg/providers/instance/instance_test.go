@@ -858,8 +858,14 @@ func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) 
 
 	require.Len(t, result, 2)
 	require.Equal(t, "subnet", result[0].Subnetwork)
+	// Public cluster: primary interface gets ONE_TO_ONE_NAT.
+	require.Len(t, result[0].AccessConfigs, 1)
+	require.Equal(t, "ONE_TO_ONE_NAT", result[0].AccessConfigs[0].Type)
 	require.Equal(t, "regions/us-central1/subnetworks/secondary", result[1].Subnetwork)
 	require.Equal(t, "net", result[1].Network)
+	// Public cluster: secondary interface also gets ONE_TO_ONE_NAT.
+	require.Len(t, result[1].AccessConfigs, 1)
+	require.Equal(t, "ONE_TO_ONE_NAT", result[1].AccessConfigs[0].Type)
 }
 
 func TestSetupNetworkInterfaces_AdditionalInterfaceNetworkOverride(t *testing.T) {
