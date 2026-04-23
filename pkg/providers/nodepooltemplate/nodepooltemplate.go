@@ -38,7 +38,7 @@ import (
 
 type Provider interface {
 	Create(ctx context.Context) error
-	GetInstanceTemplates(ctx context.Context) (map[string]*compute.InstanceTemplate, error)
+	GetBootstrapMetadata(ctx context.Context) (map[string]*compute.InstanceTemplate, error)
 	GetClusterConfig(ctx context.Context) (*container.Cluster, error)
 }
 
@@ -219,7 +219,7 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, i
 	return nil
 }
 
-func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]*compute.InstanceTemplate, error) {
+func (p *DefaultProvider) GetBootstrapMetadata(ctx context.Context) (map[string]*compute.InstanceTemplate, error) {
 	ret := map[string]*compute.InstanceTemplate{}
 	defaultTemplate, err := p.getInstanceTemplate(ctx, KarpenterDefaultNodePoolTemplate)
 	if err != nil {

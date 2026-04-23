@@ -38,7 +38,7 @@ func resolveSourceImage(selfLink string) (string, error) {
 }
 
 func getSourceImage(ctx context.Context, provider nodepooltemplate.Provider, nodePoolTemplateName string) (string, error) {
-	templates, err := provider.GetInstanceTemplates(ctx)
+	templates, err := provider.GetBootstrapMetadata(ctx)
 	if err != nil {
 		return "", err
 	}
