@@ -19,9 +19,11 @@ The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created
 
 ## Cluster-level private nodes
 
-Clusters configured with `PrivateClusterConfig.EnablePrivateNodes: true` are detected automatically. Karpenter reads this setting from the cluster API at startup and omits the `ONE_TO_ONE_NAT` access config from all provisioned instances — no extra NodeClass configuration is required.
+Karpenter reads `PrivateClusterConfig.EnablePrivateNodes` from the cluster API and automatically omits the `ONE_TO_ONE_NAT` access config from all **provisioned instances** on private clusters — no extra NodeClass configuration is required for this.
 
-To override the automatic behaviour on a per-NodeClass basis, set `enableExternalIPAccess` explicitly:
+However, Karpenter still creates bootstrap node pool templates at startup. On clusters that enforce private nodes via org policy (e.g. `container.managed.enablePrivateNodes`), this creation request may be rejected by GKE, preventing Karpenter from starting. Full support for such clusters is tracked in [#263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263), which eliminates bootstrap pool creation entirely.
+
+To override the automatic external-IP behaviour on a per-NodeClass basis:
 
 ```yaml
 networkConfig:
