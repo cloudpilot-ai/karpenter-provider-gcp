@@ -87,9 +87,14 @@ networkConfig:
 
 ## Multi-interface nodes
 
-> **Note:** Only the primary interface (`networkInterfaces[0]`) is currently supported. Entries at index 1 and above are ignored.
+`networkInterfaces` is an ordered list. Index 0 configures the primary interface (built from the cluster's network and subnetwork). Each subsequent entry adds a secondary interface — a `subnetwork` must be specified for each secondary entry; entries without one are skipped.
 
-Multi-interface support is tracked in a follow-up.
+```yaml
+networkConfig:
+  networkInterfaces:
+    - enableExternalIPAccess: false          # primary: no external IP
+    - subnetwork: regions/us-central1/subnetworks/secondary-net  # secondary interface
+```
 
 ## Relationship to `networkTags` and `subnetRangeName`
 

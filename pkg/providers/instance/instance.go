@@ -743,10 +743,19 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 
 func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
 	targetRange := podCIDRRange(nodeClass.GetMaxPods())
+	clusterPrivate := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
 
-	// Subnetwork: cluster default, overrideable per NodeClass.
+	// Pod CIDR range name: NodeClass → cluster IpAllocationPolicy → let GKE pick.
+	rangeName := ""
+	if nodeClass.Spec.SubnetRangeName != nil {
+		rangeName = *nodeClass.Spec.SubnetRangeName
+	} else if cluster.IpAllocationPolicy != nil {
+		rangeName = cluster.IpAllocationPolicy.ClusterSecondaryRangeName
+	}
+
+	// Primary interface: built from cluster config, overrideable via NodeClass index 0.
 	subnetwork := cluster.NetworkConfig.Subnetwork
-	disableExternal := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
+	disableExternal := clusterPrivate
 	if nodeClass.Spec.NetworkConfig != nil && len(nodeClass.Spec.NetworkConfig.NetworkInterfaces) > 0 {
 		override := nodeClass.Spec.NetworkConfig.NetworkInterfaces[0]
 		if override.Subnetwork != "" {
@@ -757,15 +766,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 		}
 	}
 
-	// Pod CIDR range name: NodeClass → cluster IpAllocationPolicy → let GKE pick.
-	rangeName := ""
-	if nodeClass.Spec.SubnetRangeName != nil {
-		rangeName = *nodeClass.Spec.SubnetRangeName
-	} else if cluster.IpAllocationPolicy != nil {
-		rangeName = cluster.IpAllocationPolicy.ClusterSecondaryRangeName
-	}
-
-	iface := &compute.NetworkInterface{
+	primary := &compute.NetworkInterface{
 		Network:    cluster.NetworkConfig.Network,
 		Subnetwork: subnetwork,
 		AliasIpRanges: []*compute.AliasIpRange{{
@@ -774,13 +775,38 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 		}},
 	}
 	if !disableExternal {
-		iface.AccessConfigs = []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT", Name: "External NAT"}}
+		primary.AccessConfigs = []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT", Name: "External NAT"}}
 	} else {
 		// Force-send empty slice so GCP API does not default-insert ONE_TO_ONE_NAT.
-		iface.ForceSendFields = []string{"AccessConfigs"}
+		primary.ForceSendFields = []string{"AccessConfigs"}
 	}
 
-	return []*compute.NetworkInterface{iface}
+	ifaces := []*compute.NetworkInterface{primary}
+
+	// Secondary interfaces: require an explicit subnetwork; skip entries without one.
+	if nodeClass.Spec.NetworkConfig != nil {
+		for _, override := range nodeClass.Spec.NetworkConfig.NetworkInterfaces[1:] {
+			if override.Subnetwork == "" {
+				continue
+			}
+			iface := &compute.NetworkInterface{
+				Network:    cluster.NetworkConfig.Network,
+				Subnetwork: override.Subnetwork,
+			}
+			disableSecondaryExternal := clusterPrivate
+			if override.EnableExternalIPAccess != nil {
+				disableSecondaryExternal = !*override.EnableExternalIPAccess
+			}
+			if !disableSecondaryExternal {
+				iface.AccessConfigs = []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT", Name: "External NAT"}}
+			} else {
+				iface.ForceSendFields = []string{"AccessConfigs"}
+			}
+			ifaces = append(ifaces, iface)
+		}
+	}
+
+	return ifaces
 }
 
 // podCIDRRange returns the /N alias IP range size for the given maxPods count,

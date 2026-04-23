@@ -839,6 +839,71 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 	})
 }
 
+func TestSetupNetworkInterfaces_SecondaryInterfaceWithSubnetwork(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				NetworkInterfaces: []v1alpha1.NetworkInterface{
+					{},
+					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
+				},
+			},
+		},
+	}
+	cluster := makeCluster("net", "subnet", "pods", false)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+	require.Len(t, result, 2)
+	require.Equal(t, "subnet", result[0].Subnetwork)
+	require.Equal(t, "regions/us-central1/subnetworks/secondary", result[1].Subnetwork)
+	require.Equal(t, "net", result[1].Network)
+}
+
+func TestSetupNetworkInterfaces_SecondaryInterfaceWithoutSubnetworkIsSkipped(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				NetworkInterfaces: []v1alpha1.NetworkInterface{
+					{},
+					{}, // no subnetwork — should be skipped
+				},
+			},
+		},
+	}
+	cluster := makeCluster("net", "subnet", "pods", false)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+	require.Len(t, result, 1)
+}
+
+func TestSetupNetworkInterfaces_SecondaryInterfacePrivateCluster(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				NetworkInterfaces: []v1alpha1.NetworkInterface{
+					{},
+					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
+				},
+			},
+		},
+	}
+	cluster := makeCluster("net", "subnet", "pods", true)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+	require.Len(t, result, 2)
+	require.Empty(t, result[1].AccessConfigs)
+	require.Contains(t, result[1].ForceSendFields, "AccessConfigs")
+}
+
 func TestSetupScheduling_SpotSetsTerminationAction(t *testing.T) {
 	t.Parallel()
 
