@@ -17,19 +17,23 @@ These pools have `InitialNodeCount: 0` — they hold no running nodes and exist 
 
 The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created on a best-effort basis. If the cluster's region does not support arm64 machine types, those pools are skipped and arm64 provisioning is disabled for that image family.
 
-## Cluster-level private nodes (untested)
+## Cluster-level private nodes
 
-Karpenter GCP has not been tested on clusters that enforce private nodes at the cluster level (e.g. `DefaultEnablePrivateNodes: true` or `PrivateClusterConfig.enablePrivateNodes: true`). It may not work.
+Clusters configured with `PrivateClusterConfig.EnablePrivateNodes: true` are detected automatically. Karpenter reads this setting from the cluster API at startup and omits the `ONE_TO_ONE_NAT` access config from all provisioned instances — no extra NodeClass configuration is required.
 
-When Karpenter starts it creates the four template node pools. The creation request sets only `ImageType` and `ServiceAccount` — `NodePool.NetworkConfig` is not set at all. On a cluster that restricts new node pools to private nodes only, this request may be rejected by GKE, preventing Karpenter from starting.
+To override the automatic behaviour on a per-NodeClass basis, set `enableExternalIPAccess` explicitly:
 
-The `enableExternalIPAccess: false` field on `GCENodeClass` controls the external IP of **provisioned instances** but does not affect the template pool creation, so it does not address this.
-
-Support for cluster-level private nodes is tracked in [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
+```yaml
+networkConfig:
+  networkInterfaces:
+    - enableExternalIPAccess: false  # force private, even on a public cluster
+    # or
+    - enableExternalIPAccess: true   # force public, even on a private cluster
+```
 
 ## Selectively disabling external IPs via NodeClass
 
-On a standard GKE cluster (public nodes), you may want Karpenter to provision nodes without external IPs while leaving other node pools public. Use `networkConfig.networkInterfaces` on a `GCENodeClass` to override the access config that Karpenter inherits from its template pool.
+On a standard GKE cluster (public nodes), you may want Karpenter to provision nodes without external IPs while leaving other node pools public. Use `networkConfig.networkInterfaces` on a `GCENodeClass` to override the default derived from the cluster:
 
 ```yaml
 networkConfig:
@@ -37,7 +41,7 @@ networkConfig:
     - enableExternalIPAccess: false
 ```
 
-Setting `enableExternalIPAccess: false` removes the `ONE_TO_ONE_NAT` access config from the primary interface of every node Karpenter provisions via that `GCENodeClass`. The template pool itself (`karpenter-default`) is not modified.
+Setting `enableExternalIPAccess: false` removes the `ONE_TO_ONE_NAT` access config from the primary interface of every node Karpenter provisions via that `GCENodeClass`.
 
 ### Prerequisites
 
@@ -53,7 +57,7 @@ See [NodePool examples — Private nodes](../examples/networking.md#private-node
 
 ## Overriding the subnetwork
 
-By default, nodes are placed in the subnetwork that the `karpenter-default` template inherits from the cluster. Use `networkConfig.networkInterfaces[].subnetwork` to place Karpenter nodes in a different subnetwork — for example one with a narrower CIDR or separate firewall rules.
+By default, nodes are placed in the cluster's primary subnetwork (read from `cluster.NetworkConfig.Subnetwork`). Use `networkConfig.networkInterfaces[].subnetwork` to place Karpenter nodes in a different subnetwork — for example one with a narrower CIDR or separate firewall rules.
 
 ```yaml
 networkConfig:
@@ -83,14 +87,9 @@ networkConfig:
 
 ## Multi-interface nodes
 
-`networkInterfaces` is an ordered list matched to the node pool template interfaces by position (index 0 = primary interface). Interfaces in the template that have no corresponding entry in the list are left unchanged. The list is capped at 8 entries matching GCP's limit on network interfaces per instance.
+> **Note:** Only the primary interface (`networkInterfaces[0]`) is currently supported. Entries at index 1 and above are ignored.
 
-```yaml
-networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false   # primary interface: no external IP
-    - subnetwork: regions/us-central1/subnetworks/secondary-net  # secondary interface: different subnet
-```
+Multi-interface support is tracked in a follow-up.
 
 ## Relationship to `networkTags` and `subnetRangeName`
 

@@ -1,5 +1,36 @@
 # Migration Guide
 
+## Upgrading to vNext — network config, tags, and service account changes
+
+### Network interfaces
+
+Karpenter now builds the primary network interface from the cluster API (`cluster.NetworkConfig`) instead of copying it from a GKE node pool template. The network, subnetwork, and pod CIDR range are read directly from the cluster. NodeClass overrides (`subnetwork`, `enableExternalIPAccess`, `subnetRangeName`) continue to work as before.
+
+**Multi-interface:** Only the primary interface (`networkInterfaces[0]`) is built. Any `networkInterfaces[1+]` entries in existing NodeClass resources are silently ignored. Remove them to avoid confusion.
+
+**Cluster-level private nodes** (`EnablePrivateNodes: true`) are now detected automatically — no NodeClass override is needed.
+
+### Network tags
+
+Previously, Karpenter merged all tags from the bootstrap node pool template with `spec.networkTags` in NodeClass. Now only two sources are used:
+
+- The cluster-wide GKE tag `gke-<cluster-name>-node` (always present)
+- `spec.networkTags` from NodeClass
+
+**Action required:** If your GKE node pool template carried additional tags used in firewall rules (e.g. pool-specific tags), add them explicitly to `spec.networkTags` in the relevant NodeClass.
+
+### Node service account
+
+The service account resolution order is now:
+
+1. `spec.serviceAccount` in GCENodeClass
+2. `--node-pool-service-account` operator flag / `NODE_POOL_SERVICE_ACCOUNT` env var
+3. No explicit SA — GCE uses the project's Compute Engine default service account (`<project-number>-compute@developer.gserviceaccount.com`), the same default GKE applies when no SA is specified at node pool creation
+
+The fallback to the template's service account list has been removed. If your NodeClass and operator flag are both unset, provisioned nodes will use the Compute Engine default SA. This matches GKE's own default, but GKE recommends using a dedicated SA with minimal permissions ([`roles/container.nodeServiceAccount`](https://cloud.google.com/kubernetes-engine/docs/how-to/hardening-your-cluster#use_least_privilege_sa)) for production clusters. Set `NODE_POOL_SERVICE_ACCOUNT` or `spec.serviceAccount` accordingly.
+
+---
+
 ## Upgrading to vNext — GC controller and cluster identity labels
 
 ### Background
