@@ -46,7 +46,6 @@ log "Deploying karpenter via Helm..."
 helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
   --namespace karpenter-system \
   --create-namespace \
-  --skip-schema-validation \
   --set controller.image.repository="${IMAGE_REPO}" \
   --set controller.image.tag="${KO_IMAGE_TAG}" \
   --set controller.image.digest="${IMAGE_REF##*@}" \
