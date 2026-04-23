@@ -10,6 +10,24 @@
 
 
 
+#### AdditionalNetworkInterface
+
+
+
+AdditionalNetworkInterface defines a secondary network interface on provisioned nodes.
+Mirrors an entry in GKE node pool network_config.additional_node_network_configs.
+
+
+
+_Appears in:_
+- [NetworkConfig](#networkconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `network` _string_ | Network is the VPC network for this interface.<br />When unset, defaults to the cluster's network. |  | Optional: \{\} <br /> |
+| `subnetwork` _string_ | Subnetwork is the subnetwork for this interface. Required. |  | MinLength: 1 <br /> |
+
+
 
 
 #### Disk
@@ -184,7 +202,9 @@ _Appears in:_
 
 
 
-NetworkConfig holds per-interface network settings that override the node pool template.
+NetworkConfig holds network settings for provisioned nodes.
+The shape mirrors the Terraform google_container_node_pool network_config block
+so that operators already familiar with GKE node pools can transfer that knowledge directly.
 
 
 
@@ -193,24 +213,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `networkInterfaces` _[NetworkInterface](#networkinterface) array_ | NetworkInterfaces is a list of per-interface overrides matched to the node pool template<br />interfaces by position (index 0 = primary interface). Interfaces beyond the end of this<br />list are left unchanged from the template. |  | MaxItems: 8 <br />Optional: \{\} <br /> |
-
-
-#### NetworkInterface
-
-
-
-NetworkInterface defines overrides for a single network interface on provisioned nodes.
-
-
-
-_Appears in:_
-- [NetworkConfig](#networkconfig)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `enableExternalIPAccess` _boolean_ | EnableExternalIPAccess, when set to false, removes all access configs from this interface<br />so that the node has no external (public) IP address. Setting it to true or leaving it<br />unset inherits the template's access configs without modification — it does not add an<br />external IP if the template has none. |  | Optional: \{\} <br /> |
-| `subnetwork` _string_ | Subnetwork is the self-link or partial URL of the subnetwork to use for this interface<br />(e.g. "regions/us-central1/subnetworks/my-subnet").<br />When unset, the subnetwork is inherited from the node pool template.<br />Note: to override the pod IP range name on an interface, use spec.subnetRangeName instead. |  | Optional: \{\} <br /> |
+| `enablePrivateNodes` _boolean_ | EnablePrivateNodes controls whether provisioned nodes have internal IP addresses only<br />(no external IP). When unset, defaults to the cluster's EnablePrivateNodes setting.<br />Mirrors GKE node pool network_config.enable_private_nodes. |  | Optional: \{\} <br /> |
+| `subnetwork` _string_ | Subnetwork is the subnetwork for the primary network interface.<br />Format: projects/\{project\}/regions/\{region\}/subnetworks/\{name\}<br />When unset, defaults to the cluster's primary subnetwork.<br />Mirrors GKE node pool network_config.subnetwork. |  | Optional: \{\} <br /> |
+| `additionalNetworkInterfaces` _[AdditionalNetworkInterface](#additionalnetworkinterface) array_ | AdditionalNetworkInterfaces adds secondary network interfaces to provisioned nodes.<br />Each entry must specify a subnetwork.<br />Mirrors GKE node pool network_config.additional_node_network_configs. |  | MaxItems: 7 <br />Optional: \{\} <br /> |
 
 
 #### NetworkTag

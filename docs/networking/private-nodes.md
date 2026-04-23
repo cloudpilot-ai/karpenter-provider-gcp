@@ -17,27 +17,31 @@ These pools have `InitialNodeCount: 0` — they hold no running nodes and exist 
 
 The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created on a best-effort basis. If the cluster's region does not support arm64 machine types, those pools are skipped and arm64 provisioning is disabled for that image family.
 
-## Cluster-level private nodes (untested)
+## Cluster-level private nodes
 
-Karpenter GCP has not been tested on clusters that enforce private nodes at the cluster level (e.g. `DefaultEnablePrivateNodes: true` or `PrivateClusterConfig.enablePrivateNodes: true`). It may not work.
+Karpenter reads `PrivateClusterConfig.EnablePrivateNodes` from the cluster API and automatically omits the `ONE_TO_ONE_NAT` access config from all **provisioned instances** on private clusters — no extra NodeClass configuration is required for this.
 
-When Karpenter starts it creates the four template node pools. The creation request sets only `ImageType` and `ServiceAccount` — `NodePool.NetworkConfig` is not set at all. On a cluster that restricts new node pools to private nodes only, this request may be rejected by GKE, preventing Karpenter from starting.
+However, Karpenter still creates bootstrap node pool templates at startup. On clusters that enforce private nodes via org policy (e.g. `container.managed.enablePrivateNodes`), this creation request may be rejected by GKE, preventing Karpenter from starting. Full support for such clusters is tracked in [#230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230), which eliminates bootstrap pool creation entirely.
 
-The `enableExternalIPAccess: false` field on `GCENodeClass` controls the external IP of **provisioned instances** but does not affect the template pool creation, so it does not address this.
-
-Support for cluster-level private nodes is tracked in [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
-
-## Selectively disabling external IPs via NodeClass
-
-On a standard GKE cluster (public nodes), you may want Karpenter to provision nodes without external IPs while leaving other node pools public. Use `networkConfig.networkInterfaces` on a `GCENodeClass` to override the access config that Karpenter inherits from its template pool.
+To override the automatic external-IP behaviour on a per-NodeClass basis:
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false
+  enablePrivateNodes: true   # force private, even on a public cluster
+  # or
+  enablePrivateNodes: false  # force public, even on a private cluster
 ```
 
-Setting `enableExternalIPAccess: false` removes the `ONE_TO_ONE_NAT` access config from the primary interface of every node Karpenter provisions via that `GCENodeClass`. The template pool itself (`karpenter-default`) is not modified.
+## Selectively disabling external IPs via NodeClass
+
+On a standard GKE cluster (public nodes), you may want Karpenter to provision nodes without external IPs while leaving other node pools public. Set `networkConfig.enablePrivateNodes: true` on a `GCENodeClass`:
+
+```yaml
+networkConfig:
+  enablePrivateNodes: true
+```
+
+Setting `enablePrivateNodes: true` removes the `ONE_TO_ONE_NAT` access config from every node Karpenter provisions via that `GCENodeClass`. This mirrors the `enable_private_nodes` field in the Terraform `google_container_node_pool` resource's `network_config` block.
 
 ### Prerequisites
 
@@ -53,12 +57,11 @@ See [NodePool examples — Private nodes](../examples/networking.md#private-node
 
 ## Overriding the subnetwork
 
-By default, nodes are placed in the subnetwork that the `karpenter-default` template inherits from the cluster. Use `networkConfig.networkInterfaces[].subnetwork` to place Karpenter nodes in a different subnetwork — for example one with a narrower CIDR or separate firewall rules.
+By default, nodes are placed in the cluster's primary subnetwork (read from `cluster.NetworkConfig.Subnetwork`). Use `networkConfig.subnetwork` to place Karpenter nodes in a different subnetwork — for example one with a narrower CIDR or separate firewall rules. This mirrors the `subnetwork` field in the Terraform `google_container_node_pool` `network_config` block.
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - subnetwork: regions/us-central1/subnetworks/karpenter-nodes
+  subnetwork: regions/us-central1/subnetworks/karpenter-nodes
 ```
 
 The value must be a [self-link or partial URL](https://cloud.google.com/compute/docs/reference/rest/v1/instances#networkinterface):
@@ -72,33 +75,38 @@ See [NodePool examples — Custom subnetwork](../examples/networking.md#custom-s
 
 ## Combining both overrides
 
-`enableExternalIPAccess` and `subnetwork` can be set together on the same interface entry:
+`enablePrivateNodes` and `subnetwork` can be set together:
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false
-      subnetwork: regions/us-central1/subnetworks/private-nodes
+  enablePrivateNodes: true
+  subnetwork: regions/us-central1/subnetworks/private-nodes
 ```
 
 ## Multi-interface nodes
 
-`networkInterfaces` is an ordered list matched to the node pool template interfaces by position (index 0 = primary interface). Interfaces in the template that have no corresponding entry in the list are left unchanged. The list is capped at 8 entries matching GCP's limit on network interfaces per instance.
+Use `additionalNetworkInterfaces` to attach secondary network interfaces. Each entry must specify a `subnetwork`. The `network` field is optional and defaults to the cluster's VPC. This mirrors the `additional_node_network_configs` block in the Terraform `google_container_node_pool` `network_config`.
 
 ```yaml
 networkConfig:
-  networkInterfaces:
-    - enableExternalIPAccess: false   # primary interface: no external IP
-    - subnetwork: regions/us-central1/subnetworks/secondary-net  # secondary interface: different subnet
+  enablePrivateNodes: true
+  additionalNetworkInterfaces:
+    - subnetwork: regions/us-central1/subnetworks/secondary-net  # network defaults to cluster VPC
+    - network: projects/p/global/networks/other-vpc               # explicit network override
+      subnetwork: regions/us-central1/subnetworks/other-net
 ```
+
+Secondary interfaces inherit the `enablePrivateNodes` setting from the top level.
 
 ## Relationship to `networkTags` and `subnetRangeName`
 
-| Field                                                      | Scope                     | Purpose                          |
-|------------------------------------------------------------|---------------------------|----------------------------------|
-| `networkTags`                                              | Instance (all interfaces) | GCP firewall rule targets        |
-| `networkConfig.networkInterfaces[].subnetwork`             | Per interface             | Which subnetwork to attach       |
-| `networkConfig.networkInterfaces[].enableExternalIPAccess` | Per interface             | Whether to assign an external IP |
-| `subnetRangeName`                                          | Per interface (all)       | Secondary IP range for pod IPs   |
+| Field                                                    | Scope                     | Purpose                          |
+|----------------------------------------------------------|---------------------------|----------------------------------|
+| `networkTags`                                            | Instance (all interfaces) | GCP firewall rule targets        |
+| `networkConfig.subnetwork`                               | Primary interface         | Which subnetwork to attach       |
+| `networkConfig.enablePrivateNodes`                       | All interfaces            | Whether to assign an external IP |
+| `networkConfig.additionalNetworkInterfaces[].network`    | Per secondary interface   | Which VPC network to attach      |
+| `networkConfig.additionalNetworkInterfaces[].subnetwork` | Per secondary interface   | Which subnetwork to attach       |
+| `subnetRangeName`                                        | Primary interface         | Secondary IP range for pod IPs   |
 
 `networkTags` is intentionally top-level because GCP's Compute API places tags on the `Instance` resource, not on individual `NetworkInterface` objects — they apply to all interfaces on the instance.
