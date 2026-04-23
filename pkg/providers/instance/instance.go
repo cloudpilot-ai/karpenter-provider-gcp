@@ -799,7 +799,7 @@ func applyAccessConfig(iface *compute.NetworkInterface, disableExternal bool) {
 
 // buildAdditionalInterfaces builds secondary NetworkInterface objects from additionalNetworkInterfaces.
 // Subnetwork is required by the CRD schema on each entry. Network falls back to the cluster network
-// when not explicitly set, mirroring GKE's additional_node_network_configs behaviour.
+// when not explicitly set, mirroring GKE's additional_node_network_configs behavior.
 func buildAdditionalInterfaces(clusterNetwork string, overrides []v1alpha1.AdditionalNetworkInterface, disableExternal bool) []*compute.NetworkInterface {
 	ifaces := make([]*compute.NetworkInterface, 0, len(overrides))
 	for _, override := range overrides {
