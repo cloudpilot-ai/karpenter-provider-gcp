@@ -17,7 +17,20 @@ gcloud services enable compute.googleapis.com container.googleapis.com
 
 ## Step 1 — Create a GCP service account
 
-Karpenter needs permissions to manage Compute Engine instances and GKE node pools.
+Karpenter needs the following GCP permissions at runtime:
+
+| Permission                            | Purpose                                                                  |
+|---------------------------------------|--------------------------------------------------------------------------|
+| `compute.instances.*`                 | Create, delete, list, and tag GCE VM instances                           |
+| `compute.disks.*`                     | Attach disks during instance creation                                    |
+| `compute.instanceTemplates.get`       | Read bootstrap node pool instance templates                              |
+| `compute.regionInstanceTemplates.get` | Read regional instance templates                                         |
+| `compute.instanceGroupManagers.get`   | Resolve instance group → template mapping                                |
+| `container.clusters.get`              | Read cluster network config (network, subnetwork, private-nodes setting) |
+| `container.nodePools.*`               | Create and delete bootstrap node pools                                   |
+| `iam.serviceAccounts.actAs`           | Assign a service account to provisioned nodes                            |
+
+The quickstart uses `roles/compute.admin` + `roles/container.admin` which covers all of the above. For production environments, consider a custom role scoped to only these permissions.
 
 ```sh
 export PROJECT_ID=<your-project-id>

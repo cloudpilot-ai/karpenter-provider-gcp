@@ -59,6 +59,12 @@ networkConfig:
 
 **Cluster-level private nodes** (`EnablePrivateNodes: true`) are now detected automatically — no NodeClass override is needed.
 
+### New IAM permission: `container.clusters.get`
+
+Karpenter now reads the cluster API at provisioning time (`container.projects.locations.clusters.get`) to derive network configuration. This requires the `container.clusters.get` IAM permission on the Karpenter service account.
+
+**Action required if you use a custom minimal IAM role** (not `roles/container.admin`): add `container.clusters.get` to the role. No action is needed if you use the predefined `roles/container.admin` role, which already includes this permission.
+
 ### Network tags
 
 Previously, Karpenter merged all tags from the bootstrap node pool template with `spec.networkTags` in NodeClass. Now only two sources are used:
