@@ -130,15 +130,15 @@ e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS
 
 FOCUS ?=
 SUITE ?=
-e2e-test: require-e2e-vars ## Run a single e2e spec (FOCUS="<substring>", optionally SUITE=<suite-dir>)
+e2e-test: require-e2e-vars ## Run a single e2e suite or focused spec (SUITE=<name>, FOCUS="<substring>", GINKGO_PROCS=N)
 	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_LOCATION) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
-	go test -count 1 -timeout 30m -v \
-	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...) \
-	-args -ginkgo.focus="$(FOCUS)" -ginkgo.v
+	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=30m -v \
+	$(if $(FOCUS),--focus="$(FOCUS)",) \
+	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...)
 
 e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \

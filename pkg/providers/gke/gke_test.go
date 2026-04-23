@@ -25,10 +25,9 @@ import (
 	"testing"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/stretchr/testify/require"
 	containerv1 "google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestGetClusterConfig_CacheHit(t *testing.T) {
