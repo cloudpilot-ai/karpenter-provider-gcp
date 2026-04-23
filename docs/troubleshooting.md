@@ -104,6 +104,14 @@ disks:
 
 ---
 
+## Private node clusters (org policy)
+
+Karpenter correctly omits external IPs from **provisioned nodes** on clusters with `enablePrivateNodes: true`. However, Karpenter still creates zero-node bootstrap node pools at startup. On clusters where an org policy enforces private nodes (e.g. `container.managed.enablePrivateNodes`), this pool creation request may be rejected by GKE, preventing Karpenter from starting.
+
+Full support for such clusters — eliminating bootstrap pool creation entirely — is tracked in [GitHub issue #263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263).
+
+---
+
 ## arm64 provisioning not available
 
 arm64 node provisioning is skipped at startup if the cluster's region does not support arm64 machine types. Check Karpenter startup logs for a message indicating that arm64 template pools were not created.
