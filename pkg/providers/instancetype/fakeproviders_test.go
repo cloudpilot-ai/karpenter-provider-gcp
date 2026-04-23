@@ -23,6 +23,7 @@ import (
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/patrickmn/go-cache"
+	containerv1 "google.golang.org/api/container/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -35,6 +36,10 @@ type fakeGKEProvider struct{}
 
 func (f *fakeGKEProvider) ResolveClusterZones(_ context.Context) ([]string, error) {
 	return []string{"us-central1-a"}, nil
+}
+
+func (f *fakeGKEProvider) GetClusterConfig(_ context.Context) (*containerv1.Cluster, error) {
+	return &containerv1.Cluster{}, nil
 }
 
 // fakePricingProvider returns a fixed price for every instance type without

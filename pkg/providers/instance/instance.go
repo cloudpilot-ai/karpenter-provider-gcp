@@ -30,6 +30,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -378,7 +379,13 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, "", nil, &retryableError{err}
 	}
 
-	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, capacityType)
+	clusterConfig, err := p.gkeProvider.GetClusterConfig(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to fetch cluster config")
+		return nil, "", nil, &retryableError{err}
+	}
+
+	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, clusterConfig, nodePoolName, zone, capacityType)
 	if err != nil {
 		if retryable {
 			return nil, "", nil, &retryableError{err}
@@ -389,7 +396,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 	return instance, zone, template, nil
 }
 
-func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, capacityType string) (*compute.Instance, bool, error) {
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, clusterConfig *container.Cluster, nodePoolName, zone, capacityType string) (*compute.Instance, bool, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
 	instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
 	if err != nil {
@@ -401,7 +408,7 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		return instance, false, nil
 	}
 
-	instance, err = p.buildInstance(nodeClaim, nodeClass, instanceType, template, nodePoolName, zone, instanceName, capacityType)
+	instance, err = p.buildInstance(nodeClaim, nodeClass, instanceType, template, clusterConfig, nodePoolName, zone, instanceName, capacityType)
 	if err != nil {
 		return nil, false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
@@ -671,7 +678,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, nodePoolName, zone, instanceName, capacityType string) (*compute.Instance, error) {
+func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, clusterConfig *container.Cluster, nodePoolName, zone, instanceName, capacityType string) (*compute.Instance, error) {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
@@ -685,8 +692,11 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// Setup service accounts
 	serviceAccounts := p.setupServiceAccounts(nodeClass, template.Properties.ServiceAccounts)
 
-	// setup network interfaces
-	networkInterfaces := p.setupNetworkInterfaces(template, nodeClass)
+	// Setup network interfaces
+	if clusterConfig.NetworkConfig == nil {
+		return nil, fmt.Errorf("cluster %q has no NetworkConfig; cannot build network interfaces", clusterConfig.Name)
+	}
+	networkInterfaces := p.setupNetworkInterfaces(clusterConfig, nodeClass)
 
 	sched := p.setupScheduling(template, capacityType)
 
@@ -700,7 +710,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
 		Scheduling:        sched,
-		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
+		Tags:              buildInstanceTags(p.clusterName, nodeClass.Spec.NetworkTags),
 		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
 
@@ -741,96 +751,97 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	return instance, nil
 }
 
-// nolint:gocyclo
-func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTemplate, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
-	// referring to: https://cloud.google.com/kubernetes-engine/docs/how-to/flexible-pod-cidr
-	maxPods := nodeClass.GetMaxPods()
-	targetRange := int32(maxNodeCIDR)
-	if maxPods <= 8 {
-		targetRange = 28
-	}
-	if maxPods >= 9 && maxPods <= 16 {
-		targetRange = 27
-	}
-	if maxPods >= 17 && maxPods <= 32 {
-		targetRange = 26
-	}
-	if maxPods >= 33 && maxPods <= 64 {
-		targetRange = 25
-	}
-	if maxPods >= 65 && maxPods <= 128 {
-		targetRange = 24
-	}
-	if maxPods >= 129 && maxPods <= 256 {
-		targetRange = 23
+func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
+	targetRange := podCIDRRange(nodeClass.GetMaxPods())
+	clusterPrivate := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
+
+	// Pod CIDR range name: NodeClass → cluster IpAllocationPolicy → let GKE pick.
+	rangeName := ""
+	if nodeClass.Spec.SubnetRangeName != nil {
+		rangeName = *nodeClass.Spec.SubnetRangeName
+	} else if cluster.IpAllocationPolicy != nil {
+		rangeName = cluster.IpAllocationPolicy.ClusterSecondaryRangeName
 	}
 
-	var networkInterfaces []*compute.NetworkInterface
-
-	for idx, networkInterface := range template.Properties.NetworkInterfaces {
-		copiedAliasIpRanges := make([]*compute.AliasIpRange, len(networkInterface.AliasIpRanges))
-		for i, r := range networkInterface.AliasIpRanges {
-			copied := *r
-			copiedAliasIpRanges[i] = &copied
+	// Primary interface: built from cluster config, overrideable via NodeClass networkConfig.
+	subnetwork := cluster.NetworkConfig.Subnetwork
+	disableExternal := clusterPrivate
+	if nodeClass.Spec.NetworkConfig != nil {
+		cfg := nodeClass.Spec.NetworkConfig
+		if cfg.Subnetwork != "" {
+			subnetwork = cfg.Subnetwork
 		}
-
-		// Deep-copy AccessConfigs so mutations to the new interface never reach the template.
-		copiedAccessConfigs := make([]*compute.AccessConfig, len(networkInterface.AccessConfigs))
-		for i, ac := range networkInterface.AccessConfigs {
-			copied := *ac
-			copiedAccessConfigs[i] = &copied
+		if cfg.EnablePrivateNodes != nil {
+			disableExternal = *cfg.EnablePrivateNodes
 		}
+	}
 
-		accessConfigs := copiedAccessConfigs
-		subnetwork := networkInterface.Subnetwork
-		if nodeClass.Spec.NetworkConfig != nil && idx < len(nodeClass.Spec.NetworkConfig.NetworkInterfaces) {
-			ifaceOverride := nodeClass.Spec.NetworkConfig.NetworkInterfaces[idx]
-			if ifaceOverride.EnableExternalIPAccess != nil && !*ifaceOverride.EnableExternalIPAccess {
-				accessConfigs = nil
-			}
-			if ifaceOverride.Subnetwork != "" {
-				subnetwork = ifaceOverride.Subnetwork
-			}
+	primary := &compute.NetworkInterface{
+		Network:    cluster.NetworkConfig.Network,
+		Subnetwork: subnetwork,
+		AliasIpRanges: []*compute.AliasIpRange{{
+			IpCidrRange:         fmt.Sprintf("/%d", targetRange),
+			SubnetworkRangeName: rangeName,
+		}},
+	}
+	applyAccessConfig(primary, disableExternal)
+
+	ifaces := []*compute.NetworkInterface{primary}
+
+	if nodeClass.Spec.NetworkConfig != nil {
+		ifaces = append(ifaces, buildAdditionalInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.AdditionalNetworkInterfaces, disableExternal)...)
+	}
+
+	return ifaces
+}
+
+// applyAccessConfig sets the ONE_TO_ONE_NAT access config on iface when external is enabled,
+// or force-sends an empty slice so the GCP API does not insert it automatically.
+func applyAccessConfig(iface *compute.NetworkInterface, disableExternal bool) {
+	if !disableExternal {
+		iface.AccessConfigs = []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT", Name: "External NAT"}}
+	} else {
+		iface.ForceSendFields = []string{"AccessConfigs"}
+	}
+}
+
+// buildAdditionalInterfaces builds secondary NetworkInterface objects from additionalNetworkInterfaces.
+// Subnetwork is required by the CRD schema on each entry. Network falls back to the cluster network
+// when not explicitly set, mirroring GKE's additional_node_network_configs behavior.
+func buildAdditionalInterfaces(clusterNetwork string, overrides []v1alpha1.AdditionalNetworkInterface, disableExternal bool) []*compute.NetworkInterface {
+	ifaces := make([]*compute.NetworkInterface, 0, len(overrides))
+	for _, override := range overrides {
+		network := clusterNetwork
+		if override.Network != "" {
+			network = override.Network
 		}
-
-		// When access configs are explicitly cleared, force-send the empty slice so the
-		// GCP API does not default-insert ONE_TO_ONE_NAT on the primary interface.
-		// Always copy so iface never shares the template's ForceSendFields backing array.
-		forceSendFields := append([]string{}, networkInterface.ForceSendFields...)
-		if accessConfigs == nil && !lo.Contains(forceSendFields, "AccessConfigs") {
-			forceSendFields = append(forceSendFields, "AccessConfigs")
-		}
-
 		iface := &compute.NetworkInterface{
-			AccessConfigs:            accessConfigs,
-			AliasIpRanges:            copiedAliasIpRanges,
-			Fingerprint:              networkInterface.Fingerprint,
-			InternalIpv6PrefixLength: networkInterface.InternalIpv6PrefixLength,
-			Ipv6AccessConfigs:        networkInterface.Ipv6AccessConfigs,
-			Ipv6AccessType:           networkInterface.Ipv6AccessType,
-			Ipv6Address:              networkInterface.Ipv6Address,
-			Kind:                     networkInterface.Kind,
-			Name:                     networkInterface.Name,
-			Network:                  networkInterface.Network,
-			NetworkIP:                networkInterface.NetworkIP,
-			NicType:                  networkInterface.NicType,
-			QueueCount:               networkInterface.QueueCount,
-			StackType:                networkInterface.StackType,
-			Subnetwork:               subnetwork,
-			ForceSendFields:          forceSendFields,
-			NullFields:               append([]string{}, networkInterface.NullFields...),
+			Network:    network,
+			Subnetwork: override.Subnetwork,
 		}
-		for aliasIpRangeIndex := range copiedAliasIpRanges {
-			// TODO: Optionally, add validation to ensure the network interface supports this range if needed
-			iface.AliasIpRanges[aliasIpRangeIndex].IpCidrRange = fmt.Sprintf("/%d", targetRange)
-			if nodeClass.Spec.SubnetRangeName != nil {
-				iface.AliasIpRanges[aliasIpRangeIndex].SubnetworkRangeName = *nodeClass.Spec.SubnetRangeName
-			}
-		}
-		networkInterfaces = append(networkInterfaces, iface)
+		applyAccessConfig(iface, disableExternal)
+		ifaces = append(ifaces, iface)
 	}
+	return ifaces
+}
 
-	return networkInterfaces
+// podCIDRRange returns the /N alias IP range size for the given maxPods count,
+// following https://cloud.google.com/kubernetes-engine/docs/how-to/flexible-pod-cidr
+func podCIDRRange(maxPods int32) int32 {
+	switch {
+	case maxPods <= 8:
+		return 28
+	case maxPods <= 16:
+		return 27
+	case maxPods <= 32:
+		return 26
+	case maxPods <= 64:
+		return 25
+	case maxPods <= 128:
+		return 24
+	default:
+		return int32(maxNodeCIDR)
+	}
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance
@@ -967,40 +978,17 @@ func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	return !ok || loc == p.clusterLocation
 }
 
-func mergeInstanceTags(templateTags *compute.Tags, networkTags []v1alpha1.NetworkTag) *compute.Tags {
-	if (templateTags == nil || len(templateTags.Items) == 0) && len(networkTags) == 0 {
-		return nil
+// buildInstanceTags constructs GCE network tags for a new node.
+// The cluster-wide tag (gke-<clusterName>-node) is always included — GKE's
+// cluster-level firewall rules match on this tag. NodeClass network tags are
+// appended after so callers can extend without replacing cluster routing.
+func buildInstanceTags(clusterName string, networkTags []v1alpha1.NetworkTag) *compute.Tags {
+	items := make([]string, 0, 1+len(networkTags))
+	items = append(items, fmt.Sprintf("gke-%s-node", clusterName))
+	for _, t := range networkTags {
+		items = append(items, string(t))
 	}
-
-	templateLen := 0
-	if templateTags != nil {
-		templateLen = len(templateTags.Items)
-	}
-
-	merged := make([]string, 0, templateLen+len(networkTags))
-
-	if templateLen > 0 {
-		merged = append(merged, templateTags.Items...)
-	}
-
-	if len(networkTags) > 0 {
-		tags := lo.Map(networkTags, func(tag v1alpha1.NetworkTag, _ int) string {
-			return string(tag)
-		})
-
-		merged = append(merged, tags...)
-	}
-
-	if len(merged) == 0 {
-		return nil
-	}
-
-	newTags := &compute.Tags{Items: merged}
-	if templateTags != nil {
-		newTags.Fingerprint = templateTags.Fingerprint
-	}
-
-	return newTags
+	return &compute.Tags{Items: lo.Uniq(items)}
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance, error) {

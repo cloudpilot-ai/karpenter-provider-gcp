@@ -123,7 +123,11 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		log.FromContext(ctx).Error(err, "failed to create gke client")
 		os.Exit(1)
 	}
-	gkeProvider := gke.NewDefaultProvider(gkeClient, computeService)
+	gkeProvider := gke.NewDefaultProvider(gkeClient, computeService, containerService,
+		options.FromContext(ctx).ProjectID,
+		options.FromContext(ctx).NodeLocation,
+		options.FromContext(ctx).ClusterName,
+	)
 
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,
