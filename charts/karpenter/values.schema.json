@@ -134,6 +134,10 @@
               "enum": ["Always", "IfNotPresent", "Never"],
               "description": "Image pull policy.",
               "default": "IfNotPresent"
+            },
+            "digest": {
+              "type": "string",
+              "description": "Image digest (sha256:...). Overrides tag when set."
             }
           }
         },
@@ -220,6 +224,16 @@
               "type": "boolean",
               "description": "Enable NodeOverlay (alpha). Allows node overlay to influence scheduling decisions.",
               "default": false
+            },
+            "staticCapacity": {
+              "type": "boolean",
+              "description": "Enable static capacity (alpha). NodePool with spec.replicas maintains a fixed number of nodes.",
+              "default": false
+            },
+            "nodeRepair": {
+              "type": "boolean",
+              "description": "Enable node repair (alpha). Replaces nodes failing GKE Node Problem Detector health conditions.",
+              "default": false
             }
           }
         },
@@ -269,6 +283,10 @@
               "type": "string",
               "description": "Idle timeout that ends a batch window when no new pods arrive (e.g. 1s).",
               "default": "1s"
+            },
+            "interruptionQueue": {
+              "type": "string",
+              "description": "GCP Pub/Sub subscription name for Spot interruption notifications."
             }
           }
         }
