@@ -692,6 +692,9 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
+	if clusterConfig.NetworkConfig == nil {
+		return nil, fmt.Errorf("cluster %q has no NetworkConfig; cannot build network interfaces", clusterConfig.Name)
+	}
 	networkInterfaces := p.setupNetworkInterfaces(clusterConfig, nodeClass)
 
 	instance := &compute.Instance{
@@ -965,7 +968,7 @@ func buildInstanceTags(clusterName string, networkTags []v1alpha1.NetworkTag) *c
 	for _, t := range networkTags {
 		items = append(items, string(t))
 	}
-	return &compute.Tags{Items: items}
+	return &compute.Tags{Items: lo.Uniq(items)}
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance, error) {

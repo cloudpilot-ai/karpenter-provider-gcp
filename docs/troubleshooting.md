@@ -71,7 +71,7 @@ This is a known limitation tracked in [GitHub issue #245](https://github.com/clo
 
 Karpenter correctly omits external IPs from **provisioned nodes** on clusters with `enablePrivateNodes: true`. However, Karpenter still creates zero-node bootstrap node pools at startup. On clusters where an org policy enforces private nodes (e.g. `container.managed.enablePrivateNodes`), this pool creation request may be rejected by GKE, preventing Karpenter from starting.
 
-Full support for such clusters — eliminating bootstrap pool creation entirely — is tracked in [GitHub issue #263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263).
+Full support for such clusters — eliminating bootstrap pool creation entirely — is tracked in [PR #263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263).
 
 ---
 

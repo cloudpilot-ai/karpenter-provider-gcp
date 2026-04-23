@@ -882,6 +882,31 @@ func TestSetupNetworkInterfaces_AdditionalInterfaceNetworkOverride(t *testing.T)
 	require.Equal(t, "projects/p/global/networks/other-vpc", result[1].Network)
 }
 
+func TestSetupNetworkInterfaces_NodeClassEnablePrivateNodesWithAdditionalInterfaces(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				EnablePrivateNodes: ptr.To(true),
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
+					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
+				},
+			},
+		},
+	}
+	// Public cluster: NodeClass override drives private behaviour on both interfaces.
+	cluster := makeCluster("net", "subnet", "pods", false)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+	require.Len(t, result, 2)
+	require.Empty(t, result[0].AccessConfigs)
+	require.Contains(t, result[0].ForceSendFields, "AccessConfigs")
+	require.Empty(t, result[1].AccessConfigs)
+	require.Contains(t, result[1].ForceSendFields, "AccessConfigs")
+}
+
 func TestSetupNetworkInterfaces_AdditionalInterfacePrivateCluster(t *testing.T) {
 	t.Parallel()
 
