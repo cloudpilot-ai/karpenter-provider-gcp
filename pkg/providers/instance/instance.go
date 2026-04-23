@@ -779,40 +779,51 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 			SubnetworkRangeName: rangeName,
 		}},
 	}
-	if !disableExternal {
-		primary.AccessConfigs = []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT", Name: "External NAT"}}
-	} else {
-		// Force-send empty slice so GCP API does not default-insert ONE_TO_ONE_NAT.
-		primary.ForceSendFields = []string{"AccessConfigs"}
-	}
+	applyAccessConfig(primary, disableExternal)
 
 	ifaces := []*compute.NetworkInterface{primary}
 
-	// Secondary interfaces: subnetwork is required (enforced by CRD validation).
 	if nodeClass.Spec.NetworkConfig != nil {
-		for i, override := range nodeClass.Spec.NetworkConfig.NetworkInterfaces[1:] {
-			if override.Subnetwork == "" {
-				// Should not reach here for valid CRs — CRD CEL rule enforces subnetwork on
-				// secondary entries. Guard against pre-validation CRs applied before this rule.
-				return nil, fmt.Errorf("networkInterfaces[%d]: subnetwork is required for secondary interfaces", i+1)
-			}
-			iface := &compute.NetworkInterface{
-				Network:    cluster.NetworkConfig.Network,
-				Subnetwork: override.Subnetwork,
-			}
-			disableSecondaryExternal := clusterPrivate
-			if override.EnableExternalIPAccess != nil {
-				disableSecondaryExternal = !*override.EnableExternalIPAccess
-			}
-			if !disableSecondaryExternal {
-				iface.AccessConfigs = []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT", Name: "External NAT"}}
-			} else {
-				iface.ForceSendFields = []string{"AccessConfigs"}
-			}
-			ifaces = append(ifaces, iface)
+		secondary, err := buildSecondaryInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.NetworkInterfaces[1:], clusterPrivate)
+		if err != nil {
+			return nil, err
 		}
+		ifaces = append(ifaces, secondary...)
 	}
 
+	return ifaces, nil
+}
+
+// applyAccessConfig sets the ONE_TO_ONE_NAT access config on iface when external is enabled,
+// or force-sends an empty slice so the GCP API does not insert it automatically.
+func applyAccessConfig(iface *compute.NetworkInterface, disableExternal bool) {
+	if !disableExternal {
+		iface.AccessConfigs = []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT", Name: "External NAT"}}
+	} else {
+		iface.ForceSendFields = []string{"AccessConfigs"}
+	}
+}
+
+// buildSecondaryInterfaces builds secondary NetworkInterface objects from NodeClass overrides.
+// All secondary entries must specify a subnetwork — the CRD CEL rule enforces this for valid CRs;
+// the check here guards against CRs applied before the validation rule was introduced.
+func buildSecondaryInterfaces(network string, overrides []v1alpha1.NetworkInterface, clusterPrivate bool) ([]*compute.NetworkInterface, error) {
+	ifaces := make([]*compute.NetworkInterface, 0, len(overrides))
+	for i, override := range overrides {
+		if override.Subnetwork == "" {
+			return nil, fmt.Errorf("networkInterfaces[%d]: subnetwork is required for secondary interfaces", i+1)
+		}
+		iface := &compute.NetworkInterface{
+			Network:    network,
+			Subnetwork: override.Subnetwork,
+		}
+		disableExternal := clusterPrivate
+		if override.EnableExternalIPAccess != nil {
+			disableExternal = !*override.EnableExternalIPAccess
+		}
+		applyAccessConfig(iface, disableExternal)
+		ifaces = append(ifaces, iface)
+	}
 	return ifaces, nil
 }
 
