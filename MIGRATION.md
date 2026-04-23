@@ -12,7 +12,7 @@ The `networkConfig` API has been redesigned to mirror the `network_config` block
 - `networkConfig.subnetwork` — primary subnetwork override (mirrors `network_config.subnetwork`)
 - `networkConfig.additionalNetworkInterfaces` — secondary interfaces, each requiring a `subnetwork` and optionally a `network` (mirrors `network_config.additional_node_network_configs`)
 
-**Action required if you used `networkConfig.networkInterfaces`:**
+**Action required if you used `networkConfig.networkInterfaces` (this field existed only in unreleased `main` builds — no released version ever shipped it):**
 
 ```yaml
 # Before
@@ -42,7 +42,7 @@ networkConfig:
     - subnetwork: regions/us-central1/subnetworks/secondary
 ```
 
-**Action required if you used `networkConfig.networkInterface` (the intermediate wrapper form):**
+**Action required if you used `networkConfig.networkInterface` (the intermediate wrapper form — also only in unreleased `main` builds):**
 
 ```yaml
 # Before
