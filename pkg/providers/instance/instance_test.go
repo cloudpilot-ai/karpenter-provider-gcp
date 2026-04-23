@@ -896,7 +896,7 @@ func TestSetupNetworkInterfaces_NodeClassEnablePrivateNodesWithAdditionalInterfa
 			},
 		},
 	}
-	// Public cluster: NodeClass override drives private behaviour on both interfaces.
+	// Public cluster: NodeClass override drives private behavior on both interfaces.
 	cluster := makeCluster("net", "subnet", "pods", false)
 	result := p.setupNetworkInterfaces(cluster, nodeClass)
 
