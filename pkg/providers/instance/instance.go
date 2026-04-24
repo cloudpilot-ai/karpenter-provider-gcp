@@ -684,12 +684,17 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
+	serviceAccounts, err := p.setupServiceAccounts(nodeClass)
+	if err != nil {
+		return nil, fmt.Errorf("setting up service accounts: %w", err)
+	}
+
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
 		NetworkInterfaces: p.setupNetworkInterfaces(template, nodeClass),
-		ServiceAccounts:   p.setupServiceAccounts(nodeClass),
+		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
 		Scheduling:        setupScheduling(capacityType),
@@ -861,11 +866,14 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 	return nil
 }
 
-// setupServiceAccounts configures service accounts for the instance
-func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass) []*compute.ServiceAccount {
+// setupServiceAccounts configures service accounts for the instance.
+// Returns an error if no service account can be resolved, which means the project has
+// disabled the Compute Engine default SA and neither spec.serviceAccount nor
+// DEFAULT_NODEPOOL_SERVICE_ACCOUNT is set — nodes would fail to authenticate without an SA.
+func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass) ([]*compute.ServiceAccount, error) {
 	serviceAccount := p.resolveServiceAccount(nodeClass)
 	if serviceAccount == "" {
-		return nil
+		return nil, fmt.Errorf("no service account available: spec.serviceAccount and DEFAULT_NODEPOOL_SERVICE_ACCOUNT are unset, and the Compute Engine default SA is unavailable for this project")
 	}
 
 	return []*compute.ServiceAccount{
@@ -881,7 +889,7 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass)
 				"https://www.googleapis.com/auth/cloud-platform",
 			},
 		},
-	}
+	}, nil
 }
 
 // setupScheduling returns scheduling config derived from capacity type alone.
