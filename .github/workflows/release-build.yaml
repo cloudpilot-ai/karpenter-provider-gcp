@@ -81,8 +81,10 @@ jobs:
             exit 1
           fi
 
-      - name: Package chart
-        run: helm package charts/karpenter --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
+      - name: Package charts
+        run: |
+          helm package charts/karpenter     --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
+          helm package charts/karpenter-crd --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
 
       - name: Update Helm repo index
         run: |
@@ -98,22 +100,28 @@ jobs:
       - name: Restore previously published chart versions
         run: |
           PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          VERSIONS=$(grep '^    version:' /tmp/merge-index.yaml 2>/dev/null | awk '{print $2}')
-          [ -z "${VERSIONS}" ] && exit 0
+          [ ! -f /tmp/merge-index.yaml ] && exit 0
 
           helm repo add karpenter-gcp "${PAGES_URL}" --force-update
-          echo "${VERSIONS}" | while read VERSION; do
-            if [ ! -f "charts/karpenter-${VERSION}.tgz" ]; then
-              echo "Pulling karpenter ${VERSION}..."
-              helm pull karpenter-gcp/karpenter --version "${VERSION}" --destination charts/
-            fi
-          done
 
-          # Fail rather than deploy an incomplete repo
-          EXPECTED=$(echo "${VERSIONS}" | grep -c .)
-          ACTUAL=$(ls charts/karpenter-*.tgz 2>/dev/null | wc -l | tr -d ' ')
+          # Parse "chart_name version" pairs from the Helm index YAML using awk.
+          # Chart names appear at 2-space indent (e.g. "  karpenter:"); versions at 4-space indent.
+          awk '/^  [a-z].*:$/ { chart=$1; sub(/:$/,"",chart) } /^    version:/ { print chart " " $2 }' \
+            /tmp/merge-index.yaml > /tmp/chart-versions.txt
+
+          while read CHART VERSION; do
+            TARBALL="charts/${CHART}-${VERSION}.tgz"
+            if [ ! -f "${TARBALL}" ]; then
+              echo "Pulling ${CHART} ${VERSION}..."
+              helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --destination charts/ || \
+                echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
+            fi
+          done < /tmp/chart-versions.txt
+
+          EXPECTED=$(wc -l < /tmp/chart-versions.txt | tr -d ' ')
+          ACTUAL=$(ls charts/karpenter*.tgz 2>/dev/null | wc -l | tr -d ' ')
           if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
-            echo "ERROR: Expected ${EXPECTED} chart versions but only have ${ACTUAL}. Aborting."
+            echo "ERROR: Expected ${EXPECTED} chart archives but only have ${ACTUAL}. Aborting."
             exit 1
           fi
 
