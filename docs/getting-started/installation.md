@@ -48,6 +48,10 @@ export REGION=<your-region-or-zone>   # e.g. us-central1 or us-central1-f
 helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
 helm repo update
 
+# Install CRDs first (separate chart ensures CRDs are upgraded on helm upgrade)
+helm upgrade --install karpenter-crd karpenter-provider-gcp/karpenter-crd
+
+# Install the controller
 helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
@@ -113,6 +117,10 @@ helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
 ```
 
 > **Warning:** Service account keys are long-lived credentials. Prefer Workload Identity wherever possible.
+
+## Upgrading
+
+See the [upgrade guide](upgrading.md).
 
 ## Uninstalling
 
