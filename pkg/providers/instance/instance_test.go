@@ -1310,39 +1310,39 @@ func TestResolveServiceAccount(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name                 string
-		specServiceAccount   string
+		name                  string
+		specServiceAccount    string
 		defaultServiceAccount string
-		computeDefaultSA     string
-		want                 string
+		computeDefaultSA      string
+		want                  string
 	}{
 		{
-			name:               "spec.serviceAccount takes priority over all",
-			specServiceAccount: "spec-sa@project.iam.gserviceaccount.com",
+			name:                  "spec.serviceAccount takes priority over all",
+			specServiceAccount:    "spec-sa@project.iam.gserviceaccount.com",
 			defaultServiceAccount: "flag-sa@project.iam.gserviceaccount.com",
-			computeDefaultSA:  "123-compute@developer.gserviceaccount.com",
-			want:               "spec-sa@project.iam.gserviceaccount.com",
+			computeDefaultSA:      "123-compute@developer.gserviceaccount.com",
+			want:                  "spec-sa@project.iam.gserviceaccount.com",
 		},
 		{
-			name:               "DEFAULT_NODEPOOL_SERVICE_ACCOUNT used when spec is empty",
-			specServiceAccount: "",
+			name:                  "DEFAULT_NODEPOOL_SERVICE_ACCOUNT used when spec is empty",
+			specServiceAccount:    "",
 			defaultServiceAccount: "flag-sa@project.iam.gserviceaccount.com",
-			computeDefaultSA:  "123-compute@developer.gserviceaccount.com",
-			want:               "flag-sa@project.iam.gserviceaccount.com",
+			computeDefaultSA:      "123-compute@developer.gserviceaccount.com",
+			want:                  "flag-sa@project.iam.gserviceaccount.com",
 		},
 		{
-			name:               "Compute Engine default SA used as final fallback",
-			specServiceAccount: "",
+			name:                  "Compute Engine default SA used as final fallback",
+			specServiceAccount:    "",
 			defaultServiceAccount: "",
-			computeDefaultSA:  "123-compute@developer.gserviceaccount.com",
-			want:               "123-compute@developer.gserviceaccount.com",
+			computeDefaultSA:      "123-compute@developer.gserviceaccount.com",
+			want:                  "123-compute@developer.gserviceaccount.com",
 		},
 		{
-			name:               "empty string when all sources are unset",
-			specServiceAccount: "",
+			name:                  "empty string when all sources are unset",
+			specServiceAccount:    "",
 			defaultServiceAccount: "",
-			computeDefaultSA:  "",
-			want:               "",
+			computeDefaultSA:      "",
+			want:                  "",
 		},
 	}
 
