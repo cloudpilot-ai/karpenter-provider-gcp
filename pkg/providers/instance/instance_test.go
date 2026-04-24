@@ -1059,7 +1059,7 @@ func TestGetCapacityType(t *testing.T) {
 func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
+	p := &DefaultProvider{computeDefaultSA: "123-compute@developer.gserviceaccount.com"}
 
 	// on-demand-only: no spot offering — pre-fix buildInstance would recompute "on-demand" from this.
 	onDemandOnlyIT := &cloudprovider.InstanceType{
@@ -1262,6 +1262,61 @@ func TestBelongsToCluster(t *testing.T) {
 			p := &DefaultProvider{clusterLocation: controllerLocation}
 			inst := &Instance{InstanceID: "test-instance", Labels: tc.labels}
 			require.Equal(t, tc.want, p.belongsToCluster(inst), tc.name)
+		})
+	}
+}
+
+func TestResolveServiceAccount(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                 string
+		specServiceAccount   string
+		defaultServiceAccount string
+		computeDefaultSA     string
+		want                 string
+	}{
+		{
+			name:               "spec.serviceAccount takes priority over all",
+			specServiceAccount: "spec-sa@project.iam.gserviceaccount.com",
+			defaultServiceAccount: "flag-sa@project.iam.gserviceaccount.com",
+			computeDefaultSA:  "123-compute@developer.gserviceaccount.com",
+			want:               "spec-sa@project.iam.gserviceaccount.com",
+		},
+		{
+			name:               "DEFAULT_NODEPOOL_SERVICE_ACCOUNT used when spec is empty",
+			specServiceAccount: "",
+			defaultServiceAccount: "flag-sa@project.iam.gserviceaccount.com",
+			computeDefaultSA:  "123-compute@developer.gserviceaccount.com",
+			want:               "flag-sa@project.iam.gserviceaccount.com",
+		},
+		{
+			name:               "Compute Engine default SA used as final fallback",
+			specServiceAccount: "",
+			defaultServiceAccount: "",
+			computeDefaultSA:  "123-compute@developer.gserviceaccount.com",
+			want:               "123-compute@developer.gserviceaccount.com",
+		},
+		{
+			name:               "empty string when all sources are unset",
+			specServiceAccount: "",
+			defaultServiceAccount: "",
+			computeDefaultSA:  "",
+			want:               "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := &DefaultProvider{
+				defaultServiceAccount: tc.defaultServiceAccount,
+				computeDefaultSA:      tc.computeDefaultSA,
+			}
+			nodeClass := &v1alpha1.GCENodeClass{}
+			nodeClass.Spec.ServiceAccount = tc.specServiceAccount
+			require.Equal(t, tc.want, p.resolveServiceAccount(nodeClass))
 		})
 	}
 }
