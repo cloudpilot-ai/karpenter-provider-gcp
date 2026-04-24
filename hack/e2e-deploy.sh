@@ -42,6 +42,13 @@ IMAGE_REF="$(
 )"
 log "Image: ${IMAGE_REF}"
 
+log "Installing/upgrading karpenter-crd chart..."
+helm upgrade --install karpenter-crd "${REPO_ROOT}/charts/karpenter-crd" \
+  --namespace karpenter-system \
+  --create-namespace \
+  --wait \
+  --timeout 2m
+
 log "Deploying karpenter via Helm..."
 helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
   --namespace karpenter-system \
