@@ -1360,3 +1360,14 @@ func TestResolveServiceAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestSetupServiceAccounts_ErrorWhenNoSAAvailable(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{}
+
+	_, err := p.setupServiceAccounts(nodeClass)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no service account available")
+}
