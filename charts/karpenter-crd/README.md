@@ -1,6 +1,6 @@
 # karpenter-crd
 
-Karpenter GCP CRD chart — installs and upgrades Karpenter CustomResourceDefinitions independently
+Karpenter GCP CRD chart - installs and upgrades Karpenter CustomResourceDefinitions independently
 
 The `karpenter-crd` chart installs and upgrades the Karpenter GCP CRDs independently
 of the controller chart. Installing CRDs via this chart allows `helm upgrade karpenter-crd`
