@@ -96,15 +96,19 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		operator.GetClient(),
 		computeService,
 		containerService,
-		versionProvider,
 		options.FromContext(ctx).ClusterName,
 		region,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
 		options.FromContext(ctx).ClusterLocation,
 		options.FromContext(ctx).NodeLocation,
+		options.FromContext(ctx).DefaultNodePoolTemplateName,
 	)
-	imageProvider := imagefamily.NewDefaultProvider(computeService, nodeTemplateProvider)
+	if nodeTemplateProvider == nil {
+		log.FromContext(ctx).Error(fmt.Errorf("zone resolution failed at startup"), "failed to create node pool template provider")
+		os.Exit(1)
+	}
+	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider)
 	pricingProvider, err := pricing.NewDefaultProvider(ctx, region)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create pricing provider")
@@ -133,6 +137,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).NodePoolServiceAccount,
 		computeService,
 		gkeProvider,
+		nodeTemplateProvider,
+		versionProvider,
 		unavailableOfferingsCache,
 	)
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache)

@@ -67,16 +67,6 @@ This is a known limitation tracked in [GitHub issue #245](https://github.com/clo
 
 ---
 
-## Private node clusters
-
-Karpenter GCP has not been tested on clusters that enforce private nodes at the cluster level (`enablePrivateNodes: true`). The node pool template creation request may be rejected on such clusters.
-
-For selectively provisioning nodes without a public IP on a standard cluster, see [Private Nodes](networking/private-nodes.md).
-
-Support for cluster-level private nodes is tracked in [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
-
----
-
 ## CSR (Certificate Signing Request) not approved
 
 Karpenter runs a CSR approver controller that automatically approves node bootstrap CSRs. If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
@@ -110,18 +100,6 @@ disks:
     sizeGiB: 60
     boot: true
     kmsKeyName: projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key
-```
-
----
-
-## arm64 provisioning not available
-
-arm64 node provisioning is skipped at startup if the cluster's region does not support arm64 machine types. Check Karpenter startup logs for a message indicating that arm64 template pools were not created.
-
-If arm64 support is needed, verify that arm64 machine types (e.g. `c4a`, `t2a`) are available in your cluster's region:
-
-```sh
-gcloud compute machine-types list --zones=ZONE --filter="name:t2a OR name:c4a"
 ```
 
 ---
