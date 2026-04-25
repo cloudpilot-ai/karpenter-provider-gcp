@@ -15,7 +15,7 @@ for crd in gcenodeclasses.karpenter.k8s.gcp \
            nodepools.karpenter.sh; do
   kubectl annotate crd $crd \
     meta.helm.sh/release-name=karpenter-crd \
-    meta.helm.sh/release-namespace=<karpenter-namespace> \
+    meta.helm.sh/release-namespace=karpenter-system \
     --overwrite
   kubectl label crd $crd app.kubernetes.io/managed-by=Helm --overwrite
 done
@@ -28,8 +28,8 @@ helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-p
 helm repo update
 
 helm install karpenter-crd karpenter-provider-gcp/karpenter-crd \
-  --namespace <karpenter-namespace>
+  --namespace karpenter-system
 
 helm upgrade karpenter karpenter-provider-gcp/karpenter \
-  --namespace <karpenter-namespace>
+  --namespace karpenter-system
 ```
