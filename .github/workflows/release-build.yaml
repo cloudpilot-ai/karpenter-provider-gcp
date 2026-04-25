@@ -104,26 +104,29 @@ jobs:
 
           helm repo add karpenter-gcp "${PAGES_URL}" --force-update
 
-          # Parse "chart_name version" pairs from the Helm index YAML using awk.
-          # Chart names appear at 2-space indent (e.g. "  karpenter:"); versions at 4-space indent.
-          awk '/^  [a-z].*:$/ { chart=$1; sub(/:$/,"",chart) } /^    version:/ { print chart " " $2 }' \
-            /tmp/merge-index.yaml > /tmp/chart-versions.txt
+          for CHART in karpenter karpenter-crd; do
+            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions -o json 2>/dev/null | jq -r '.[].version' || true)
+            [ -z "${VERSIONS}" ] && continue
 
-          while read CHART VERSION; do
-            TARBALL="charts/${CHART}-${VERSION}.tgz"
-            if [ ! -f "${TARBALL}" ]; then
-              echo "Pulling ${CHART} ${VERSION}..."
-              helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --destination charts/ || \
-                echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
+            echo "${VERSIONS}" | while read VERSION; do
+              if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
+                echo "Pulling ${CHART} ${VERSION}..."
+                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --destination charts/ || \
+                  echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
+              fi
+            done
+
+            # Fail rather than deploy an incomplete repo
+            ACTUAL=0
+            for V in ${VERSIONS}; do
+              [ -f "charts/${CHART}-${V}.tgz" ] && ACTUAL=$((ACTUAL + 1))
+            done
+            EXPECTED=$(echo "${VERSIONS}" | grep -c .)
+            if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
+              echo "ERROR: Expected ${EXPECTED} ${CHART} archives but only have ${ACTUAL}. Aborting."
+              exit 1
             fi
-          done < /tmp/chart-versions.txt
-
-          EXPECTED=$(wc -l < /tmp/chart-versions.txt | tr -d ' ')
-          ACTUAL=$(ls charts/karpenter*.tgz 2>/dev/null | wc -l | tr -d ' ')
-          if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
-            echo "ERROR: Expected ${EXPECTED} chart archives but only have ${ACTUAL}. Aborting."
-            exit 1
-          fi
+          done
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
