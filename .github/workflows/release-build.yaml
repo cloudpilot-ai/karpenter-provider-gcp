@@ -81,8 +81,11 @@ jobs:
             exit 1
           fi
 
-      - name: Package chart
-        run: helm package charts/karpenter --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
+      - name: Package charts
+        run: |
+          for CHART in karpenter karpenter-crd; do
+            helm package "charts/${CHART}"  --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/
+          done
 
       - name: Update Helm repo index
         run: |
@@ -98,24 +101,31 @@ jobs:
       - name: Restore previously published chart versions
         run: |
           PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          VERSIONS=$(grep '^    version:' /tmp/merge-index.yaml 2>/dev/null | awk '{print $2}')
-          [ -z "${VERSIONS}" ] && exit 0
+          [ ! -f /tmp/merge-index.yaml ] && exit 0
 
           helm repo add karpenter-gcp "${PAGES_URL}" --force-update
-          echo "${VERSIONS}" | while read VERSION; do
-            if [ ! -f "charts/karpenter-${VERSION}.tgz" ]; then
-              echo "Pulling karpenter ${VERSION}..."
-              helm pull karpenter-gcp/karpenter --version "${VERSION}" --destination charts/
+
+          for CHART in karpenter karpenter-crd; do
+            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions -o json 2>/dev/null | jq -r '.[].version' || true)
+            [ -z "${VERSIONS}" ] && continue
+
+            echo "${VERSIONS}" | while read VERSION; do
+              if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
+                echo "Pulling ${CHART} ${VERSION}..."
+                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --destination charts/
+              fi
+            done
+
+            ACTUAL=0
+            for V in ${VERSIONS}; do
+              [ -f "charts/${CHART}-${V}.tgz" ] && ACTUAL=$((ACTUAL + 1))
+            done
+            EXPECTED=$(echo "${VERSIONS}" | grep -c .)
+            if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
+              echo "ERROR: Expected ${EXPECTED} ${CHART} versions but only have ${ACTUAL}. Aborting."
+              exit 1
             fi
           done
-
-          # Fail rather than deploy an incomplete repo
-          EXPECTED=$(echo "${VERSIONS}" | grep -c .)
-          ACTUAL=$(ls charts/karpenter-*.tgz 2>/dev/null | wc -l | tr -d ' ')
-          if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
-            echo "ERROR: Expected ${EXPECTED} chart versions but only have ${ACTUAL}. Aborting."
-            exit 1
-          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

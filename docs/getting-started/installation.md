@@ -38,17 +38,30 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
     --role="roles/iam.serviceAccountUser"
 ```
 
-## Step 2 — Install Karpenter with Helm
+## Step 2 — Install the CRD chart
+
+Karpenter's CRDs ship as a separate `karpenter-crd` chart so they can be upgraded via `helm upgrade` (Helm treats files in a chart's `crds/` directory as install-only and never updates them on subsequent upgrades). Install it first, at the same version as the main `karpenter` chart:
+
+```sh
+export KARPENTER_VERSION=<chart-version>   # same version used for the main chart below
+
+helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
+helm repo update
+
+helm install karpenter-crd karpenter-provider-gcp/karpenter-crd \
+  --version "${KARPENTER_VERSION}" \
+  --namespace karpenter-system --create-namespace
+```
+
+## Step 3 — Install Karpenter with Helm
 
 ```sh
 export PROJECT_ID=<your-project-id>
 export CLUSTER_NAME=<your-cluster-name>
 export REGION=<your-region-or-zone>   # e.g. us-central1 or us-central1-f
 
-helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
-helm repo update
-
 helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
+  --version "${KARPENTER_VERSION}" \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \
@@ -58,7 +71,7 @@ helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
   --wait
 ```
 
-## Step 3 — Bind Workload Identity
+## Step 4 — Bind Workload Identity
 
 Allow the Karpenter Kubernetes service account to impersonate the GCP service account:
 
@@ -69,7 +82,7 @@ gcloud iam service-accounts add-iam-policy-binding \
     --member "serviceAccount:$PROJECT_ID.svc.id.goog[karpenter-system/karpenter]"
 ```
 
-## Step 4 — Verify
+## Step 5 — Verify
 
 ```sh
 kubectl get pods -n karpenter-system
@@ -101,10 +114,11 @@ kubectl create secret generic karpenter-gcp-credentials \
     --from-file=key.json=key.json
 ```
 
-Install without `credentials.enabled=false` (the default enables key-based auth):
+Install the CRD chart first (per Step 2 above), then install the main chart without `credentials.enabled=false` (the default enables key-based auth):
 
 ```sh
 helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
+  --version "${KARPENTER_VERSION}" \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \
@@ -118,8 +132,15 @@ helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
 
 ```sh
 helm uninstall karpenter --namespace karpenter-system
+helm uninstall karpenter-crd --namespace karpenter-system
 kubectl delete namespace karpenter-system
 ```
+
+> **Warning:** Uninstalling `karpenter-crd` deletes the four CRDs and cascade-deletes every `GCENodeClass`, `NodePool`, and `NodeClaim` in the cluster. Only do this if you intend to fully remove Karpenter.
+
+## Upgrading from earlier chart versions?
+
+See [Upgrading](./upgrading.md) for migration guidance from chart versions that bundled CRDs in the main `karpenter` chart.
 
 ## Next steps
 

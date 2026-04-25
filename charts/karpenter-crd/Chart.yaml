@@ -1,0 +1,10 @@
+apiVersion: v2
+name: karpenter-crd
+description: Custom Resource Definitions for the Karpenter GCP Cloud Provider
+
+type: application
+
+# Real version and appVersion are injected at packaging time by `helm package --version --app-version`
+# (matches charts/karpenter pattern). Keep these at 0.0.0 in source so upstream merges don't conflict.
+version: 0.0.0
+appVersion: "0.0.0"
