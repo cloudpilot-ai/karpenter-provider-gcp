@@ -40,16 +40,13 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 
 ## Step 2 — Install the CRD chart
 
-Karpenter's CRDs ship as a separate `karpenter-crd` chart so they can be upgraded via `helm upgrade` (Helm treats files in a chart's `crds/` directory as install-only and never updates them on subsequent upgrades). Install it first, at the same version as the main `karpenter` chart:
+Karpenter's CRDs ship as a separate `karpenter-crd` chart so they can be upgraded via `helm upgrade` (Helm treats files in a chart's `crds/` directory as install-only and never updates them on subsequent upgrades). Install it first.
 
 ```sh
-export KARPENTER_VERSION=<chart-version>   # same version used for the main chart below
-
 helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
 helm repo update
 
 helm install karpenter-crd karpenter-provider-gcp/karpenter-crd \
-  --version "${KARPENTER_VERSION}" \
   --namespace karpenter-system --create-namespace
 ```
 
@@ -61,7 +58,6 @@ export CLUSTER_NAME=<your-cluster-name>
 export REGION=<your-region-or-zone>   # e.g. us-central1 or us-central1-f
 
 helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
-  --version "${KARPENTER_VERSION}" \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \
@@ -118,7 +114,6 @@ Install the CRD chart first (per Step 2 above), then install the main chart with
 
 ```sh
 helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
-  --version "${KARPENTER_VERSION}" \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \

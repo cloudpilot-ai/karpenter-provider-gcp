@@ -21,17 +21,15 @@ for crd in gcenodeclasses.karpenter.k8s.gcp \
 done
 ```
 
-Then install the companion chart at the same version as your main chart, followed by upgrading the main chart:
+Then install the companion chart, followed by upgrading the main chart:
 
 ```bash
 helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
 helm repo update
 
 helm install karpenter-crd karpenter-provider-gcp/karpenter-crd \
-  --version "<NEXT-VERSION>" \
   --namespace <karpenter-namespace>
 
 helm upgrade karpenter karpenter-provider-gcp/karpenter \
-  --version "<NEXT-VERSION>" \
   --namespace <karpenter-namespace>
 ```
