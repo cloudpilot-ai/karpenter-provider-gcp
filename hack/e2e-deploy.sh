@@ -53,7 +53,6 @@ helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
   --set controller.settings.projectID="${E2E_PROJECT_ID}" \
   --set controller.settings.clusterName="${CLUSTER_NAME}" \
   --set controller.settings.clusterLocation="${E2E_LOCATION}" \
-  --set controller.settings.interruptionQueue="${CLUSTER_NAME}" \
   --set controller.featureGates.spotToSpotConsolidation=true \
   --set controller.featureGates.nodeRepair=true \
   --set "serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=${GSA_EMAIL}" \
