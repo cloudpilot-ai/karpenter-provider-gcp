@@ -42,3 +42,34 @@ These options configure the controller's runtime behavior.
 | Cluster location   | `CLUSTER_LOCATION`           | `controller.settings.clusterLocation`         | Yes      | GKE cluster location (zone or region, e.g. `us-central1-f`).                    |
 | Node location      | `NODE_LOCATION`              | `controller.settings.nodeLocation`            | No       | Override zone for node placement. Defaults to cluster location.                 |
 | VM memory overhead | `VM_MEMORY_OVERHEAD_PERCENT` | `controller.settings.vmMemoryOverheadPercent` | No       | Fraction of node memory reserved for OS/kubelet overhead (e.g. `0.075` = 7.5%). |
+
+## NodePool Features
+
+These fields are set on `NodePool` objects, not on the controller. They are part of the karpenter-core API and are available in this provider.
+
+### Node count limit (v1.11)
+
+`spec.limits.nodes` caps the maximum number of nodes a NodePool will provision, independent of resource limits.
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+spec:
+  limits:
+    cpu: "100"
+    memory: 400Gi
+    nodes: "20"       # cap at 20 nodes regardless of resource headroom
+```
+
+### Disruption grace period (v1.12)
+
+`spec.disruption.terminationGracePeriod` sets the maximum time Karpenter waits for pods to drain before force-deleting them during disruption. Overrides the pod's own `terminationGracePeriodSeconds` when set.
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+spec:
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    terminationGracePeriod: 48h    # wait up to 48 hours for pods to drain
+```
