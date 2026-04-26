@@ -16,17 +16,19 @@ No additional configuration is needed — the label is derived from the instance
 
 ## Driver installation
 
-Set the `cloud.google.com/gke-gpu-driver-version` label in `spec.metadata` to have GKE install the GPU driver automatically:
+Karpenter automatically installs the GKE-recommended stable NVIDIA driver on GPU nodes. Set `gpuDriverVersion` to choose between the stable and latest drivers:
 
 ```yaml
 spec:
-  metadata:
-    kube-labels: "cloud.google.com/gke-gpu-driver-version=latest"
+  gpuDriverVersion: latest
 ```
 
-Supported values: `latest`, `default`, or a specific driver version string.
+| Value     | Terraform equivalent | Behaviour                                                             |
+|-----------|----------------------|-----------------------------------------------------------------------|
+| `default` | `DEFAULT`            | GKE-recommended stable driver. Works on COS and Ubuntu. (**default**) |
+| `latest`  | `LATEST`             | Newest available driver. COS only.                                    |
 
-`spec.metadata` maps to raw GCE instance metadata keys. `kube-labels` is the GCE metadata key GKE uses to pass `--node-labels` to kubelet at boot; its value is a comma-separated list of `key=value` pairs. Karpenter **appends** any value you provide here to the existing `kube-labels` from the node pool template — it does not replace the full label set.
+Karpenter injects `cloud.google.com/gke-gpu-driver-version=<value>` as a node label at provisioning time. GKE's GPU driver installer DaemonSet reads this label to determine which driver to install. The label is only set on GPU instances — non-GPU instances are unaffected.
 
 ## Auto GPU taint
 
@@ -41,10 +43,9 @@ metadata:
   name: gpu
 spec:
   autoGPUTaint: true
+  gpuDriverVersion: latest
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
-  metadata:
-    kube-labels: "cloud.google.com/gke-gpu-driver-version=latest"
 ```
 
 When `autoGPUTaint: true`, Karpenter injects `--register-with-taints=nvidia.com/gpu=present:NoSchedule` into the node's `KUBELET_ARGS` at provisioning time. The node registers with the taint, preventing non-GPU workloads from landing on it.
