@@ -202,6 +202,9 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 		log.FromContext(ctx).Error(gcperrors.ErrResolveNodeClass, "nodePool", nodePool)
 		return nil, fmt.Errorf("resolving node class, %w", err)
 	}
+	if nodeClass == nil {
+		return nil, nil
+	}
 	// TODO, break this coupling
 	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
 	if err != nil {
@@ -248,6 +251,9 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
 		}
 		return "", client.IgnoreNotFound(fmt.Errorf("resolving node class, %w", err))
+	}
+	if nodeClass == nil {
+		return "", nil
 	}
 	return c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass), nil
 }
