@@ -18,6 +18,7 @@ package environment
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -35,6 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -61,7 +63,7 @@ type TestCase struct {
 	InstanceTypes []string
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
-	ImageFamily string
+	ImageFamily         string
 	ConsolidationPolicy string // defaults to WhenEmptyOrUnderutilized when empty
 }
 
@@ -628,6 +630,24 @@ func (e *Environment) WaitForKubeProxyRunning(ctx context.Context, nodeName stri
 func (e *Environment) WaitForNodeClassReady(ctx context.Context, name string) {
 	GinkgoWriter.Printf("[setup] waiting for GCENodeClass %s to become Ready\n", name)
 	e.waitForReadyCondition(ctx, gceNodeClassGVR, name, NodeClassReadyTimeout)
+}
+
+// AddNodeClassMetadataEntry adds a single key/value pair to spec.metadata of the
+// named GCENodeClass using a merge patch. This is the simplest way to trigger
+// NodeClassDrift in tests — the hash controller detects the spec change, updates
+// the NodeClass hash annotation, and the disruption controller marks affected
+// NodeClaims as drifted.
+func (e *Environment) AddNodeClassMetadataEntry(ctx context.Context, name, key, value string) {
+	type patchSpec struct {
+		Metadata map[string]string `json:"metadata"`
+	}
+	type patchBody struct {
+		Spec patchSpec `json:"spec"`
+	}
+	body, err := json.Marshal(patchBody{Spec: patchSpec{Metadata: map[string]string{key: value}}})
+	Expect(err).NotTo(HaveOccurred(), "marshaling metadata patch for GCENodeClass %s", name)
+	_, err = e.DynamicClient.Resource(gceNodeClassGVR).Patch(ctx, name, types.MergePatchType, body, metav1.PatchOptions{})
+	Expect(err).NotTo(HaveOccurred(), "patching spec.metadata on GCENodeClass %s", name)
 }
 
 // deleteIfExists deletes a resource if it exists and waits for it to be fully
