@@ -26,6 +26,8 @@ spec:
 
 Supported values: `latest`, `default`, or a specific driver version string.
 
+`spec.metadata` maps to raw GCE instance metadata keys. `kube-labels` is the GCE metadata key GKE uses to pass `--node-labels` to kubelet at boot; its value is a comma-separated list of `key=value` pairs. Karpenter **appends** any value you provide here to the existing `kube-labels` from the node pool template — it does not replace the full label set.
+
 ## Auto GPU taint
 
 GKE natively taints GPU nodes with `nvidia.com/gpu=present:NoSchedule` so that only GPU-tolerating workloads are scheduled on them. Karpenter does not apply this taint by default.
