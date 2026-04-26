@@ -48,6 +48,7 @@ helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
   --create-namespace \
   --set controller.image.repository="${IMAGE_REPO}" \
   --set controller.image.tag="${KO_IMAGE_TAG}" \
+  --set controller.image.digest="${IMAGE_REF##*@}" \
   --set logLevel=debug \
   --set controller.settings.projectID="${E2E_PROJECT_ID}" \
   --set controller.settings.clusterName="${CLUSTER_NAME}" \
