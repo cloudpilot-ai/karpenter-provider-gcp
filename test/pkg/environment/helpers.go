@@ -61,7 +61,7 @@ type TestCase struct {
 	InstanceTypes []string
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
-	ImageFamily string
+	ImageFamily         string
 	ConsolidationPolicy string // defaults to WhenEmptyOrUnderutilized when empty
 }
 
@@ -198,8 +198,8 @@ func (e *Environment) CreateDeploymentWithGPU(ctx context.Context, name, appLabe
 						Image: PauseImage,
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:              resource.MustParse("100m"),
-								corev1.ResourceMemory:           resource.MustParse("128Mi"),
+								corev1.ResourceCPU:                    resource.MustParse("100m"),
+								corev1.ResourceMemory:                 resource.MustParse("128Mi"),
 								corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
 							},
 							Limits: corev1.ResourceList{
