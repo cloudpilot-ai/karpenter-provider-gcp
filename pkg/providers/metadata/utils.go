@@ -34,11 +34,12 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex  = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex         = regexp.MustCompile(`max-pods=\d+`)
-	gkeProvisioningRegex = regexp.MustCompile(`gke-provisioning=\w+`)
-	kubeEnvArchRegex     = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
-	kubeEnvFamilyRegex   = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	maxPodsPerNodeRegex      = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex             = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex     = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex         = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex       = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	registerWithTaintsRegex  = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -202,8 +203,16 @@ func AppendGPUTaint(metadata *compute.Metadata) error {
 			for i, line := range lines {
 				if strings.HasPrefix(line, "KUBELET_ARGS:") {
 					found = true
-					if !strings.Contains(line, GPUTaintArg) {
-						lines[i] = line + " " + GPUTaintArg
+					if strings.Contains(line, GPUTaintArg) {
+						// already present, idempotent
+						continue
+					}
+					if registerWithTaintsRegex.MatchString(line) {
+						// Merge into the existing --register-with-taints value to avoid
+						// having two separate flags (kubelet only honours the last one).
+						lines[i] = registerWithTaintsRegex.ReplaceAllString(line, "${1}${2},"+GPUTaintArg)
+					} else {
+						lines[i] = line + " --register-with-taints=" + GPUTaintArg
 					}
 				}
 			}

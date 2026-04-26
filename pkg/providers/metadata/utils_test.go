@@ -121,7 +121,26 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
 }
 
-func TestAppendGPUTaint_AppendsWhenAbsent(t *testing.T) {
+func TestAppendGPUTaint_MergesIntoExistingFlag(t *testing.T) {
+	// The common case: PatchUnregisteredTaints has already added --register-with-taints.
+	// AppendGPUTaint must merge into that value, not add a second flag.
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String("KUBELET_ARGS: --v=2 --register-with-taints=karpenter.sh/unregistered=true:NoExecute\n"),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := swag.StringValue(meta.Items[0].Value)
+	require.Contains(t, got, GPUTaintArg)
+	require.Contains(t, got, "karpenter.sh/unregistered=true:NoExecute")
+	// Both taints must be in a single --register-with-taints flag, not two separate ones.
+	require.Equal(t, 1, strings.Count(got, "--register-with-taints="), "must not introduce a second --register-with-taints flag")
+}
+
+func TestAppendGPUTaint_AppendsNewFlagWhenNoneExists(t *testing.T) {
 	meta := &compute.Metadata{
 		Items: []*compute.MetadataItems{
 			{
@@ -136,7 +155,7 @@ func TestAppendGPUTaint_AppendsWhenAbsent(t *testing.T) {
 }
 
 func TestAppendGPUTaint_IdempotentWhenPresent(t *testing.T) {
-	initial := "KUBELET_ARGS: --v=2 " + GPUTaintArg + "\n"
+	initial := "KUBELET_ARGS: --v=2 --register-with-taints=karpenter.sh/unregistered=true:NoExecute," + GPUTaintArg + "\n"
 	meta := &compute.Metadata{
 		Items: []*compute.MetadataItems{
 			{
