@@ -17,7 +17,6 @@ limitations under the License.
 package cloudprovider
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -188,97 +187,141 @@ func TestIsImageDrifted(t *testing.T) {
 	}
 }
 
-// setNonZeroPrimitive handles scalar kinds for setNonZero.
-func setNonZeroPrimitive(v reflect.Value) {
-	switch v.Kind() {
-	case reflect.String:
-		v.SetString("non-zero")
-	case reflect.Bool:
-		v.SetBool(true)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		v.SetInt(1)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		v.SetUint(1)
-	case reflect.Float32, reflect.Float64:
-		v.SetFloat(1)
-	}
-}
-
-// setNonZero sets v to a non-zero value of its type. Used by
-// TestGCENodeClassHashCoversAllMutableFields to verify every GCENodeClassSpec
-// field participates in the hash without manually enumerating each field.
-func setNonZero(v reflect.Value) {
-	switch v.Kind() {
-	case reflect.Ptr:
-		if v.IsNil() {
-			v.Set(reflect.New(v.Type().Elem()))
-		}
-		setNonZero(v.Elem())
-	case reflect.Slice:
-		elem := reflect.New(v.Type().Elem()).Elem()
-		setNonZero(elem)
-		v.Set(reflect.Append(v, elem))
-	case reflect.Map:
-		if v.IsNil() {
-			v.Set(reflect.MakeMap(v.Type()))
-		}
-		key := reflect.New(v.Type().Key()).Elem()
-		setNonZero(key)
-		val := reflect.New(v.Type().Elem()).Elem()
-		setNonZero(val)
-		v.SetMapIndex(key, val)
-	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			if v.Field(i).CanSet() {
-				setNonZero(v.Field(i))
-				return
-			}
-		}
-	default:
-		setNonZeroPrimitive(v)
-	}
-}
-
-// TestGCENodeClassHashCoversAllMutableFields uses reflection to iterate every
-// exported GCENodeClassSpec field. For each field it verifies that setting a
-// non-zero value produces a different hash (fields tagged hash:"ignore" must
-// NOT change the hash). New fields added to GCENodeClassSpec are tested
-// automatically without requiring manual updates here.
-func TestGCENodeClassHashCoversAllMutableFields(t *testing.T) {
+// TestNodeClassDriftFieldCoverage verifies that each GCENodeClassSpec field either
+// triggers NodeClassDrift (hashed fields) or produces no drift (hash:"ignore" fields).
+// One row per field — when per-field drift reasons are added in the future (e.g.
+// ServiceAccountDrift, NetworkTagsDrift), update the want column for that row.
+func TestNodeClassDriftFieldCoverage(t *testing.T) {
 	t.Parallel()
+	cp := &CloudProvider{}
 
+	// baseline returns a GCENodeClass with all required fields populated.
+	// ImageFamily is set explicitly so that ImageSelectorTerms changes do not
+	// affect the hash via in.ImageFamily().
 	baseline := func() *v1alpha1.GCENodeClass {
+		cos := v1alpha1.ImageFamilyContainerOptimizedOS
 		return &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
 				ServiceAccount: "sa@project.iam.gserviceaccount.com",
 				ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{
 					{Alias: "ContainerOptimizedOS@latest"},
 				},
-				ImageFamily: ptr(v1alpha1.ImageFamilyContainerOptimizedOS),
+				ImageFamily: &cos,
 			},
 		}
 	}
 
-	specType := reflect.TypeOf(v1alpha1.GCENodeClassSpec{})
-	for i := 0; i < specType.NumField(); i++ {
-		field := specType.Field(i)
-		idx := i
-		isIgnored := field.Tag.Get("hash") == "ignore"
+	// stampHash stamps both the NodeClaim (old hash) and NodeClass (new hash)
+	// with the current hash version so that areStaticFieldsDrifted can compare them.
+	stampHash := func(nc *karpv1.NodeClaim, class *v1alpha1.GCENodeClass) {
+		h := class.Hash()
+		if class.Annotations == nil {
+			class.Annotations = make(map[string]string)
+		}
+		class.Annotations[v1alpha1.AnnotationGCENodeClassHash] = h
+		class.Annotations[v1alpha1.AnnotationGCENodeClassHashVersion] = v1alpha1.GCENodeClassHashVersion
+		if nc.Annotations == nil {
+			nc.Annotations = make(map[string]string)
+		}
+		nc.Annotations[v1alpha1.AnnotationGCENodeClassHash] = h
+		nc.Annotations[v1alpha1.AnnotationGCENodeClassHashVersion] = v1alpha1.GCENodeClassHashVersion
+	}
 
-		t.Run(field.Name, func(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*v1alpha1.GCENodeClass)
+		want   karpcloudprovider.DriftReason
+	}{
+		{
+			name:   "ServiceAccount",
+			mutate: func(nc *v1alpha1.GCENodeClass) { nc.Spec.ServiceAccount = "other@project.iam.gserviceaccount.com" },
+			want:   NodeClassDrift,
+		},
+		{
+			name: "Disks",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.Disks = append(nc.Spec.Disks, v1alpha1.Disk{SizeGiB: 100, Boot: true})
+			},
+			want: NodeClassDrift,
+		},
+		{
+			// ImageSelectorTerms is tagged hash:"ignore". With an explicit ImageFamily set,
+			// changing ImageSelectorTerms also does not affect in.ImageFamily(), so no drift.
+			name: "ImageSelectorTerms (hash:ignore)",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.ImageSelectorTerms = append(nc.Spec.ImageSelectorTerms, v1alpha1.ImageSelectorTerm{ID: "extra-image-id"})
+			},
+			want: "",
+		},
+		{
+			name: "ImageFamily",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				ubuntu := v1alpha1.ImageFamilyUbuntu
+				nc.Spec.ImageFamily = &ubuntu
+			},
+			want: NodeClassDrift,
+		},
+		{
+			name: "KubeletConfiguration",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				maxPods := int32(50)
+				nc.Spec.KubeletConfiguration = &v1alpha1.KubeletConfiguration{MaxPods: &maxPods}
+			},
+			want: NodeClassDrift,
+		},
+		{
+			name:   "Labels",
+			mutate: func(nc *v1alpha1.GCENodeClass) { nc.Spec.Labels = map[string]string{"env": "test"} },
+			want:   NodeClassDrift,
+		},
+		{
+			name:   "Metadata",
+			mutate: func(nc *v1alpha1.GCENodeClass) { nc.Spec.Metadata = map[string]string{"key": "value"} },
+			want:   NodeClassDrift,
+		},
+		{
+			name: "NetworkTags",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.NetworkTags = append(nc.Spec.NetworkTags, "drift-tag")
+			},
+			want: NodeClassDrift,
+		},
+		{
+			name: "ShieldedInstanceConfig",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.ShieldedInstanceConfig = &v1alpha1.ShieldedInstanceConfig{EnableSecureBoot: ptr(true)}
+			},
+			want: NodeClassDrift,
+		},
+		{
+			name: "NetworkConfig",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.NetworkConfig = &v1alpha1.NetworkConfig{
+					NetworkInterfaces: []v1alpha1.NetworkInterface{{Subnetwork: "regions/us-central1/subnetworks/custom"}},
+				}
+			},
+			want: NodeClassDrift,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
 			before := baseline()
-			after := baseline()
-			setNonZero(reflect.ValueOf(&after.Spec).Elem().Field(idx))
+			nc := &karpv1.NodeClaim{}
+			stampHash(nc, before)
 
-			if isIgnored {
-				require.Equal(t, before.Hash(), after.Hash(),
-					"field %s is hash:ignore — mutating it must NOT change the hash", field.Name)
-			} else {
-				require.NotEqual(t, before.Hash(), after.Hash(),
-					"field %s must change the hash when mutated", field.Name)
+			after := baseline()
+			tt.mutate(after)
+			if after.Annotations == nil {
+				after.Annotations = make(map[string]string)
 			}
+			after.Annotations[v1alpha1.AnnotationGCENodeClassHash] = after.Hash()
+			after.Annotations[v1alpha1.AnnotationGCENodeClassHashVersion] = v1alpha1.GCENodeClassHashVersion
+
+			got := cp.areStaticFieldsDrifted(nc, after)
+			require.Equal(t, tt.want, got, "field %q: unexpected drift reason", tt.name)
 		})
 	}
 }
