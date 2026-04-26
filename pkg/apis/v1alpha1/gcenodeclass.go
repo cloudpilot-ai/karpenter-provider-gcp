@@ -93,6 +93,21 @@ type GCENodeClassSpec struct {
 	// Disabled by default to preserve backward compatibility.
 	// +optional
 	AutoGPUTaint bool `json:"autoGPUTaint,omitempty"`
+	// GPUDriverVersion specifies the NVIDIA GPU driver version GKE should install on GPU nodes.
+	// Karpenter injects the cloud.google.com/gke-gpu-driver-version node label at provisioning
+	// time; the GKE GPU driver installer DaemonSet reads this label and installs the requested
+	// driver. The label is only injected for GPU instances (built-in GPU families or nodes with
+	// attached accelerators); non-GPU instances are unaffected.
+	//
+	// Aligns with Terraform google_container_node_pool
+	// node_config.guest_accelerator.gpu_driver_installation_config.gpu_driver_version:
+	//   - "default" → DEFAULT  (GKE-recommended stable driver, works on COS and Ubuntu)
+	//   - "latest"  → LATEST   (newest available driver, COS only)
+	//
+	// +kubebuilder:default=default
+	// +kubebuilder:validation:Enum=default;latest
+	// +optional
+	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
 }
 
 // NetworkConfig holds per-interface network settings that override the node pool template.
