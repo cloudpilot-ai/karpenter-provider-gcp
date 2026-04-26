@@ -88,6 +88,11 @@ type GCENodeClassSpec struct {
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
 	// +optional
 	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
+	// AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule
+	// to any GPU node at provisioning time, regardless of the NodePool configuration.
+	// Disabled by default to preserve backward compatibility.
+	// +optional
+	AutoGPUTaint bool `json:"autoGPUTaint,omitempty"`
 }
 
 // NetworkConfig holds per-interface network settings that override the node pool template.
