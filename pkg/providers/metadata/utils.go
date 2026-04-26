@@ -356,6 +356,20 @@ func SetGPUAcceleratorLabel(metadata *compute.Metadata, gpuName string) {
 	}
 }
 
+// SetGPUDriverVersionLabel injects cloud.google.com/gke-gpu-driver-version=<version>
+// into kube-labels. No-op if the label is already present.
+func SetGPUDriverVersionLabel(metadata *compute.Metadata, version string) {
+	label := "cloud.google.com/gke-gpu-driver-version=" + version
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			if strings.Contains(swag.StringValue(item.Value), "gke-gpu-driver-version=") {
+				return
+			}
+			item.Value = swag.String(swag.StringValue(item.Value) + "," + label)
+		}
+	}
+}
+
 // ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.
 // If a metadata key already exists, it appends the value with comma separator.
 // Otherwise, it creates a new metadata item.

@@ -180,3 +180,41 @@ func TestAppendGPUTaint_ErrorWhenNoKubeletArgs(t *testing.T) {
 	}
 	require.Error(t, AppendGPUTaint(meta))
 }
+
+func TestSetGPUDriverVersionLabel_InjectsLabel(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: swag.String("existing-label=value")},
+	}}
+	SetGPUDriverVersionLabel(meta, "latest")
+	val := swag.StringValue(meta.Items[0].Value)
+	require.Contains(t, val, "cloud.google.com/gke-gpu-driver-version=latest")
+	require.Contains(t, val, "existing-label=value", "existing labels must be preserved")
+}
+
+func TestSetGPUDriverVersionLabel_DefaultValue(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: swag.String("existing=x")},
+	}}
+	SetGPUDriverVersionLabel(meta, "default")
+	val := swag.StringValue(meta.Items[0].Value)
+	require.Contains(t, val, "cloud.google.com/gke-gpu-driver-version=default")
+	require.Contains(t, val, "existing=x", "existing labels must be preserved")
+}
+
+func TestSetGPUDriverVersionLabel_IdempotentWhenPresent(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: swag.String("existing=x,cloud.google.com/gke-gpu-driver-version=latest")},
+	}}
+	SetGPUDriverVersionLabel(meta, "latest")
+	val := swag.StringValue(meta.Items[0].Value)
+	require.Equal(t, 1, strings.Count(val, "gke-gpu-driver-version"), "label must not be duplicated")
+}
+
+func TestSetGPUDriverVersionLabel_NoopWhenNoKubeLabels(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-env", Value: swag.String("KUBELET_ARGS: --v=2")},
+	}}
+	SetGPUDriverVersionLabel(meta, "default")
+	require.Len(t, meta.Items, 1)
+	require.Equal(t, "kube-env", meta.Items[0].Key)
+}
