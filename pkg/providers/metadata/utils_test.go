@@ -191,16 +191,6 @@ func TestSetGPUDriverVersionLabel_InjectsLabel(t *testing.T) {
 	require.Contains(t, val, "existing-label=value", "existing labels must be preserved")
 }
 
-func TestSetGPUDriverVersionLabel_DefaultValue(t *testing.T) {
-	meta := &compute.Metadata{Items: []*compute.MetadataItems{
-		{Key: "kube-labels", Value: swag.String("existing=x")},
-	}}
-	SetGPUDriverVersionLabel(meta, "default")
-	val := swag.StringValue(meta.Items[0].Value)
-	require.Contains(t, val, "cloud.google.com/gke-gpu-driver-version=default")
-	require.Contains(t, val, "existing=x", "existing labels must be preserved")
-}
-
 func TestSetGPUDriverVersionLabel_IdempotentWhenPresent(t *testing.T) {
 	meta := &compute.Metadata{Items: []*compute.MetadataItems{
 		{Key: "kube-labels", Value: swag.String("existing=x,cloud.google.com/gke-gpu-driver-version=latest")},

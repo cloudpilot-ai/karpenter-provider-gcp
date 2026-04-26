@@ -351,7 +351,7 @@ func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootD
 func SetGPUAcceleratorLabel(metadata *compute.Metadata, gpuName string) {
 	for _, item := range metadata.Items {
 		if item.Key == "kube-labels" {
-			item.Value = swag.String(*item.Value + ",cloud.google.com/gke-accelerator=" + gpuName)
+			item.Value = swag.String(swag.StringValue(item.Value) + ",cloud.google.com/gke-accelerator=" + gpuName)
 		}
 	}
 }
