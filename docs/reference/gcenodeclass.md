@@ -95,6 +95,7 @@ _Appears in:_
 | `networkTags` _[NetworkTag](#networktag) array_ | NetworkTags is a list of network tags to apply to the node. |  | MaxItems: 20 <br />MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `shieldedInstanceConfig` _[ShieldedInstanceConfig](#shieldedinstanceconfig)_ | ShieldedInstanceConfig is the Shielded VM configuration for the instance. |  | Optional: \{\} <br /> |
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
+| `autoGPUTaint` _boolean_ | AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule<br />to any GPU node at provisioning time, regardless of the NodePool configuration.<br />Disabled by default to preserve backward compatibility. |  | Optional: \{\} <br /> |
 
 
 #### GCENodeClassStatus

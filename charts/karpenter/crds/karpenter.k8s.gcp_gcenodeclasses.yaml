@@ -53,6 +53,12 @@ spec:
               GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
               This will contain the configuration necessary to launch instances in GCP.
             properties:
+              autoGPUTaint:
+                description: |-
+                  AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule
+                  to any GPU node at provisioning time, regardless of the NodePool configuration.
+                  Disabled by default to preserve backward compatibility.
+                type: boolean
               disks:
                 description: Disk defines the disks to attach to the provisioned instance.
                 items:
