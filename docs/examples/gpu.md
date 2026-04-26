@@ -2,12 +2,15 @@
 
 Request GPU resources via `nvidia.com/gpu` and select GPU-equipped instance families.
 
+Set `autoGPUTaint: true` to automatically taint GPU nodes with `nvidia.com/gpu=present:NoSchedule`, matching GKE's native GPU pool behaviour. See [GPU Nodes](../gpu-nodes.md) for details.
+
 ```yaml
 apiVersion: karpenter.k8s.gcp/v1alpha1
 kind: GCENodeClass
 metadata:
   name: gpu
 spec:
+  autoGPUTaint: true
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
   metadata:
