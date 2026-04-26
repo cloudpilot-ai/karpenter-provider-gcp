@@ -680,8 +680,13 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	isGPUInstance := len(template.Properties.GuestAccelerators) > 0 ||
 		instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
 
+	gpuName := instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUName).Any()
+	if gpuName == "" && len(template.Properties.GuestAccelerators) > 0 {
+		gpuName = template.Properties.GuestAccelerators[0].AcceleratorType
+	}
+
 	// Setup metadata
-	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType, isGPUInstance); err != nil {
+	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType, isGPUInstance, gpuName); err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
@@ -832,7 +837,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(template *compute.InstanceTempl
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance
-func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string, capacityType string, isGPUInstance bool) error {
+func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string, capacityType string, isGPUInstance bool, gpuName string) error {
 	if err := metadata.RemoveGKEBuiltinLabels(instanceMetadata, nodePoolName); err != nil {
 		return fmt.Errorf("failed to remove GKE builtin labels from metadata: %w", err)
 	}
@@ -847,6 +852,10 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 
 	if err := metadata.PatchUnregisteredTaints(instanceMetadata); err != nil {
 		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
+	}
+
+	if isGPUInstance && gpuName != "" {
+		metadata.SetGPUAcceleratorLabel(instanceMetadata, gpuName)
 	}
 
 	if nodeClass.Spec.AutoGPUTaint && isGPUInstance {

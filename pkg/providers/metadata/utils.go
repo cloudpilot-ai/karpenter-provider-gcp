@@ -345,6 +345,17 @@ func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootD
 	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
 }
 
+// SetGPUAcceleratorLabel injects the cloud.google.com/gke-accelerator=<gpuName> label
+// into kube-labels so the NVIDIA device plugin DaemonSet (which requires that label via
+// nodeAffinity) schedules onto Karpenter-provisioned GPU nodes.
+func SetGPUAcceleratorLabel(metadata *compute.Metadata, gpuName string) {
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			item.Value = swag.String(*item.Value + ",cloud.google.com/gke-accelerator=" + gpuName)
+		}
+	}
+}
+
 // ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.
 // If a metadata key already exists, it appends the value with comma separator.
 // Otherwise, it creates a new metadata item.

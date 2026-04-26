@@ -688,6 +688,36 @@ func (e *Environment) WaitForNodeClaimLaunched(ctx context.Context, nodePoolName
 	}).WithTimeout(NodeClaimLaunchTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 }
 
+// WaitForNodeClaimInitialized polls NodeClaims owned by nodePoolName until at least
+// one reaches Initialized=True. Uses GPUProvisioningTimeout to accommodate the time
+// needed for GPU driver installation and device plugin startup.
+func (e *Environment) WaitForNodeClaimInitialized(ctx context.Context, nodePoolName string) {
+	GinkgoWriter.Printf("[wait] waiting for NodeClaim in pool %s to become Initialized\n", nodePoolName)
+	Eventually(func(g Gomega) {
+		claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(ctx, metav1.ListOptions{
+			LabelSelector: "karpenter.sh/nodepool=" + nodePoolName,
+		})
+		g.Expect(err).NotTo(HaveOccurred(), "listing NodeClaims for pool %s", nodePoolName)
+		g.Expect(claims.Items).NotTo(BeEmpty(), "no NodeClaims for pool %s yet", nodePoolName)
+
+		for i := range claims.Items {
+			conditions, _, _ := unstructured.NestedSlice(claims.Items[i].Object, "status", "conditions")
+			for _, c := range conditions {
+				cond, ok := c.(map[string]any)
+				if !ok || cond["type"] != "Initialized" {
+					continue
+				}
+				if cond["status"] == "True" {
+					return // at least one claim initialized
+				}
+				GinkgoWriter.Printf("[wait] NodeClaim %s Initialized=%s reason=%s: %s\n",
+					claims.Items[i].GetName(), cond["status"], cond["reason"], cond["message"])
+			}
+		}
+		g.Expect(false).To(BeTrue(), "no NodeClaim for pool %s has Initialized=True yet", nodePoolName)
+	}).WithTimeout(GPUProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
 // WaitForKubeProxyRunning polls until the kube-proxy DaemonSet pod on the given
 // node is Running and Ready. GKE uses "component=kube-proxy" (not the upstream
 // "k8s-app=kube-proxy" label), so we query by that selector.

@@ -66,6 +66,7 @@ var _ = Describe("GPU Auto-Taint", func() {
 
 		env.CreateDeploymentWithGPU(ctx, name, name, name)
 		env.WaitForNodeClaimLaunched(ctx, name)
+		env.WaitForNodeClaimInitialized(ctx, name)
 		pod := env.WaitForRunningPod(ctx, name)
 		Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 
@@ -81,5 +82,5 @@ var _ = Describe("GPU Auto-Taint", func() {
 			}
 		}
 		Expect(gpuTaint).NotTo(BeNil(), "node %s should have nvidia.com/gpu=present:NoSchedule taint", node.Name)
-	}, SpecTimeout(25*time.Minute))
+	}, SpecTimeout(35*time.Minute))
 })
