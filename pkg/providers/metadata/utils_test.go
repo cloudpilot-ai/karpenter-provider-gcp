@@ -17,6 +17,7 @@ limitations under the License.
 package metadata
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/swag"
@@ -118,4 +119,45 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 	require.Contains(t, got, "cloud.google.com/machine-family=e2")
 	require.Contains(t, got, "arch=amd64")
 	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
+}
+
+func TestAppendGPUTaint_AppendsWhenAbsent(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String("KUBELET_ARGS: --v=2\n"),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := swag.StringValue(meta.Items[0].Value)
+	require.Contains(t, got, GPUTaintArg)
+}
+
+func TestAppendGPUTaint_IdempotentWhenPresent(t *testing.T) {
+	initial := "KUBELET_ARGS: --v=2 " + GPUTaintArg + "\n"
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String(initial),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := swag.StringValue(meta.Items[0].Value)
+	require.Equal(t, 1, strings.Count(got, GPUTaintArg), "taint must appear exactly once")
+}
+
+func TestAppendGPUTaint_ErrorWhenNoKubeletArgs(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String("SOME_OTHER_KEY: value\n"),
+			},
+		},
+	}
+	require.Error(t, AppendGPUTaint(meta))
 }
