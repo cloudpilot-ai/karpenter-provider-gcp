@@ -28,6 +28,7 @@ const (
 	ClusterNameLabel                = "cluster-name"
 	GKENodePoolLabel                = "cloud.google.com/gke-nodepool"
 	UnregisteredTaintArg            = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
+	GPUTaintArg                     = "--register-with-taints=nvidia.com/gpu=present:NoSchedule"
 	KubeletConfigLabel              = "kubelet-config"
 	GKESecondaryBootDiskLabelPrefix = "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk-"
 )

@@ -193,6 +193,29 @@ func PatchUnregisteredTaints(metadata *compute.Metadata) error {
 	return nil
 }
 
+func AppendGPUTaint(metadata *compute.Metadata) error {
+	found := false
+	for _, item := range metadata.Items {
+		if item.Key == "kube-env" {
+			kubeEnv := swag.StringValue(item.Value)
+			lines := strings.Split(kubeEnv, "\n")
+			for i, line := range lines {
+				if strings.HasPrefix(line, "KUBELET_ARGS:") {
+					found = true
+					if !strings.Contains(line, GPUTaintArg) {
+						lines[i] = line + " " + GPUTaintArg
+					}
+				}
+			}
+			item.Value = swag.String(strings.Join(lines, "\n"))
+		}
+	}
+	if !found {
+		return fmt.Errorf("KUBELET_ARGS not found in kube-env")
+	}
+	return nil
+}
+
 func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloudprovider.InstanceType) error {
 	if metadata == nil || instanceType == nil {
 		return fmt.Errorf("metadata and instanceType must be non-nil")
