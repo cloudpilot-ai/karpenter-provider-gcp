@@ -4,10 +4,15 @@ Karpenter can provision GPU-equipped GKE nodes for workloads that request `nvidi
 
 ## Instance types
 
-Two categories of GPU instances are supported:
+**Built-in GPU families** — `a2`, `a3`, `g2`, `a4`. These machine families have NVIDIA accelerators integrated into the machine type. Select them via `karpenter.k8s.gcp/instance-gpu-count`.
 
-- **Built-in GPU families** — `a2`, `a3`, `g2`, `a4`. These machine families have NVIDIA accelerators integrated into the machine type. Select them via `karpenter.k8s.gcp/instance-gpu-count`.
-- **Attached GPU instances** — standard instance types (e.g. `n1`) with NVIDIA accelerators attached via the GKE node pool template. The template carries the `GuestAccelerators` configuration.
+> **Note:** Attached GPU instances (e.g. `n1-standard-*` + NVIDIA T4/P100/V100 accelerators) are not yet fully supported. Tracked in [#84](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/84).
+
+## Device plugin scheduling
+
+Karpenter automatically injects the `cloud.google.com/gke-accelerator=<type>` label into the node's `kube-labels` metadata for all GPU instances. This label is required by the NVIDIA device plugin DaemonSet's `nodeAffinity`, so without it the plugin would not schedule onto Karpenter-provisioned GPU nodes and `nvidia.com/gpu` would never become allocatable.
+
+No additional configuration is needed — the label is derived from the instance type's accelerator type and injected at provisioning time.
 
 ## Driver installation
 
