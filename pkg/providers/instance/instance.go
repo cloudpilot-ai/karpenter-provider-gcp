@@ -854,13 +854,9 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
 	}
 
-	if isGPUInstance && gpuName != "" {
-		metadata.SetGPUAcceleratorLabel(instanceMetadata, gpuName)
-	}
-
-	if nodeClass.Spec.AutoGPUTaint && isGPUInstance {
-		if err := metadata.AppendGPUTaint(instanceMetadata); err != nil {
-			return fmt.Errorf("failed to append GPU taint to kube-env: %w", err)
+	if isGPUInstance {
+		if err := setupGPUMetadata(instanceMetadata, nodeClass, gpuName); err != nil {
+			return err
 		}
 	}
 
@@ -879,6 +875,19 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
 	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
 
+	return nil
+}
+
+// setupGPUMetadata injects the GKE accelerator label and, if requested, the GPU taint.
+func setupGPUMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, gpuName string) error {
+	if gpuName != "" {
+		metadata.SetGPUAcceleratorLabel(instanceMetadata, gpuName)
+	}
+	if nodeClass.Spec.AutoGPUTaint {
+		if err := metadata.AppendGPUTaint(instanceMetadata); err != nil {
+			return fmt.Errorf("failed to append GPU taint to kube-env: %w", err)
+		}
+	}
 	return nil
 }
 
