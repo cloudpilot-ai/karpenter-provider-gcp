@@ -25,12 +25,12 @@ import (
 )
 
 const (
-	ClusterNameLabel                = "cluster-name"
-	GKENodePoolLabel                = "cloud.google.com/gke-nodepool"
+	ClusterNameLabel     = "cluster-name"
+	GKENodePoolLabel     = "cloud.google.com/gke-nodepool"
 	UnregisteredTaintArg = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
 	// GPUTaintArg is the taint value (not the full flag) merged into the existing
 	// --register-with-taints flag to avoid overwriting other taints set earlier.
-	GPUTaintArg = "nvidia.com/gpu=present:NoSchedule"
+	GPUTaintArg                     = "nvidia.com/gpu=present:NoSchedule"
 	KubeletConfigLabel              = "kubelet-config"
 	GKESecondaryBootDiskLabelPrefix = "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk-"
 )

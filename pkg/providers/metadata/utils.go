@@ -34,12 +34,12 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex      = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex             = regexp.MustCompile(`max-pods=\d+`)
-	gkeProvisioningRegex     = regexp.MustCompile(`gke-provisioning=\w+`)
-	kubeEnvArchRegex         = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
-	kubeEnvFamilyRegex       = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
-	registerWithTaintsRegex  = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	maxPodsPerNodeRegex     = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex            = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -209,7 +209,7 @@ func AppendGPUTaint(metadata *compute.Metadata) error {
 					}
 					if registerWithTaintsRegex.MatchString(line) {
 						// Merge into the existing --register-with-taints value to avoid
-						// having two separate flags (kubelet only honours the last one).
+						// having two separate flags (kubelet only honors the last one).
 						lines[i] = registerWithTaintsRegex.ReplaceAllString(line, "${1}${2},"+GPUTaintArg)
 					} else {
 						lines[i] = line + " --register-with-taints=" + GPUTaintArg
