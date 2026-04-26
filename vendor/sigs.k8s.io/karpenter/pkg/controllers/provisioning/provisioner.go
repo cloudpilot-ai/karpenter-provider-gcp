@@ -183,7 +183,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil, nil)
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info("ignoring pod", "error", err)
 			// Don't create pod events for pods that are specifically avoiding scheduling to Karpenter-managed capacity
 			if !errors.Is(err, KarpenterManagedLabelDoesNotExistError) {
 				p.recorder.Publish(scheduler.PodFailedToScheduleEvent(po, err))
@@ -331,7 +331,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
-	deletingNodePods, err := nodes.Deleting().CurrentlyReschedulablePods(ctx, p.kubeClient)
+	deletingNodePods, err := nodes.Deleting().CurrentlyReschedulablePods(ctx, p.kubeClient, p.clock, p.recorder)
 	if err != nil {
 		return scheduler.Results{}, err
 	}
