@@ -883,6 +883,9 @@ func setupGPUMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GC
 	if gpuName != "" {
 		metadata.SetGPUAcceleratorLabel(instanceMetadata, gpuName)
 	}
+	if nodeClass.Spec.GPUDriverVersion != "" {
+		metadata.SetGPUDriverVersionLabel(instanceMetadata, nodeClass.Spec.GPUDriverVersion)
+	}
 	if nodeClass.Spec.AutoGPUTaint {
 		if err := metadata.AppendGPUTaint(instanceMetadata); err != nil {
 			return fmt.Errorf("failed to append GPU taint to kube-env: %w", err)
