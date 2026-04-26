@@ -283,6 +283,10 @@
               "type": "string",
               "description": "Idle timeout that ends a batch window when no new pods arrive (e.g. 1s).",
               "default": "1s"
+            },
+            "interruptionQueue": {
+              "type": "string",
+              "description": "GCP Pub/Sub queue name for spot interruption notifications (optional)."
             }
           }
         }
