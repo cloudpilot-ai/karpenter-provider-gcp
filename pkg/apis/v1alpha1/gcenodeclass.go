@@ -101,11 +101,12 @@ type GCENodeClassSpec struct {
 	//
 	// Aligns with Terraform google_container_node_pool
 	// node_config.guest_accelerator.gpu_driver_installation_config.gpu_driver_version:
-	//   - "default" → DEFAULT  (GKE-recommended stable driver, works on COS and Ubuntu)
-	//   - "latest"  → LATEST   (newest available driver, COS only)
+	//   - "default"  → DEFAULT              (GKE-recommended stable driver, works on COS and Ubuntu)
+	//   - "latest"   → LATEST               (newest available driver, COS only)
+	//   - "disabled" → INSTALLATION_DISABLED (skip driver installation; manage drivers manually)
 	//
 	// +kubebuilder:default=default
-	// +kubebuilder:validation:Enum=default;latest
+	// +kubebuilder:validation:Enum=default;latest;disabled
 	// +optional
 	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
 }

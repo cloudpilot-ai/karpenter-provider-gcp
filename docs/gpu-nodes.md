@@ -16,17 +16,18 @@ No additional configuration is needed — the label is derived from the instance
 
 ## Driver installation
 
-Karpenter automatically installs the GKE-recommended stable NVIDIA driver on GPU nodes. Set `gpuDriverVersion` to choose between the stable and latest drivers:
+Karpenter automatically installs the GKE-recommended stable NVIDIA driver on GPU nodes. Set `gpuDriverVersion` to choose the driver version or opt out:
 
 ```yaml
 spec:
-  gpuDriverVersion: latest
+  gpuDriverVersion: latest   # or "default" (default) / "disabled"
 ```
 
-| Value     | Terraform equivalent | Behaviour                                                             |
-|-----------|----------------------|-----------------------------------------------------------------------|
-| `default` | `DEFAULT`            | GKE-recommended stable driver. Works on COS and Ubuntu. (**default**) |
-| `latest`  | `LATEST`             | Newest available driver. COS only.                                    |
+| Value      | Terraform equivalent    | Behaviour                                                             |
+|------------|-------------------------|-----------------------------------------------------------------------|
+| `default`  | `DEFAULT`               | GKE-recommended stable driver. Works on COS and Ubuntu. (**default**) |
+| `latest`   | `LATEST`                | Newest available driver. COS only.                                    |
+| `disabled` | `INSTALLATION_DISABLED` | Skip automatic driver installation. Manage drivers manually.          |
 
 Karpenter injects `cloud.google.com/gke-gpu-driver-version=<value>` as a node label at provisioning time. GKE's GPU driver installer DaemonSet reads this label to determine which driver to install. The label is only set on GPU instances — non-GPU instances are unaffected.
 
