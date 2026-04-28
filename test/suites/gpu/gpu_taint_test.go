@@ -45,10 +45,10 @@ var _ = Describe("GPU Auto-Taint", func() {
 
 		GinkgoWriter.Printf("[setup] gpu-taint nodePool=%s\n", name)
 
-		DeferCleanup(func() {
-			env.DeleteDeployment(ctx, name)
-			env.DeleteNodePool(ctx, name)
-			env.DeleteNodeClass(ctx, name)
+		DeferCleanup(func(cleanupCtx SpecContext) {
+			env.DeleteDeployment(cleanupCtx, name)
+			env.DeleteNodePool(cleanupCtx, name)
+			env.DeleteNodeClass(cleanupCtx, name)
 		})
 
 		env.CreateNodeClassWithAutoGPUTaint(ctx, name)
