@@ -134,6 +134,10 @@
               "enum": ["Always", "IfNotPresent", "Never"],
               "description": "Image pull policy.",
               "default": "IfNotPresent"
+            },
+            "digest": {
+              "type": "string",
+              "description": "Image digest (e.g. sha256:…). When set, takes precedence over tag."
             }
           }
         },
