@@ -975,28 +975,20 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 	})
 }
 
-// TestSetupScheduling_DoesNotMutateTemplate guards against setupScheduling mutating the shared
-// template. The same template pointer is reused across zone and instance-type retries inside
-// Create(), so any in-place write to template.Properties.Scheduling would persist across
-// iterations and corrupt subsequent instances.
-func TestSetupScheduling_DoesNotMutateTemplate(t *testing.T) {
+func TestSetupScheduling(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
-	template := &compute.InstanceTemplate{
-		Properties: &compute.InstanceProperties{
-			Scheduling: &compute.Scheduling{OnHostMaintenance: "MIGRATE"},
-		},
-	}
+	t.Run("spot sets termination action", func(t *testing.T) {
+		t.Parallel()
+		sched := setupScheduling(karpv1.CapacityTypeSpot)
+		require.Equal(t, instanceTerminationActionDelete, sched.InstanceTerminationAction)
+	})
 
-	sched := p.setupScheduling(template, karpv1.CapacityTypeSpot)
-
-	require.Equal(t, instanceTerminationActionDelete, sched.InstanceTerminationAction,
-		"returned Scheduling must have InstanceTerminationAction set for spot")
-	require.Empty(t, template.Properties.Scheduling.InstanceTerminationAction,
-		"setupScheduling must not write to the original template Scheduling struct")
-	require.Equal(t, "MIGRATE", template.Properties.Scheduling.OnHostMaintenance,
-		"original template fields must be unchanged")
+	t.Run("on-demand leaves termination action empty", func(t *testing.T) {
+		t.Parallel()
+		sched := setupScheduling(karpv1.CapacityTypeOnDemand)
+		require.Empty(t, sched.InstanceTerminationAction)
+	})
 }
 
 func spotOrOnDemandNodeClaim() *karpv1.NodeClaim {
@@ -1109,7 +1101,7 @@ func TestGetCapacityType(t *testing.T) {
 func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
+	p := &DefaultProvider{computeDefaultSA: "123-compute@developer.gserviceaccount.com"}
 
 	// on-demand-only: no spot offering — pre-fix buildInstance would recompute "on-demand" from this.
 	onDemandOnlyIT := &cloudprovider.InstanceType{
@@ -1312,4 +1304,70 @@ func TestBelongsToCluster(t *testing.T) {
 			require.Equal(t, tc.want, p.belongsToCluster(inst), tc.name)
 		})
 	}
+}
+
+func TestResolveServiceAccount(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                  string
+		specServiceAccount    string
+		defaultServiceAccount string
+		computeDefaultSA      string
+		want                  string
+	}{
+		{
+			name:                  "spec.serviceAccount takes priority over all",
+			specServiceAccount:    "spec-sa@project.iam.gserviceaccount.com",
+			defaultServiceAccount: "flag-sa@project.iam.gserviceaccount.com",
+			computeDefaultSA:      "123-compute@developer.gserviceaccount.com",
+			want:                  "spec-sa@project.iam.gserviceaccount.com",
+		},
+		{
+			name:                  "DEFAULT_NODEPOOL_SERVICE_ACCOUNT used when spec is empty",
+			specServiceAccount:    "",
+			defaultServiceAccount: "flag-sa@project.iam.gserviceaccount.com",
+			computeDefaultSA:      "123-compute@developer.gserviceaccount.com",
+			want:                  "flag-sa@project.iam.gserviceaccount.com",
+		},
+		{
+			name:                  "Compute Engine default SA used as final fallback",
+			specServiceAccount:    "",
+			defaultServiceAccount: "",
+			computeDefaultSA:      "123-compute@developer.gserviceaccount.com",
+			want:                  "123-compute@developer.gserviceaccount.com",
+		},
+		{
+			name:                  "empty string when all sources are unset",
+			specServiceAccount:    "",
+			defaultServiceAccount: "",
+			computeDefaultSA:      "",
+			want:                  "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := &DefaultProvider{
+				defaultServiceAccount: tc.defaultServiceAccount,
+				computeDefaultSA:      tc.computeDefaultSA,
+			}
+			nodeClass := &v1alpha1.GCENodeClass{}
+			nodeClass.Spec.ServiceAccount = tc.specServiceAccount
+			require.Equal(t, tc.want, p.resolveServiceAccount(nodeClass))
+		})
+	}
+}
+
+func TestSetupServiceAccounts_ErrorWhenNoSAAvailable(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{}
+
+	_, err := p.setupServiceAccounts(nodeClass)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no service account available")
 }

@@ -86,10 +86,11 @@ type DefaultProvider struct {
 	region                string
 	projectID             string
 	defaultServiceAccount string
+	computeDefaultSA      string
 	computeService        *compute.Service
 }
 
-func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount string, computeService *compute.Service, gkeProvider gke.Provider,
+func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount, computeDefaultSA string, computeService *compute.Service, gkeProvider gke.Provider,
 	unavailableOfferings *pkgcache.UnavailableOfferings,
 ) Provider {
 	return &DefaultProvider{
@@ -101,6 +102,7 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 		region:                region,
 		projectID:             projectID,
 		defaultServiceAccount: defaultServiceAccount,
+		computeDefaultSA:      computeDefaultSA,
 		computeService:        computeService,
 	}
 }
@@ -682,26 +684,21 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
-	// Setup service accounts
-	serviceAccounts := p.setupServiceAccounts(nodeClass, template.Properties.ServiceAccounts)
+	serviceAccounts, err := p.setupServiceAccounts(nodeClass)
+	if err != nil {
+		return nil, fmt.Errorf("setting up service accounts: %w", err)
+	}
 
-	// setup network interfaces
-	networkInterfaces := p.setupNetworkInterfaces(template, nodeClass)
-
-	sched := p.setupScheduling(template, capacityType)
-
-	// Create instance
 	instance := &compute.Instance{
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
-		NetworkInterfaces: networkInterfaces,
+		NetworkInterfaces: p.setupNetworkInterfaces(template, nodeClass),
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
-		Scheduling:        sched,
+		Scheduling:        setupScheduling(capacityType),
 		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
-		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
 
 	// Configure Shielded VM options
@@ -869,11 +866,14 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 	return nil
 }
 
-// setupServiceAccounts configures service accounts for the instance
-func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass, defaultServiceAccounts []*compute.ServiceAccount) []*compute.ServiceAccount {
+// setupServiceAccounts configures service accounts for the instance.
+// Returns an error if no service account can be resolved, which means the project has
+// disabled the Compute Engine default SA and neither spec.serviceAccount nor
+// DEFAULT_NODEPOOL_SERVICE_ACCOUNT is set — nodes would fail to authenticate without an SA.
+func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass) ([]*compute.ServiceAccount, error) {
 	serviceAccount := p.resolveServiceAccount(nodeClass)
 	if serviceAccount == "" {
-		return defaultServiceAccounts
+		return nil, fmt.Errorf("no service account available: spec.serviceAccount and DEFAULT_NODEPOOL_SERVICE_ACCOUNT are unset, and the Compute Engine default SA is unavailable for this project")
 	}
 
 	return []*compute.ServiceAccount{
@@ -889,21 +889,19 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass,
 				"https://www.googleapis.com/auth/cloud-platform",
 			},
 		},
-	}
+	}, nil
 }
 
-// setupScheduling configures scheduling for the instance
-func (p *DefaultProvider) setupScheduling(template *compute.InstanceTemplate, capacityType string) *compute.Scheduling {
-	// Copy the struct so we never mutate the shared template — the same template
-	// pointer is reused across zone and instance-type retries inside Create().
-	var sched compute.Scheduling
-	if template.Properties.Scheduling != nil {
-		sched = *template.Properties.Scheduling
-	}
+// setupScheduling returns scheduling config derived from capacity type alone.
+// Spot-specific fields (provisioning model, preemptibility) are set later by
+// configureInstanceCapacityProvision; this only wires the termination action so
+// GCE honors DELETE rather than the default STOP on preemption.
+func setupScheduling(capacityType string) *compute.Scheduling {
+	sched := &compute.Scheduling{}
 	if capacityType == karpv1.CapacityTypeSpot {
 		sched.InstanceTerminationAction = instanceTerminationActionDelete
 	}
-	return &sched
+	return sched
 }
 
 // initializeInstanceLabels initializes the instance labels map
@@ -1236,12 +1234,14 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 	return nil
 }
 
-// resolveServiceAccount returns the service account to use for the instance.
-// If the NodeClass specifies a service account, use that. Otherwise, use the default.
-// Returns empty string if neither is specified.
+// resolveServiceAccount returns the service account email for the instance.
+// Priority: spec.serviceAccount → DEFAULT_NODEPOOL_SERVICE_ACCOUNT → Compute Engine default SA.
 func (p *DefaultProvider) resolveServiceAccount(nodeClass *v1alpha1.GCENodeClass) string {
 	if nodeClass.Spec.ServiceAccount != "" {
 		return nodeClass.Spec.ServiceAccount
 	}
-	return p.defaultServiceAccount
+	if p.defaultServiceAccount != "" {
+		return p.defaultServiceAccount
+	}
+	return p.computeDefaultSA
 }

@@ -225,14 +225,14 @@
               "description": "Enable NodeOverlay (alpha). Allows node overlay to influence scheduling decisions.",
               "default": false
             },
-            "nodeRepair": {
-              "type": "boolean",
-              "description": "Enable nodeRepair (alpha). When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions.",
-              "default": false
-            },
             "staticCapacity": {
               "type": "boolean",
-              "description": "Enable staticCapacity (alpha). When enabled, NodePools with spec.replicas maintain a fixed number of nodes regardless of pod demand.",
+              "description": "Enable static capacity (alpha). NodePool with spec.replicas maintains a fixed number of nodes.",
+              "default": false
+            },
+            "nodeRepair": {
+              "type": "boolean",
+              "description": "Enable node repair (alpha). Replaces nodes failing GKE Node Problem Detector health conditions.",
               "default": false
             }
           }
@@ -283,6 +283,10 @@
               "type": "string",
               "description": "Idle timeout that ends a batch window when no new pods arrive (e.g. 1s).",
               "default": "1s"
+            },
+            "interruptionQueue": {
+              "type": "string",
+              "description": "GCP Pub/Sub subscription name for Spot interruption notifications."
             }
           }
         }
