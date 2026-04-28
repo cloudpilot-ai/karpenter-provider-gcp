@@ -45,6 +45,7 @@ func init() {
 		LabelInstanceGPUMemory,
 		LabelTopologyZoneID,
 		corev1.LabelWindowsBuild,
+		LabelGKEAccelerator,
 		LabelGKEReadinessCalicoReady,
 		LabelGKEReadinessKubeProxyReady,
 		LabelGKEReadinessMetadataServerEnabled,
@@ -83,6 +84,14 @@ var (
 	ImageFamilyUbuntu               = "Ubuntu"
 	ImageFamilyContainerOptimizedOS = "ContainerOptimizedOS"
 	ImageFamilyCustom               = "Custom"
+
+	// LabelGKEAccelerator is applied by Karpenter to GPU nodes so that GKE's
+	// NVIDIA device-plugin DaemonSets (which all gate on this label via nodeAffinity)
+	// schedule onto Karpenter-provisioned GPU nodes. GKE's NodeRestriction policy
+	// prevents the kubelet from self-applying this label via kube-labels metadata,
+	// so Karpenter must patch it onto the Node object directly via the NodeClaim
+	// scheduling requirements.
+	LabelGKEAccelerator = "cloud.google.com/gke-accelerator"
 
 	// GKE readiness-gate labels are applied by the GKE control plane after node
 	// registration. System DaemonSets use these as nodeSelector to gate scheduling
