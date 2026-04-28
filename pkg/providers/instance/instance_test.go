@@ -40,6 +40,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -1152,6 +1153,401 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 	require.NotNil(t, instance)
 	require.Equal(t, "SPOT", instance.Scheduling.ProvisioningModel,
 		"buildInstance must use the passed capacityType, not recompute it from instanceType offerings")
+}
+
+func TestBuildInstance_GPUTaintInjected(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	gpuIT := &cloudprovider.InstanceType{
+		Name: "g2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: true}}
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		nc,
+		gpuIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	var kubeEnv string
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-env" {
+			kubeEnv = ptr.Deref(item.Value, "")
+			break
+		}
+	}
+	require.Contains(t, kubeEnv, metadata.GPUTaintArg, "GPU taint must be present in kube-env when AutoGPUTaint=true")
+}
+
+func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	gpuIT := &cloudprovider.InstanceType{
+		Name: "g2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: false}}
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		nc,
+		gpuIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	var kubeEnv string
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-env" {
+			kubeEnv = ptr.Deref(item.Value, "")
+			break
+		}
+	}
+	require.NotContains(t, kubeEnv, metadata.GPUTaintArg, "GPU taint must not be present when AutoGPUTaint=false")
+}
+
+func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	// Non-GPU instance type (no LabelInstanceGPUCount requirement)
+	nonGPUIT := &cloudprovider.InstanceType{
+		Name: "n1-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	// Template carries attached accelerators (T4), which triggers isGPUInstance
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			GuestAccelerators: []*compute.AcceleratorConfig{
+				{AcceleratorType: "nvidia-tesla-t4", AcceleratorCount: 1},
+			},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: true}}
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		nc,
+		nonGPUIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	var kubeEnv string
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-env" {
+			kubeEnv = ptr.Deref(item.Value, "")
+			break
+		}
+	}
+	require.Contains(t, kubeEnv, metadata.GPUTaintArg, "GPU taint must be injected when GuestAccelerators present and AutoGPUTaint=true")
+}
+
+func TestBuildInstance_GPUDriverVersionInjected(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	gpuIT := &cloudprovider.InstanceType{
+		Name: "g2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: "latest"}}
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		nc,
+		gpuIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	var kubeLabels string
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-labels" {
+			kubeLabels = ptr.Deref(item.Value, "")
+			break
+		}
+	}
+	require.Contains(t, kubeLabels, "cloud.google.com/gke-gpu-driver-version=latest",
+		"gke-gpu-driver-version label must be injected for GPU instances")
+}
+
+func TestBuildInstance_GPUDriverVersionDefault(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	gpuIT := &cloudprovider.InstanceType{
+		Name: "g2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: "default"}}
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		nc,
+		gpuIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	var kubeLabels string
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-labels" {
+			kubeLabels = ptr.Deref(item.Value, "")
+			break
+		}
+	}
+	require.Contains(t, kubeLabels, "cloud.google.com/gke-gpu-driver-version=default",
+		"gke-gpu-driver-version label must be injected with default value")
+}
+
+func TestBuildInstance_GPUDriverVersionNotInjectedForNonGPU(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	// Non-GPU instance type: LabelInstanceGPUCount set to DoesNotExist (matches real non-GPU types), no GuestAccelerators
+	nonGPUIT := &cloudprovider.InstanceType{
+		Name: "n2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	// GPUDriverVersion is set but instance is NOT a GPU instance — label must NOT be injected
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: "default"}}
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		nc,
+		nonGPUIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	var kubeLabels string
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-labels" {
+			kubeLabels = ptr.Deref(item.Value, "")
+			break
+		}
+	}
+	require.NotContains(t, kubeLabels, "gke-gpu-driver-version",
+		"gke-gpu-driver-version must not be injected for non-GPU instances")
+}
+
+func TestBuildInstance_GPUDriverVersionDisabled(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+
+	gpuIT := &cloudprovider.InstanceType{
+		Name: "g2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	template := &compute.InstanceTemplate{
+		Properties: &compute.InstanceProperties{
+			Scheduling:        &compute.Scheduling{},
+			NetworkInterfaces: []*compute.NetworkInterface{},
+			Metadata: &compute.Metadata{
+				Items: []*compute.MetadataItems{
+					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
+				},
+			},
+		},
+	}
+
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: "disabled"}}
+	instance, err := p.buildInstance(
+		spotOrOnDemandNodeClaim(),
+		nc,
+		gpuIT,
+		template,
+		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	var kubeLabels string
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-labels" {
+			kubeLabels = ptr.Deref(item.Value, "")
+			break
+		}
+	}
+	require.Contains(t, kubeLabels, "cloud.google.com/gke-gpu-driver-version=disabled",
+		"gke-gpu-driver-version=disabled must be injected to opt out of automatic driver installation")
 }
 
 // instanceLabelsFixture returns the common NodeClaim and GCENodeClass objects used

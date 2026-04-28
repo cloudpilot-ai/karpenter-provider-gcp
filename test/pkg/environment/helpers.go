@@ -61,7 +61,7 @@ type TestCase struct {
 	InstanceTypes []string
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
-	ImageFamily string
+	ImageFamily         string
 	ConsolidationPolicy string // defaults to WhenEmptyOrUnderutilized when empty
 }
 
@@ -136,6 +136,88 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
 	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithAutoGPUTaint creates a GCENodeClass with autoGPUTaint: true
+// and the GKE GPU driver auto-install label set. Used by GPU e2e tests.
+func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"autoGPUTaint": true,
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"metadata": map[string]any{
+				"kube-labels": "cloud.google.com/gke-gpu-driver-version=latest",
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// CreateDeploymentWithGPU creates a single-replica Deployment that requests one
+// nvidia.com/gpu resource, tolerates the GPU taint and the e2e nodepool taint.
+func (e *Environment) CreateDeploymentWithGPU(ctx context.Context, name, appLabel, nodePoolName string) {
+	replicas := int32(1)
+	zero := int64(0)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: TestNamespace},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": appLabel}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": appLabel}},
+				Spec: corev1.PodSpec{
+					NodeSelector:                  map[string]string{karpv1.NodePoolLabelKey: nodePoolName},
+					TerminationGracePeriodSeconds: &zero,
+					Tolerations: []corev1.Toleration{
+						{
+							Key:      "karpenter-e2e/nodepool",
+							Value:    nodePoolName,
+							Effect:   corev1.TaintEffectNoSchedule,
+							Operator: corev1.TolerationOpEqual,
+						},
+						{
+							Key:      "nvidia.com/gpu",
+							Operator: corev1.TolerationOpExists,
+							Effect:   corev1.TaintEffectNoSchedule,
+						},
+					},
+					Containers: []corev1.Container{{
+						Name:  "inflate",
+						Image: PauseImage,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:                    resource.MustParse("100m"),
+								corev1.ResourceMemory:                 resource.MustParse("128Mi"),
+								corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+	_ = e.KubeClient.AppsV1().Deployments(TestNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+	Eventually(func(g Gomega) {
+		_, err := e.KubeClient.AppsV1().Deployments(TestNamespace).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "waiting for stale Deployment %s to be deleted", name)
+	}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).Should(Succeed())
+	_, err := e.KubeClient.AppsV1().Deployments(TestNamespace).Create(ctx, dep, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GPU Deployment %s", name)
 }
 
 // GetGCEInstance fetches the GCE instance corresponding to the given node
@@ -604,6 +686,36 @@ func (e *Environment) WaitForNodeClaimLaunched(ctx context.Context, nodePoolName
 		}
 		g.Expect(false).To(BeTrue(), "no NodeClaim for pool %s has Launched=True yet", nodePoolName)
 	}).WithTimeout(NodeClaimLaunchTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+// WaitForNodeClaimInitialized polls NodeClaims owned by nodePoolName until at least
+// one reaches Initialized=True. Uses GPUProvisioningTimeout to accommodate the time
+// needed for GPU driver installation and device plugin startup.
+func (e *Environment) WaitForNodeClaimInitialized(ctx context.Context, nodePoolName string) {
+	GinkgoWriter.Printf("[wait] waiting for NodeClaim in pool %s to become Initialized\n", nodePoolName)
+	Eventually(func(g Gomega) {
+		claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(ctx, metav1.ListOptions{
+			LabelSelector: "karpenter.sh/nodepool=" + nodePoolName,
+		})
+		g.Expect(err).NotTo(HaveOccurred(), "listing NodeClaims for pool %s", nodePoolName)
+		g.Expect(claims.Items).NotTo(BeEmpty(), "no NodeClaims for pool %s yet", nodePoolName)
+
+		for i := range claims.Items {
+			conditions, _, _ := unstructured.NestedSlice(claims.Items[i].Object, "status", "conditions")
+			for _, c := range conditions {
+				cond, ok := c.(map[string]any)
+				if !ok || cond["type"] != "Initialized" {
+					continue
+				}
+				if cond["status"] == "True" {
+					return // at least one claim initialized
+				}
+				GinkgoWriter.Printf("[wait] NodeClaim %s Initialized=%s reason=%s: %s\n",
+					claims.Items[i].GetName(), cond["status"], cond["reason"], cond["message"])
+			}
+		}
+		g.Expect(false).To(BeTrue(), "no NodeClaim for pool %s has Initialized=True yet", nodePoolName)
+	}).WithTimeout(GPUProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 }
 
 // WaitForKubeProxyRunning polls until the kube-proxy DaemonSet pod on the given

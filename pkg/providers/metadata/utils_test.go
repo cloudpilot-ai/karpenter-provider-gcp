@@ -17,6 +17,7 @@ limitations under the License.
 package metadata
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/swag"
@@ -118,4 +119,92 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 	require.Contains(t, got, "cloud.google.com/machine-family=e2")
 	require.Contains(t, got, "arch=amd64")
 	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
+}
+
+func TestAppendGPUTaint_MergesIntoExistingFlag(t *testing.T) {
+	// The common case: PatchUnregisteredTaints has already added --register-with-taints.
+	// AppendGPUTaint must merge into that value, not add a second flag.
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String("KUBELET_ARGS: --v=2 --register-with-taints=karpenter.sh/unregistered=true:NoExecute\n"),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := swag.StringValue(meta.Items[0].Value)
+	require.Contains(t, got, GPUTaintArg)
+	require.Contains(t, got, "karpenter.sh/unregistered=true:NoExecute")
+	// Both taints must be in a single --register-with-taints flag, not two separate ones.
+	require.Equal(t, 1, strings.Count(got, "--register-with-taints="), "must not introduce a second --register-with-taints flag")
+}
+
+func TestAppendGPUTaint_AppendsNewFlagWhenNoneExists(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String("KUBELET_ARGS: --v=2\n"),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := swag.StringValue(meta.Items[0].Value)
+	require.Contains(t, got, GPUTaintArg)
+}
+
+func TestAppendGPUTaint_IdempotentWhenPresent(t *testing.T) {
+	initial := "KUBELET_ARGS: --v=2 --register-with-taints=karpenter.sh/unregistered=true:NoExecute," + GPUTaintArg + "\n"
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String(initial),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := swag.StringValue(meta.Items[0].Value)
+	require.Equal(t, 1, strings.Count(got, GPUTaintArg), "taint must appear exactly once")
+}
+
+func TestAppendGPUTaint_ErrorWhenNoKubeletArgs(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: swag.String("SOME_OTHER_KEY: value\n"),
+			},
+		},
+	}
+	require.Error(t, AppendGPUTaint(meta))
+}
+
+func TestSetGPUDriverVersionLabel_InjectsLabel(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: swag.String("existing-label=value")},
+	}}
+	SetGPUDriverVersionLabel(meta, "latest")
+	val := swag.StringValue(meta.Items[0].Value)
+	require.Contains(t, val, "cloud.google.com/gke-gpu-driver-version=latest")
+	require.Contains(t, val, "existing-label=value", "existing labels must be preserved")
+}
+
+func TestSetGPUDriverVersionLabel_IdempotentWhenPresent(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: swag.String("existing=x,cloud.google.com/gke-gpu-driver-version=latest")},
+	}}
+	SetGPUDriverVersionLabel(meta, "latest")
+	val := swag.StringValue(meta.Items[0].Value)
+	require.Equal(t, 1, strings.Count(val, "gke-gpu-driver-version"), "label must not be duplicated")
+}
+
+func TestSetGPUDriverVersionLabel_NoopWhenNoKubeLabels(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-env", Value: swag.String("KUBELET_ARGS: --v=2")},
+	}}
+	SetGPUDriverVersionLabel(meta, "default")
+	require.Len(t, meta.Items, 1)
+	require.Equal(t, "kube-env", meta.Items[0].Key)
 }
