@@ -23,14 +23,15 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	lop "github.com/samber/lo/parallel"
-	"go.uber.org/multierr"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 )
+
+// GCP spot prices change at most daily; on-demand roughly yearly.
+const priceRefreshInterval = 12 * time.Hour
 
 type Controller struct {
 	pricingProvider pricing.Provider
@@ -45,19 +46,10 @@ func NewController(pricingProvider pricing.Provider) *Controller {
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "providers.pricing")
 
-	work := []func(ctx context.Context) error{
-		c.pricingProvider.UpdatePrices,
-	}
-	errs := make([]error, len(work))
-	lop.ForEach(work, func(f func(ctx context.Context) error, i int) {
-		if err := f(ctx); err != nil {
-			errs[i] = err
-		}
-	})
-	if err := multierr.Combine(errs...); err != nil {
+	if err := c.pricingProvider.UpdatePrices(ctx); err != nil {
 		return reconciler.Result{}, fmt.Errorf("updating pricing, %w", err)
 	}
-	return reconciler.Result{RequeueAfter: 12 * time.Hour}, nil
+	return reconciler.Result{RequeueAfter: priceRefreshInterval}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
