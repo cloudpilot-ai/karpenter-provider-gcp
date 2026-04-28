@@ -1,6 +1,6 @@
 # Proposal: Eliminate Karpenter-Managed Node Pool Dependency
 
-- **Status**: Provisional
+- **Status**: Implemented (PR [#263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263))
 - **Authors**: @dm3ch
 - **Created**: 2026-04-17
 - **Related Issues**: [#255](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/255)
@@ -71,14 +71,14 @@ After:
 
 The table below maps each kube-env field group to its source after this change. "Any pool" means whichever RUNNING pool the selection algorithm picks — arch of the source pool does not matter.
 
-| Group | Fields | Source |
-|---|---|---|
-| 1 — Cluster constants | CA cert, master endpoint, IP ranges, feature flags, … | Any pool's template |
-| 2 — Arch-specific binary | `SERVER_BINARY_TAR_URL`, `SERVER_BINARY_TAR_HASH` | Source arch detected from pool's URL; patched to target arch; hash from GCS `.sha512` sidecar |
-| 3 — OS-specific | `gke-os-distribution`, BFQ scheduler flags | Patched at provisioning time (`PatchKubeEnvForOSType`) |
-| 4 — Per-pool credentials | `TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`, NPD config | Any pool's template |
-| 5 — Node-specific | arch label, machine-family, provisioning model, max-pods | Patched at provisioning time (existing functions, no change) |
-| 6 — Boot images | Source image URL per OS + arch | COS: pool template boot disk; Ubuntu: `ubuntu-os-gke-cloud` image catalog |
+| Group                    | Fields                                                   | Source                                                                                                                                           |
+|--------------------------|----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 — Cluster constants    | CA cert, master endpoint, IP ranges, feature flags, …    | Any pool's template                                                                                                                              |
+| 2 — Arch-specific binary | `SERVER_BINARY_TAR_URL`, `SERVER_BINARY_TAR_HASH`        | Source arch detected from pool's URL; patched to target arch; hash from GCS `.sha512` sidecar                                                    |
+| 3 — OS-specific          | `gke-os-distribution`, BFQ scheduler flags               | Patched at provisioning time (`PatchKubeEnvForOSType`)                                                                                           |
+| 4 — Per-pool credentials | `TPM_BOOTSTRAP_CERT`, `KUBE_PROXY_TOKEN`, NPD config     | Any pool's template                                                                                                                              |
+| 5 — Node-specific        | arch label, machine-family, provisioning model, max-pods | Patched at provisioning time (existing functions, no change)                                                                                     |
+| 6 — Boot images          | Source image URL per OS + arch                           | COS: `gke-node-images` project catalog (filtered by GKE version + `architecture=ARM64` for arm64); Ubuntu: `ubuntu-os-gke-cloud` project catalog |
 
 ### Design Details
 
@@ -91,39 +91,41 @@ On startup and on each template refresh cycle, Karpenter selects a bootstrap sou
 2. If default-pool exists and is RUNNING → use it.
 3. Sort remaining pools by name; use the first RUNNING pool.
 4. If no RUNNING pool found → retry with backoff (transient during cluster upgrades).
-   If retry limit exceeded → create karpenter-default as last-resort fallback (see below).
+   If retry limit exceeded → create karpenter-fallback as last-resort fallback (see below).
 ```
 
-The selected pool name is stored in the provider struct, refreshed every sync cycle. `GetInstanceTemplates()` returns a single template keyed by the selected pool name. Observability:
+The selected pool name is stored in the provider struct, refreshed every 12 minutes (controller requeue interval). Observability:
 - Logged at INFO on startup and whenever the selected pool changes (not on every refresh cycle).
-- A `karpenter_gcp_bootstrap_source_pool` Prometheus gauge (label: `pool_name`) is updated on each selection, enabling alerts on unexpected changes via `rate()`.
 
 NodePool status treatment for selection purposes:
 
-| Status | Treatment |
-|---|---|
-| `RUNNING` | Eligible |
+| Status               | Treatment                                                                             |
+|----------------------|---------------------------------------------------------------------------------------|
+| `RUNNING`            | Eligible                                                                              |
 | `RUNNING_WITH_ERROR` | Eligible — pool is functional; per-node failures do not affect the bootstrap template |
-| `PROVISIONING` | Skip — transient; retried on next cycle |
-| `RECONCILING` | Skip — transient (same as PROVISIONING) |
-| `STOPPING` | Skip — pool is being deleted |
-| `ERROR` | Skip |
-| `STATUS_UNSPECIFIED` | Skip |
+| `PROVISIONING`       | Skip — transient; retried on next cycle                                               |
+| `RECONCILING`        | Skip — transient (same as PROVISIONING)                                               |
+| `STOPPING`           | Skip — pool is being deleted                                                          |
+| `ERROR`              | Skip                                                                                  |
+| `STATUS_UNSPECIFIED` | Skip                                                                                  |
 
 No arch-based or OS-based filtering is needed. `PatchKubeEnvForArch` and `PatchKubeEnvForOSType` handle all differences at provisioning time regardless of the source pool's architecture or image type.
 
 #### Last-Resort Fallback Pool
 
-In the unlikely event that no RUNNING pool is available after retries (e.g., unusual cluster state), Karpenter creates a single `karpenter-default` pool. The implementation will make a best effort to be compatible with all known optional GCE org policies:
+In the unlikely event that no RUNNING pool is available after retries (e.g., unusual cluster state, 5 consecutive selection failures), Karpenter creates a single `karpenter-fallback` pool. The implementation makes a best effort to be compatible with all known optional GCE org policies:
 
 - Minimal `NodeConfig`: only `imageType` (COS_CONTAINERD) and `serviceAccount`; no explicit machine type, no custom labels or taints
 - Shielded VM config enabled by default (`enableSecureBoot`, `enableIntegrityMonitoring`) to satisfy `compute.requireShieldedVm`
+- `EnablePrivateNodes` mirrored from the cluster's network config, so private-node clusters are handled automatically
+- Workload Identity configured (`WorkloadMetadataConfig.Mode: GKE_METADATA`) if the cluster uses it
+- Insecure kubelet readonly port disabled; project SSH keys blocked via instance metadata
 - `gcp.restrictNonCmekServices` **cannot** be automatically satisfied: this constraint requires a pre-existing customer-managed KMS key at pool creation time; auto-provisioning a key ring and key is out of scope (requires additional IAM permissions and may itself be restricted by `gcp.restrictCmekCryptoKeyProjects`). If this policy is active and no RUNNING pool exists, fallback pool creation will fail — the operator must pre-create any RUNNING pool and optionally set `DEFAULT_NODEPOOL_TEMPLATE_NAME`
 - 0 initial nodes — pool is never used to run workloads
 
 If the fallback creation still fails due to an org policy that cannot be automatically satisfied, Karpenter logs a clear error and halts provisioning. The operator can then create any RUNNING pool manually and set `DEFAULT_NODEPOOL_TEMPLATE_NAME` to point Karpenter at it.
 
-`karpenter-default` is not preferred over existing cluster pools. It is only used when the fallback creation path fires — at which point it is the only candidate.
+`karpenter-fallback` is not preferred over existing cluster pools. It is only used when the fallback creation path fires — at which point it is the only candidate.
 
 #### Architecture-Specific Binary Metadata (Group 2)
 
@@ -152,16 +154,27 @@ In clusters where `storage.googleapis.com` is not reachable (VPC Service Control
 
 #### OS-Type Patching (Group 3)
 
-Add `PatchKubeEnvForOSType(metadata *compute.Metadata, imageFamily v1alpha1.ImageFamily)` to `pkg/providers/metadata/utils.go`:
+Add `PatchKubeEnvForOSType(metadata *compute.Metadata, imageFamily v1alpha1.ImageFamily)` to `pkg/providers/metadata/utils.go`. The function is bidirectional: it patches in either direction based on the target `imageFamily`, so the source pool's OS type is irrelevant.
 
-| Field | COS pool value | Action for Ubuntu |
-|---|---|---|
-| `gke-os-distribution=cos` in `AUTOSCALER_ENV_VARS` | `cos` | regex replace → `ubuntu` |
-| `gke-os-distribution=cos` in `KUBELET_ARGS` | `cos` | regex replace → `ubuntu` |
-| `ENABLE_NODE_BFQ_IO_SCHEDULER` | `"true"` | remove line |
-| `NODE_BFQ_IO_SCHEDULER_IO_WEIGHT` | `"1200"` | remove line |
+**COS source → Ubuntu target:**
 
-This follows the same pattern as the existing `PatchKubeEnvForInstanceType` and eliminates the Ubuntu-specific template pools.
+| Field                                              | COS pool value | Action                   |
+|----------------------------------------------------|----------------|--------------------------|
+| `gke-os-distribution=cos` in `AUTOSCALER_ENV_VARS` | `cos`          | regex replace → `ubuntu` |
+| `gke-os-distribution=cos` in `KUBELET_ARGS`        | `cos`          | regex replace → `ubuntu` |
+| `ENABLE_NODE_BFQ_IO_SCHEDULER`                     | `"true"`       | remove line              |
+| `NODE_BFQ_IO_SCHEDULER_IO_WEIGHT`                  | `"1200"`       | remove line              |
+
+**Ubuntu source → COS target:**
+
+| Field                                                 | Ubuntu pool value | Action                                        |
+|-------------------------------------------------------|-------------------|-----------------------------------------------|
+| `gke-os-distribution=ubuntu` in `AUTOSCALER_ENV_VARS` | `ubuntu`          | regex replace → `cos`                         |
+| `gke-os-distribution=ubuntu` in `KUBELET_ARGS`        | `ubuntu`          | regex replace → `cos`                         |
+| `ENABLE_NODE_BFQ_IO_SCHEDULER`                        | missing           | add `ENABLE_NODE_BFQ_IO_SCHEDULER: "true"`    |
+| `NODE_BFQ_IO_SCHEDULER_IO_WEIGHT`                     | missing           | add `NODE_BFQ_IO_SCHEDULER_IO_WEIGHT: "1200"` |
+
+This follows the same pattern as the existing `PatchKubeEnvForInstanceType` and eliminates both Ubuntu-specific and COS-specific template pools.
 
 #### Group 4 Credential Reuse
 
@@ -173,12 +186,18 @@ Verified against GKE 1.35.1 (COS `default-pool` vs Ubuntu `ubuntu-pool` on the s
 
 #### Code Changes
 
-| File | Change |
-|---|---|
-| `pkg/providers/nodepooltemplate/nodepooltemplate.go` | `Create()` → no-op unless no RUNNING pool found (fallback only). Add `discoverSourcePool()` with priority-based selection. |
-| `pkg/providers/instance/instance.go` | `resolveNodePoolName()` → `resolveSourcePoolName()`. Single source pool for all OS families and both arches. |
-| `pkg/providers/metadata/utils.go` | Add `PatchKubeEnvForOSType`, `PatchKubeEnvForArch`. |
-| `pkg/operator/options/options.go` | Add `DEFAULT_NODEPOOL_TEMPLATE_NAME` env var (optional, default empty). |
+| File                                                 | Change                                                                                                                                                          |
+|------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `pkg/providers/nodepooltemplate/nodepooltemplate.go` | `Create()` → fallback-only (`EnsureFallbackPool`). Add `discoverSourcePool()` with priority-based selection. Add `GetSourcePoolName()`.                         |
+| `pkg/providers/instance/instance.go`                 | `resolveNodePoolName()` → `resolveSourcePoolName()`. Single source pool for all OS families and both arches.                                                    |
+| `pkg/providers/metadata/utils.go`                    | Add `PatchKubeEnvForOSType` (bidirectional), `PatchKubeEnvForArch` (with GCS hash fetch and `sync.Map` cache).                                                  |
+| `pkg/providers/imagefamily/containeroptimizedos.go`  | Image resolution rewritten to query `gke-node-images` project catalog directly; arm64 variant derived by string substitution.                                   |
+| `pkg/providers/imagefamily/ubuntu.go`                | Image resolution rewritten to query `ubuntu-os-gke-cloud` project catalog directly; arm64 variant derived by string substitution.                               |
+| `pkg/providers/imagefamily/helper.go`                | Deleted — no longer needed.                                                                                                                                     |
+| `pkg/operator/options/options.go`                    | Add `DEFAULT_NODEPOOL_TEMPLATE_NAME` env var / `--default-nodepool-template-name` flag (optional, default empty).                                               |
+| `pkg/controllers/nodepooltemplate/controller.go`     | Reconcile loop: attempt pool discovery, exponential backoff on failure (30s→10min), create fallback after 5 consecutive failures. Requeue interval: 12 minutes. |
+| `MIGRATION.md`                                       | Added upgrade guide with legacy pool cleanup commands.                                                                                                          |
+| `docs/bootstrap-pool.md`                             | New operator guide for bootstrap pool configuration and troubleshooting.                                                                                        |
 
 Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManagerName`, `resolveInstanceTemplateName`, `PatchKubeEnvForInstanceType`, `SetProvisioningModel`, `SetMaxPodsPerNode`, `RemoveGKEBuiltinLabels` — are reused unchanged.
 
@@ -196,7 +215,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Mitigation**:
 - The refresh cycle re-runs selection. If another RUNNING pool exists, it is promoted automatically with no operator action.
-- If no pool remains, the fallback creates `karpenter-default` (COS, 0 nodes) — distinct from the current 4-pool creation path.
+- If no pool remains, the fallback creates `karpenter-fallback` (COS, 0 nodes) — distinct from the current 4-pool creation path.
 - `DEFAULT_NODEPOOL_TEMPLATE_NAME` produces a clear error message naming the expected pool if it is missing.
 
 ### GKE control-plane or node-pool upgrade
@@ -223,7 +242,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Impact**: Group 1 (cluster constants) and Group 4 (credentials) are identical across pools — verified across four pools on a live GKE 1.35.1 cluster. Custom `Properties.Metadata` keys set by operators are the only divergence risk.
 
-**Mitigation**: Selection is deterministic — `default-pool` is preferred, then alphabetical by name. The selected pool name is logged at INFO on startup and on any change; a `karpenter_gcp_bootstrap_source_pool` Prometheus gauge tracks the current selection. Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`.
+**Mitigation**: Selection is deterministic — `default-pool` is preferred, then alphabetical by name. The selected pool name is logged at INFO on startup and on any change. Operators who need a specific pool can pin it via `DEFAULT_NODEPOOL_TEMPLATE_NAME`.
 
 ### `NODE_PROBLEM_DETECTOR_ADC_CONFIG` pool name validation
 
@@ -245,7 +264,7 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 **Scenario**: All cluster pools are in PROVISIONING state during a GKE cluster upgrade (transient), or an unusual cluster state where all pools are unavailable.
 
-**Mitigation**: Retry with backoff — the normal case (upgrade in progress) resolves within minutes. If retries are exhausted, create `karpenter-default` as a last-resort fallback with minimal, policy-safe config (see Pool Selection Algorithm above). Log pool states clearly at each retry so operators can diagnose the situation.
+**Mitigation**: Retry with backoff — the normal case (upgrade in progress) resolves within minutes. If retries are exhausted (5 consecutive failures, exponential backoff 30s→10min), create `karpenter-fallback` as a last-resort fallback with minimal, policy-safe config (see Pool Selection Algorithm above). Log pool states clearly at each retry so operators can diagnose the situation.
 
 ### GKE Container API quota
 
@@ -286,16 +305,16 @@ Existing functions — `getInstanceTemplate`, `resolveInstanceGroupZoneAndManage
 
 ### E2E Test Matrix
 
-| Variant | Bootstrap source | Image source | Patches |
-|---|---|---|---|
-| COS amd64 on-demand | discovered pool | pool template boot disk | arch, machine-family, provisioning |
-| COS amd64 spot | same | same | + gke-provisioning=spot |
-| Ubuntu amd64 on-demand | same | `ubuntu-os-gke-cloud` lookup | + gke-os-distribution, -BFQ |
-| Ubuntu amd64 spot | same | same | + gke-provisioning=spot |
-| COS arm64 on-demand | same | `gke-node-images` arm64 | arch=arm64, URL/hash patch |
-| COS arm64 spot | same | same | + gke-provisioning=spot |
-| Ubuntu arm64 on-demand | same | `ubuntu-os-gke-cloud` arm64 | + gke-os-distribution, URL/hash patch |
-| Ubuntu arm64 spot | same | same | + gke-provisioning=spot |
+| Variant                | Bootstrap source | Image source                 | Patches                               |
+|------------------------|------------------|------------------------------|---------------------------------------|
+| COS amd64 on-demand    | discovered pool  | `gke-node-images` catalog    | arch, machine-family, provisioning    |
+| COS amd64 spot         | same             | same                         | + gke-provisioning=spot               |
+| Ubuntu amd64 on-demand | same             | `ubuntu-os-gke-cloud` lookup | + gke-os-distribution, -BFQ           |
+| Ubuntu amd64 spot      | same             | same                         | + gke-provisioning=spot               |
+| COS arm64 on-demand    | same             | `gke-node-images` arm64      | arch=arm64, URL/hash patch            |
+| COS arm64 spot         | same             | same                         | + gke-provisioning=spot               |
+| Ubuntu arm64 on-demand | same             | `ubuntu-os-gke-cloud` arm64  | + gke-os-distribution, URL/hash patch |
+| Ubuntu arm64 spot      | same             | same                         | + gke-provisioning=spot               |
 
 ### Scenario Tests
 
@@ -323,6 +342,8 @@ The feature is considered complete when:
 
 ## Implementation Phases
 
+> **Note:** All phases below were implemented together in PR [#263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263). The phased breakdown is preserved as a record of the original plan.
+
 ### Phase 0 — Research: credential viability and pool discovery PoC
 
 Before any implementation begins:
@@ -347,37 +368,40 @@ Before any implementation begins, add e2e tests for all node variant scenarios t
 
 Scenarios to cover (that are not yet covered or only partially covered):
 
-| Scenario | Why needed |
-|---|---|
-| Ubuntu amd64 on-demand node provisions and registers | Phase 2 replaces the Ubuntu template pool |
-| Ubuntu amd64 spot node provisions and registers | same |
-| COS arm64 on-demand node provisions and registers | Phase 2 eliminates the arm64 COS pool |
-| Ubuntu arm64 on-demand node provisions and registers | Phase 2 eliminates the arm64 Ubuntu pool |
-| Node registers with correct `kubernetes.io/arch` label | Arch patching correctness |
-| Node registers with correct `cloud.google.com/machine-family` label | Machine-family patching correctness |
-| kube-proxy pod is Running on a Karpenter-provisioned node | Group 4 credential baseline |
-| node-problem-detector pod is Running on a Karpenter-provisioned node | NPD credential baseline |
+| Scenario                                                                                                          | Why needed                                 |
+|-------------------------------------------------------------------------------------------------------------------|--------------------------------------------|
+| Ubuntu amd64 on-demand node provisions and registers                                                              | Phase 2 replaces the Ubuntu template pool  |
+| Ubuntu amd64 spot node provisions and registers                                                                   | same                                       |
+| COS arm64 on-demand node provisions and registers                                                                 | Phase 2 eliminates the arm64 COS pool      |
+| Ubuntu arm64 on-demand node provisions and registers                                                              | Phase 2 eliminates the arm64 Ubuntu pool   |
+| Node registers with correct `kubernetes.io/arch` label                                                            | Arch patching correctness                  |
+| Node registers with correct `cloud.google.com/machine-family` label                                               | Machine-family patching correctness        |
+| kube-proxy pod is Running on a Karpenter-provisioned node                                                         | Group 4 credential baseline                |
+| node-problem-detector pod is Running on a Karpenter-provisioned node                                              | NPD credential baseline                    |
 | NPD remains Running after source pool is deleted (token exchange succeeds with non-existent pool in audience URL) | Validates OQ1 empirical finding end-to-end |
-| Cluster with `compute.requireShieldedVm` policy — node provisions | Org-policy regression gate |
+| Cluster with `compute.requireShieldedVm` policy — node provisions                                                 | Org-policy regression gate                 |
 
 These tests run against the project's shared e2e cluster using the existing framework under `test/e2e/`. Env vars `E2E_PROJECT_ID`, `E2E_LOCATION`, and `GOOGLE_APPLICATION_CREDENTIALS` must be set; see `CLAUDE.md` for values.
 
 Tests that require arm64 must guard on `c4a` availability in the configured zone and skip gracefully if unsupported.
 
 ### Phase 1 — OS-type patching
+
 Add `PatchKubeEnvForOSType`. Add Ubuntu image resolver (query `ubuntu-os-gke-cloud`, cache by GKE version + arch). Eliminates `karpenter-ubuntu` and `karpenter-ubuntu-arm64` pools.
 
 ### Phase 2 — Arm64 hash via GCS sidecar
+
 Add `PatchKubeEnvForArch`. Eliminates `karpenter-cos-arm64` pool. At this point, only `karpenter-default` remains.
 
 ### Phase 3 — Pool discovery and selection
+
 Replace `Create()` pool creation with priority-based discovery. Add `DEFAULT_NODEPOOL_TEMPLATE_NAME`. At this point, 0 Karpenter-specific pools in normal operation.
 
 ---
 
 ## Migration: Existing Karpenter-Managed Pools
 
-Clusters upgrading from a version that created the four Karpenter template pools will have `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64` present after the upgrade.
+Clusters upgrading from a version that created the four Karpenter template pools will have `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, and `karpenter-ubuntu-arm64` present after the upgrade. The new last-resort fallback pool, if ever created, is named `karpenter-fallback` — a distinct name so legacy pool deletion is unambiguous.
 
 ### Should Karpenter delete them automatically?
 
