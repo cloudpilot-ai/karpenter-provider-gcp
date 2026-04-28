@@ -79,7 +79,7 @@ helm install karpenter karpenter-gcp/karpenter \
 | controller.env | list | `[]` |  |
 | controller.featureGates.nodeOverlay | bool | `false` | nodeOverlay is ALPHA and is disabled by default. Setting this will allow the use of node overlay to impact scheduling decisions |
 | controller.featureGates.nodeRepair | bool | `false` | nodeRepair is ALPHA and is disabled by default. When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions. |
-| controller.featureGates.reservedCapacity | bool | `true` | reservedCapacity enables scheduling to reserved/committed GCP capacity (default on). |
+| controller.featureGates.reservedCapacity | bool | `false` | reservedCapacity enables scheduling to reserved/committed GCP capacity. Disabled: the GCP provider does not yet implement GCE reservation support (#239). |
 | controller.featureGates.spotToSpotConsolidation | bool | `true` |  |
 | controller.featureGates.staticCapacity | bool | `false` | staticCapacity is ALPHA and is disabled by default. When enabled, a NodePool with spec.replicas set maintains a fixed number of nodes regardless of pod demand (static node pool). consolidationPolicy and consolidateAfter are ignored on static NodePools. |
 | controller.healthProbe.port | int | `8081` |  |

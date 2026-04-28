@@ -6,13 +6,13 @@ Karpenter for GCP is configured via environment variables passed to the controll
 
 Feature gates control opt-in or experimental behaviors. They are passed as a comma-separated list via the `FEATURE_GATES` environment variable.
 
-| Feature Gate              | Helm value                                        | Default | Status | Description                                                                                                                    |
-|---------------------------|---------------------------------------------------|---------|--------|--------------------------------------------------------------------------------------------------------------------------------|
-| `NodeRepair`              | `controller.featureGates.nodeRepair`              | `false` | Alpha  | Automatically replaces nodes that fail GKE Node Problem Detector health checks.                                                |
-| `ReservedCapacity`        | `controller.featureGates.reservedCapacity`        | `true`  | Beta   | Enables scheduling to reserved/committed GCP capacity. Disable only if you do not use Committed Use Discounts or Reservations. |
-| `SpotToSpotConsolidation` | `controller.featureGates.spotToSpotConsolidation` | `true`  | Beta   | Allows consolidation to replace a Spot node with a cheaper Spot node (both single- and multi-node).                            |
-| `NodeOverlay`             | `controller.featureGates.nodeOverlay`             | `false` | Alpha  | Applies `NodeOverlay` resources to instance type scheduling decisions.                                                         |
-| `StaticCapacity`          | `controller.featureGates.staticCapacity`          | `false` | Alpha  | Enables NodePools with `spec.replicas` set to maintain a fixed number of nodes regardless of pod demand.                       |
+| Feature Gate              | Helm value                                        | Default | Status | Description                                                                                                                                                                                    |
+|---------------------------|---------------------------------------------------|---------|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NodeRepair`              | `controller.featureGates.nodeRepair`              | `false` | Alpha  | Automatically replaces nodes that fail GKE Node Problem Detector health checks.                                                                                                                |
+| `ReservedCapacity`        | `controller.featureGates.reservedCapacity`        | `false` | Beta   | Enables scheduling to reserved/committed GCP capacity. Disabled until GCE reservation support is implemented (see [#239](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/239)). |
+| `SpotToSpotConsolidation` | `controller.featureGates.spotToSpotConsolidation` | `true`  | Beta   | Allows consolidation to replace a Spot node with a cheaper Spot node (both single- and multi-node).                                                                                            |
+| `NodeOverlay`             | `controller.featureGates.nodeOverlay`             | `false` | Alpha  | Applies `NodeOverlay` resources to instance type scheduling decisions.                                                                                                                         |
+| `StaticCapacity`          | `controller.featureGates.staticCapacity`          | `false` | Alpha  | Enables NodePools with `spec.replicas` set to maintain a fixed number of nodes regardless of pod demand.                                                                                       |
 
 Example Helm override to enable `NodeRepair`:
 
