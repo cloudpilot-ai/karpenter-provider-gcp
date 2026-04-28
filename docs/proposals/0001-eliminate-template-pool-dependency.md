@@ -1,6 +1,6 @@
 # Proposal: Eliminate Karpenter-Managed Node Pool Dependency
 
-- **Status**: Implemented (PR [#263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263))
+- **Status**: Provisional
 - **Authors**: @dm3ch
 - **Created**: 2026-04-17
 - **Related Issues**: [#255](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/255)
