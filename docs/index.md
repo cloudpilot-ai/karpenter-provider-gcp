@@ -23,7 +23,7 @@ Key capabilities:
 
 - **GCENodeClass** — a custom resource that captures all GCP-specific node configuration: image family, disk type and size, service account, network tags, Shielded VM settings, kubelet configuration, and network overrides
 - **Template pool bootstrap** — Karpenter creates lightweight zero-node GKE node pools to obtain GKE-managed instance templates, ensuring provisioned nodes are fully GKE-compatible
-- **Node repair policies** — integrates with GKE's node problem detection to trigger replacement of unhealthy nodes
+- **Node repair policies** — integrates with GKE's node problem detection to trigger replacement of unhealthy nodes (see [Node repair](node-repair.md))
 
 ## Known limitations
 
@@ -38,6 +38,11 @@ Key capabilities:
 - [Quick start](getting-started/quick-start.md) — create your first NodePool and GCENodeClass, and trigger node provisioning
 - [Terraform](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/deploy/terraform) — provision the full GCP infrastructure (VPC, GKE cluster, service accounts) with Terraform
 
+## Features
+
+- [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
+- [Static capacity](examples/static-capacity.md) — keep a fixed number of nodes running with `spec.replicas`
+
 ## Reference
 
 - [GCENodeClass](reference/gcenodeclass.md) — full field reference for the `GCENodeClass` resource
@@ -50,6 +55,7 @@ Key capabilities:
 - [Ubuntu](examples/ubuntu.md) — Ubuntu image family
 - [GPU](examples/gpu.md) — GPU workloads
 - [Networking](examples/networking.md) — private nodes, custom subnetwork, pod IP range
+- [Static capacity](examples/static-capacity.md) — fixed node count with `spec.replicas`
 - [Advanced](examples/advanced.md) — kubelet config, Shielded VM, metadata, secondary disk, multiple pools
 
 ## Community
