@@ -12,9 +12,7 @@ controller-gen crd paths=./pkg/apis/v1alpha1/... output:crd:dir=./charts/karpent
 # every controller-gen version. The vendored files are the canonical artifacts shipped
 # by the karpenter-core team and always have the correct full enum.
 KARPENTER_CRD_DIR=vendor/sigs.k8s.io/karpenter/pkg/apis/crds
-cp "${KARPENTER_CRD_DIR}"/karpenter.sh_nodeclaims.yaml ./charts/karpenter/crds/
-cp "${KARPENTER_CRD_DIR}"/karpenter.sh_nodepools.yaml  ./charts/karpenter/crds/
-cp "${KARPENTER_CRD_DIR}"/karpenter.sh_nodeoverlays.yaml ./charts/karpenter/crds/ 2>/dev/null || true
+cp "${KARPENTER_CRD_DIR}"/*.yaml ./charts/karpenter/crds/
 
 # Update generated code
 export REPO_ROOT=$(pwd)
