@@ -110,8 +110,8 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily str
 }
 
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
-// CreateNodeClass but with networkConfig.networkInterfaces[0].enableExternalIPAccess
-// set to false, so Karpenter provisions nodes with no external (public) IP.
+// CreateNodeClass but with networkConfig.enablePrivateNodes set to true,
+// so Karpenter provisions nodes with no external (public) IP.
 func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, name string) {
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
@@ -127,9 +127,7 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 			},
 			"subnetRangeName": e.PodsRangeName,
 			"networkConfig": map[string]any{
-				"networkInterfaces": []any{
-					map[string]any{"enableExternalIPAccess": false},
-				},
+				"enablePrivateNodes": true,
 			},
 		},
 	}}

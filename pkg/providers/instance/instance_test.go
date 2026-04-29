@@ -29,6 +29,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+	containerv1 "google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
@@ -43,29 +44,19 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
-func TestMergeInstanceTagsPreservesTemplateAndAddsNetworkTags(t *testing.T) {
-	base := &compute.Tags{Items: []string{"gke-default", "existing"}, Fingerprint: "fp"}
-
-	merged := mergeInstanceTags(base, []v1alpha1.NetworkTag{"existing", "custom"})
-
-	require.NotNil(t, merged)
-	require.Equal(t, []string{"gke-default", "existing", "existing", "custom"}, merged.Items)
-	require.Equal(t, "fp", merged.Fingerprint)
-	require.Equal(t, []string{"gke-default", "existing"}, base.Items, "base tags should not be mutated")
-	require.NotSame(t, base, merged)
+func TestBuildInstanceTagsAlwaysIncludesClusterTag(t *testing.T) {
+	tags := buildInstanceTags("my-cluster", nil)
+	require.Contains(t, tags.Items, "gke-my-cluster-node")
 }
 
-func TestMergeInstanceTagsHandlesNilTemplate(t *testing.T) {
-	merged := mergeInstanceTags(nil, []v1alpha1.NetworkTag{"tag-one", "tag-two"})
-
-	require.NotNil(t, merged)
-	require.Equal(t, []string{"tag-one", "tag-two"}, merged.Items)
-	require.Empty(t, merged.Fingerprint)
+func TestBuildInstanceTagsAppendsNodeClassTags(t *testing.T) {
+	tags := buildInstanceTags("my-cluster", []v1alpha1.NetworkTag{"custom-tag", "another"})
+	require.Equal(t, []string{"gke-my-cluster-node", "custom-tag", "another"}, tags.Items)
 }
 
-func TestMergeInstanceTagsReturnsNilWhenNoTags(t *testing.T) {
-	require.Nil(t, mergeInstanceTags(nil, nil))
-	require.Nil(t, mergeInstanceTags(&compute.Tags{}, nil))
+func TestBuildInstanceTagsNoNodeClassTags(t *testing.T) {
+	tags := buildInstanceTags("prod-cluster", nil)
+	require.Equal(t, []string{"gke-prod-cluster-node"}, tags.Items)
 }
 
 func TestIsInsufficientCapacityErrorMatchesCode(t *testing.T) {
@@ -225,8 +216,8 @@ func TestDelete_IssuesDeleteWhenInstanceIsRunning(t *testing.T) {
 	}))
 
 	err := p.Delete(context.Background(), "gce://test-project/us-central1-a/karpenter-node1")
-
 	require.NoError(t, err)
+
 	require.True(t, deleteCalled, "delete must be issued for a running instance")
 }
 
@@ -236,6 +227,15 @@ type fakeGKEProvider struct {
 
 func (f *fakeGKEProvider) ResolveClusterZones(context.Context) ([]string, error) {
 	return f.zones, nil
+}
+
+func (f *fakeGKEProvider) GetClusterConfig(context.Context) (*containerv1.Cluster, error) {
+	return &containerv1.Cluster{
+		NetworkConfig: &containerv1.NetworkConfig{
+			Network:    "projects/test-project/global/networks/default",
+			Subnetwork: "projects/test-project/regions/europe-west4/subnetworks/default",
+		},
+	}, nil
 }
 
 func TestSelectZone_OnDemandHonorsTopologyRequirement(t *testing.T) {
@@ -606,8 +606,8 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	nodeClass := bootDiskNodeClass("pd-ssd", nil, nil)
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedIops)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
@@ -620,8 +620,8 @@ func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
 	nodeClass := bootDiskNodeClass("pd-extreme", ptr.To(int64(5000)), nil)
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Equal(t, int64(5000), disks[0].InitializeParams.ProvisionedIops)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
@@ -634,8 +634,8 @@ func TestRenderDiskProperties_SetsProvisionedThroughput(t *testing.T) {
 	nodeClass := bootDiskNodeClass("hyperdisk-throughput", nil, ptr.To(int64(500)))
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedIops)
 	require.Equal(t, int64(500), disks[0].InitializeParams.ProvisionedThroughput)
@@ -648,8 +648,8 @@ func TestRenderDiskProperties_SetsBothIOPSAndThroughput(t *testing.T) {
 	nodeClass := bootDiskNodeClass("hyperdisk-balanced", ptr.To(int64(10000)), ptr.To(int64(400)))
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 1)
 	require.Equal(t, int64(10000), disks[0].InitializeParams.ProvisionedIops)
 	require.Equal(t, int64(400), disks[0].InitializeParams.ProvisionedThroughput)
@@ -692,8 +692,8 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 	}
 
 	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
-
 	require.NoError(t, err)
+
 	require.Len(t, disks, 2)
 	require.Equal(t, int64(10000), disks[0].InitializeParams.ProvisionedIops)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
@@ -701,59 +701,136 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 	require.Zero(t, disks[1].InitializeParams.ProvisionedThroughput)
 }
 
+func makeCluster(network, subnetwork, podRangeName string, privateNodes bool) *containerv1.Cluster {
+	c := &containerv1.Cluster{
+		NetworkConfig: &containerv1.NetworkConfig{
+			Network:    network,
+			Subnetwork: subnetwork,
+		},
+		IpAllocationPolicy: &containerv1.IPAllocationPolicy{
+			ClusterSecondaryRangeName: podRangeName,
+		},
+	}
+	if privateNodes {
+		c.PrivateClusterConfig = &containerv1.PrivateClusterConfig{EnablePrivateNodes: true}
+	}
+	return c
+}
+
 func TestSetupNetworkInterfaces(t *testing.T) {
 	t.Parallel()
 
-	makeTemplate := func(rangeName string) *compute.InstanceTemplate {
-		return &compute.InstanceTemplate{
-			Properties: &compute.InstanceProperties{
-				NetworkInterfaces: []*compute.NetworkInterface{
-					{
-						AliasIpRanges: []*compute.AliasIpRange{
-							{SubnetworkRangeName: rangeName, IpCidrRange: "/24"},
-						},
-					},
+	p := &DefaultProvider{}
+
+	t.Run("network and subnetwork from cluster config", func(t *testing.T) {
+		t.Parallel()
+
+		cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+
+		require.Len(t, result, 1)
+		require.Equal(t, "projects/p/global/networks/my-vpc", result[0].Network)
+		require.Equal(t, "regions/us-central1/subnetworks/my-subnet", result[0].Subnetwork)
+	})
+
+	t.Run("public cluster gets ONE_TO_ONE_NAT access config", func(t *testing.T) {
+		t.Parallel()
+
+		cluster := makeCluster("net", "subnet", "pods", false)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+
+		require.Len(t, result, 1)
+		require.Len(t, result[0].AccessConfigs, 1)
+		require.Equal(t, "ONE_TO_ONE_NAT", result[0].AccessConfigs[0].Type)
+	})
+
+	t.Run("private cluster (EnablePrivateNodes=true) has no access config", func(t *testing.T) {
+		t.Parallel()
+
+		cluster := makeCluster("net", "subnet", "pods", true)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+
+		require.Len(t, result, 1)
+		require.Empty(t, result[0].AccessConfigs)
+		require.Contains(t, result[0].ForceSendFields, "AccessConfigs")
+	})
+
+	t.Run("NodeClass EnablePrivateNodes=true overrides public cluster", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					EnablePrivateNodes: ptr.To(true),
 				},
 			},
 		}
-	}
-
-	p := &DefaultProvider{}
-
-	t.Run("without SubnetRangeName, SubnetworkRangeName is unchanged", func(t *testing.T) {
-		t.Parallel()
-
-		nodeClass := &v1alpha1.GCENodeClass{}
-		template := makeTemplate("original-pods-range")
-
-		result := p.setupNetworkInterfaces(template, nodeClass)
+		cluster := makeCluster("net", "subnet", "pods", false)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Len(t, result, 1)
-		require.Len(t, result[0].AliasIpRanges, 1)
-		require.Equal(t, "original-pods-range", result[0].AliasIpRanges[0].SubnetworkRangeName)
-		require.Equal(t, "original-pods-range", template.Properties.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName, "template must not be mutated")
+		require.Empty(t, result[0].AccessConfigs)
+		require.Contains(t, result[0].ForceSendFields, "AccessConfigs")
 	})
 
-	t.Run("with SubnetRangeName, SubnetworkRangeName is overridden", func(t *testing.T) {
+	t.Run("NodeClass EnablePrivateNodes=false overrides private cluster", func(t *testing.T) {
 		t.Parallel()
 
-		rangeName := "pods-secondary"
 		nodeClass := &v1alpha1.GCENodeClass{
 			Spec: v1alpha1.GCENodeClassSpec{
-				SubnetRangeName: &rangeName,
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					EnablePrivateNodes: ptr.To(false),
+				},
 			},
 		}
-		template := makeTemplate("original-pods-range")
-
-		result := p.setupNetworkInterfaces(template, nodeClass)
+		cluster := makeCluster("net", "subnet", "pods", true)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Len(t, result, 1)
-		require.Len(t, result[0].AliasIpRanges, 1)
-		require.Equal(t, "pods-secondary", result[0].AliasIpRanges[0].SubnetworkRangeName)
-		require.Equal(t, "original-pods-range", template.Properties.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName, "template must not be mutated")
+		require.Len(t, result[0].AccessConfigs, 1)
 	})
 
-	t.Run("CIDR prefix is set from maxPods in both cases", func(t *testing.T) {
+	t.Run("NodeClass Subnetwork overrides cluster subnetwork", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{
+				NetworkConfig: &v1alpha1.NetworkConfig{
+					Subnetwork: "regions/us-central1/subnetworks/override",
+				},
+			},
+		}
+		cluster := makeCluster("net", "regions/us-central1/subnetworks/default", "pods", false)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+		require.Len(t, result, 1)
+		require.Equal(t, "regions/us-central1/subnetworks/override", result[0].Subnetwork)
+	})
+
+	t.Run("pod CIDR range from cluster IpAllocationPolicy", func(t *testing.T) {
+		t.Parallel()
+
+		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
+		result := p.setupNetworkInterfaces(cluster, &v1alpha1.GCENodeClass{})
+
+		require.Len(t, result, 1)
+		require.Equal(t, "cluster-pods-range", result[0].AliasIpRanges[0].SubnetworkRangeName)
+	})
+
+	t.Run("NodeClass SubnetRangeName overrides cluster pod range", func(t *testing.T) {
+		t.Parallel()
+
+		name := "custom-pods"
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeName: &name},
+		}
+		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+		require.Equal(t, "custom-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
+	})
+
+	t.Run("CIDR prefix derived from maxPods", func(t *testing.T) {
 		t.Parallel()
 
 		maxPods := int32(32)
@@ -762,217 +839,108 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 				KubeletConfiguration: &v1alpha1.KubeletConfiguration{MaxPods: &maxPods},
 			},
 		}
-		template := makeTemplate("some-range")
+		cluster := makeCluster("net", "subnet", "pods", false)
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
-		result := p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
-		require.Equal(t, "/24", template.Properties.NetworkInterfaces[0].AliasIpRanges[0].IpCidrRange, "template must not be mutated")
-
-		rangeName := "pods-secondary"
-		nodeClass.Spec.SubnetRangeName = &rangeName
-		result = p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
 		require.Equal(t, "/26", result[0].AliasIpRanges[0].IpCidrRange)
 	})
+}
 
-	// makeTemplateWithAccessConfig builds on makeTemplate, adding an access config and subnetwork
-	// to the primary interface to simulate a public-node pool template.
-	makeTemplateWithAccessConfig := func() *compute.InstanceTemplate {
-		tmpl := makeTemplate("pods")
-		tmpl.Properties.NetworkInterfaces[0].AccessConfigs = []*compute.AccessConfig{
-			{Type: "ONE_TO_ONE_NAT", Name: "External NAT"},
-		}
-		tmpl.Properties.NetworkInterfaces[0].Subnetwork = "regions/us-central1/subnetworks/default"
-		return tmpl
+func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
+					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
+				},
+			},
+		},
 	}
+	cluster := makeCluster("net", "subnet", "pods", false)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
 
-	t.Run("without NetworkConfig, AccessConfigs are inherited from template", func(t *testing.T) {
-		t.Parallel()
+	require.Len(t, result, 2)
+	require.Equal(t, "subnet", result[0].Subnetwork)
+	// Public cluster: primary interface gets ONE_TO_ONE_NAT.
+	require.Len(t, result[0].AccessConfigs, 1)
+	require.Equal(t, "ONE_TO_ONE_NAT", result[0].AccessConfigs[0].Type)
+	require.Equal(t, "regions/us-central1/subnetworks/secondary", result[1].Subnetwork)
+	require.Equal(t, "net", result[1].Network)
+	// Public cluster: secondary interface also gets ONE_TO_ONE_NAT.
+	require.Len(t, result[1].AccessConfigs, 1)
+	require.Equal(t, "ONE_TO_ONE_NAT", result[1].AccessConfigs[0].Type)
+}
 
-		nodeClass := &v1alpha1.GCENodeClass{}
-		template := makeTemplateWithAccessConfig()
+func TestSetupNetworkInterfaces_AdditionalInterfaceNetworkOverride(t *testing.T) {
+	t.Parallel()
 
-		result := p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Len(t, result[0].AccessConfigs, 1, "access config should be inherited from template")
-	})
-
-	t.Run("EnableExternalIPAccess=false removes AccessConfigs (private node)", func(t *testing.T) {
-		t.Parallel()
-
-		disabled := false
-		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{
-				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{
-						{EnableExternalIPAccess: &disabled},
-					},
-				},
-			},
-		}
-		template := makeTemplateWithAccessConfig()
-
-		result := p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Empty(t, result[0].AccessConfigs, "access configs must be removed for private node")
-		require.Contains(t, result[0].ForceSendFields, "AccessConfigs", "AccessConfigs must be force-sent as empty so GCP API does not default-insert ONE_TO_ONE_NAT")
-		require.Len(t, template.Properties.NetworkInterfaces[0].AccessConfigs, 1, "template must not be mutated")
-		require.NotContains(t, template.Properties.NetworkInterfaces[0].ForceSendFields, "AccessConfigs", "template ForceSendFields must not be mutated")
-	})
-
-	t.Run("EnableExternalIPAccess=true on template with no AccessConfigs leaves them empty (no-op)", func(t *testing.T) {
-		t.Parallel()
-
-		enabled := true
-		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{
-				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{
-						{EnableExternalIPAccess: &enabled},
-					},
-				},
-			},
-		}
-		// makeTemplate produces a template with no AccessConfigs.
-		template := makeTemplate("pods")
-
-		result := p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Empty(t, result[0].AccessConfigs, "EnableExternalIPAccess=true does not synthesize an access config; template value is inherited")
-	})
-
-	t.Run("EnableExternalIPAccess=true keeps AccessConfigs from template", func(t *testing.T) {
-		t.Parallel()
-
-		enabled := true
-		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{
-				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{
-						{EnableExternalIPAccess: &enabled},
-					},
-				},
-			},
-		}
-		template := makeTemplateWithAccessConfig()
-
-		result := p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Len(t, result[0].AccessConfigs, 1, "access configs should be kept when explicitly enabled")
-	})
-
-	t.Run("NetworkConfig.Subnetwork overrides template subnetwork", func(t *testing.T) {
-		t.Parallel()
-
-		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{
-				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{
-						{Subnetwork: "regions/us-central1/subnetworks/private-subnet"},
-					},
-				},
-			},
-		}
-		template := makeTemplateWithAccessConfig()
-
-		result := p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Equal(t, "regions/us-central1/subnetworks/private-subnet", result[0].Subnetwork)
-		require.Equal(t, "regions/us-central1/subnetworks/default", template.Properties.NetworkInterfaces[0].Subnetwork, "template must not be mutated")
-	})
-
-	t.Run("NetworkConfig with fewer interfaces than template does not override unmatched interfaces", func(t *testing.T) {
-		t.Parallel()
-
-		disabled := false
-		// Template with two interfaces; NodeClass overrides only the first.
-		template := &compute.InstanceTemplate{
-			Properties: &compute.InstanceProperties{
-				NetworkInterfaces: []*compute.NetworkInterface{
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
 					{
-						AccessConfigs: []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT"}},
-						AliasIpRanges: []*compute.AliasIpRange{{SubnetworkRangeName: "pods", IpCidrRange: "/24"}},
-					},
-					{
-						AccessConfigs: []*compute.AccessConfig{{Type: "ONE_TO_ONE_NAT"}},
-						AliasIpRanges: []*compute.AliasIpRange{},
+						Network:    "projects/p/global/networks/other-vpc",
+						Subnetwork: "regions/us-central1/subnetworks/secondary",
 					},
 				},
 			},
-		}
-		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{
-				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{
-						{EnableExternalIPAccess: &disabled},
-						// second interface not listed — should be unmodified
-					},
+		},
+	}
+	cluster := makeCluster("projects/p/global/networks/my-vpc", "subnet", "pods", false)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+	require.Len(t, result, 2)
+	require.Equal(t, "projects/p/global/networks/other-vpc", result[1].Network)
+}
+
+func TestSetupNetworkInterfaces_NodeClassEnablePrivateNodesWithAdditionalInterfaces(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				EnablePrivateNodes: ptr.To(true),
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
+					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
 				},
 			},
-		}
+		},
+	}
+	// Public cluster: NodeClass override drives private behavior on both interfaces.
+	cluster := makeCluster("net", "subnet", "pods", false)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
 
-		result := p.setupNetworkInterfaces(template, nodeClass)
+	require.Len(t, result, 2)
+	require.Empty(t, result[0].AccessConfigs)
+	require.Contains(t, result[0].ForceSendFields, "AccessConfigs")
+	require.Empty(t, result[1].AccessConfigs)
+	require.Contains(t, result[1].ForceSendFields, "AccessConfigs")
+}
 
-		require.Len(t, result, 2)
-		require.Empty(t, result[0].AccessConfigs, "first interface should have no external IP")
-		require.Len(t, result[1].AccessConfigs, 1, "second interface should inherit access config from template")
-	})
+func TestSetupNetworkInterfaces_AdditionalInterfacePrivateCluster(t *testing.T) {
+	t.Parallel()
 
-	t.Run("NetworkConfig present with empty NetworkInterfaces inherits all template settings", func(t *testing.T) {
-		t.Parallel()
-
-		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{
-				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{},
+	p := &DefaultProvider{}
+	nodeClass := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{
+			NetworkConfig: &v1alpha1.NetworkConfig{
+				AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
+					{Subnetwork: "regions/us-central1/subnetworks/secondary"},
 				},
 			},
-		}
-		template := makeTemplateWithAccessConfig()
+		},
+	}
+	cluster := makeCluster("net", "subnet", "pods", true)
+	result := p.setupNetworkInterfaces(cluster, nodeClass)
 
-		result := p.setupNetworkInterfaces(template, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Len(t, result[0].AccessConfigs, 1, "empty NetworkInterfaces list must not override template")
-		require.Equal(t, "regions/us-central1/subnetworks/default", result[0].Subnetwork, "empty NetworkInterfaces list must not override template subnetwork")
-	})
-
-	t.Run("EnableExternalIPAccess=false does not duplicate AccessConfigs in ForceSendFields when already present", func(t *testing.T) {
-		t.Parallel()
-
-		disabled := false
-		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{
-				NetworkConfig: &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{
-						{EnableExternalIPAccess: &disabled},
-					},
-				},
-			},
-		}
-		tmpl := makeTemplateWithAccessConfig()
-		tmpl.Properties.NetworkInterfaces[0].ForceSendFields = []string{"AccessConfigs"}
-
-		result := p.setupNetworkInterfaces(tmpl, nodeClass)
-
-		require.Len(t, result, 1)
-		require.Empty(t, result[0].AccessConfigs, "access configs must be removed for private node")
-		count := 0
-		for _, f := range result[0].ForceSendFields {
-			if f == "AccessConfigs" {
-				count++
-			}
-		}
-		require.Equal(t, 1, count, "AccessConfigs must appear exactly once in ForceSendFields")
-	})
+	require.Len(t, result, 2)
+	require.Empty(t, result[1].AccessConfigs)
+	require.Contains(t, result[1].ForceSendFields, "AccessConfigs")
 }
 
 // TestSetupScheduling_DoesNotMutateTemplate guards against setupScheduling mutating the shared
@@ -1139,16 +1107,18 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		},
 	}
 
+	cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
 	instance, err := p.buildInstance(
 		spotOrOnDemandNodeClaim(),
 		&v1alpha1.GCENodeClass{},
 		onDemandOnlyIT,
 		template,
+		cluster,
 		"default-pool", "us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
 	)
-
 	require.NoError(t, err)
+
 	require.NotNil(t, instance)
 	require.Equal(t, "SPOT", instance.Scheduling.ProvisioningModel,
 		"buildInstance must use the passed capacityType, not recompute it from instanceType offerings")
@@ -1254,8 +1224,8 @@ func TestWaitOperationDone_RetriesOnTransient503(t *testing.T) {
 	}))
 
 	err := p.waitOperationDone(context.Background(), "n1-standard-1", "us-central1-a", "on-demand", "op-123")
-
 	require.NoError(t, err)
+
 	require.Equal(t, int32(3), callCount.Load())
 }
 
