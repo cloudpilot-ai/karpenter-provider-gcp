@@ -46,6 +46,11 @@ import (
 
 const CloudProviderName = "gcp"
 
+// errNodeClassTerminating is returned by resolveNodeClassFromNodePool when the
+// referenced GCENodeClass has a non-zero DeletionTimestamp. Callers treat it as
+// "no NodeClass available" (equivalent to NotFound) without logging an error.
+var errNodeClassTerminating = stderrors.New("GCENodeClass is terminating")
+
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 type CloudProvider struct {
@@ -195,6 +200,9 @@ func (c *CloudProvider) LivenessProbe(req *http.Request) error {
 func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
 	if err != nil {
+		if stderrors.Is(err, errNodeClassTerminating) {
+			return nil, nil
+		}
 		if errors.IsNotFound(err) {
 			// If we can't resolve the NodeClass, then it's impossible for us to resolve the instance types
 			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
@@ -216,9 +224,7 @@ func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePo
 		return nil, err
 	}
 	if !nodeClass.DeletionTimestamp.IsZero() {
-		// For the purposes of NodeClass CloudProvider resolution, we treat deleting NodeClasses as NotFound,
-		// but we return a different error message to be clearer to users
-		return nil, nil // return nil, newTerminatingNodeClassError(nodeClass.Name)
+		return nil, errNodeClassTerminating
 	}
 	return nodeClass, nil
 }
@@ -244,6 +250,9 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 	}
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
 	if err != nil {
+		if stderrors.Is(err, errNodeClassTerminating) {
+			return "", nil
+		}
 		if errors.IsNotFound(err) {
 			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
 		}
