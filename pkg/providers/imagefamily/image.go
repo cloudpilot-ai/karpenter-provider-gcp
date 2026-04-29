@@ -32,7 +32,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
 type Provider interface {
@@ -48,15 +48,17 @@ type DefaultProvider struct {
 	ubuntuOSProvider             *Ubuntu
 }
 
-func NewDefaultProvider(computeService *compute.Service, nodePoolTemplateProvider nodepooltemplate.Provider) *DefaultProvider {
+func NewDefaultProvider(computeService *compute.Service, versionProvider versionprovider.Provider) *DefaultProvider {
 	return &DefaultProvider{
 		cache:          cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
 		computeService: computeService,
 		containerOptimizedOSProvider: &ContainerOptimizedOS{
-			nodePoolTemplateProvider: nodePoolTemplateProvider,
+			computeService:  computeService,
+			versionProvider: versionProvider,
 		},
 		ubuntuOSProvider: &Ubuntu{
-			nodePoolTemplateProvider: nodePoolTemplateProvider,
+			computeService:  computeService,
+			versionProvider: versionProvider,
 		},
 	}
 }
