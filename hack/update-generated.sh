@@ -2,9 +2,17 @@
 
 set -eu -o pipefail
 
-# Update CRD
+# Update CRD — GCP-specific types
 controller-gen crd paths=./pkg/apis/v1alpha1/... output:crd:dir=./charts/karpenter/crds
-controller-gen crd paths=sigs.k8s.io/karpenter/pkg/apis/v1/... output:crd:dir=./charts/karpenter/crds
+
+# Copy karpenter-core CRDs from vendored pre-built files rather than re-generating
+# from source.  Re-generating via controller-gen would produce a truncated operator
+# enum for NodeSelectorRequirementWithMinValues.Operator ([Gte,Lte] only) because the
+# upstream marker (+kubebuilder:validation:Enum:=Gte;Lte) interacts differently with
+# every controller-gen version. The vendored files are the canonical artifacts shipped
+# by the karpenter-core team and always have the correct full enum.
+KARPENTER_CRD_DIR=vendor/sigs.k8s.io/karpenter/pkg/apis/crds
+cp "${KARPENTER_CRD_DIR}"/*.yaml ./charts/karpenter/crds/
 
 # Update generated code
 export REPO_ROOT=$(pwd)

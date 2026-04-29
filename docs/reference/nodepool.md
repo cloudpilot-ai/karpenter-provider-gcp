@@ -313,7 +313,7 @@ _Appears in:_
 
 
 
-A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
+A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
 and minValues that represent the requirement to have at least that many values.
 
 
@@ -324,9 +324,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `key` _string_ | The label key that the selector applies to. |  |  |
-| `operator` _[NodeSelectorOperator](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#nodeselectoroperator-v1-core)_ | Represents a key's relationship to a set of values.<br />Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt. |  |  |
-| `values` _string array_ | An array of string values. If the operator is In or NotIn,<br />the values array must be non-empty. If the operator is Exists or DoesNotExist,<br />the values array must be empty. If the operator is Gt or Lt, the values<br />array must have a single element, which will be interpreted as an integer.<br />This array is replaced during a strategic merge patch. |  | Optional: \{\} <br /> |
+| `key` _string_ | The label key that the selector applies to. |  | Required: \{\} <br /> |
+| `operator` _[NodeSelectorOperator](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#nodeselectoroperator-v1-core)_ | Represents a key's relationship to a set of values.<br />Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte. |  | Enum: [Gte Lte] <br />Required: \{\} <br /> |
+| `values` _string array_ | An array of string values. If the operator is In or NotIn,<br />the values array must be non-empty. If the operator is Exists or DoesNotExist,<br />the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values<br />array must have a single element, which will be interpreted as an integer.<br />This array is replaced during a strategic merge patch. |  | Optional: \{\} <br /> |
 | `minValues` _integer_ | This field is ALPHA and can be dropped or replaced at any time<br />MinValues is the minimum number of unique values required to define the flexibility of the specific requirement. |  | Maximum: 50 <br />Minimum: 1 <br />Optional: \{\} <br /> |
 
 

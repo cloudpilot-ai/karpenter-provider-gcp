@@ -50,7 +50,7 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 
 	nodeClass.Status.Images = lo.Map(images, func(image imagefamily.Image, _ int) v1alpha1.Image {
 		reqs := lo.Map(image.Requirements.NodeSelectorRequirements(), func(item karpv1.NodeSelectorRequirementWithMinValues, _ int) corev1.NodeSelectorRequirement {
-			return item.NodeSelectorRequirement
+			return corev1.NodeSelectorRequirement{Key: item.Key, Operator: item.Operator, Values: item.Values}
 		})
 
 		sort.Slice(reqs, func(i, j int) bool {
