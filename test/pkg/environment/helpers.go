@@ -63,7 +63,7 @@ type TestCase struct {
 	InstanceTypes []string
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
-	ImageFamily         string
+	ImageFamily string
 	ConsolidationPolicy string // defaults to WhenEmptyOrUnderutilized when empty
 }
 
