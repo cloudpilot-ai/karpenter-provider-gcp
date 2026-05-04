@@ -1,5 +1,81 @@
 # Migration Guide
 
+## Upgrading to vNext — network config and tags
+
+### Network interfaces
+
+Karpenter now builds the primary network interface from the cluster API (`cluster.NetworkConfig`) instead of copying it from a GKE node pool template. The network, subnetwork, and pod CIDR range are read directly from the cluster.
+
+The `networkConfig` API has been redesigned to mirror the `network_config` block in Terraform's `google_container_node_pool` resource, making it immediately familiar to operators who configure GKE node pools with Terraform:
+
+- `networkConfig.enablePrivateNodes` — whether provisioned nodes have internal IPs only (mirrors `network_config.enable_private_nodes`)
+- `networkConfig.subnetwork` — primary subnetwork override (mirrors `network_config.subnetwork`)
+- `networkConfig.additionalNetworkInterfaces` — secondary interfaces, each requiring a `subnetwork` and optionally a `network` (mirrors `network_config.additional_node_network_configs`)
+
+**Action required if you used `networkConfig.networkInterfaces` (this field existed only in unreleased `main` builds — no released version ever shipped it):**
+
+```yaml
+# Before
+networkConfig:
+  networkInterfaces:
+    - enableExternalIPAccess: false
+      subnetwork: regions/us-central1/subnetworks/my-subnet
+
+# After
+networkConfig:
+  enablePrivateNodes: true
+  subnetwork: regions/us-central1/subnetworks/my-subnet
+```
+
+For secondary interfaces (previously `networkInterfaces[1+]`):
+
+```yaml
+# Before
+networkConfig:
+  networkInterfaces:
+    - {}
+    - subnetwork: regions/us-central1/subnetworks/secondary
+
+# After
+networkConfig:
+  additionalNetworkInterfaces:
+    - subnetwork: regions/us-central1/subnetworks/secondary
+```
+
+**Action required if you used `networkConfig.networkInterface` (the intermediate wrapper form — also only in unreleased `main` builds):**
+
+```yaml
+# Before
+networkConfig:
+  networkInterface:
+    enableExternalIPAccess: false
+    subnetwork: regions/us-central1/subnetworks/my-subnet
+
+# After
+networkConfig:
+  enablePrivateNodes: true
+  subnetwork: regions/us-central1/subnetworks/my-subnet
+```
+
+**Cluster-level private nodes** (`EnablePrivateNodes: true`) are now detected automatically — no NodeClass override is needed.
+
+### New IAM permission: `container.clusters.get`
+
+Karpenter now reads the cluster API at provisioning time (`container.projects.locations.clusters.get`) to derive network configuration. This requires the `container.clusters.get` IAM permission on the Karpenter service account.
+
+**Action required if you use a custom minimal IAM role** (not `roles/container.admin`): add `container.clusters.get` to the role. No action is needed if you use the predefined `roles/container.admin` role, which already includes this permission.
+
+### Network tags
+
+Previously, Karpenter merged all tags from the bootstrap node pool template with `spec.networkTags` in NodeClass. Now only two sources are used:
+
+- The cluster-wide GKE tag `gke-<cluster-name>-node` (always present)
+- `spec.networkTags` from NodeClass
+
+**Action required:** If your GKE node pool template carried additional tags used in firewall rules (e.g. pool-specific tags), add them explicitly to `spec.networkTags` in the relevant NodeClass.
+
+---
+
 ## Upgrading to vNext — GC controller and cluster identity labels
 
 ### Background

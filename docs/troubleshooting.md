@@ -67,13 +67,11 @@ This is a known limitation tracked in [GitHub issue #245](https://github.com/clo
 
 ---
 
-## Private node clusters
+## Private node clusters (org policy)
 
-Karpenter GCP has not been tested on clusters that enforce private nodes at the cluster level (`enablePrivateNodes: true`). The node pool template creation request may be rejected on such clusters.
+Karpenter correctly omits external IPs from **provisioned nodes** on clusters with `enablePrivateNodes: true`. However, Karpenter still creates zero-node bootstrap node pools at startup. On clusters where an org policy enforces private nodes (e.g. `container.managed.enablePrivateNodes`), this pool creation request may be rejected by GKE, preventing Karpenter from starting.
 
-For selectively provisioning nodes without a public IP on a standard cluster, see [Private Nodes](networking/private-nodes.md).
-
-Support for cluster-level private nodes is tracked in [GitHub issue #230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
+Full support for such clusters — eliminating bootstrap pool creation entirely — is tracked in [#230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
 
 ---
 
