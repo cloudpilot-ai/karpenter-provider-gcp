@@ -31,7 +31,7 @@ import (
 )
 
 var _ = Describe("Drift", func() {
-	// Drift test: provision a node, then update the NodePool to exclude the
+	// Requirement drift: provision a node, then update the NodePool to exclude the
 	// running instance type. Karpenter detects requirement drift and replaces
 	// the node with one of the remaining allowed types.
 	It("should replace a drifted amd64 on-demand node", func(ctx SpecContext) {
@@ -42,7 +42,69 @@ var _ = Describe("Drift", func() {
 			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
 		})
 	}, SpecTimeout(25*time.Minute))
+
+	// NodeClass drift: provision a node, then mutate the GCENodeClass spec.
+	// The hash controller updates the NodeClass hash annotation, the disruption
+	// controller marks the NodeClaim as drifted, and Karpenter replaces the node.
+	It("should replace a node when GCENodeClass metadata changes", func(ctx SpecContext) {
+		runNodeClassDriftTest(ctx, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2"},
+		})
+	}, SpecTimeout(30*time.Minute))
 })
+
+func runNodeClassDriftTest(ctx context.Context, tc environment.TestCase) {
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "ncclass-drift")
+	suffix := environment.UniqueSuffix()
+	name := prefix + "-" + suffix
+
+	GinkgoWriter.Printf("[setup] nodeclass-drift arch=%s capacityType=%s nodePool=%s\n",
+		tc.Arch, tc.CapacityType, name)
+
+	var firstNodeName string
+	DeferCleanup(func(ctx context.Context) {
+		env.DeleteDeployment(ctx, name)
+		env.DeleteNodePool(ctx, name)
+		env.DeleteNodeClass(ctx, name)
+		if firstNodeName != "" {
+			_ = env.WaitForNodeRemoval(ctx, firstNodeName)
+		}
+	})
+
+	env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+	env.WaitForNodeClassReady(ctx, name)
+	env.CreateNodePool(ctx, name, name, tc)
+	env.WaitForNodePoolReady(ctx, name)
+	env.CreateDeployment(ctx, name, name, name, tc.Arch)
+	env.WaitForNodeClaimLaunched(ctx, name)
+	firstPod := env.WaitForRunningPod(ctx, name)
+	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
+	firstNodeName = firstPod.Spec.NodeName
+
+	GinkgoWriter.Printf("[drift] first node: %s; adding spec.metadata entry to trigger NodeClassDrift\n", firstNodeName)
+
+	// Mutate spec.metadata — a no-op for the running node but changes the hash.
+	env.AddNodeClassMetadataEntry(ctx, name, "drift-test", "triggered")
+
+	GinkgoWriter.Printf("[drift] GCENodeClass patched; waiting for replacement node...\n")
+
+	replacementPod := env.WaitForPodOnDifferentNode(ctx, name, firstNodeName, environment.ReplacementTimeout)
+	Expect(replacementPod.Spec.NodeName).NotTo(Equal(firstNodeName))
+
+	replacementNode, err := env.KubeClient.CoreV1().Nodes().Get(ctx, replacementPod.Spec.NodeName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	replacementType := replacementNode.Labels[corev1.LabelInstanceTypeStable]
+	Expect(tc.InstanceTypes).To(ContainElement(replacementType),
+		"replacement node %s has unexpected instance type %s", replacementNode.Name, replacementType)
+
+	GinkgoWriter.Printf("[drift] replacement node: %s instanceType=%s\n", replacementNode.Name, replacementType)
+
+	Expect(env.WaitForNodeRemoval(ctx, firstNodeName)).To(Succeed())
+	firstNodeName = ""
+}
 
 func runDriftTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "drift")
