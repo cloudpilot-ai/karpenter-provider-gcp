@@ -936,9 +936,12 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
 
-	lo.ForEach(lo.Entries(instanceType.Requirements.Labels()), func(entry lo.Entry[string, string], _ int) {
-		instance.Labels[entry.Key] = entry.Value
-	})
+	for key, req := range instanceType.Requirements {
+		if req.Operator() == corev1.NodeSelectorOpIn && req.Len() == 1 {
+			// GCP label keys only allow [a-z0-9_-]; Kubernetes label keys may contain '/' and '.'.
+			instance.Labels[utils.SanitizeGCELabelValue(key)] = utils.SanitizeGCELabelValue(req.Any())
+		}
+	}
 
 	// Stamp both cluster-identity labels last so NodePool labels cannot overwrite them.
 	// LabelClusterNameKey is used by the syncInstances API filter; LabelClusterLocationKey

@@ -124,6 +124,7 @@ func NewScheduler(
 	daemonSetPods []*corev1.Pod,
 	recorder events.Recorder,
 	clock clock.Clock,
+	volumeReqsByPod map[types.UID]scheduling.Requirements,
 	opts ...Options,
 ) *Scheduler {
 	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
@@ -165,6 +166,7 @@ func NewScheduler(
 		daemonOverhead:      getDaemonOverhead(ctx, templates, daemonSetPods),
 		daemonHostPortUsage: getDaemonHostPortUsage(ctx, templates, daemonSetPods),
 		cachedPodData:       map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
+		volumeReqsByPod:     volumeReqsByPod,          // Volume requirements per pod
 		recorder:            recorder,
 		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
@@ -186,6 +188,7 @@ type PodData struct {
 	Requirements             scheduling.Requirements
 	StrictRequirements       scheduling.Requirements
 	HasResourceClaimRequests bool
+	VolumeRequirements       scheduling.Requirements // Volume topology requirements
 }
 
 type Scheduler struct {
@@ -196,7 +199,8 @@ type Scheduler struct {
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead          map[*NodeClaimTemplate]corev1.ResourceList
 	daemonHostPortUsage     map[*NodeClaimTemplate]*scheduling.HostPortUsage
-	cachedPodData           map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
+	cachedPodData           map[types.UID]*PodData                // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
+	volumeReqsByPod         map[types.UID]scheduling.Requirements // Volume topology requirements per pod
 	preferences             *Preferences
 	topology                *Topology
 	cluster                 *state.Cluster
@@ -482,6 +486,7 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 		Requirements:             requirements,
 		StrictRequirements:       strictRequirements,
 		HasResourceClaimRequests: pod.HasDRARequirements(p),
+		VolumeRequirements:       s.volumeReqsByPod[p.UID], // Volume requirements
 	}
 }
 
@@ -598,6 +603,12 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		its := s.nodeClaimTemplates[i].InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
+			// Node limits can be enforced early, since we know exactly how much capacity in nodes will be consumed by any instance type (1 node).
+			nodesRemaining, ok := remaining[resources.Node]
+			if ok && nodesRemaining.IsZero() {
+				errs[i] = serrors.Wrap(fmt.Errorf("node limits have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				return true
+			}
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
 				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
@@ -605,11 +616,9 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
 					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
-				).Info(fmt.Sprintf(
-					"%d out of %d instance types were excluded because they would breach limits",
-					len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
-					len(s.nodeClaimTemplates[i].InstanceTypeOptions),
-				))
+				).Info("instance types were excluded because they would breach limits",
+					"excluded", len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
+					"total", len(s.nodeClaimTemplates[i].InstanceTypeOptions))
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)

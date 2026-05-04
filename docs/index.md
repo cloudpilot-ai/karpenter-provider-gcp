@@ -47,6 +47,7 @@ Key capabilities:
 
 - [GCENodeClass](reference/gcenodeclass.md) — full field reference for the `GCENodeClass` resource
 - [NodePool](reference/nodepool.md) — full field reference for the `NodePool` resource
+- [Settings](settings.md) — all controller feature gates, environment variables, and Helm values
 
 ## Examples
 
