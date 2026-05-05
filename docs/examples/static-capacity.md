@@ -36,24 +36,6 @@ Static and dynamic NodePools can coexist. A static pool provides baseline capaci
 > **Note:** Static NodePools do not support `weight`. Scheduling priority between static and dynamic pools is determined by node availability and pod requirements, not by pool weight.
 
 ```yaml
-# Static pool — always-on baseline (no weight allowed)
-apiVersion: karpenter.sh/v1
-kind: NodePool
-metadata:
-  name: baseline
-spec:
-  replicas: 2
-  template:
-    spec:
-      nodeClassRef:
-        group: karpenter.k8s.gcp
-        kind: GCENodeClass
-        name: default-example
-      requirements:
-        - key: karpenter.sh/capacity-type
-          operator: In
-          values: ["on-demand"]
----
 # Dynamic pool — scales on demand
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -74,4 +56,22 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 0s
+---
+# Static pool — always-on baseline (no weight allowed)
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: baseline
+spec:
+  replicas: 2
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.gcp
+        kind: GCENodeClass
+        name: default-example
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
 ```
