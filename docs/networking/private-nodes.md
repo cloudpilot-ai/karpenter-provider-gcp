@@ -13,9 +13,11 @@ When Karpenter starts, it creates four zero-node GKE node pools that act as inst
 | `karpenter-cos-arm64`    | Container-Optimized OS | arm64        |
 | `karpenter-ubuntu-arm64` | Ubuntu                 | arm64        |
 
-These pools have `InitialNodeCount: 0` — they hold no running nodes and exist purely to give Karpenter a GKE-managed instance template to clone from. The network configuration of these templates comes from the GKE cluster itself, not from Karpenter.
+These pools have `InitialNodeCount: 0` — they hold no running nodes and exist purely to give Karpenter a GKE-managed instance template for network and kubelet configuration. The network configuration of these templates comes from the GKE cluster itself, not from Karpenter.
 
-The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created on a best-effort basis. If the cluster's region does not support arm64 machine types, those pools are skipped and arm64 provisioning is disabled for that image family.
+Image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu) and does not depend on template pool boot disks.
+
+The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created on a best-effort basis. If the cluster's region does not support arm64 machine types, those pools are skipped.
 
 ## Cluster-level private nodes
 
