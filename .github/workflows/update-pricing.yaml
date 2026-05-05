@@ -1,0 +1,76 @@
+# Pricing data codegen workflow.
+#
+# Mirrors the approach used by karpenter-provider-aws (.github/workflows/codegen.yaml):
+# a scheduled job regenerates embedded pricing data from the cloud provider's
+# billing API, commits to a dedicated branch, and opens a PR for review.
+#
+# Reference: https://github.com/aws/karpenter-provider-aws/blob/main/.github/workflows/codegen.yaml
+#
+# Required repository configuration:
+#   Secret  GCP_PRICING_SA_KEY     — service account key JSON
+#   Variable GCP_PRICING_PROJECT   — GCP project ID
+#
+# A free-tier GCP project is sufficient. Required API services setup:
+#   gcloud services enable cloudbilling.googleapis.com compute.googleapis.com
+#
+# The service account only needs:
+#   roles/compute.viewer  — read machine type specs and region list (#218)
+name: Update pricing data
+
+on:
+  schedule:
+    # Weekly on Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate prices without opening a PR (skips the Create PR step)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-pricing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_PRICING_SA_KEY }}
+
+      - name: Set GCP project
+        run: echo "GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PRICING_PROJECT }}" >> $GITHUB_ENV
+
+      - name: Update initial-prices.json
+        run: make update-pricing
+
+      - name: Prepare PR body
+        run: |
+          {
+            echo 'Automated refresh of `pkg/providers/pricing/initial-prices.json`'
+          } > /tmp/pr-body.md
+
+      - name: Create PR if pricing changed
+        if: ${{ !inputs.dry_run }}
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "chore(pricing): update initial-prices.json"
+          title: "chore(pricing): scheduled pricing data refresh"
+          body-path: /tmp/pr-body.md
+          branch: automated/update-pricing
+          signoff: true
+          sign-commits: true
+          delete-branch: true
+          labels: pricing,automated

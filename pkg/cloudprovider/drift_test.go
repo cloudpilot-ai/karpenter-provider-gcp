@@ -297,7 +297,7 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			name: "NetworkConfig",
 			mutate: func(nc *v1alpha1.GCENodeClass) {
 				nc.Spec.NetworkConfig = &v1alpha1.NetworkConfig{
-					NetworkInterfaces: []v1alpha1.NetworkInterface{{Subnetwork: "regions/us-central1/subnetworks/custom"}},
+					Subnetwork: "regions/us-central1/subnetworks/custom",
 				}
 			},
 			want: NodeClassDrift,
