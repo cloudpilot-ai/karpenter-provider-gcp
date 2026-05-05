@@ -700,12 +700,12 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
-		NetworkInterfaces: p.setupNetworkInterfaces(template, nodeClass),
+		NetworkInterfaces: p.setupNetworkInterfaces(clusterConfig, nodeClass),
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
 		Scheduling:        setupScheduling(capacityType),
-		Tags:              mergeInstanceTags(template.Properties.Tags, nodeClass.Spec.NetworkTags),
+		Tags:              buildInstanceTags(clusterConfig.Name, nodeClass.Spec.NetworkTags),
 	}
 
 	// Configure Shielded VM options
