@@ -1,0 +1,10 @@
+# Direct pod IPs to a specific secondary IP range.
+# subnetRangeName controls pod alias IPs; use networkConfig.subnetwork for the node subnet.
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: subnet-range-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  subnetRangeName: karpenter-pods
