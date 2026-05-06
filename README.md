@@ -61,7 +61,7 @@ Full documentation is available at [karpenter gcp cloud provider docs](https://d
 
 We want your contributions and suggestions! One of the easiest ways to contribute is to participate in discussions on the Github Issues/Discussion or chat on Slack.
 
-* [Slack channel](https://kubernetes.slack.com/archives/C02SFFZSA2K)
+* [Slack channel](https://kubernetes.slack.com/archives/C0B20K4KWP8)
 
 ## Attribution Notice
 
