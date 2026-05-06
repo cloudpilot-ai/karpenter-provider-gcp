@@ -1,0 +1,13 @@
+apiVersion: v2
+name: karpenter-crd
+description: Karpenter GCP CRD chart - installs and upgrades Karpenter CustomResourceDefinitions independently
+type: application
+version: 0.0.0
+appVersion: "0.0.0"
+
+annotations:
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/cloudpilot-ai/karpenter-provider-gcp
+    - name: support
+      url: https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues
