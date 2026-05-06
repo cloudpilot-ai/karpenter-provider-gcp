@@ -34,3 +34,5 @@ spec:
 See [`examples/nodeclass/subnet-range-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnet-range-gcenodeclass.yaml).
 
 > **Note**: `subnetRangeName` controls pod IPs (alias IPs). To change the node's subnet, use `networkConfig.subnetwork`.
+
+On clusters with [additional pod ranges](https://cloud.google.com/kubernetes-engine/docs/how-to/multi-pod-cidr) (`additionalPodRangesConfig`), Karpenter always allocates from the cluster's default pod range and does not spill over to additional ranges automatically. If your default range is near exhaustion, set `subnetRangeName` to pin allocation to a specific secondary range.
