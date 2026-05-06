@@ -14,7 +14,7 @@
 > [!NOTE]
 > A live version is now available.
 >
-> **Feedback welcome!** Join our [Slack](https://join.slack.com/t/cloudpilotaicommunity/shared_invite/zt-37rwpf8k7-Rx4BjrhuWtk9U0MXBKYL7A) or [Discord](https://discord.gg/WxFWc87QWr) to share your ideas, ask questions, and discuss with the community.
+> **Feedback welcome!** Join our [Slack](https://kubernetes.slack.com/archives/C0B20K4KWP8) to share your ideas, ask questions, and discuss with the community.
 >
 > Need enterprise support? [Get in touch](https://www.cloudpilot.ai/en/contact/)
 
