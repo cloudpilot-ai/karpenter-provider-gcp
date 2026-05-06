@@ -1,0 +1,38 @@
+# Example: directing pod IPs to a specific secondary IP range.
+#
+# Background
+# ----------
+# GKE VPC-native clusters use alias IP ranges for pod addresses. By default,
+# Karpenter uses the cluster's primary pod secondary range (ClusterSecondaryRangeName
+# from the cluster's IP allocation policy). Use subnetRangeName to direct pods
+# provisioned by this NodeClass to a different secondary range on the subnet.
+#
+# Use cases:
+# - Multi-tenant isolation: route workloads to separate ranges for network policy
+#   or billing separation.
+# - IP exhaustion: direct high-density NodePools to a larger secondary range.
+# - Network segmentation: use distinct ranges for compliance or firewall rules.
+#
+# Finding secondary range names
+# -----------------------------
+# GCP Console: VPC Network > Subnets > click subnet > "Secondary IP ranges"
+# gcloud: gcloud compute networks subnets describe SUBNET --region=REGION \
+#         --format="table(secondaryIpRanges.rangeName, secondaryIpRanges.ipCidrRange)"
+#
+# Note: subnetRangeName controls pod IPs (alias IPs), not the node's primary
+# subnet. To change the node subnet, use networkConfig.subnetwork instead.
+#
+# Reference:
+#   https://cloud.google.com/kubernetes-engine/docs/concepts/alias-ips
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: subnet-range-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  subnetRangeName: karpenter-pods
+  disks:
+    - category: pd-balanced
+      sizeGiB: 60
+      boot: true
