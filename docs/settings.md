@@ -61,15 +61,23 @@ spec:
     nodes: "20"       # cap at 20 nodes regardless of resource headroom
 ```
 
-### Disruption grace period (v1.12)
+### Termination grace period (v1.12)
 
-`spec.disruption.terminationGracePeriod` sets the maximum time Karpenter waits for pods to drain before force-deleting them during disruption. Overrides the pod's own `terminationGracePeriodSeconds` when set.
+`spec.template.spec.terminationGracePeriod` sets the maximum time Karpenter waits for pods to drain before force-deleting them during disruption. Overrides the pod's own `terminationGracePeriodSeconds` when set.
 
 ```yaml
 apiVersion: karpenter.sh/v1
 kind: NodePool
 spec:
-  disruption:
-    consolidationPolicy: WhenEmptyOrUnderutilized
-    terminationGracePeriod: 48h    # wait up to 48 hours for pods to drain
+  template:
+    spec:
+      terminationGracePeriod: 48h    # wait up to 48 hours for pods to drain
+      nodeClassRef:
+        group: karpenter.k8s.gcp
+        kind: GCENodeClass
+        name: default
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
 ```
