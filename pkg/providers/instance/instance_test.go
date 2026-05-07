@@ -44,21 +44,6 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
-func TestBuildInstanceTagsAlwaysIncludesClusterTag(t *testing.T) {
-	tags := buildInstanceTags("my-cluster", nil)
-	require.Contains(t, tags.Items, "gke-my-cluster-node")
-}
-
-func TestBuildInstanceTagsAppendsNodeClassTags(t *testing.T) {
-	tags := buildInstanceTags("my-cluster", []v1alpha1.NetworkTag{"custom-tag", "another"})
-	require.Equal(t, []string{"gke-my-cluster-node", "custom-tag", "another"}, tags.Items)
-}
-
-func TestBuildInstanceTagsNoNodeClassTags(t *testing.T) {
-	tags := buildInstanceTags("prod-cluster", nil)
-	require.Equal(t, []string{"gke-prod-cluster-node"}, tags.Items)
-}
-
 func TestIsInsufficientCapacityErrorMatchesCode(t *testing.T) {
 	t.Parallel()
 
@@ -697,6 +682,7 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 
 func makeCluster(network, subnetwork, podRangeName string, privateNodes bool) *containerv1.Cluster {
 	c := &containerv1.Cluster{
+		Id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		NetworkConfig: &containerv1.NetworkConfig{
 			Network:    network,
 			Subnetwork: subnetwork,
@@ -1270,6 +1256,47 @@ func TestBelongsToCluster(t *testing.T) {
 			p := &DefaultProvider{clusterLocation: controllerLocation}
 			inst := &Instance{InstanceID: "test-instance", Labels: tc.labels}
 			require.Equal(t, tc.want, p.belongsToCluster(inst), tc.name)
+		})
+	}
+}
+
+func TestBuildInstanceTags(t *testing.T) {
+	t.Parallel()
+
+	const (
+		clusterName = "my-cluster"
+		clusterID   = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	)
+	clusterWideTag := fmt.Sprintf("gke-%s-node", clusterName)
+	clusterIDTag := fmt.Sprintf("gke-%s-%s-node", clusterName, clusterID[:8])
+
+	tests := []struct {
+		name        string
+		networkTags []v1alpha1.NetworkTag
+		want        []string
+	}{
+		{
+			name:        "emits both cluster-wide and cluster-id-bearing tags when no NodeClass tags",
+			networkTags: nil,
+			want:        []string{clusterWideTag, clusterIDTag},
+		},
+		{
+			name:        "appends NodeClass tags after cluster-derived tags",
+			networkTags: []v1alpha1.NetworkTag{"frontend-pool", "high-mem"},
+			want:        []string{clusterWideTag, clusterIDTag, "frontend-pool", "high-mem"},
+		},
+		{
+			name:        "de-dupes NodeClass tag that collides with cluster-wide tag",
+			networkTags: []v1alpha1.NetworkTag{v1alpha1.NetworkTag(clusterWideTag), "extra"},
+			want:        []string{clusterWideTag, clusterIDTag, "extra"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tags := buildInstanceTags(clusterName, clusterID, tt.networkTags)
+			require.Equal(t, tt.want, tags.Items)
 		})
 	}
 }
