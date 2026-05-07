@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,11 @@ import (
 )
 
 var knownExtras = map[string]bool{
+	"a3-edgegpu-8g":         true,
+	"a3-edgegpu-8g-nolssd":  true,
+	"a3-megagpu-8g":         true, // in Cyclenerd but prices differ in some regions; still absent from some regions
+	"a3-ultragpu-8g":        true, // base variant not yet in reference sources in all regions
+	"a3-ultragpu-8g-nolssd": true,
 }
 
 func main() {
@@ -73,12 +79,13 @@ func main() {
 	}
 
 	fmt.Println("Phase 2: Computed prices (instanceprice)")
+	resolvedProject, err := resolveProject(ctx, *project)
+	if err != nil {
+		log.Fatalf("  resolving GCP project: %v", err)
+	}
+
 	var regions []string
 	if *filterRegion == "all" {
-		resolvedProject, err := resolveProject(ctx, *project)
-		if err != nil {
-			log.Fatalf("  resolving GCP project: %v", err)
-		}
 		regions, err = getGCPRegions(ctx, resolvedProject)
 		if err != nil {
 			log.Fatalf("  fetching GCP regions: %v", err)
@@ -101,10 +108,17 @@ func main() {
 		log.Fatalf("  writing %s: %v", computedPath, err)
 	}
 
+	fmt.Print("  Fetching machine type availability...")
+	availability, err := getMachineAvailability(ctx, resolvedProject, regions)
+	if err != nil {
+		log.Fatalf("  machine availability: %v", err)
+	}
+	fmt.Printf(" %d regions\n", len(availability))
+
 	fmt.Println("Phase 3: Comparing prices")
 	// refs ordered by trust
 	refs := []RegionPrices{gcpWebPrices, cyclenerdPrices}
-	results := buildResults(computedPrices, refs, nil, regions, func(m string) bool { return knownExtras[m] }, *tolerance)
+	results := buildResults(computedPrices, refs, availability, regions, func(m string) bool { return knownExtras[m] }, *tolerance)
 	os.Exit(printReport(results, []string{"gcp_web", "cyclenerd"}, len(regions), *tolerance))
 }
 
@@ -166,4 +180,58 @@ func fetchInstancePrices(ctx context.Context, regions []string) (RegionPrices, e
 	}
 	fmt.Printf("  Computed prices for %d regions\n", len(computed))
 	return computed, nil
+}
+
+// getMachineAvailability queries the Compute Engine aggregated machine types
+// API and returns, for each region, the set of machine types that are deployed
+// there. classifyMissing uses this to distinguish MISSING (machine available
+// but we have no price) from UNAVAIL (machine not deployed in the region).
+func getMachineAvailability(ctx context.Context, project string, regions []string) (RegionAvailability, error) {
+	client, err := compute.NewMachineTypesRESTClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("creating machine types client: %w", err)
+	}
+	defer client.Close()
+
+	regionSet := make(map[string]bool, len(regions))
+	for _, r := range regions {
+		regionSet[r] = true
+	}
+
+	availability := make(RegionAvailability, len(regions))
+	for _, r := range regions {
+		availability[r] = make(map[string]bool)
+	}
+
+	it := client.AggregatedList(ctx, &computepb.AggregatedListMachineTypesRequest{
+		Project: project,
+	})
+	for {
+		pair, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("listing machine types: %w", err)
+		}
+		zone := strings.TrimPrefix(pair.Key, "zones/")
+		region := zoneToRegion(zone)
+		if !regionSet[region] {
+			continue
+		}
+		for _, mt := range pair.Value.GetMachineTypes() {
+			availability[region][mt.GetName()] = true
+		}
+	}
+	return availability, nil
+}
+
+// zoneToRegion strips the trailing zone letter from a GCE zone name.
+// e.g. "us-central1-a" → "us-central1".
+func zoneToRegion(zone string) string {
+	idx := strings.LastIndex(zone, "-")
+	if idx < 0 {
+		return zone
+	}
+	return zone[:idx]
 }
