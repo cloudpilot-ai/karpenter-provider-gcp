@@ -978,15 +978,18 @@ func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	return !ok || loc == p.clusterLocation
 }
 
-// buildInstanceTags emits both the generic gke-<clusterName>-node tag and the
-// cluster-id-bearing gke-<clusterName>-<clusterID[:8]>-node tag (the latter
-// is the target of GKE's auto-created cluster firewall rules), then appends
-// any NodeClass network tags. clusterID must be the 64-char cluster.Id from
-// the Container API.
+// buildInstanceTags emits the generic gke-<clusterName>-node tag and, when
+// clusterID is at least 8 characters, the cluster-id-bearing
+// gke-<clusterName>-<clusterID[:8]>-node tag (the target of GKE's
+// auto-created cluster firewall rules). NodeClass network tags are appended
+// last. clusterID is normally the 64-char cluster.Id from the Container API;
+// the cluster-id tag is omitted if the API returns a short or empty value.
 func buildInstanceTags(clusterName, clusterID string, networkTags []v1alpha1.NetworkTag) *compute.Tags {
 	items := make([]string, 0, 2+len(networkTags))
 	items = append(items, fmt.Sprintf("gke-%s-node", clusterName))
-	items = append(items, fmt.Sprintf("gke-%s-%s-node", clusterName, clusterID[:8]))
+	if len(clusterID) >= 8 {
+		items = append(items, fmt.Sprintf("gke-%s-%s-node", clusterName, clusterID[:8]))
+	}
 	for _, t := range networkTags {
 		items = append(items, string(t))
 	}

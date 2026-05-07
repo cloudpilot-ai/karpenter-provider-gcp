@@ -1272,30 +1272,46 @@ func TestBuildInstanceTags(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		clusterID   string
 		networkTags []v1alpha1.NetworkTag
 		want        []string
 	}{
 		{
 			name:        "emits both cluster-wide and cluster-id-bearing tags when no NodeClass tags",
+			clusterID:   clusterID,
 			networkTags: nil,
 			want:        []string{clusterWideTag, clusterIDTag},
 		},
 		{
 			name:        "appends NodeClass tags after cluster-derived tags",
+			clusterID:   clusterID,
 			networkTags: []v1alpha1.NetworkTag{"frontend-pool", "high-mem"},
 			want:        []string{clusterWideTag, clusterIDTag, "frontend-pool", "high-mem"},
 		},
 		{
 			name:        "de-dupes NodeClass tag that collides with cluster-wide tag",
+			clusterID:   clusterID,
 			networkTags: []v1alpha1.NetworkTag{v1alpha1.NetworkTag(clusterWideTag), "extra"},
 			want:        []string{clusterWideTag, clusterIDTag, "extra"},
+		},
+		{
+			name:        "omits cluster-id-bearing tag when clusterID is empty",
+			clusterID:   "",
+			networkTags: nil,
+			want:        []string{clusterWideTag},
+		},
+		{
+			name:        "omits cluster-id-bearing tag when clusterID is shorter than 8 chars",
+			clusterID:   "abc1234",
+			networkTags: nil,
+			want:        []string{clusterWideTag},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tags := buildInstanceTags(clusterName, clusterID, tt.networkTags)
+			tags := buildInstanceTags(clusterName, tt.clusterID, tt.networkTags)
 			require.Equal(t, tt.want, tags.Items)
 		})
 	}
