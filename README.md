@@ -35,7 +35,7 @@ See [`docs/`](docs/) for installation, configuration, networking, troubleshootin
 
 ## Release notes / upgrades
 
-See `CHANGELOG.md` for breaking changes and upgrade notes between releases.
+See [GitHub Releases](https://github.com/cloudpilot-ai/karpenter-provider-gcp/releases) for the full changelog. See [`MIGRATION.md`](MIGRATION.md) for breaking changes and upgrade steps.
 
 ## How it works
 
