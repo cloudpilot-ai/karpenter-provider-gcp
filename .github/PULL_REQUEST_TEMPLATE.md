@@ -33,6 +33,7 @@ Fixes #
 #### Docs and examples
 
 - [ ] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+- [ ] `MIGRATION.md` updated (or this PR does not require any migration steps)
 
 #### Special notes for your reviewer:
 
