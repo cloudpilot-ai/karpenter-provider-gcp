@@ -31,6 +31,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: write
 
 jobs:
   update-pricing:
@@ -53,16 +54,42 @@ jobs:
       - name: Set GCP project
         run: echo "GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PRICING_PROJECT }}" >> $GITHUB_ENV
 
+      - name: Run price_validate and capture findings
+        id: validate
+        run: |
+          mkdir -p /tmp/price-data
+          set +e
+          go run ./hack/tools/price_validate \
+            --work-dir=/tmp/price-data \
+            --no-cache \
+            > /tmp/findings.txt 2>&1
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          set -e
+
       - name: Update initial-prices.json
-        run: make update-pricing
+        run: cp /tmp/price-data/computed.json pkg/providers/pricing/initial-prices.json
 
       - name: Prepare PR body
         run: |
+          FINDINGS_EXIT="${{ steps.validate.outputs.exit_code }}"
           {
             echo 'Automated refresh of `pkg/providers/pricing/initial-prices.json`'
+            echo ''
+            echo '## Pricing findings'
+            echo ''
+            if [ "$FINDINGS_EXIT" = "0" ]; then
+              echo 'All prices within tolerance — no actionable findings.'
+            else
+              echo '> ⚠️ **Actionable findings detected.** Review before merging.'
+              echo ''
+              echo '```'
+              cat /tmp/findings.txt
+              echo '```'
+            fi
           } > /tmp/pr-body.md
 
       - name: Create PR if pricing changed
+        id: create-pr
         if: ${{ !inputs.dry_run }}
         uses: peter-evans/create-pull-request@v8
         with:
@@ -74,3 +101,30 @@ jobs:
           sign-commits: true
           delete-branch: true
           labels: pricing,automated
+
+      - name: Post findings check run on PR
+        if: ${{ !inputs.dry_run && steps.create-pr.outputs.pull-request-number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FINDINGS_EXIT="${{ steps.validate.outputs.exit_code }}"
+          HEAD_SHA="${{ steps.create-pr.outputs.pull-request-head-sha }}"
+
+          if [ "$FINDINGS_EXIT" = "0" ]; then
+            CONCLUSION="success"
+            TITLE="No pricing findings"
+            SUMMARY="All prices are within tolerance."
+          else
+            CONCLUSION="failure"
+            TITLE="Pricing findings detected"
+            SUMMARY="Mismatches, missing, or unknown machines found. See PR body for details."
+          fi
+
+          jq -n \
+            --arg name "pricing-findings" \
+            --arg sha "$HEAD_SHA" \
+            --arg conclusion "$CONCLUSION" \
+            --arg title "$TITLE" \
+            --arg summary "$SUMMARY" \
+            '{name:$name,head_sha:$sha,status:"completed",conclusion:$conclusion,output:{title:$title,summary:$summary}}' | \
+          gh api repos/${{ github.repository }}/check-runs --method POST --input -
