@@ -136,12 +136,12 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	)
 
 	projectID := options.FromContext(ctx).ProjectID
-	proj, err := computeService.Projects.Get(projectID).Context(ctx).Do()
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to get Compute Engine default service account")
-		os.Exit(1)
+	computeDefaultSA := ""
+	if proj, err := computeService.Projects.Get(projectID).Context(ctx).Do(); err != nil {
+		log.FromContext(ctx).Error(err, "failed to get Compute Engine default service account; nodes without an explicit serviceAccount will fail to provision")
+	} else {
+		computeDefaultSA = proj.DefaultServiceAccount
 	}
-	computeDefaultSA := proj.DefaultServiceAccount
 
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,

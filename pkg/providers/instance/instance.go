@@ -746,6 +746,9 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 }
 
 func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
+	if cluster.NetworkConfig == nil {
+		return nil
+	}
 	targetRange := podCIDRRange(nodeClass.GetMaxPods())
 	clusterPrivate := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
 
