@@ -1,0 +1,26 @@
+changelog:
+  exclude:
+    labels:
+      - dependencies
+    authors:
+      - dependabot
+  categories:
+    - title: Breaking Changes
+      labels:
+        - kind api-change
+    - title: New Features
+      labels:
+        - kind feature
+        - enhancement
+    - title: Bug Fixes
+      labels:
+        - bug
+        - kind failing-test
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Maintenance
+      labels:
+        - chore
+        - cleanup
+        - test
