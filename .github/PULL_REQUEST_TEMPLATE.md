@@ -18,6 +18,10 @@ Optionally add one or more of the following kinds if applicable:
 /kind failing-test
 /kind flake
 /kind regression
+
+Additional labels (applied directly, not via /kind):
+  dependencies  — dependency update PRs
+  release-prep  — release preparation PRs (see RELEASE.md)
 -->
 
 #### What this PR does / why we need it:
@@ -33,15 +37,8 @@ Fixes #
 #### Docs and examples
 
 - [ ] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+- [ ] `MIGRATION.md` updated (or this PR does not require any migration steps)
 
 #### Special notes for your reviewer:
 
 #### Does this PR introduce a user-facing change?
-<!--
-If no, just write "NONE" in the release-note block below.
-If yes, a release note is required:
-Enter your extended release note in the block below. If the PR requires additional action from users switching to the new release, include the string "action required".
--->
-```release-note
-
-```
