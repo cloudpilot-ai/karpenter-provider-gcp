@@ -1096,7 +1096,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
+	p := &DefaultProvider{computeDefaultSA: "123-compute@developer.gserviceaccount.com"}
 
 	gpuIT := &cloudprovider.InstanceType{
 		Name: "g2-standard-4",
@@ -1153,7 +1153,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
+	p := &DefaultProvider{computeDefaultSA: "123-compute@developer.gserviceaccount.com"}
 
 	gpuIT := &cloudprovider.InstanceType{
 		Name: "g2-standard-4",
@@ -1210,7 +1210,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
+	p := &DefaultProvider{computeDefaultSA: "123-compute@developer.gserviceaccount.com"}
 
 	// Non-GPU instance type (no LabelInstanceGPUCount requirement)
 	nonGPUIT := &cloudprovider.InstanceType{

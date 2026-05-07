@@ -732,8 +732,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
 
-	// GPU instances do not support live migration, so OnHostMaintenance must be TERMINATE.
-	if isGPUInstance {
+	// A2, A3, G2 machine types have built-in GPUs and do not support live migration.
+	if instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0 {
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 
