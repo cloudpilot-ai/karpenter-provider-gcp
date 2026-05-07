@@ -6,34 +6,9 @@
 
 ### CRDs moved to a separate Helm chart (`karpenter-crd`)
 
-CRDs are now distributed and managed via a dedicated `karpenter-crd` Helm chart, separate from the main `karpenter` chart. This enables independent CRD upgrades without touching the controller.
+CRDs are now managed via a dedicated `karpenter-crd` Helm chart. Users upgrading from v0.2.x must install this chart and, if CRDs were previously installed by the single `karpenter` chart, adopt them into the new release first.
 
-**Action required when upgrading from v0.2.x:**
-
-Install the new chart before upgrading the main chart:
-
-```bash
-helm upgrade --install karpenter-crd oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/chart/karpenter-crd \
-  --version 0.3.0 \
-  --namespace karpenter-system \
-  --create-namespace
-```
-
-If your existing CRDs were installed by a previous version of the `karpenter` chart, adopt them into the new release before installing `karpenter-crd`:
-
-```bash
-for crd in gcenodeclasses.karpenter.k8s.gcp nodeclaims.karpenter.sh nodepools.karpenter.sh nodeoverlays.karpenter.sh; do
-  kubectl annotate crd $crd \
-    meta.helm.sh/release-name=karpenter-crd \
-    meta.helm.sh/release-namespace=karpenter-system \
-    --overwrite
-  kubectl label crd $crd \
-    app.kubernetes.io/managed-by=Helm \
-    --overwrite
-done
-```
-
-Then proceed with `helm upgrade karpenter-crd ...` and the regular `karpenter` chart upgrade.
+See [Upgrading](docs/getting-started/upgrading.md) for the full procedure.
 
 ---
 
