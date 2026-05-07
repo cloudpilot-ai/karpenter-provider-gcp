@@ -1,5 +1,8 @@
 # Migration Guide
 
+> For a full list of changes per release, see [GitHub Releases](https://github.com/cloudpilot-ai/karpenter-provider-gcp/releases).
+> This file documents only breaking changes and steps required when upgrading.
+
 ## Unreleased
 
 ## v0.3.0
