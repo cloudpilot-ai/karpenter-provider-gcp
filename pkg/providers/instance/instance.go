@@ -710,7 +710,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		Metadata:          template.Properties.Metadata,
 		Labels:            p.initializeInstanceLabels(nodeClass),
 		Scheduling:        sched,
-		Tags:              buildInstanceTags(p.clusterName, nodeClass.Spec.NetworkTags),
+		Tags:              buildInstanceTags(p.clusterName, clusterConfig.Id, nodeClass.Spec.NetworkTags),
 		GuestAccelerators: template.Properties.GuestAccelerators,
 	}
 
@@ -978,13 +978,18 @@ func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
 	return !ok || loc == p.clusterLocation
 }
 
-// buildInstanceTags constructs GCE network tags for a new node.
-// The cluster-wide tag (gke-<clusterName>-node) is always included — GKE's
-// cluster-level firewall rules match on this tag. NodeClass network tags are
-// appended after so callers can extend without replacing cluster routing.
-func buildInstanceTags(clusterName string, networkTags []v1alpha1.NetworkTag) *compute.Tags {
-	items := make([]string, 0, 1+len(networkTags))
+// buildInstanceTags emits the generic gke-<clusterName>-node tag and, when
+// clusterID is at least 8 characters, the cluster-id-bearing
+// gke-<clusterName>-<clusterID[:8]>-node tag (the target of GKE's
+// auto-created cluster firewall rules). NodeClass network tags are appended
+// last. clusterID is normally the 64-char cluster.Id from the Container API;
+// the cluster-id tag is omitted if the API returns a short or empty value.
+func buildInstanceTags(clusterName, clusterID string, networkTags []v1alpha1.NetworkTag) *compute.Tags {
+	items := make([]string, 0, 2+len(networkTags))
 	items = append(items, fmt.Sprintf("gke-%s-node", clusterName))
+	if len(clusterID) >= 8 {
+		items = append(items, fmt.Sprintf("gke-%s-%s-node", clusterName, clusterID[:8]))
+	}
 	for _, t := range networkTags {
 		items = append(items, string(t))
 	}
