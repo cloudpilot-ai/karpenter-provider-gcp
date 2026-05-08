@@ -108,12 +108,14 @@ e2e-setup: require-e2e-vars ## Create (or reuse) the e2e GKE cluster and support
 	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-setup.sh
 
-e2e-deploy: require-e2e-vars ## Build image and (re)deploy karpenter onto an existing e2e cluster
+RELEASE_VERSION ?=
+e2e-deploy: require-e2e-vars ## Build and deploy karpenter; set RELEASE_VERSION=X.Y.Z to install the published chart instead
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
 	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_LOCATION=$(E2E_LOCATION) \
+	RELEASE_VERSION=$(RELEASE_VERSION) \
 	./hack/e2e-deploy.sh
 
 require-e2e-vars: ## Fail fast if required e2e variables are not set
