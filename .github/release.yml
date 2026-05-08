@@ -1,0 +1,33 @@
+changelog:
+  exclude:
+    labels:
+      - dependencies
+      - release-prep
+    authors:
+      - dependabot
+  categories:
+    - title: Breaking Changes
+      labels:
+        - kind api-change
+        - kind deprecation
+    - title: New Features
+      labels:
+        - kind feature
+        - enhancement
+    - title: Bug Fixes
+      labels:
+        - bug
+        - kind bug
+        - kind failing-test
+        - kind regression
+    - title: Documentation
+      labels:
+        - documentation
+        - kind documentation
+    - title: Maintenance
+      labels:
+        - chore
+        - cleanup
+        - kind cleanup
+        - test
+        - kind flake
