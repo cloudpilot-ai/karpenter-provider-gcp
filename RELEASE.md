@@ -51,8 +51,16 @@ git fetch origin && git checkout main && git reset --hard origin/main
 git checkout -b release-X.Y
 git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git release-X.Y
 
-# Create a signed tag
-git tag -s vX.Y.0 -m "Release vX.Y.0"
+# Capture the exact commit SHA — never rely on HEAD when tagging
+COMMIT=$(git rev-parse origin/release-X.Y)
+echo "Tagging commit: $COMMIT"
+
+# Create a signed tag on the explicit SHA
+git tag -s vX.Y.0 "$COMMIT" -m "Release vX.Y.0"
+
+# Verify the tag object points to the right commit before pushing
+git cat-file -p vX.Y.0 | head -3
+
 git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.0
 ```
 
@@ -99,24 +107,25 @@ Also confirm the new version appears on [ArtifactHub](https://artifacthub.io/pac
 
 ### 6. Validate on the e2e cluster
 
-Install the published chart without overriding the image (this validates the full published artefact):
+Install the published chart and run e2e from the release branch (tests must match the released code):
 
 ```bash
-helm repo add karpenter-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp --force-update
+git checkout release-X.Y
 
-helm upgrade --install karpenter-crd karpenter-gcp/karpenter-crd \
-  --version X.Y.0 --namespace karpenter-system --create-namespace --wait
+make e2e-deploy \
+  RELEASE_VERSION=X.Y.0 \
+  E2E_PROJECT_ID=<PROJECT_ID> \
+  E2E_SA_PATH=<SA_KEY> \
+  E2E_LOCATION=<ZONE>
 
-helm upgrade --install karpenter karpenter-gcp/karpenter \
-  --version X.Y.0 --namespace karpenter-system \
-  --set controller.settings.projectID=<PROJECT_ID> \
-  --set controller.settings.clusterName=<CLUSTER_NAME> \
-  --set controller.settings.clusterLocation=<LOCATION> \
-  --set "serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=<GSA_EMAIL>" \
-  --wait
+make e2e-tests \
+  E2E_PROJECT_ID=<PROJECT_ID> \
+  E2E_SA_PATH=<SA_KEY> \
+  E2E_LOCATION=<ZONE> \
+  E2E_REGION=<REGION>
 ```
 
-Run the full e2e suite and confirm all specs pass.
+`RELEASE_VERSION` switches `make e2e-deploy` into published-chart mode — it installs from the Helm repo at the given version with no local image build. All specs must pass before announcing.
 
 ### 7. Announce
 
@@ -131,7 +140,11 @@ Post a release announcement to **#karpenter-gcp** on [Kubernetes Slack](https://
    ```bash
    git fetch origin
    git checkout -b fix/<short-description> origin/release-X.Y
-   git cherry-pick <commit-sha>
+
+   # Always cherry-pick the squash/merge commit from main (not individual PR commits)
+   MERGE_SHA=$(gh pr view <N> --repo cloudpilot-ai/karpenter-provider-gcp --json mergeCommit --jq '.mergeCommit.oid')
+   git cherry-pick -m 1 "$MERGE_SHA"
+
    git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git fix/<short-description>
    ```
 
@@ -141,8 +154,17 @@ Post a release announcement to **#karpenter-gcp** on [Kubernetes Slack](https://
 
    ```bash
    git fetch origin
-   git checkout release-X.Y && git reset --hard origin/release-X.Y
-   git tag -s vX.Y.Z -m "Release vX.Y.Z"
+
+   # Capture the exact commit SHA — never rely on HEAD when tagging
+   COMMIT=$(git rev-parse origin/release-X.Y)
+   echo "Tagging commit: $COMMIT"
+
+   # Create a signed tag on the explicit SHA
+   git tag -s vX.Y.Z "$COMMIT" -m "Release vX.Y.Z"
+
+   # Verify the tag object points to the right commit before pushing
+   git cat-file -p vX.Y.Z | head -3
+
    git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.Z
    ```
 
@@ -163,4 +185,20 @@ Post a release announcement to **#karpenter-gcp** on [Kubernetes Slack](https://
      --draft
    ```
 
-5. Follow steps 5–7 of the minor release process above.
+5. Follow steps 5–7 of the minor release process above, substituting `X.Y.Z` for the patch version and running:
+
+   ```bash
+   git checkout release-X.Y
+
+   make e2e-deploy \
+     RELEASE_VERSION=X.Y.Z \
+     E2E_PROJECT_ID=<PROJECT_ID> \
+     E2E_SA_PATH=<SA_KEY> \
+     E2E_LOCATION=<ZONE>
+
+   make e2e-tests \
+     E2E_PROJECT_ID=<PROJECT_ID> \
+     E2E_SA_PATH=<SA_KEY> \
+     E2E_LOCATION=<ZONE> \
+     E2E_REGION=<REGION>
+   ```
