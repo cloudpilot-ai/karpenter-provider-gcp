@@ -68,6 +68,27 @@ helm install karpenter karpenter-gcp/karpenter \
   ...
 ```
 
+## Prometheus Operator Integration
+
+Enable automatic metric scraping with a ServiceMonitor when using the [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator):
+
+```bash
+helm install karpenter karpenter-gcp/karpenter \
+  --set serviceMonitor.enabled=true \
+  ...
+```
+
+The ServiceMonitor requires the Prometheus Operator CRDs (`monitoring.coreos.com/v1`) to be installed in your cluster.
+
+Add labels to match your Prometheus instance's selector:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: prometheus
+```
+
 ## Values
 
 | Key | Type | Default | Description |
