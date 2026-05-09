@@ -114,12 +114,16 @@ disks:
 
 ## arm64 provisioning not available
 
-arm64 node provisioning is skipped at startup if the cluster's region does not support arm64 machine types. Check Karpenter startup logs for a message indicating that arm64 template pools were not created.
+arm64 node provisioning may be unavailable if the cluster's region does not support arm64 machine types or if arm64 template pools could not be created. Check Karpenter startup logs for related messages.
 
-If arm64 support is needed, verify that arm64 machine types (e.g. `c4a`, `t2a`) are available in your cluster's region:
+Karpenter detects arm64 architecture directly from the GCP Compute API. All arm64-capable instance families (`c4a`, `t2a`, `n4a`) are supported automatically.
+
+Image resolution queries GCP image catalogs directly and does not depend on template pool availability, so arm64 images can be resolved even without arm64 template pools. However, the template pools are still used for network and kubelet configuration.
+
+To verify arm64 machine types are available in your cluster's region:
 
 ```sh
-gcloud compute machine-types list --zones=ZONE --filter="name:t2a OR name:c4a"
+gcloud compute machine-types list --zones=ZONE --filter="architecture:ARM64"
 ```
 
 ---
@@ -140,7 +144,9 @@ GC only deletes instances that carry the Karpenter cluster tag and have no corre
 
 ## Insufficient capacity errors
 
-When Karpenter cannot provision an instance due to insufficient capacity (spot or on-demand), it logs the error and marks the zone/instance-type combination as unavailable for a short backoff period before retrying.
+When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable for 30 minutes. Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones can recover and become available again.
+
+If all zones for a given instance type are exhausted, Karpenter returns an insufficient capacity error immediately without attempting GCP API calls that would fail.
 
 To increase provisioning success:
 

@@ -17,7 +17,7 @@ gcloud services enable compute.googleapis.com container.googleapis.com
 
 ## Step 1 — Create a GCP service account
 
-Karpenter needs permissions to manage Compute Engine instances and GKE node pools.
+Karpenter needs permissions to manage Compute Engine instances and read GKE cluster configuration.
 
 ```sh
 export PROJECT_ID=<your-project-id>
@@ -37,6 +37,8 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/iam.serviceAccountUser"
 ```
+
+If you use a custom minimal IAM role instead of `roles/container.admin`, ensure it includes `container.clusters.get`. Karpenter reads the cluster API to derive network configuration for provisioned nodes.
 
 ## Step 2 — Install Karpenter with Helm
 
