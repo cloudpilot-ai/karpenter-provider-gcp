@@ -68,6 +68,27 @@ helm install karpenter karpenter-gcp/karpenter \
   ...
 ```
 
+## Prometheus Operator Integration
+
+Enable automatic metric scraping with a ServiceMonitor when using the [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator):
+
+```bash
+helm install karpenter karpenter-gcp/karpenter \
+  --set serviceMonitor.enabled=true \
+  ...
+```
+
+The ServiceMonitor requires the Prometheus Operator CRDs (`monitoring.coreos.com/v1`) to be installed in your cluster.
+
+Add labels to match your Prometheus instance's selector:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: prometheus
+```
+
 ## Values
 
 | Key | Type | Default | Description |
@@ -119,3 +140,9 @@ helm install karpenter karpenter-gcp/karpenter \
 | serviceAccount.automount | bool | `true` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
+| serviceMonitor.enabled | bool | `false` | Whether to create a ServiceMonitor for Prometheus Operator scraping. Requires the Prometheus Operator CRDs to be installed (`monitoring.coreos.com/v1`). |
+| serviceMonitor.additionalLabels | object | `{}` | Additional labels to apply to the ServiceMonitor. Use this to match Prometheus Operator label selectors. |
+| serviceMonitor.relabelings | array | `[]` | Relabelings for the `http-metrics` endpoint. See [Prometheus relabel_config](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config). |
+| serviceMonitor.metricRelabelings | array | `[]` | Metric relabelings for the `http-metrics` endpoint. See [Prometheus metric_relabel_configs](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#metric_relabel_configs). |
+| serviceMonitor.endpointConfig | object | `{}` | Additional configuration for the `http-metrics` endpoint. See [Prometheus Operator Endpoint API](https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api-reference/api.md#endpoint). |
+| serviceMonitor.sampleLimit | int/null | `null` | Per-scrape sample limit. If more samples are present after metric relabeling, the scrape is treated as failed. `0` or `null` means no limit. |
