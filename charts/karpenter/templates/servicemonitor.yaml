@@ -26,15 +26,18 @@ spec:
   endpoints:
     - port: http-metrics
       path: /metrics
-      {{- if and .Values.serviceMonitor.relabelings (not (hasKey .Values.serviceMonitor.endpointConfig "relabelings")) }}
+      {{- with .Values.serviceMonitor.interval }}
+      interval: {{ . }}
+      {{- end }}
+      {{- with .Values.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+      {{- with .Values.serviceMonitor.relabelings }}
       relabelings:
-        {{- toYaml .Values.serviceMonitor.relabelings | nindent 6 }}
+        {{- toYaml . | nindent 6 }}
       {{- end }}
-      {{- if and .Values.serviceMonitor.metricRelabelings (not (hasKey .Values.serviceMonitor.endpointConfig "metricRelabelings")) }}
+      {{- with .Values.serviceMonitor.metricRelabelings }}
       metricRelabelings:
-        {{- toYaml .Values.serviceMonitor.metricRelabelings | nindent 6 }}
+        {{- toYaml . | nindent 6 }}
       {{- end }}
-    {{- with .Values.serviceMonitor.endpointConfig }}
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
 {{- end -}}
