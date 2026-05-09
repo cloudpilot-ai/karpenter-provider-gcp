@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "additionalAnnotations": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Additional annotations added to all CRD resources."
+    }
+  }
+}

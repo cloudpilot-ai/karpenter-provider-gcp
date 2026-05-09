@@ -46,12 +46,14 @@ update: tidy download ## Update go files header, CRD and generated code
 	hack/update-generated.sh
 	hack/docs-generate.sh
 	helm-docs -c charts/karpenter
+	helm-docs -c charts/karpenter-crd
 
 verify-codegen: update ## Verify generated code is up to date
 	git diff --exit-code || (echo "Generated files are out of date — run 'make update' and commit the changes" && exit 1)
 
-chart-lint: ## Lint the Helm chart (validates values.schema.json and templates)
+chart-lint: ## Lint the Helm charts (validates values.schema.json and templates)
 	helm lint charts/karpenter/
+	helm lint charts/karpenter-crd/
 
 verify: ## Verify code. Includes linting, formatting, etc
 	golangci-lint run --new-from-rev=origin/main --timeout=20m
