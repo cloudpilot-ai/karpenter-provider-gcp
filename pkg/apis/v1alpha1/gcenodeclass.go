@@ -50,8 +50,9 @@ type GCENodeClassSpec struct {
 	// +optional
 	ImageFamily *string `json:"imageFamily,omitempty"`
 	// SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
-	// to allocate pod IP addresses. If not specified, the range inherited from the node
-	// pool instance template is used (typically the default pods range).
+	// to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's
+	// default pod secondary range (ClusterSecondaryRangeName from the cluster's IP
+	// allocation policy) is used.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
