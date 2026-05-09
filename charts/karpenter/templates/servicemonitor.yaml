@@ -26,13 +26,13 @@ spec:
   endpoints:
     - port: http-metrics
       path: /metrics
-      {{- with .Values.serviceMonitor.relabelings }}
+      {{- if and .Values.serviceMonitor.relabelings (not (hasKey .Values.serviceMonitor.endpointConfig "relabelings")) }}
       relabelings:
-        {{- toYaml . | nindent 6 }}
+        {{- toYaml .Values.serviceMonitor.relabelings | nindent 6 }}
       {{- end }}
-      {{- with .Values.serviceMonitor.metricRelabelings }}
+      {{- if and .Values.serviceMonitor.metricRelabelings (not (hasKey .Values.serviceMonitor.endpointConfig "metricRelabelings")) }}
       metricRelabelings:
-        {{- toYaml . | nindent 6 }}
+        {{- toYaml .Values.serviceMonitor.metricRelabelings | nindent 6 }}
       {{- end }}
     {{- with .Values.serviceMonitor.endpointConfig }}
       {{- toYaml . | nindent 6 }}
