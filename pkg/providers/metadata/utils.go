@@ -207,10 +207,11 @@ func AppendGPUTaint(metadata *compute.Metadata) error {
 						// already present, idempotent
 						continue
 					}
-					if registerWithTaintsRegex.MatchString(line) {
-						// Merge into the existing --register-with-taints value to avoid
-						// having two separate flags (kubelet only honors the last one).
-						lines[i] = registerWithTaintsRegex.ReplaceAllString(line, "${1}${2},"+GPUTaintArg)
+					if loc := registerWithTaintsRegex.FindStringIndex(line); loc != nil {
+						// Append into the first --register-with-taints value only; using
+						// FindStringIndex avoids ReplaceAll touching a second flag if the
+						// template happens to carry one.
+						lines[i] = line[:loc[1]] + "," + GPUTaintArg + line[loc[1]:]
 					} else {
 						lines[i] = line + " --register-with-taints=" + GPUTaintArg
 					}
