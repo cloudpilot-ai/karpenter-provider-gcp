@@ -41,6 +41,7 @@ Key capabilities:
 
 ## Features
 
+- [GPU nodes](gpu-nodes.md) — GPU instance types and automatic GPU taints for workload isolation
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
 - [Static capacity](examples/static-capacity.md) — keep a fixed number of nodes running with `spec.replicas`
 
