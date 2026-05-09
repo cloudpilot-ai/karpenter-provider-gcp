@@ -119,3 +119,10 @@ helm install karpenter karpenter-gcp/karpenter \
 | serviceAccount.automount | bool | `true` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
+| serviceMonitor.additionalLabels | object | `{}` | Additional labels for the ServiceMonitor. |
+| serviceMonitor.enabled | bool | `false` | Specifies whether a ServiceMonitor should be created. |
+| serviceMonitor.interval | string | `""` | Scrape interval for the `http-metrics` endpoint. Empty string uses the Prometheus operator's default (typically 30s). |
+| serviceMonitor.metricRelabelings | list | `[]` | Metric relabelings for the `http-metrics` endpoint on the ServiceMonitor. For more details on metric relabelings, see: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#metric_relabel_configs |
+| serviceMonitor.relabelings | list | `[]` | Relabelings for the `http-metrics` endpoint on the ServiceMonitor. For more details on relabelings, see: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config |
+| serviceMonitor.sampleLimit | string | `nil` | Specifies the sampleLimit for prometheus scrapes. Per-scrape limit on the number of scraped samples that will be accepted. If more than this number of samples are present after metric relabeling the entire scrape will be treated as failed. 0 means no limit. |
+| serviceMonitor.scrapeTimeout | string | `""` | Scrape timeout for the `http-metrics` endpoint. Empty string uses the Prometheus operator's default (typically 10s). |

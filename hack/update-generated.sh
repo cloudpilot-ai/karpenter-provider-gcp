@@ -14,6 +14,11 @@ controller-gen crd paths=./pkg/apis/v1alpha1/... output:crd:dir=./charts/karpent
 KARPENTER_CRD_DIR=vendor/sigs.k8s.io/karpenter/pkg/apis/crds
 cp "${KARPENTER_CRD_DIR}"/*.yaml ./charts/karpenter/crds/
 
+# Sync CRDs to karpenter-crd chart with additionalAnnotations support
+rm -f charts/karpenter-crd/templates/*.yaml
+cp charts/karpenter/crds/*.yaml charts/karpenter-crd/templates/
+hack/mutation/crd_annotations.sh
+
 # Update generated code
 export REPO_ROOT=$(pwd)
 export GOPATH="${REPO_ROOT}/_go"

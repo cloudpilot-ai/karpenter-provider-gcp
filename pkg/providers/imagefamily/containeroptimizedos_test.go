@@ -82,10 +82,12 @@ func TestResolveLatestCOSImage_PicksNewestNonDeprecated(t *testing.T) {
 
 func TestResolveLatestCOSImage_ExcludesSpecialisedVariants(t *testing.T) {
 	images := []*compute.Image{
-		{Name: "gke-1351-gke1396004-cos-arm64-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-10T00:00:00Z"},
-		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-nvda", CreationTimestamp: "2025-04-09T00:00:00Z"},
-		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre-kmod", CreationTimestamp: "2025-04-08T00:00:00Z"},
-		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-test", CreationTimestamp: "2025-04-07T00:00:00Z"},
+		{Name: "gke-1351-gke1396004-cos-arm64-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-11T00:00:00Z"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-nvda", CreationTimestamp: "2025-04-10T00:00:00Z"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre-kmod", CreationTimestamp: "2025-04-09T00:00:00Z"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-test", CreationTimestamp: "2025-04-08T00:00:00Z"},
+		// cgpv1 (cgroup v1) variant — must be excluded; GKE 1.29+ kubelet sets --fail-cgroupv1=true
+		{Name: "gke-1353-gke1389001-cos-125-19216-220-106-c-cgpv1-pre", CreationTimestamp: "2025-04-07T00:00:00Z"},
 		{Name: "gke-1351-gke1390000-cos-125-19216-100-100-c-pre", CreationTimestamp: "2025-03-01T00:00:00Z"},
 	}
 
