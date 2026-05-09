@@ -71,6 +71,51 @@
         }
       }
     },
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration for the optional Prometheus Operator ServiceMonitor.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether to create a ServiceMonitor for Prometheus Operator scraping.",
+          "default": false
+        },
+        "additionalLabels": {
+          "type": "object",
+          "description": "Additional labels to apply to the ServiceMonitor.",
+          "default": {}
+        },
+        "interval": {
+          "type": "string",
+          "description": "Scrape interval for the http-metrics endpoint. Empty uses the Prometheus operator default.",
+          "default": ""
+        },
+        "scrapeTimeout": {
+          "type": "string",
+          "description": "Scrape timeout for the http-metrics endpoint. Empty uses the Prometheus operator default.",
+          "default": ""
+        },
+        "relabelings": {
+          "type": "array",
+          "description": "Relabelings for the http-metrics endpoint on the ServiceMonitor.",
+          "default": []
+        },
+        "metricRelabelings": {
+          "type": "array",
+          "description": "Metric relabelings for the http-metrics endpoint on the ServiceMonitor.",
+          "default": []
+        },
+        "sampleLimit": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "integer", "minimum": 0 }
+          ],
+          "description": "Per-scrape sample limit. 0 or null means no limit.",
+          "default": null
+        }
+      }
+    },
     "serviceAccount": {
       "type": "object",
       "additionalProperties": false,

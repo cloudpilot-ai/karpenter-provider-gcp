@@ -33,6 +33,27 @@ imagePullSecrets: []
 podDisruptionBudget:
   minAvailable: 1
 
+serviceMonitor:
+  # -- Specifies whether a ServiceMonitor should be created.
+  enabled: false
+  # -- Additional labels for the ServiceMonitor.
+  additionalLabels: {}
+  # -- Scrape interval for the `http-metrics` endpoint. Empty string uses the Prometheus operator's default (typically 30s).
+  interval: ""
+  # -- Scrape timeout for the `http-metrics` endpoint. Empty string uses the Prometheus operator's default (typically 10s).
+  scrapeTimeout: ""
+  # -- Relabelings for the `http-metrics` endpoint on the ServiceMonitor.
+  # For more details on relabelings, see: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config
+  relabelings: []
+  # -- Metric relabelings for the `http-metrics` endpoint on the ServiceMonitor.
+  # For more details on metric relabelings, see: https://prometheus.io/docs/prometheus/latest/configuration/configuration/#metric_relabel_configs
+  metricRelabelings: []
+  # -- Specifies the sampleLimit for prometheus scrapes.
+  # Per-scrape limit on the number of scraped samples that will be accepted.
+  # If more than this number of samples are present after metric relabeling
+  # the entire scrape will be treated as failed. 0 means no limit.
+  sampleLimit: null
+
 controller:
   replicaCount: 2
   revisionHistoryLimit: 10
