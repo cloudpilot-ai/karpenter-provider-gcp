@@ -1,6 +1,6 @@
 # arm64 nodes (Google Axion / Ampere Altra)
 
-Use `c4a` (Google Axion, based on Arm Neoverse V2) or `t2a` (Ampere Altra) instance families for arm64 workloads.
+Karpenter automatically detects arm64 architecture from the GCP Compute API. All arm64-capable instance families work without explicit configuration, including `c4a` (Google Axion, Arm Neoverse V2), `t2a` (Ampere Altra), and `n4a` (Google Axion). New arm64 families are supported automatically as GCP releases them.
 
 ```yaml
 apiVersion: karpenter.k8s.gcp/v1alpha1
@@ -32,7 +32,7 @@ spec:
           values: ["spot", "on-demand"]
         - key: karpenter.k8s.gcp/instance-family
           operator: In
-          values: ["c4a", "t2a"]
+          values: ["c4a", "t2a", "n4a"]
         - key: kubernetes.io/arch
           operator: In
           values: ["arm64"]

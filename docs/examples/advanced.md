@@ -32,7 +32,7 @@ kubeletConfiguration:
 
 ## Shielded VM
 
-Enable Shielded VM features for additional security guarantees:
+Shielded VM provides verifiable integrity for your instances, protecting against boot-level and kernel-level malware. GCP organizations that enforce `constraints/compute.requireShieldedVm` require these settings on all instances. Without them, Karpenter-provisioned nodes fail with a `412 conditionNotMet` error.
 
 ```yaml
 shieldedInstanceConfig:
@@ -40,6 +40,14 @@ shieldedInstanceConfig:
   enableVtpm: true
   enableIntegrityMonitoring: true
 ```
+
+The options are:
+
+- **enableSecureBoot**: Verifies all boot components (firmware, bootloader, kernel) are signed by trusted publishers. Prevents boot-level rootkits.
+- **enableVtpm**: Enables a virtual Trusted Platform Module that validates guest VM integrity before and during boot.
+- **enableIntegrityMonitoring**: Monitors and reports changes to the boot sequence. View integrity reports in Cloud Monitoring.
+
+See [GCP Shielded VM documentation](https://cloud.google.com/compute/shielded-vm/docs/shielded-vm) for details on each feature.
 
 ## Multiple NodePools
 
