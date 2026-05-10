@@ -2,9 +2,11 @@
 
 ## Instance metadata
 
-Set GCE instance metadata key-value pairs, for example to pin the GPU driver version:
+Set GCE instance metadata key-value pairs for advanced configuration:
 
 See [`examples/nodeclass/gcenodeclass-metadata.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/gcenodeclass-metadata.yaml).
+
+> **Note:** For GPU driver version control, use `spec.gpuDriverVersion` instead of setting `cloud.google.com/gke-gpu-driver-version` via metadata. See [GPU Nodes](../gpu-nodes.md) for details.
 
 ## Secondary boot disk (container image pre-loading)
 
