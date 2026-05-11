@@ -94,6 +94,15 @@ type GCENodeClassSpec struct {
 	// Disabled by default to preserve backward compatibility.
 	// +optional
 	AutoGPUTaint bool `json:"autoGPUTaint,omitempty"`
+	// GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.
+	// Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.
+	// Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),
+	// "disabled" (skip automatic installation).
+	// Ignored for non-GPU instance types.
+	// +kubebuilder:validation:Enum=default;latest;disabled
+	// +kubebuilder:default=default
+	// +optional
+	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
 }
 
 // NetworkConfig holds network settings for provisioned nodes.

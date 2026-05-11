@@ -180,3 +180,92 @@ func TestAppendGPUTaint_ErrorWhenNoKubeletArgs(t *testing.T) {
 	}
 	require.Error(t, AppendGPUTaint(meta))
 }
+
+func TestSetGPUDriverVersionLabel_InjectsLabel(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "kube-labels", Value: lo.ToPtr("max-pods-per-node=110")},
+		},
+	}
+	require.NoError(t, SetGPUDriverVersionLabel(meta, "latest"))
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, "cloud.google.com/gke-gpu-driver-version=latest")
+}
+
+func TestSetGPUDriverVersionLabel_ReplacesExistingValue(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "kube-labels", Value: lo.ToPtr("max-pods-per-node=110,cloud.google.com/gke-gpu-driver-version=default")},
+		},
+	}
+	require.NoError(t, SetGPUDriverVersionLabel(meta, "latest"))
+	got := lo.FromPtr(meta.Items[0].Value)
+	// Old value replaced; new value present exactly once.
+	require.NotContains(t, got, "gke-gpu-driver-version=default")
+	require.Contains(t, got, "cloud.google.com/gke-gpu-driver-version=latest")
+	require.Equal(t, 1, strings.Count(got, "gke-gpu-driver-version="), "must appear exactly once")
+}
+
+func TestSetGPUDriverVersionLabel_ErrorWhenNoKubeLabels(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
+		},
+	}
+	err := SetGPUDriverVersionLabel(meta, "default")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "kube-labels")
+	// Metadata must be unchanged.
+	require.Len(t, meta.Items, 1)
+	require.Equal(t, "kube-env", meta.Items[0].Key)
+}
+
+func TestSetGPUAcceleratorLabel_InjectsLabel(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "kube-labels", Value: lo.ToPtr("max-pods-per-node=110")},
+		},
+	}
+	require.NoError(t, SetGPUAcceleratorLabel(meta, "nvidia-tesla-t4"))
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, "cloud.google.com/gke-accelerator=nvidia-tesla-t4")
+}
+
+func TestSetGPUAcceleratorLabel_ErrorWhenNoKubeLabels(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
+		},
+	}
+	err := SetGPUAcceleratorLabel(meta, "nvidia-tesla-a100")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "kube-labels")
+	require.Len(t, meta.Items, 1)
+	require.Equal(t, "kube-env", meta.Items[0].Key)
+}
+
+func TestSetGPUAcceleratorLabel_ReplacesExistingValue(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "kube-labels", Value: lo.ToPtr("max-pods-per-node=110,cloud.google.com/gke-accelerator=nvidia-tesla-t4")},
+		},
+	}
+	require.NoError(t, SetGPUAcceleratorLabel(meta, "nvidia-l4"))
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.NotContains(t, got, "gke-accelerator=nvidia-tesla-t4")
+	require.Contains(t, got, "cloud.google.com/gke-accelerator=nvidia-l4")
+	require.Equal(t, 1, strings.Count(got, "gke-accelerator="), "must appear exactly once")
+}
+
+func TestSetGPUAcceleratorLabel_IdempotentOnRepeat(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "kube-labels", Value: lo.ToPtr("max-pods-per-node=110")},
+		},
+	}
+	require.NoError(t, SetGPUAcceleratorLabel(meta, "nvidia-tesla-t4"))
+	require.NoError(t, SetGPUAcceleratorLabel(meta, "nvidia-tesla-t4"))
+	got := lo.FromPtr(meta.Items[0].Value)
+	// Label must appear exactly once.
+	require.Equal(t, 1, strings.Count(got, "gke-accelerator="), "accelerator label must appear exactly once")
+}

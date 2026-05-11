@@ -5,6 +5,37 @@
 
 ## Unreleased
 
+### GPU node provisioning (`gpuDriverVersion`)
+
+Karpenter now automatically sets the two node labels required by the GKE GPU software stack
+at boot time:
+
+- `cloud.google.com/gke-accelerator=<type>` — required by the NVIDIA device plugin DaemonSet.
+- `cloud.google.com/gke-gpu-driver-version=<value>` — read by the GKE GPU driver installer.
+
+The driver version is controlled by the new `spec.gpuDriverVersion` field on `GCENodeClass`
+(default: `"default"`, matching GKE's native behaviour).
+
+**Action required if you set `cloud.google.com/gke-gpu-driver-version` via NodePool
+`spec.template.spec.labels`:** remove the label from the NodePool and set
+`spec.gpuDriverVersion` on `GCENodeClass` instead — it is now injected at boot time,
+before the driver installer runs.
+
+```yaml
+# Before — NodePool:
+spec:
+  template:
+    spec:
+      labels:
+        cloud.google.com/gke-gpu-driver-version: default
+
+# After — remove the NodePool label; set in GCENodeClass:
+spec:
+  gpuDriverVersion: default
+```
+
+---
+
 ### Node service account
 
 The service account resolution order is now:

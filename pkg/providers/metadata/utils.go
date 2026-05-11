@@ -345,6 +345,57 @@ func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootD
 	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
 }
 
+// SetGPUAcceleratorLabel sets cloud.google.com/gke-accelerator=<gpuName> in kube-labels.
+// The NVIDIA device plugin DaemonSet uses this label as a nodeAffinity selector; without it the
+// plugin will not schedule onto Karpenter-provisioned GPU nodes.
+// This always replaces any existing value so that the instance type's accelerator type is
+// authoritative over the base template.
+// Returns an error if the kube-labels metadata key is absent.
+func SetGPUAcceleratorLabel(metadata *compute.Metadata, gpuName string) error {
+	prefix := v1alpha1.LabelGKEAccelerator + "="
+	label := prefix + gpuName
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			current := lo.FromPtr(item.Value)
+			parts := strings.Split(current, ",")
+			filtered := parts[:0]
+			for _, p := range parts {
+				if !strings.HasPrefix(p, prefix) {
+					filtered = append(filtered, p)
+				}
+			}
+			item.Value = lo.ToPtr(strings.Join(append(filtered, label), ","))
+			return nil
+		}
+	}
+	return fmt.Errorf("kube-labels metadata key not found in instance template")
+}
+
+// SetGPUDriverVersionLabel sets cloud.google.com/gke-gpu-driver-version=<version> in kube-labels.
+// GKE's GPU driver installer DaemonSet reads this label to select which driver to install.
+// This always replaces any existing value so that spec.gpuDriverVersion is authoritative over
+// whatever the base instance template or spec.metadata may have set.
+// Returns an error if the kube-labels metadata key is absent.
+func SetGPUDriverVersionLabel(metadata *compute.Metadata, version string) error {
+	prefix := v1alpha1.LabelGKEGPUDriverVersion + "="
+	label := prefix + version
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			current := lo.FromPtr(item.Value)
+			parts := strings.Split(current, ",")
+			filtered := parts[:0]
+			for _, p := range parts {
+				if !strings.HasPrefix(p, prefix) {
+					filtered = append(filtered, p)
+				}
+			}
+			item.Value = lo.ToPtr(strings.Join(append(filtered, label), ","))
+			return nil
+		}
+	}
+	return fmt.Errorf("kube-labels metadata key not found in instance template")
+}
+
 // ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.
 // If a metadata key already exists, it appends the value with comma separator.
 // Otherwise, it creates a new metadata item.

@@ -7,8 +7,6 @@ spec:
     - alias: ContainerOptimizedOS@latest
   labels:
     env: dev
-  metadata:
-    kube-labels: "cloud.google.com/gke-gpu-driver-version=latest"
   networkTags:
     - karpenter-default
   kubeletConfiguration:

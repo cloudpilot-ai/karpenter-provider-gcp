@@ -148,6 +148,19 @@ spec:
                       || (has(self.provisionedIOPS) == has(self.provisionedThroughput))'
                 maxItems: 10
                 type: array
+              gpuDriverVersion:
+                default: default
+                description: |-
+                  GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.
+                  Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.
+                  Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),
+                  "disabled" (skip automatic installation).
+                  Ignored for non-GPU instance types.
+                enum:
+                - default
+                - latest
+                - disabled
+                type: string
               imageFamily:
                 description: |-
                   ImageFamily dictates the instance template used when generating launch templates.
