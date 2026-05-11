@@ -9,3 +9,12 @@ updates:
     directory: "/" 
     schedule:
       interval: "weekly"
+     groups:
+      karpenter-core:
+        patterns:
+          - "sigs.k8s.io/karpenter"
+      go-dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "sigs.k8s.io/karpenter"
