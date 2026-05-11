@@ -684,8 +684,11 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
 
+	isGPUInstance := len(template.Properties.GuestAccelerators) > 0 ||
+		instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
+
 	// Setup metadata
-	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType); err != nil {
+	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType, isGPUInstance); err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
@@ -735,13 +738,8 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
 
-	// Configure GPU on-host maintenance to TERMINATE if:
-	// 1. GPU is attached via template (GuestAccelerators like T4/P4/V100), or
-	// 2. Machine type has built-in GPUs (e.g., A2, A3, G2 series)
 	// GPU instances do not support live migration, so OnHostMaintenance must be TERMINATE.
-	hasAttachedGPU := len(instance.GuestAccelerators) > 0
-	hasBuiltInGPU := instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
-	if hasAttachedGPU || hasBuiltInGPU {
+	if isGPUInstance {
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 
@@ -845,7 +843,7 @@ func podCIDRRange(maxPods int32) int32 {
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance
-func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string, capacityType string) error {
+func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, nodePoolName string, capacityType string, isGPUInstance bool) error {
 	if err := metadata.RemoveGKEBuiltinLabels(instanceMetadata, nodePoolName); err != nil {
 		return fmt.Errorf("failed to remove GKE builtin labels from metadata: %w", err)
 	}
@@ -860,6 +858,12 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 
 	if err := metadata.PatchUnregisteredTaints(instanceMetadata); err != nil {
 		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
+	}
+
+	if isGPUInstance {
+		if err := setupGPUMetadata(instanceMetadata, nodeClass); err != nil {
+			return err
+		}
 	}
 
 	if err := metadata.PatchKubeEnvForInstanceType(instanceMetadata, instanceType); err != nil {
@@ -877,6 +881,17 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
 	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
 
+	return nil
+}
+
+// setupGPUMetadata injects the nvidia.com/gpu=present:NoSchedule taint into KUBELET_ARGS
+// when autoGPUTaint is enabled, so GPU nodes register with the taint from the start.
+func setupGPUMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass) error {
+	if nodeClass.Spec.AutoGPUTaint {
+		if err := metadata.AppendGPUTaint(instanceMetadata); err != nil {
+			return fmt.Errorf("failed to append GPU taint to kube-env: %w", err)
+		}
+	}
 	return nil
 }
 

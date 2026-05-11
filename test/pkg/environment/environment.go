@@ -53,6 +53,10 @@ const (
 	ControllerStartTimeout = 5 * time.Minute         // karpenter controller Deployment becomes available
 	ProvisioningTimeout    = 10 * time.Minute        // VM created, booted, registered, pod Running
 	ReplacementTimeout     = 2 * ProvisioningTimeout // node replacement (drift, expiration): drain + reprovision
+	// GPUProvisioningTimeout is longer than ProvisioningTimeout to account for
+	// GPU driver installation and NVIDIA device plugin startup before the
+	// nvidia.com/gpu resource becomes allocatable.
+	GPUProvisioningTimeout = 20 * time.Minute
 	// GKENodePoolReadyTimeout is for GKE template node pools reaching RUNNING
 	// state, which can take up to 10 minutes on first start.
 	GKENodePoolReadyTimeout = 10 * time.Minute
