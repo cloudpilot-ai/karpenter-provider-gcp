@@ -15,7 +15,7 @@ GKE's GPU software stack requires two labels for GPU nodes to function:
 - `cloud.google.com/gke-accelerator=<type>` — used by the NVIDIA device plugin DaemonSet to target GPU nodes via node affinity.
 - `cloud.google.com/gke-gpu-driver-version=<value>` — used by the GKE GPU driver installer to select the NVIDIA driver version.
 
-Karpenter injects both labels into `kube-labels` at node boot time. The accelerator type is derived from the instance type. The driver version is controlled by `spec.gpuDriverVersion`.
+Karpenter automatically applies both labels at node boot time. The accelerator type is derived from the instance type. The driver version is controlled by `spec.gpuDriverVersion`.
 
 ## GPU driver version
 
@@ -39,21 +39,6 @@ spec:
 ```
 
 Defaults to `"default"`, matching GKE's native behavior for GPU node pools.
-
-### Migrating from metadata-based driver control
-
-If you previously set the driver version via `spec.metadata`, migrate to `spec.gpuDriverVersion`:
-
-```yaml
-# Before
-spec:
-  metadata:
-    kube-labels: "...,cloud.google.com/gke-gpu-driver-version=default"
-
-# After
-spec:
-  gpuDriverVersion: default
-```
 
 > **Note:** NodePool `spec.template.spec.labels` does not affect the driver version at boot time. NodePool labels are applied post-registration, after the GPU driver installer has already run. Use `GCENodeClass.spec.gpuDriverVersion` to control which driver GKE installs.
 
