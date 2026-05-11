@@ -9,7 +9,6 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    vendor: true
     ignore:
       - dependency-name: "k8s.io/*"
     groups:
