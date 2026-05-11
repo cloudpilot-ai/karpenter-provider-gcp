@@ -31,19 +31,21 @@ import (
 )
 
 // GPU tests consume real GPU quota. Run only when E2E_GPU_TESTS=true.
-var _ = Describe("GPU Auto-Taint", func() {
+var _ = Describe("GPU Node", func() {
 	BeforeEach(func() {
 		if os.Getenv("E2E_GPU_TESTS") != "true" {
 			Skip("set E2E_GPU_TESTS=true to run GPU quota tests")
 		}
 	})
 
-	It("should provision a GPU node with nvidia.com/gpu=present:NoSchedule taint when autoGPUTaint=true", func(ctx SpecContext) {
-		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "gpu-taint")
+	// This single It covers all GPU provisioning invariants on one node to avoid
+	// spinning up multiple expensive GPU instances.
+	It("should provision a GPU node with correct taint, labels, and allocatable GPU resource", func(ctx SpecContext) {
+		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "gpu-node")
 		suffix := environment.UniqueSuffix()
 		name := prefix + "-" + suffix
 
-		GinkgoWriter.Printf("[setup] gpu-taint nodePool=%s\n", name)
+		GinkgoWriter.Printf("[setup] gpu-node nodePool=%s\n", name)
 
 		DeferCleanup(func(cleanupCtx SpecContext) {
 			env.DeleteDeployment(cleanupCtx, name)
@@ -51,13 +53,14 @@ var _ = Describe("GPU Auto-Taint", func() {
 			env.DeleteNodeClass(cleanupCtx, name)
 		})
 
-		env.CreateNodeClassWithAutoGPUTaint(ctx, name)
+		env.CreateNodeClassWithAutoGPUTaint(ctx, name, "default")
 		env.WaitForNodeClassReady(ctx, name)
 
 		env.CreateNodePool(ctx, name, name, environment.TestCase{
 			CapacityType:        karpv1.CapacityTypeOnDemand,
 			Arch:                karpv1.ArchitectureAmd64,
-			GPUCountExists:      true,
+			Families:            []string{"g2"},
+			GPUCount:            "1",
 			ImageFamily:         gcpv1alpha1.ImageFamilyContainerOptimizedOS,
 			ConsolidationPolicy: "WhenEmpty",
 		})
@@ -72,6 +75,7 @@ var _ = Describe("GPU Auto-Taint", func() {
 		node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
+		By("asserting autoGPUTaint: node has nvidia.com/gpu=present:NoSchedule taint")
 		var gpuTaint *corev1.Taint
 		for i := range node.Spec.Taints {
 			t := &node.Spec.Taints[i]
@@ -81,5 +85,15 @@ var _ = Describe("GPU Auto-Taint", func() {
 			}
 		}
 		Expect(gpuTaint).NotTo(BeNil(), "node %s should have nvidia.com/gpu=present:NoSchedule taint", node.Name)
-	}, SpecTimeout(35*time.Minute))
+
+		By("asserting gpuDriverVersion: node has cloud.google.com/gke-gpu-driver-version=default label")
+		Expect(node.Labels).To(HaveKeyWithValue(
+			gcpv1alpha1.LabelGKEGPUDriverVersion, "default",
+		), "node %s should carry gke-gpu-driver-version=default", node.Name)
+
+		By("asserting gke-accelerator: node has cloud.google.com/gke-accelerator label with non-empty value")
+		accelerator, ok := node.Labels[gcpv1alpha1.LabelGKEAccelerator]
+		Expect(ok).To(BeTrue(), "node %s should have gke-accelerator label", node.Name)
+		Expect(accelerator).NotTo(BeEmpty(), "gke-accelerator label must be non-empty on node %s", node.Name)
+	}, SpecTimeout(45*time.Minute))
 })
