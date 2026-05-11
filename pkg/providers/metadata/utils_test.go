@@ -17,9 +17,11 @@ limitations under the License.
 package metadata
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/swag"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -118,4 +120,64 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 	require.Contains(t, got, "cloud.google.com/machine-family=e2")
 	require.Contains(t, got, "arch=amd64")
 	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
+}
+
+func TestAppendGPUTaint_MergesIntoExistingFlag(t *testing.T) {
+	// The common case: PatchUnregisteredTaints has already added --register-with-taints.
+	// AppendGPUTaint must merge into that value, not add a second flag.
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: lo.ToPtr("KUBELET_ARGS: --v=2 --register-with-taints=karpenter.sh/unregistered=true:NoExecute\n"),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, GPUTaintArg)
+	require.Contains(t, got, "karpenter.sh/unregistered=true:NoExecute")
+	// Both taints must be in a single --register-with-taints flag, not two separate ones.
+	require.Equal(t, 1, strings.Count(got, "--register-with-taints="), "must not introduce a second --register-with-taints flag")
+}
+
+func TestAppendGPUTaint_AppendsNewFlagWhenNoneExists(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: lo.ToPtr("KUBELET_ARGS: --v=2\n"),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, GPUTaintArg)
+}
+
+func TestAppendGPUTaint_IdempotentWhenPresent(t *testing.T) {
+	initial := "KUBELET_ARGS: --v=2 --register-with-taints=karpenter.sh/unregistered=true:NoExecute," + GPUTaintArg + "\n"
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: lo.ToPtr(initial),
+			},
+		},
+	}
+	require.NoError(t, AppendGPUTaint(meta))
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Equal(t, 1, strings.Count(got, GPUTaintArg), "taint must appear exactly once")
+}
+
+func TestAppendGPUTaint_ErrorWhenNoKubeletArgs(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{
+				Key:   "kube-env",
+				Value: lo.ToPtr("SOME_OTHER_KEY: value\n"),
+			},
+		},
+	}
+	require.Error(t, AppendGPUTaint(meta))
 }

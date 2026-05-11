@@ -2,16 +2,21 @@
 
 Request GPU resources via `nvidia.com/gpu` and select GPU-equipped instance families.
 
+Set `autoGPUTaint: true` to automatically taint GPU nodes with `nvidia.com/gpu=present:NoSchedule`, matching GKE's native GPU pool behaviour. See [GPU Nodes](../gpu-nodes.md) for details.
+
+> **Driver installation:** To enable automatic NVIDIA driver installation, set `cloud.google.com/gke-gpu-driver-version` in `spec.metadata.kube-labels`. For example: `"cloud.google.com/gke-gpu-driver-version=default"`. Without this label, no driver is installed and `nvidia.com/gpu` will not be allocatable.
+
 ```yaml
 apiVersion: karpenter.k8s.gcp/v1alpha1
 kind: GCENodeClass
 metadata:
   name: gpu
 spec:
+  autoGPUTaint: true
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
   metadata:
-    kube-labels: "cloud.google.com/gke-gpu-driver-version=latest"
+    kube-labels: "cloud.google.com/gke-gpu-driver-version=default"
   disks:
     - category: pd-balanced
       sizeGiB: 100

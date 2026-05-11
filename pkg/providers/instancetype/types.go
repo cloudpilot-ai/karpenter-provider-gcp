@@ -145,7 +145,8 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 
 	// GPU labels
 	if len(mt.GetAccelerators()) > 0 {
-		requirements.Get(v1alpha1.LabelInstanceGPUName).Insert(extractGPUName(mt))
+		gpuName := extractGPUName(mt)
+		requirements.Get(v1alpha1.LabelInstanceGPUName).Insert(gpuName)
 		requirements.Get(v1alpha1.LabelInstanceGPUCount).Insert(fmt.Sprintf("%d", len(mt.GetAccelerators())))
 	}
 

@@ -34,11 +34,12 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex  = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex         = regexp.MustCompile(`max-pods=\d+`)
-	gkeProvisioningRegex = regexp.MustCompile(`gke-provisioning=\w+`)
-	kubeEnvArchRegex     = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
-	kubeEnvFamilyRegex   = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	maxPodsPerNodeRegex     = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex            = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -190,6 +191,38 @@ func PatchUnregisteredTaints(metadata *compute.Metadata) error {
 		return fmt.Errorf("failed to patch unregistered taints")
 	}
 
+	return nil
+}
+
+func AppendGPUTaint(metadata *compute.Metadata) error {
+	found := false
+	for _, item := range metadata.Items {
+		if item.Key == "kube-env" {
+			kubeEnv := lo.FromPtr(item.Value)
+			lines := strings.Split(kubeEnv, "\n")
+			for i, line := range lines {
+				if strings.HasPrefix(line, "KUBELET_ARGS:") {
+					found = true
+					if strings.Contains(line, GPUTaintArg) {
+						// already present, idempotent
+						continue
+					}
+					if loc := registerWithTaintsRegex.FindStringIndex(line); loc != nil {
+						// Append into the first --register-with-taints value only; using
+						// FindStringIndex avoids ReplaceAll touching a second flag if the
+						// template happens to carry one.
+						lines[i] = line[:loc[1]] + "," + GPUTaintArg + line[loc[1]:]
+					} else {
+						lines[i] = line + " --register-with-taints=" + GPUTaintArg
+					}
+				}
+			}
+			item.Value = lo.ToPtr(strings.Join(lines, "\n"))
+		}
+	}
+	if !found {
+		return fmt.Errorf("KUBELET_ARGS not found in kube-env")
+	}
 	return nil
 }
 
