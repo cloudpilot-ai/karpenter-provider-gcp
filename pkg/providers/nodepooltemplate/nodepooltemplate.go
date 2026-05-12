@@ -40,9 +40,6 @@ type Provider interface {
 	Sync(ctx context.Context) error
 	// EnsureFallbackPool creates the karpenter-fallback pool if it does not already exist.
 	EnsureFallbackPool(ctx context.Context) error
-	// GetInstanceTemplates returns a single-entry map keyed by the selected source pool
-	// name. Returns an error if no source pool has been discovered yet.
-	GetInstanceTemplates(ctx context.Context) (map[string]*compute.InstanceTemplate, error)
 	// GetSourcePoolName returns the name of the currently selected bootstrap source pool.
 	GetSourcePoolName(ctx context.Context) (string, error)
 }
@@ -243,23 +240,6 @@ func (p *DefaultProvider) GetSourcePoolName(_ context.Context) (string, error) {
 		return "", fmt.Errorf("bootstrap source pool not yet discovered")
 	}
 	return name, nil
-}
-
-// GetInstanceTemplates returns a single-entry map keyed by the selected source pool name.
-func (p *DefaultProvider) GetInstanceTemplates(ctx context.Context) (map[string]*compute.InstanceTemplate, error) {
-	poolName, err := p.GetSourcePoolName(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	template, err := p.getInstanceTemplate(ctx, poolName)
-	if err != nil {
-		return nil, err
-	}
-	if template == nil {
-		return nil, fmt.Errorf("source pool %q has no instance template", poolName)
-	}
-	return map[string]*compute.InstanceTemplate{poolName: template}, nil
 }
 
 // ensureKarpenterNodePoolTemplate creates the fallback pool if it does not already exist.
