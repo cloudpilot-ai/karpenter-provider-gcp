@@ -35,7 +35,10 @@ import (
 
 const ubuntuGKEImageProject = "ubuntu-os-gke-cloud"
 
+// ubuntuVersionRe matches the GKE version token in an Ubuntu image name (e.g. "-v20260416").
+var ubuntuVersionRe = regexp.MustCompile(`-v\d+(-|$)`)
 var ubuntuPinnedVersionRe = regexp.MustCompile(`^v\d{8}$`)
+
 type Ubuntu struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
@@ -54,8 +57,7 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 	}
 
 	if version != "latest" {
-		re := regexp.MustCompile(`-v\d+(-|$)`)
-		sourceImage = re.ReplaceAllStringFunc(sourceImage, func(m string) string {
+		sourceImage = ubuntuVersionRe.ReplaceAllStringFunc(sourceImage, func(m string) string {
 			suffix := ""
 			if strings.HasSuffix(m, "-") {
 				suffix = "-"

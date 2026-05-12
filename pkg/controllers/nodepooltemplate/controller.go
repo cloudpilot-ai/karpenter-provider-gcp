@@ -24,6 +24,7 @@ import (
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
@@ -43,6 +44,7 @@ func NewController(nodePooltemplateProvider nodepooltemplate.Provider) *Controll
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepooltemplate")
 	if err := c.nodePoolTemplateProvider.Sync(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "bootstrap source pool discovery failed, ensuring fallback pool")
 		if createErr := c.nodePoolTemplateProvider.EnsureFallbackPool(ctx); createErr != nil {
 			return reconciler.Result{}, fmt.Errorf("creating fallback pool: %w", createErr)
 		}
