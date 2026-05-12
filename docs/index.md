@@ -65,3 +65,4 @@ Key capabilities:
 - [Slack](https://cloudpilotaicommunity.slack.com/archives/C093V65481H)
 - [Discord](https://discord.gg/WxFWc87QWr)
 - [GitHub Issues](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
+- [Design proposals](../proposals/) — accepted and in-progress architectural proposals
