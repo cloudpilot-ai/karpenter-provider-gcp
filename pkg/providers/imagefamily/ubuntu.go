@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"google.golang.org/api/compute/v1"
@@ -34,10 +35,7 @@ import (
 
 const ubuntuGKEImageProject = "ubuntu-os-gke-cloud"
 
-// ubuntuVersionRe matches the GKE version token in an Ubuntu image name (e.g. "-v20260416").
-var ubuntuVersionRe = regexp.MustCompile(`-v\d+(-|$)`)
 var ubuntuPinnedVersionRe = regexp.MustCompile(`^v\d{8}$`)
-
 type Ubuntu struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
@@ -56,7 +54,8 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 	}
 
 	if version != "latest" {
-		sourceImage = ubuntuVersionRe.ReplaceAllStringFunc(sourceImage, func(m string) string {
+		re := regexp.MustCompile(`-v\d+(-|$)`)
+		sourceImage = re.ReplaceAllStringFunc(sourceImage, func(m string) string {
 			suffix := ""
 			if strings.HasSuffix(m, "-") {
 				suffix = "-"
@@ -78,13 +77,16 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 	filter := u.buildImageFilter(ctx)
 
-	var best *compute.Image
+	// GCP does not support Filter + OrderBy together, and there can be thousands of
+	// ubuntu-gke-2404 images (most deprecated). We page through all of them,
+	// collect non-deprecated amd64 candidates, then sort in code.
+	var candidates []*compute.Image
 	err := u.computeService.Images.List(ubuntuGKEImageProject).
 		Filter(filter).
 		Pages(ctx, func(page *compute.ImageList) error {
 			for _, img := range page.Items {
-				if isUsableUbuntuImage(img) && (best == nil || img.CreationTimestamp > best.CreationTimestamp) {
-					best = img
+				if isUsableUbuntuImage(img) {
+					candidates = append(candidates, img)
 				}
 			}
 			return nil
@@ -92,10 +94,15 @@ func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("listing Ubuntu GKE images in %s: %w", ubuntuGKEImageProject, err)
 	}
-	if best == nil {
+	if len(candidates) == 0 {
 		return "", fmt.Errorf("no non-deprecated ubuntu-gke-2404 amd64 image found in %s (filter: %s)", ubuntuGKEImageProject, filter)
 	}
-	return fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, best.Name), nil
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].CreationTimestamp > candidates[j].CreationTimestamp
+	})
+	img := candidates[0]
+	return fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, img.Name), nil
 }
 
 // isUsableUbuntuImage reports whether img is a non-deprecated general-purpose amd64
