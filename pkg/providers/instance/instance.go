@@ -878,6 +878,7 @@ func instanceTypeHasGPU(instanceType *cloudprovider.InstanceType) bool {
 	return req != nil && req.Operator() == corev1.NodeSelectorOpIn && req.Len() > 0
 }
 
+
 // patchKubeEnv applies all kube-env patches: instance type (arch/family), OS type, and arch binary URLs.
 func (p *DefaultProvider) patchKubeEnv(ctx context.Context, instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) error {
 	if err := metadata.PatchKubeEnvForInstanceType(instanceMetadata, instanceType); err != nil {
