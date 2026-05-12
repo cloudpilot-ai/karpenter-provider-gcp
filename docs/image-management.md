@@ -94,14 +94,37 @@ imageSelectorTerms:
 
 ### Option 3: Use `@latest` with disruption budgets
 
-Keep automatic image updates but pace the rollout to prevent cluster-wide churn:
+Keep automatic image updates but control when and how fast nodes are replaced. With `@latest`, new nodes always receive the current image; existing nodes are replaced gradually as Karpenter's Drift mechanism marks them and disruption budgets permit replacement.
 
 ```yaml
 imageSelectorTerms:
   - alias: ContainerOptimizedOS@latest
 ```
 
-In your `NodePool`:
+**Restrict drift replacement to a maintenance window** — nodes are replaced only during the scheduled window (here: Tue–Thu 15:00 UTC, 20 min); outside the window drift replacements are blocked. Consolidation (scale-down) and expiration still operate normally at all times.
+
+```yaml
+disruption:
+  budgets:
+    - nodes: "10"
+      reasons:
+        - Underutilized
+        - Drifted
+      schedule: "0 15 * * 2-4"
+      duration: 20m
+```
+
+**Block drift replacement entirely** — only new nodes receive updated images; existing nodes are rotated gradually through consolidation and expiration events, never by explicit drift eviction.
+
+```yaml
+disruption:
+  budgets:
+    - nodes: "0"
+      reasons:
+        - Drifted
+```
+
+**Pace an always-on rollout** — allow continuous replacement but cap the blast radius:
 
 ```yaml
 disruption:
