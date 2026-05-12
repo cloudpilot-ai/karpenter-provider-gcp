@@ -35,6 +35,7 @@ import (
 const ubuntuGKEImageProject = "ubuntu-os-gke-cloud"
 
 var ubuntuVersionRe = regexp.MustCompile(`-v\d+(-|$)`)
+var ubuntuPinnedVersionRe = regexp.MustCompile(`^v\d{8}$`)
 
 type Ubuntu struct {
 	computeService  *compute.Service
@@ -42,6 +43,11 @@ type Ubuntu struct {
 }
 
 func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, error) {
+	if version != "latest" && !ubuntuPinnedVersionRe.MatchString(version) {
+		return nil, &imageResolutionError{msg: fmt.Sprintf(
+			"invalid Ubuntu version %q: must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')", version)}
+	}
+
 	sourceImage, err := u.resolveLatestUbuntuImage(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to resolve Ubuntu GKE image from catalog")
