@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -199,6 +198,7 @@ func (p *DefaultProvider) selectFromClusterPools(ctx context.Context) (string, e
 		return name, nil
 	}
 
+	// Exclude "default-pool" since firstEligibleNamedPool already checked it above.
 	candidates := eligiblePoolsSorted(resp.NodePools, "default-pool")
 	if len(candidates) > 0 {
 		return candidates[0], nil
@@ -376,89 +376,4 @@ func (p *DefaultProvider) getNodePool(ctx context.Context, nodePoolName string) 
 		return nil, err
 	}
 	return nodePool, nil
-}
-
-func (p *DefaultProvider) getInstanceTemplate(ctx context.Context, nodePoolName string) (*compute.InstanceTemplate, error) {
-	logger := log.FromContext(ctx)
-
-	if p.ClusterInfo.ProjectID == "" || p.ClusterInfo.Name == "" || p.ClusterInfo.Region == "" {
-		return nil, fmt.Errorf("ClusterInfo not initialized")
-	}
-
-	nodePool, err := p.getNodePool(ctx, nodePoolName)
-	if err != nil {
-		return nil, err
-	}
-
-	if !isPoolEligible(nodePool.Status) {
-		return nil, nil
-	}
-
-	if len(nodePool.InstanceGroupUrls) == 0 {
-		return nil, fmt.Errorf("no instance group URLs found for node pool: %s", nodePoolName)
-	}
-
-	zone, managerName, err := resolveInstanceGroupZoneAndManagerName(nodePool.InstanceGroupUrls[0])
-	if err != nil {
-		logger.Error(err, "error resolving instance group URL")
-		return nil, err
-	}
-
-	ig, err := p.computeService.InstanceGroupManagers.Get(p.ClusterInfo.ProjectID, zone, managerName).Do()
-	if err != nil {
-		logger.Error(err, "error getting instance group manager")
-		return nil, err
-	}
-
-	templateName, err := resolveInstanceTemplateName(ig.InstanceTemplate)
-	if err != nil {
-		return nil, err
-	}
-
-	template, err := p.computeService.RegionInstanceTemplates.
-		Get(p.ClusterInfo.ProjectID, p.ClusterInfo.Region, templateName).Context(ctx).Do()
-	if err != nil {
-		logger.Error(err, "error getting instance template")
-		return nil, err
-	}
-
-	return template, nil
-}
-
-func resolveInstanceTemplateName(instanceTemplateURL string) (string, error) {
-	parsedURL, err := url.Parse(instanceTemplateURL)
-	if err != nil {
-		return "", err
-	}
-
-	parts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
-
-	// Look for the last part only if path contains "instanceTemplates"
-	for i := 0; i < len(parts)-1; i++ {
-		if parts[i] == "instanceTemplates" {
-			return parts[i+1], nil
-		}
-	}
-
-	return "", fmt.Errorf("invalid instance template URL: %s", instanceTemplateURL)
-}
-
-func resolveInstanceGroupZoneAndManagerName(instanceGroupURL string) (string, string, error) {
-	parsedURL, err := url.Parse(instanceGroupURL)
-	if err != nil {
-		return "", "", err
-	}
-
-	parts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
-
-	// Ensure the path has enough components to extract zone and instance group manager name
-	if len(parts) < 8 || parts[4] != "zones" || parts[6] != "instanceGroupManagers" {
-		return "", "", fmt.Errorf("invalid instance group URL: %s", instanceGroupURL)
-	}
-
-	// Extract zone and instance group manager name
-	zone := parts[5]
-	instanceGroupManagerName := parts[7]
-
-	return zone, instanceGroupManagerName, nil
 }
