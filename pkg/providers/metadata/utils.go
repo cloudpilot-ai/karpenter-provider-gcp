@@ -34,12 +34,12 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex     = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex            = regexp.MustCompile(`max-pods=\d+`)
-	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
-	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
-	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
-	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	maxPodsPerNodeRegex       = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex              = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex      = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex          = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex        = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	registerWithTaintsRegex   = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
 	osDistributionCOSRegex    = regexp.MustCompile(`\bgke-os-distribution=cos\b`)
 	osDistributionUbuntuRegex = regexp.MustCompile(`\bgke-os-distribution=ubuntu\b`)
 )
