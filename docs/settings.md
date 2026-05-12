@@ -35,13 +35,35 @@ These options configure the controller's runtime behavior.
 
 ## GCP-specific Settings
 
-| Setting            | Env var                      | Helm value                                    | Required | Description                                                                     |
-|--------------------|------------------------------|-----------------------------------------------|----------|---------------------------------------------------------------------------------|
-| Project ID         | `PROJECT_ID`                 | `controller.settings.projectID`               | Yes      | GCP project where nodes are provisioned.                                        |
-| Cluster name       | `CLUSTER_NAME`               | `controller.settings.clusterName`             | Yes      | GKE cluster name. Used to scope instance discovery.                             |
-| Cluster location   | `CLUSTER_LOCATION`           | `controller.settings.clusterLocation`         | Yes      | GKE cluster location (zone or region, e.g. `us-central1-f`).                    |
-| Node location      | `NODE_LOCATION`              | `controller.settings.nodeLocation`            | No       | Override zone for node placement. Defaults to cluster location.                 |
-| VM memory overhead | `VM_MEMORY_OVERHEAD_PERCENT` | `controller.settings.vmMemoryOverheadPercent` | No       | Fraction of node memory reserved for OS/kubelet overhead (e.g. `0.075` = 7.5%). |
+| Setting            | Env var                            | Helm value                                    | Required | Description                                                                     |
+|--------------------|----------------------------------|-----------------------------------------------|----------|---------------------------------------------------------------------------------|
+| Project ID         | `PROJECT_ID`                      | `controller.settings.projectID`               | Yes      | GCP project where nodes are provisioned.                                        |
+| Cluster name       | `CLUSTER_NAME`                    | `controller.settings.clusterName`             | Yes      | GKE cluster name. Used to scope instance discovery.                             |
+| Cluster location   | `CLUSTER_LOCATION`                | `controller.settings.clusterLocation`         | Yes      | GKE cluster location (zone or region, e.g. `us-central1-f`).                    |
+| Node location      | `NODE_LOCATION`                   | `controller.settings.nodeLocation`            | No       | Override zone for node placement. Defaults to cluster location.                 |
+| VM memory overhead | `VM_MEMORY_OVERHEAD_PERCENT`      | `controller.settings.vmMemoryOverheadPercent` | No       | Fraction of node memory reserved for OS/kubelet overhead (e.g. `0.075` = 7.5%). |
+| Default SA         | `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`| `controller.env`                              | No       | Default service account for provisioned nodes (see [Service account resolution](#service-account-resolution)). |
+
+### Service account resolution
+
+Karpenter resolves the service account for provisioned nodes in this order:
+
+1. `spec.serviceAccount` in GCENodeClass (highest priority)
+2. `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` environment variable
+3. Project's Compute Engine default service account (`<project-number>-compute@developer.gserviceaccount.com`)
+
+If none are available, node provisioning fails.
+
+For production clusters, use a dedicated service account with minimal permissions ([`roles/container.nodeServiceAccount`](https://cloud.google.com/kubernetes-engine/docs/how-to/hardening-your-cluster#use_least_privilege_sa)). Set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` or `spec.serviceAccount` accordingly.
+
+Example Helm override:
+
+```yaml
+controller:
+  env:
+    - name: DEFAULT_NODEPOOL_SERVICE_ACCOUNT
+      value: "my-node-sa@my-project.iam.gserviceaccount.com"
+```
 
 ## NodePool Features
 
