@@ -108,8 +108,9 @@ func isUsableCOSImage(img *compute.Image) bool {
 			return false
 		}
 	}
-	// Exclude arm64 and specialised variants.
-	for _, skip := range []string{"arm64", "kmod", "nvda", "gvisor", "-test"} {
+	// Exclude arm64 and specialised variants. cgpv1 images cause an immediate kubelet
+	// crash on GKE 1.29+ where --fail-cgroupv1=true is set by default.
+	for _, skip := range []string{"arm64", "cgpv1", "kmod", "nvda", "gvisor", "-test"} {
 		if strings.Contains(img.Name, skip) {
 			return false
 		}
