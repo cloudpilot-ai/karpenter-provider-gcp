@@ -69,6 +69,7 @@ func pool(name, status string) *container.NodePool {
 // --- discoverSourcePool ---
 
 func TestDiscoverSourcePool(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		pools     []*container.NodePool // nil → use singlePoolHandler with preferred
