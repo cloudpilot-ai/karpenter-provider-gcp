@@ -5,6 +5,25 @@
 
 ## Unreleased
 
+### Template pool elimination
+
+Karpenter no longer creates or relies on `karpenter-default`, `karpenter-ubuntu`,
+`karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. It discovers an existing
+RUNNING cluster pool automatically. No action required on upgrade.
+
+After confirming provisioning works, delete the legacy pools at your own pace:
+
+```bash
+for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpenter-default; do
+  gcloud container node-pools delete "$pool" --cluster=<CLUSTER> --region=<REGION> --quiet
+done
+```
+
+The new fallback pool is named `karpenter-fallback`, so deleting all four names above is
+unambiguous. Rolling back re-creates the legacy pools automatically.
+
+---
+
 ### Node service account
 
 The service account resolution order is now:
