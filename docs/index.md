@@ -43,6 +43,7 @@ Key capabilities:
 
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
 - [Static capacity](examples/static-capacity.md) — keep a fixed number of nodes running with `spec.replicas`
+- [Image management](image-management.md) — controlling GKE node image selection, version pinning, and drift
 
 ## Reference
 
