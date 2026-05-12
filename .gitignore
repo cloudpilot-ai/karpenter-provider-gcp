@@ -48,7 +48,6 @@ demo
 _go
 .worktrees/
 lefthook.yml
-lefthook.yaml
 
 # price_validate cache, output, and compiled binary
 hack/tools/price_validate/data/
