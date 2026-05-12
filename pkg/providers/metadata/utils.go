@@ -40,6 +40,8 @@ var (
 	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
 	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
 	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	osDistributionCOSRegex    = regexp.MustCompile(`\bgke-os-distribution=cos\b`)
+	osDistributionUbuntuRegex = regexp.MustCompile(`\bgke-os-distribution=ubuntu\b`)
 )
 
 func GetClusterName(metadata *compute.Metadata) (string, error) {
@@ -344,6 +346,73 @@ func GetSecondaryDiskImageName(image string) string {
 
 func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootDiskMode) string {
 	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
+}
+
+// PatchKubeEnvForOSType patches the kube-env metadata item for Ubuntu nodes provisioned
+// Patching is bidirectional: Ubuntu→COS and COS→Ubuntu.
+//
+// Fields modified for Ubuntu target (source is COS):
+//   - gke-os-distribution=cos → gke-os-distribution=ubuntu
+//   - ENABLE_NODE_BFQ_IO_SCHEDULER line removed
+//   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT line removed
+//
+// Fields modified for ContainerOptimizedOS target (source is Ubuntu):
+//   - gke-os-distribution=ubuntu → gke-os-distribution=cos
+//   - ENABLE_NODE_BFQ_IO_SCHEDULER: "true" added (if absent)
+//   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT: "1200" added (if absent)
+func PatchKubeEnvForOSType(metaData *compute.Metadata, imageFamily string) error {
+	for _, item := range metaData.Items {
+		if item.Key != "kube-env" {
+			continue
+		}
+		kubeEnv := lo.FromPtr(item.Value)
+		if kubeEnv == "" {
+			return fmt.Errorf("kube-env metadata is empty")
+		}
+
+		var updated string
+		switch imageFamily {
+		case v1alpha1.ImageFamilyUbuntu:
+			updated = osDistributionCOSRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=ubuntu")
+			updated = removeKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER")
+			updated = removeKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT")
+		case v1alpha1.ImageFamilyContainerOptimizedOS:
+			updated = osDistributionUbuntuRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=cos")
+			updated = ensureKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER", `"true"`)
+			updated = ensureKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT", `"1200"`)
+		default:
+			continue
+		}
+		item.Value = lo.ToPtr(updated)
+	}
+
+	return nil
+}
+
+// ensureKubeEnvLine adds "key: value" to the kube-env string if no line with that key
+// already exists. This is used when patching from an Ubuntu source template to a COS node.
+func ensureKubeEnvLine(kubeEnv, key, value string) string {
+	for _, line := range strings.Split(kubeEnv, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), key+":") {
+			return kubeEnv
+		}
+	}
+	return kubeEnv + "\n" + key + ": " + value
+}
+
+// removeKubeEnvLine removes any line whose key (text before the first colon) matches
+// the given key. This handles the kube-env YAML-style "KEY: value" line format.
+func removeKubeEnvLine(kubeEnv, key string) string {
+	lines := strings.Split(kubeEnv, "\n")
+	filtered := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, key+":") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.Join(filtered, "\n")
 }
 
 // ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.
