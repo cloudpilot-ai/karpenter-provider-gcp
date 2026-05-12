@@ -40,5 +40,3 @@ Fixes #
 - [ ] `MIGRATION.md` updated (or this PR does not require any migration steps)
 
 #### Special notes for your reviewer:
-
-#### Does this PR introduce a user-facing change?
