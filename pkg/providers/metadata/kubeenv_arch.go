@@ -102,11 +102,16 @@ func patchServerBinaryForArch(ctx context.Context, kubeEnv, targetArch, gkeVersi
 		"linux-"+targetArch+".tar.gz")
 
 	lines := strings.Split(updated, "\n")
+	hashPatched := false
 	for i, line := range lines {
 		if strings.HasPrefix(strings.TrimSpace(line), "SERVER_BINARY_TAR_HASH:") {
 			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 			lines[i] = indent + "SERVER_BINARY_TAR_HASH: " + hash
+			hashPatched = true
 		}
+	}
+	if !hashPatched {
+		return "", fmt.Errorf("SERVER_BINARY_TAR_HASH not found in kube-env after URL patch")
 	}
 	return strings.Join(lines, "\n"), nil
 }

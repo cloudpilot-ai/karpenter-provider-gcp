@@ -91,6 +91,7 @@ func TestPatchKubeEnvForArch_NoServerBinaryURL_NoOp(t *testing.T) {
 
 func TestPatchKubeEnvForArch_VersionFallbackToGKEVersion(t *testing.T) {
 	// URL has no /release/<version>/ segment; gkeVersion should be used instead.
+	// Use a distinct version to avoid hitting the cache populated by TestPatchKubeEnvForArch_AMD64ToARM64.
 	kubeEnv := "SERVER_BINARY_TAR_URL: https://example.com/kubernetes-server-linux-amd64.tar.gz\nSERVER_BINARY_TAR_HASH: " + strings.Repeat("0", 128) + "\n"
 	srv := hashServer(t, fakeHash, http.StatusOK)
 	defer srv.Close()
@@ -98,8 +99,24 @@ func TestPatchKubeEnvForArch_VersionFallbackToGKEVersion(t *testing.T) {
 	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
 
 	meta := kubeEnvMeta(kubeEnv)
-	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "v1.34.3-gke.1444000", client))
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "v1.34.3-gke.9999999", client))
 	require.Contains(t, lo.FromPtr(meta.Items[0].Value), "linux-arm64.tar.gz")
+}
+
+func TestPatchKubeEnvForArch_ARM64ToAMD64(t *testing.T) {
+	arm64KubeEnv := strings.ReplaceAll(amd64KubeEnv, "amd64", "arm64")
+	srv := hashServer(t, fakeHash, http.StatusOK)
+	defer srv.Close()
+	client := srv.Client()
+	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
+
+	meta := kubeEnvMeta(arm64KubeEnv)
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "amd64", "", client))
+
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, "linux-amd64.tar.gz")
+	require.NotContains(t, got, "linux-arm64.tar.gz")
+	require.Contains(t, got, fakeHash)
 }
 
 func TestPatchKubeEnvForArch_NoVersionAnywhere_Error(t *testing.T) {
@@ -163,6 +180,72 @@ func TestPatchKubeEnvForOSType_UnknownFamily_NoOp(t *testing.T) {
 	meta := kubeEnvMeta(kubeEnv)
 	require.NoError(t, PatchKubeEnvForOSType(meta, "CustomOS"))
 	require.Equal(t, kubeEnv, lo.FromPtr(meta.Items[0].Value))
+}
+
+func TestPatchKubeEnvForArch_MissingHashLine_Error(t *testing.T) {
+	// kube-env has the binary URL but no SERVER_BINARY_TAR_HASH line.
+	kubeEnv := "SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.0-gke.1/kubernetes-server-linux-amd64.tar.gz\n" +
+		"KUBELET_ARGS: --v=2\n"
+	srv := hashServer(t, fakeHash, http.StatusOK)
+	defer srv.Close()
+	client := srv.Client()
+	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
+
+	err := PatchKubeEnvForArch(context.Background(), kubeEnvMeta(kubeEnv), "arm64", "", client)
+	require.ErrorContains(t, err, "SERVER_BINARY_TAR_HASH not found")
+}
+
+// TestPatchKubeEnv_CrossOSAndArch verifies that applying both an OS-type patch and an
+// arch patch in sequence produces the correct combined kube-env (COS/amd64 → Ubuntu/arm64).
+func TestPatchKubeEnv_CrossOSAndArch(t *testing.T) {
+	cosAMD64KubeEnv := "gke-os-distribution=cos\n" +
+		"ENABLE_NODE_BFQ_IO_SCHEDULER: \"true\"\n" +
+		"NODE_BFQ_IO_SCHEDULER_IO_WEIGHT: \"1200\"\n" +
+		"SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.0-gke.2/kubernetes-server-linux-amd64.tar.gz\n" +
+		"SERVER_BINARY_TAR_HASH: " + strings.Repeat("0", 128) + "\n" +
+		"KUBELET_ARGS: --v=2\n"
+
+	srv := hashServer(t, fakeHash, http.StatusOK)
+	defer srv.Close()
+	client := srv.Client()
+	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
+
+	meta := kubeEnvMeta(cosAMD64KubeEnv)
+	require.NoError(t, PatchKubeEnvForOSType(meta, v1alpha1.ImageFamilyUbuntu))
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "", client))
+
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, "gke-os-distribution=ubuntu")
+	require.NotContains(t, got, "gke-os-distribution=cos")
+	require.NotContains(t, got, "ENABLE_NODE_BFQ_IO_SCHEDULER")
+	require.Contains(t, got, "linux-arm64.tar.gz")
+	require.NotContains(t, got, "linux-amd64.tar.gz")
+	require.Contains(t, got, fakeHash)
+}
+
+// TestPatchKubeEnv_CrossOSAndArch_UbuntuCOSToARM64 verifies Ubuntu/amd64 → COS/arm64.
+func TestPatchKubeEnv_CrossOSAndArch_UbuntuToCoSARM64(t *testing.T) {
+	ubuntuAMD64KubeEnv := "gke-os-distribution=ubuntu\n" +
+		"SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.0-gke.3/kubernetes-server-linux-amd64.tar.gz\n" +
+		"SERVER_BINARY_TAR_HASH: " + strings.Repeat("0", 128) + "\n" +
+		"KUBELET_ARGS: --v=2\n"
+
+	srv := hashServer(t, fakeHash, http.StatusOK)
+	defer srv.Close()
+	client := srv.Client()
+	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
+
+	meta := kubeEnvMeta(ubuntuAMD64KubeEnv)
+	require.NoError(t, PatchKubeEnvForOSType(meta, v1alpha1.ImageFamilyContainerOptimizedOS))
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "", client))
+
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, "gke-os-distribution=cos")
+	require.NotContains(t, got, "gke-os-distribution=ubuntu")
+	require.Contains(t, got, "ENABLE_NODE_BFQ_IO_SCHEDULER")
+	require.Contains(t, got, "linux-arm64.tar.gz")
+	require.NotContains(t, got, "linux-amd64.tar.gz")
+	require.Contains(t, got, fakeHash)
 }
 
 // rewriteHostTransport rewrites all outgoing requests to point at the target server,
