@@ -33,13 +33,13 @@ When set, Karpenter uses only that pool and returns an error if it is not RUNNIN
 
 If no RUNNING pool exists after 5 retries, Karpenter creates a zero-node pool named `karpenter-fallback`. This pool is hardened against common GCP org policy constraints:
 
-| Constraint | Fallback pool setting |
-|------------|----------------------|
-| `compute.requireShieldedVm` | Shielded VM enabled (Secure Boot + Integrity Monitoring) |
-| `container.managed.enablePrivateNodes` | Mirrors cluster's private-node setting |
-| `container.managed.disableInsecureKubeletReadOnlyPort` | Insecure read-only port disabled |
-| `container.managed.enableWorkloadIdentityFederation` | GKE_METADATA mode when Workload Identity is active |
-| `compute.managed.blockProjectSshKeys` | block-project-ssh-keys metadata set |
+| Constraint                                             | Fallback pool setting                                    |
+|--------------------------------------------------------|----------------------------------------------------------|
+| `compute.requireShieldedVm`                            | Shielded VM enabled (Secure Boot + Integrity Monitoring) |
+| `container.managed.enablePrivateNodes`                 | Mirrors cluster's private-node setting                   |
+| `container.managed.disableInsecureKubeletReadOnlyPort` | Insecure read-only port disabled                         |
+| `container.managed.enableWorkloadIdentityFederation`   | GKE_METADATA mode when Workload Identity is active       |
+| `compute.managed.blockProjectSshKeys`                  | block-project-ssh-keys metadata set                      |
 
 The `gcp.restrictNonCmekServices` constraint cannot be auto-satisfied because it requires a customer-managed KMS key. On clusters with this policy, pre-create a RUNNING pool that meets your org's requirements and set `DEFAULT_NODEPOOL_TEMPLATE_NAME`.
 
