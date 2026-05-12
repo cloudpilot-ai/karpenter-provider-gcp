@@ -122,6 +122,15 @@ func TestDiscoverSourcePool(t *testing.T) {
 			pools: []*container.NodePool{pool("karpenter-workload", "RUNNING")},
 			want:  "karpenter-workload",
 		},
+		{
+			name: "karpenter-fallback sorted after user pools",
+			pools: []*container.NodePool{
+				pool(KarpenterFallbackNodePoolTemplate, "RUNNING"),
+				pool("zoo-pool", "RUNNING"),
+				pool("alpha-pool", "RUNNING"),
+			},
+			want: "alpha-pool",
+		},
 	}
 
 	for _, tc := range cases {

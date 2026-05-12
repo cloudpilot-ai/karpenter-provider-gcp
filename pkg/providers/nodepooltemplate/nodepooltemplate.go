@@ -219,6 +219,8 @@ func firstEligibleNamedPool(pools []*container.NodePool, name string) string {
 }
 
 // eligiblePoolsSorted returns sorted names of all eligible pools, excluding excludeName.
+// karpenter-fallback is always sorted last so user-owned pools are preferred over the
+// last-resort fallback when both are present.
 func eligiblePoolsSorted(pools []*container.NodePool, excludeName string) []string {
 	var candidates []string
 	for _, pool := range pools {
@@ -226,7 +228,15 @@ func eligiblePoolsSorted(pools []*container.NodePool, excludeName string) []stri
 			candidates = append(candidates, pool.Name)
 		}
 	}
-	sort.Strings(candidates)
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i] == KarpenterFallbackNodePoolTemplate {
+			return false
+		}
+		if candidates[j] == KarpenterFallbackNodePoolTemplate {
+			return true
+		}
+		return candidates[i] < candidates[j]
+	})
 	return candidates
 }
 
