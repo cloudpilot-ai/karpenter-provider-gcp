@@ -1,3 +1,5 @@
+# Contributing
+
 # Design Proposals
 
 For significant changes — architectural redesigns, new API fields, operator-visible behaviour changes, or multi-phase work — opening a proposal before writing code helps align on the approach early and produces a useful design record.
