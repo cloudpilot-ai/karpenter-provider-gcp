@@ -180,7 +180,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify image apply delete toolchain tidy download
+.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

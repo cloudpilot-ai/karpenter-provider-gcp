@@ -5,7 +5,7 @@
 - **Created**: YYYY-MM-DD
 - **Related Issues**: [#NNN](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/NNN)
 
-<!-- Usage: copy this file to proposals/000N-brief-title.md (N = next available number).
+<!-- Usage: copy this file to proposals/NNNN-short-title.md (NNNN = next available four-digit number).
      Required sections: Summary, Motivation, Proposal.
      For architectural proposals, include Alternatives Considered.
      For operational changes, include Migration and Acceptance Criteria.
