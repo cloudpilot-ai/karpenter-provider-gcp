@@ -18,12 +18,16 @@ package nodepooltemplate
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
+	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	controller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
@@ -41,7 +45,10 @@ func NewController(nodePooltemplateProvider nodepooltemplate.Provider) *Controll
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepooltemplate")
-	if err := c.nodePoolTemplateProvider.Create(ctx); err != nil {
+	if err := c.nodePoolTemplateProvider.Sync(ctx); err != nil {
+		if createErr := c.nodePoolTemplateProvider.EnsureFallbackPool(ctx); createErr != nil {
+			return reconciler.Result{}, fmt.Errorf("creating fallback pool: %w", createErr)
+		}
 		return reconciler.Result{}, err
 	}
 	return reconciler.Result{RequeueAfter: 12 * time.Minute}, nil
@@ -50,6 +57,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepooltemplate").
+		WithOptions(controller.Options{
+			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
+				30*time.Second, 10*time.Minute),
+		}).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }
