@@ -101,10 +101,8 @@ func isUsableCOSImage(img *compute.Image) bool {
 			return false
 		}
 	}
-	// Exclude arm64 and specialised variants. Exclude cgpv1 (cgroup v1) images:
-	// GKE 1.29+ clusters run cgroup v2 by default and the GKE 1.29+ kubelet
-	// sets --fail-cgroupv1=true, so cgpv1 images cause an immediate kubelet crash.
-	for _, skip := range []string{"arm64", "kmod", "nvda", "gvisor", "-test", "cgpv1"} {
+	// Exclude arm64 and specialised variants.
+	for _, skip := range []string{"arm64", "kmod", "nvda", "gvisor", "-test"} {
 		if strings.Contains(img.Name, skip) {
 			return false
 		}
