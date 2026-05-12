@@ -18,9 +18,11 @@ A proposal is **not required** for bug fixes, small flag additions, doc-only cha
 
 1. Copy [`proposals/0000-template.md`](proposals/0000-template.md) to `proposals/NNNN-short-title.md`, where `NNNN` is the next available four-digit number.
 2. Fill in all **required** sections (Summary, Motivation, Proposal). Optional sections can be omitted or marked N/A.
-3. Open a draft PR with the proposal. The `Status` field should be `Draft` until the approach is agreed.
-4. Iterate in review. When reviewers are happy, update `Status` to `Implementable`.
+3. Open a draft PR with the proposal. The `Status` field should be `Draft` while the approach is still being formed. Update it to `Provisional` when you are ready for initial feedback.
+4. Iterate in review. When the approach is agreed by maintainers, update `Status` to `Implementable`.
 5. Implementation PRs reference the proposal via the "Related proposal" field in the PR template.
+
+Proposals are reviewed by project maintainers via GitHub PR review. Assign the PR for review or mention `@cloudpilot-ai/karpenter-gcp` when the proposal is ready for feedback.
 
 ## Status values
 
