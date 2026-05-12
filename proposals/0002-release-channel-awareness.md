@@ -300,13 +300,9 @@ When the resolved version carries a GKE build number, the catalog query uses an 
 name=gke-1346-gke1068000-*    ← channel-exact build (step 1)
 ```
 
-If the catalog returns no images (publication delay or regional propagation gap), fall back to the version-prefix filter:
+If the catalog returns no images (publication delay or regional propagation gap), the controller sets `ImagesReady = False` and retries on the next reconcile cycle. There is no silent fallback to the version-prefix filter (`name=gke-1346-*`): that fallback would pick whatever build is newest in the catalog — potentially a RAPID build that has never soaked in STABLE — violating the channel isolation guarantee that is the core purpose of this feature.
 
-```
-name=gke-1346-*               ← newest for K8s version (version: latest behavior)
-```
-
-Both paths produce a valid, compatible image. `Status.Conditions.ImagesReady` records which path was taken.
+**Trade-off**: A brief `ImagesReady = False` window (typically seconds to a few minutes while the build propagates to the regional catalog) blocks new node provisioning until the exact build appears. This is preferable to silently provisioning nodes on the wrong channel's image.
 
 ### GPU and arm64 Variants
 
@@ -342,7 +338,7 @@ The migration from `alias` to structured fields requires no behavioral change fo
 | Situation | Status.Conditions.ImagesReady message |
 |-----------|--------------------------------------|
 | Normal — exact build found | `ContainerOptimizedOS: resolved channel STABLE build gke1068000 → gke-1346-gke1068000-cos-...` |
-| Exact build not in catalog | `ContainerOptimizedOS: build gke1068000 not in catalog; using newest for 1.34.x` |
+| Exact build not in catalog (propagation delay) | `ContainerOptimizedOS: build gke1068000 not yet in catalog; retrying until propagation completes` — `ImagesReady = False` |
 | Step 3 — explicit channel, no minor match | `ContainerOptimizedOS: channel STABLE has no valid version for cluster minor 1.35; the requested channel may not yet support this Kubernetes minor` |
 | `channel: cluster` on UNSPECIFIED cluster | `ContainerOptimizedOS: cluster has no enrolled release channel (UNSPECIFIED); channel: cluster requires an enrolled channel` |
 | `GetServerConfig` failure | `getServerConfig failed: <error>; image resolution suspended` |
@@ -359,7 +355,7 @@ The migration from `alias` to structured fields requires no behavioral change fo
 | `pkg/providers/gke/gke.go` | Add `GetServerConfig()` + 30-min cache; add `ResolveVersionForChannel(sc, channelName, clusterVersion string) (string, error)` with semver-correct `validVersions` chain, empty-`defaultVersion` guard, and channel-not-found error; normalize channel names to uppercase; handle nil `cluster.ReleaseChannel` as UNSPECIFIED |
 | `pkg/apis/v1alpha1/gcenodeclass.go` | **Update existing list-level rule first** — the current `imageSelectorTerms` field carries `rule="self.all(x, has(x.alias) \|\| has(x.id))"` which rejects any term that has neither `alias` nor `id`; all `family`-based terms would be refused at admission without this change. Update to `self.all(x, has(x.alias) \|\| has(x.id) \|\| has(x.family))` and revise the message accordingly. Then: add `Family`, `Channel`, `Version` fields to `ImageSelectorTerm` (all `omitempty`); eight per-term CEL rules as specified above; family enum constants (`ContainerOptimizedOS`, `Ubuntu`, `Ubuntu2204`, `Ubuntu2404` — `Ubuntu` kept in enum so rule 8 fires a helpful migration message), channel enum constants (`rapid`, `regular`, `stable`, `extended`, `cluster`); `// Deprecated:` Go doc comment on `alias` field; add list-level `+kubebuilder:validation:XValidations` mixing rule (rule 10) on the `ImageSelectorTerms []ImageSelectorTerm` field. The existing per-field rules on `alias` (format regex, family enum check) are unchanged — they fire only when `alias` is set. |
 | `pkg/providers/imagefamily/image.go` | Add `resolveImageFromChannel()` and `resolveImageFromVersion()` dispatchers. Dispatch order: iterate over all `imageSelectorTerms`; for each term dispatch based on which selection field is set (`alias`, `id`, or `family`); collect results per-term and union them into `Status.Images` — terms are ORed, matching existing Karpenter selector semantics. A single list may mix `alias`, `id`, and `family` terms; there is no priority between term types. The `Alias()` helper returns nil when no `alias` term is present — the dispatch loop must not assume a non-nil alias. Call `ResolveVersionForChannel` for channel terms; pass resolved version to COS/Ubuntu providers. |
-| `pkg/providers/imagefamily/containeroptimizedos.go` | Add exact-build-number filter path for channel resolution; add version-pin lookup path for `family + version`; fall back to version-prefix if no results; return resolution path indicator for `Status.Conditions` message |
+| `pkg/providers/imagefamily/containeroptimizedos.go` | Add exact-build-number filter path for channel resolution; add version-pin lookup path for `family + version`; return `ImagesReady = False` (no version-prefix fallback) when exact build is not in catalog; include resolution path in `Status.Conditions` message |
 | `pkg/providers/imagefamily/ubuntu.go` | Dispatch on `family: Ubuntu2404` and `family: Ubuntu2204`; add version-pin lookup path; resolve correct image project prefix per release (`ubuntu-gke-2404-*` vs `ubuntu-gke-2204-*`) |
 | `pkg/operator/operator.go` | Wire `gkeProvider` into image provider (if not already present) |
 | CRD schema | Regenerate after struct changes |
