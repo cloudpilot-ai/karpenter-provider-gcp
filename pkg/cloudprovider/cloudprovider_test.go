@@ -17,11 +17,14 @@ limitations under the License.
 package cloudprovider
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -62,6 +65,19 @@ func TestInstanceToNodeClaim_AbsentClusterLocationLabelNotInvented(t *testing.T)
 	_, hasLabel := nc.Labels[utils.LabelClusterLocationKey]
 	require.False(t, hasLabel,
 		"NodeClaim built from a label-less instance must not carry cluster-location; GC skip depends on its absence")
+}
+
+func TestDelete_ReturnsNodeClaimNotFoundWhenProviderIDEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Without the guard in Delete, the call reaches parseGCEProviderID("") which errors,
+	// causing karpenter to retry termination forever so the finalizer never clears.
+	nc := &karpv1.NodeClaim{Status: karpv1.NodeClaimStatus{ProviderID: ""}}
+
+	err := (&CloudProvider{}).Delete(context.Background(), nc)
+
+	require.True(t, karpcloudprovider.IsNodeClaimNotFoundError(err),
+		"empty providerID must signal NotFound so karpenter clears the finalizer; got %v", err)
 }
 
 func TestRepairPolicies_NPDConditionsPolarity(t *testing.T) {
