@@ -5,9 +5,11 @@ on:
     branches: ["main"]
     paths:
       - "docs/**"
+      - "proposals/**"
   pull_request:
     paths:
       - "docs/**"
+      - "proposals/**"
 
 jobs:
   lint:

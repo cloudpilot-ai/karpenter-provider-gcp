@@ -59,7 +59,7 @@ verify: ## Verify code. Includes linting, formatting, etc
 	golangci-lint run --new-from-rev=origin/main --timeout=20m
 	git diff --exit-code || (echo "golangci-lint reformatted files above — stage and commit them" && exit 1)
 
-DOCS_FILES = $(shell find docs -name "*.md" ! -path "docs/reference/*")
+DOCS_FILES = $(shell find docs proposals -name "*.md" ! -path "docs/reference/*" 2>/dev/null)
 
 docs-lint: ## Check docs markdown formatting (excludes generated reference docs)
 	mdox fmt --check $(DOCS_FILES)
