@@ -5,9 +5,15 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to re-publish (e.g. v0.3.2) — re-deploys Pages without building a new image'
+        required: true
 
 jobs:
   image-publish:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,7 +66,11 @@ jobs:
     steps:
       - name: Set tag
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
           echo "tag=${TAG}" >> $GITHUB_ENV
           echo "tag_semver=${TAG#v}" >> $GITHUB_ENV
         shell: bash
@@ -105,7 +115,7 @@ jobs:
           helm repo add karpenter-gcp "${PAGES_URL}" --force-update
 
           for CHART in karpenter karpenter-crd; do
-            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions -o json 2>/dev/null | jq -r '.[].version' || true)
+            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json 2>/dev/null | jq -r '.[].version' || true)
             [ -z "${VERSIONS}" ] && continue
 
             echo "${VERSIONS}" | while read VERSION; do
