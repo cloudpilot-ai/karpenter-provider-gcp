@@ -347,7 +347,7 @@ func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootD
 	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
 }
 
-// PatchKubeEnvForOSType patches the kube-env metadata item for Ubuntu nodes provisioned
+// PatchKubeEnvForOSType patches the kube-env metadata item so a single bootstrap source pool can serve nodes of either OS family.
 // Patching is bidirectional: Ubuntu→COS and COS→Ubuntu.
 //
 // Fields modified for Ubuntu target (source is COS):
