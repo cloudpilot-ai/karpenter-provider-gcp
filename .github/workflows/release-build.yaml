@@ -124,12 +124,14 @@ jobs:
               if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
                 echo "Pulling ${CHART} ${VERSION}..."
                 if ! helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination charts/ 2>/dev/null; then
-                  # Pages copy is gone (e.g. lost in a previous deploy) — recover from git history.
+                  # Pages copy is gone — recover from git history.
+                  # --diff-filter=A finds the commit that added the file; git show reads
+                  # it from the local object store without any network request.
                   GIT_PATH="charts/${CHART}-${VERSION}.tgz"
-                  GIT_COMMIT=$(git log --all --format="%H" -- "${GIT_PATH}" | head -1)
-                  if [ -n "${GIT_COMMIT}" ]; then
-                    echo "helm pull failed; recovering ${GIT_PATH} from git (${GIT_COMMIT})..."
-                    git show "${GIT_COMMIT}:${GIT_PATH}" > "${GIT_PATH}"
+                  ADD_COMMIT=$(git log --all --diff-filter=A --format="%H" -- "${GIT_PATH}" | head -1)
+                  if [ -n "${ADD_COMMIT}" ]; then
+                    echo "helm pull failed; recovering ${GIT_PATH} from git (${ADD_COMMIT})..."
+                    git show "${ADD_COMMIT}:${GIT_PATH}" > "${GIT_PATH}"
                   else
                     echo "WARNING: could not pull or recover ${CHART} ${VERSION}"
                   fi
