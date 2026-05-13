@@ -77,6 +77,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Fetch existing Pages index
         run: |
@@ -121,8 +123,17 @@ jobs:
             echo "${VERSIONS}" | while read VERSION; do
               if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
                 echo "Pulling ${CHART} ${VERSION}..."
-                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --destination charts/ || \
-                  echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
+                if ! helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination charts/ 2>/dev/null; then
+                  # Pages copy is gone (e.g. lost in a previous deploy) — recover from git history.
+                  GIT_PATH="charts/${CHART}-${VERSION}.tgz"
+                  GIT_COMMIT=$(git log --all --format="%H" -- "${GIT_PATH}" | head -1)
+                  if [ -n "${GIT_COMMIT}" ]; then
+                    echo "helm pull failed; recovering ${GIT_PATH} from git (${GIT_COMMIT})..."
+                    git show "${GIT_COMMIT}:${GIT_PATH}" > "${GIT_PATH}"
+                  else
+                    echo "WARNING: could not pull or recover ${CHART} ${VERSION}"
+                  fi
+                fi
               fi
             done
 
