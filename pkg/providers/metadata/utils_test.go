@@ -20,7 +20,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-openapi/swag"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
@@ -48,7 +47,7 @@ func TestNoPatchKubeEnv(t *testing.T) {
 
 	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
 
-	got := swag.StringValue(meta.Items[0].Value)
+	got := lo.FromPtr(meta.Items[0].Value)
 	require.NotContains(t, got, "kubernetes-server-linux-arm64.tar.gz")
 	require.NotContains(t, got, "kubernetes-server-linux-amd64.tar.gz")
 	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
@@ -61,7 +60,7 @@ func TestPatchKubeEnvForInstanceType_ARM64(t *testing.T) {
 		Items: []*compute.MetadataItems{
 			{
 				Key: "kube-env",
-				Value: swag.String(`SERVER_BINARY_TAR_URL:
+				Value: lo.ToPtr(`SERVER_BINARY_TAR_URL:
   https://storage.googleapis.com/gke-release-eu/kubernetes/release/v1.34.3-gke.1444000/kubernetes-server-linux-amd64.tar.gz,
   https://storage.googleapis.com/gke-release/kubernetes/release/v1.34.3-gke.1444000/kubernetes-server-linux-amd64.tar.gz,
   https://storage.googleapis.com/gke-release-asia/kubernetes/release/v1.34.3-gke.1444000/kubernetes-server-linux-amd64.tar.gz
@@ -82,7 +81,7 @@ KUBELET_ARGS: cloud.google.com/machine-family=e2, arch=amd64; --v=2
 
 	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
 
-	got := swag.StringValue(meta.Items[0].Value)
+	got := lo.FromPtr(meta.Items[0].Value)
 	// SERVER_BINARY_TAR_URL is left unchanged; the arch-native node pool template carries the correct URL and hash.
 	require.Contains(t, got, "kubernetes-server-linux-amd64.tar.gz")
 	require.Contains(t, got, "cloud.google.com/machine-family=c4a")
@@ -95,7 +94,7 @@ func TestPatchKubeEnvForInstanceType_AMD64(t *testing.T) {
 		Items: []*compute.MetadataItems{
 			{
 				Key: "kube-env",
-				Value: swag.String(`SERVER_BINARY_TAR_URL:
+				Value: lo.ToPtr(`SERVER_BINARY_TAR_URL:
   https://storage.googleapis.com/gke-release/kubernetes/release/v1.34.3-gke.1444000/kubernetes-server-linux-arm64.tar.gz
 AUTOSCALER_ENV_VARS: cloud.google.com/machine-family=c4a, arch=arm64;
 KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
@@ -114,7 +113,7 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 
 	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
 
-	got := swag.StringValue(meta.Items[0].Value)
+	got := lo.FromPtr(meta.Items[0].Value)
 	// SERVER_BINARY_TAR_URL is left unchanged; the arch-native node pool template carries the correct URL and hash.
 	require.Contains(t, got, "kubernetes-server-linux-arm64.tar.gz")
 	require.Contains(t, got, "cloud.google.com/machine-family=e2")
