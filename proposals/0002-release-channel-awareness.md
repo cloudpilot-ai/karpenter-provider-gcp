@@ -95,18 +95,17 @@ Ubuntu GKE images (`ubuntu-gke-2404-{minor}-amd64-v{date}`) use date-based versi
 
 ### Static vs Live References: The Core Semantic Distinction
 
-| Type | Example | Behaviour |
-|------|---------|-----------|
-| **Version pin** | `family: ContainerOptimizedOS`<br>`version: "125.19216.104.126"` | Fixed image. Nodes never drift from image changes. |
-| **Latest reference** | `family: Ubuntu2404`<br>`version: latest` | Newest image for cluster's K8s version. No channel awareness. |
-| **Live channel reference** | `family: ContainerOptimizedOS`<br>`channel: stable` | Resolves to GKE's current STABLE build. Nodes drift when GKE promotes a new build. |
+| Type                       | Example                                                          | Behaviour                                                                          |
+|----------------------------|------------------------------------------------------------------|------------------------------------------------------------------------------------|
+| **Version pin**            | `family: ContainerOptimizedOS`<br>`version: "125.19216.104.126"` | Fixed image. Nodes never drift from image changes.                                 |
+| **Latest reference**       | `family: Ubuntu2404`<br>`version: latest`                        | Newest image for cluster's K8s version. No channel awareness.                      |
+| **Live channel reference** | `family: ContainerOptimizedOS`<br>`channel: stable`              | Resolves to GKE's current STABLE build. Nodes drift when GKE promotes a new build. |
 
 ### API Change: New `family`, `channel`, and `version` Fields in `ImageSelectorTerm`
 
 Three new optional fields are added alongside the unchanged `id` and the now-deprecated `alias`:
 
 > **`alias` is deprecated.** New configurations should use `family + channel` or `family + version` instead. The `alias` field will be removed in a future major release. See the [Deprecation Path](#alias-deprecation-path) section for migration guidance.
-
 
 ```yaml
 imageSelectorTerms:
@@ -130,30 +129,30 @@ imageSelectorTerms:
   - id: projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre
 ```
 
-| `channel` value | Image version resolved |
-|-----------------|----------------------|
-| `rapid`         | `RAPID.defaultVersion` build number |
-| `regular`       | `REGULAR.defaultVersion` build number |
-| `stable`        | `STABLE.defaultVersion` build number |
-| `extended`      | `EXTENDED.defaultVersion` build number |
+| `channel` value | Image version resolved                                                          |
+|-----------------|---------------------------------------------------------------------------------|
+| `rapid`         | `RAPID.defaultVersion` build number                                             |
+| `regular`       | `REGULAR.defaultVersion` build number                                           |
+| `stable`        | `STABLE.defaultVersion` build number                                            |
+| `extended`      | `EXTENDED.defaultVersion` build number                                          |
 | `cluster`       | Reads `cluster.ReleaseChannel.Channel` then resolves as the named channel above |
 
 **`family` enum:**
 
-| `family` value | OS | Notes |
-|---------------|-----|-------|
-| `ContainerOptimizedOS` | COS | Supports `channel` and `version` |
-| `Ubuntu2404` | Ubuntu 24.04 | Supports `version` only; `channel` not supported |
-| `Ubuntu2204` | Ubuntu 22.04 | Supports `version` only; `channel` not supported |
-| `Ubuntu` | — | **Deprecated.** Rejected at admission; use `Ubuntu2404` or `Ubuntu2204` |
+| `family` value         | OS           | Notes                                                                   |
+|------------------------|--------------|-------------------------------------------------------------------------|
+| `ContainerOptimizedOS` | COS          | Supports `channel` and `version`                                        |
+| `Ubuntu2404`           | Ubuntu 24.04 | Supports `version` only; `channel` not supported                        |
+| `Ubuntu2204`           | Ubuntu 22.04 | Supports `version` only; `channel` not supported                        |
+| `Ubuntu`               | —            | **Deprecated.** Rejected at admission; use `Ubuntu2404` or `Ubuntu2204` |
 
 **`version` field values by family:**
 
-| `family` | `version: latest` | Version pin format | Example pin |
-|----------|------------------|--------------------|-------------|
-| `ContainerOptimizedOS` | Newest COS for cluster's K8s version | `milestone.build.build.build` | `125.19216.104.126` |
-| `Ubuntu2404` | Newest Ubuntu 24.04 for cluster's K8s minor | `vYYYYMMDD` | `v20260416` |
-| `Ubuntu2204` | Newest Ubuntu 22.04 for cluster's K8s minor | `vYYYYMMDD` | `v20231201` |
+| `family`               | `version: latest`                           | Version pin format            | Example pin         |
+|------------------------|---------------------------------------------|-------------------------------|---------------------|
+| `ContainerOptimizedOS` | Newest COS for cluster's K8s version        | `milestone.build.build.build` | `125.19216.104.126` |
+| `Ubuntu2404`           | Newest Ubuntu 24.04 for cluster's K8s minor | `vYYYYMMDD`                   | `v20260416`         |
+| `Ubuntu2204`           | Newest Ubuntu 22.04 for cluster's K8s minor | `vYYYYMMDD`                   | `v20231201`         |
 
 **Per-term CEL validation rules** (evaluated in order; first failure wins):
 
@@ -318,14 +317,14 @@ The `alias` field is a compound string that encodes two semantically different o
 
 The migration from `alias` to structured fields requires no behavioral change for pinned versions; for `@latest`, the structured equivalent is `version: latest` (identical semantics) or `channel: cluster` (upgraded semantics — gains channel awareness).
 
-| Deprecated config | Structured equivalent | Notes |
-|-------------------|-----------------------|-------|
-| `alias: ContainerOptimizedOS@latest` | `family: ContainerOptimizedOS`<br>`version: latest` | Exact semantic equivalent |
-| `alias: ContainerOptimizedOS@latest` | `family: ContainerOptimizedOS`<br>`channel: cluster` | **Recommended upgrade** — gains channel-aware image selection |
-| `alias: ContainerOptimizedOS@125.19216.104.126` | `family: ContainerOptimizedOS`<br>`version: "125.19216.104.126"` | Exact equivalent; resolves to same image |
-| `alias: Ubuntu@latest` | `family: Ubuntu2404`<br>`version: latest` | Exact equivalent; `Ubuntu2404` is the current GKE default Ubuntu release |
-| `alias: Ubuntu@v20260416` | `family: Ubuntu2404`<br>`version: "v20260416"` | Exact equivalent; use `Ubuntu2204` if the pin targets a 22.04 build |
-| `family: Ubuntu` (bare, without release) | `family: Ubuntu2404` or `family: Ubuntu2204` | Rejected at admission — specify the Ubuntu release explicitly |
+| Deprecated config                               | Structured equivalent                                            | Notes                                                                    |
+|-------------------------------------------------|------------------------------------------------------------------|--------------------------------------------------------------------------|
+| `alias: ContainerOptimizedOS@latest`            | `family: ContainerOptimizedOS`<br>`version: latest`              | Exact semantic equivalent                                                |
+| `alias: ContainerOptimizedOS@latest`            | `family: ContainerOptimizedOS`<br>`channel: cluster`             | **Recommended upgrade** — gains channel-aware image selection            |
+| `alias: ContainerOptimizedOS@125.19216.104.126` | `family: ContainerOptimizedOS`<br>`version: "125.19216.104.126"` | Exact equivalent; resolves to same image                                 |
+| `alias: Ubuntu@latest`                          | `family: Ubuntu2404`<br>`version: latest`                        | Exact equivalent; `Ubuntu2404` is the current GKE default Ubuntu release |
+| `alias: Ubuntu@v20260416`                       | `family: Ubuntu2404`<br>`version: "v20260416"`                   | Exact equivalent; use `Ubuntu2204` if the pin targets a 22.04 build      |
+| `family: Ubuntu` (bare, without release)        | `family: Ubuntu2404` or `family: Ubuntu2204`                     | Rejected at admission — specify the Ubuntu release explicitly            |
 
 **Recommended migration path:** Replace `alias: ContainerOptimizedOS@latest` with `family: ContainerOptimizedOS, channel: cluster` and add a maintenance-window disruption budget. For pinned COS versions and Ubuntu, the migration is a mechanical substitution with no behavioral change. Ubuntu users should verify which release (22.04 or 24.04) their existing images target before substituting the `family` value.
 
@@ -335,30 +334,30 @@ The migration from `alias` to structured fields requires no behavioral change fo
 
 `GCENodeClass.Status.Images` is populated with resolved image URLs as normal. `Status.Conditions.ImagesReady` message records the resolution path taken — these messages are normative (implementations must include the stated key phrases):
 
-| Situation | Status.Conditions.ImagesReady message |
-|-----------|--------------------------------------|
-| Normal — exact build found | `ContainerOptimizedOS: resolved channel STABLE build gke1068000 → gke-1346-gke1068000-cos-...` |
-| Exact build not in catalog (propagation delay) | `ContainerOptimizedOS: build gke1068000 not yet in catalog; retrying until propagation completes` — `ImagesReady = False` |
-| Step 3 — explicit channel, no minor match | `ContainerOptimizedOS: channel STABLE has no valid version for cluster minor 1.35; the requested channel may not yet support this Kubernetes minor` |
-| `channel: cluster` on UNSPECIFIED cluster | `ContainerOptimizedOS: cluster has no enrolled release channel (UNSPECIFIED); channel: cluster requires an enrolled channel` |
-| `GetServerConfig` failure | `getServerConfig failed: <error>; image resolution suspended` |
-| `GetClusterConfig` failure (`channel: cluster`) | `GetClusterConfig failed: <error>; image resolution suspended` |
-| Channel name not in server config | `channel STABLE not found in getServerConfig response; image resolution suspended` |
-| Ubuntu version pin not in catalog | `Ubuntu2404: image version v20260416 not found in catalog; check that the version exists for cluster minor 1.35` |
+| Situation                                       | Status.Conditions.ImagesReady message                                                                                                               |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| Normal — exact build found                      | `ContainerOptimizedOS: resolved channel STABLE build gke1068000 → gke-1346-gke1068000-cos-...`                                                      |
+| Exact build not in catalog (propagation delay)  | `ContainerOptimizedOS: build gke1068000 not yet in catalog; retrying until propagation completes` — `ImagesReady = False`                           |
+| Step 3 — explicit channel, no minor match       | `ContainerOptimizedOS: channel STABLE has no valid version for cluster minor 1.35; the requested channel may not yet support this Kubernetes minor` |
+| `channel: cluster` on UNSPECIFIED cluster       | `ContainerOptimizedOS: cluster has no enrolled release channel (UNSPECIFIED); channel: cluster requires an enrolled channel`                        |
+| `GetServerConfig` failure                       | `getServerConfig failed: <error>; image resolution suspended`                                                                                       |
+| `GetClusterConfig` failure (`channel: cluster`) | `GetClusterConfig failed: <error>; image resolution suspended`                                                                                      |
+| Channel name not in server config               | `channel STABLE not found in getServerConfig response; image resolution suspended`                                                                  |
+| Ubuntu version pin not in catalog               | `Ubuntu2404: image version v20260416 not found in catalog; check that the version exists for cluster minor 1.35`                                    |
 
 ---
 
 ## Implementation Plan
 
-| File | Change |
-|------|--------|
-| `pkg/providers/gke/gke.go` | Add `GetServerConfig()` + 30-min cache; add `ResolveVersionForChannel(sc, channelName, clusterVersion string) (string, error)` with semver-correct `validVersions` chain, empty-`defaultVersion` guard, and channel-not-found error; normalize channel names to uppercase; handle nil `cluster.ReleaseChannel` as UNSPECIFIED |
-| `pkg/apis/v1alpha1/gcenodeclass.go` | **Update existing list-level rule first** — the current `imageSelectorTerms` field carries `rule="self.all(x, has(x.alias) \|\| has(x.id))"` which rejects any term that has neither `alias` nor `id`; all `family`-based terms would be refused at admission without this change. Update to `self.all(x, has(x.alias) \|\| has(x.id) \|\| has(x.family))` and revise the message accordingly. Then: add `Family`, `Channel`, `Version` fields to `ImageSelectorTerm` (all `omitempty`); eight per-term CEL rules as specified above; family enum constants (`ContainerOptimizedOS`, `Ubuntu`, `Ubuntu2204`, `Ubuntu2404` — `Ubuntu` kept in enum so rule 8 fires a helpful migration message), channel enum constants (`rapid`, `regular`, `stable`, `extended`, `cluster`); `// Deprecated:` Go doc comment on `alias` field; add list-level `+kubebuilder:validation:XValidations` mixing rule (rule 10) on the `ImageSelectorTerms []ImageSelectorTerm` field. The existing per-field rules on `alias` (format regex, family enum check) are unchanged — they fire only when `alias` is set. **Also update `ImageFamily()`** to scan `ImageSelectorTerms` for a `family` field as a third branch (before the `ImageFamilyCustom` fallback); normalize `Ubuntu2404` and `Ubuntu2204` → `ImageFamilyUbuntu`, `ContainerOptimizedOS` → `ImageFamilyContainerOptimizedOS`. This is required because `PatchKubeEnvForOSType` (called after PR #263 lands) switches kube-env OS settings based on `ImageFamily()` — Ubuntu nodes receiving `"Custom"` would silently get COS kube-env settings. |
-| `pkg/providers/imagefamily/image.go` | Add `resolveImageFromChannel()` and `resolveImageFromVersion()` dispatchers. Dispatch order: iterate over all `imageSelectorTerms`; for each term dispatch based on which selection field is set (`alias`, `id`, or `family`); collect results per-term and union them into `Status.Images` — terms are ORed, matching existing Karpenter selector semantics. A single list may mix `alias`, `id`, and `family` terms; there is no priority between term types. The `Alias()` helper returns nil when no `alias` term is present — the dispatch loop must not assume a non-nil alias. Call `ResolveVersionForChannel` for channel terms; pass resolved version to COS/Ubuntu providers. |
-| `pkg/providers/imagefamily/containeroptimizedos.go` | Add exact-build-number filter path for channel resolution; add version-pin lookup path for `family + version`; return `ImagesReady = False` (no version-prefix fallback) when exact build is not in catalog; include resolution path in `Status.Conditions` message |
-| `pkg/providers/imagefamily/ubuntu.go` | Dispatch on `family: Ubuntu2404` and `family: Ubuntu2204`; add version-pin lookup path; resolve correct image project prefix per release (`ubuntu-gke-2404-*` vs `ubuntu-gke-2204-*`) |
-| `pkg/operator/operator.go` | Wire `gkeProvider` into image provider (if not already present) |
-| CRD schema | Regenerate after struct changes |
+| File                                                | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|-----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `pkg/providers/gke/gke.go`                          | Add `GetServerConfig()` + 30-min cache; add `ResolveVersionForChannel(sc, channelName, clusterVersion string) (string, error)` with semver-correct `validVersions` chain, empty-`defaultVersion` guard, and channel-not-found error; normalize channel names to uppercase; handle nil `cluster.ReleaseChannel` as UNSPECIFIED                                                                                                                                                                                                                                                                                                                                                           |
+| `pkg/apis/v1alpha1/gcenodeclass.go`                 | **Update existing list-level rule first** — the current `imageSelectorTerms` field carries `rule="self.all(x, has(x.alias)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `pkg/providers/imagefamily/image.go`                | Add `resolveImageFromChannel()` and `resolveImageFromVersion()` dispatchers. Dispatch order: iterate over all `imageSelectorTerms`; for each term dispatch based on which selection field is set (`alias`, `id`, or `family`); collect results per-term and union them into `Status.Images` — terms are ORed, matching existing Karpenter selector semantics. A single list may mix `alias`, `id`, and `family` terms; there is no priority between term types. The `Alias()` helper returns nil when no `alias` term is present — the dispatch loop must not assume a non-nil alias. Call `ResolveVersionForChannel` for channel terms; pass resolved version to COS/Ubuntu providers. |
+| `pkg/providers/imagefamily/containeroptimizedos.go` | Add exact-build-number filter path for channel resolution; add version-pin lookup path for `family + version`; return `ImagesReady = False` (no version-prefix fallback) when exact build is not in catalog; include resolution path in `Status.Conditions` message                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `pkg/providers/imagefamily/ubuntu.go`               | Dispatch on `family: Ubuntu2404` and `family: Ubuntu2204`; add version-pin lookup path; resolve correct image project prefix per release (`ubuntu-gke-2404-*` vs `ubuntu-gke-2204-*`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `pkg/operator/operator.go`                          | Wire `gkeProvider` into image provider (if not already present)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| CRD schema                                          | Regenerate after struct changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 No changes needed to `nodepooltemplate.go`. After PR #263 lands, `resolveNodePoolName()` is removed from `instance.go` entirely (that function was the other code path that required `ImageFamily()` to return a known value); no further `instance.go` changes are needed for this proposal.
 
