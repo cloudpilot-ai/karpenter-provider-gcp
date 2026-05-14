@@ -25,10 +25,10 @@ KARPENTER_CORE_DIR = $(shell go list -m -f '{{ .Dir }}' sigs.k8s.io/karpenter)
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-presubmit: verify-codegen verify verify-deadcode chart-lint ut-test docs-lint ## Run all steps in the developer loop
+presubmit: toolchain verify-codegen verify verify-deadcode chart-lint ut-test docs-lint ## Run all steps in the developer loop
 
 toolchain: ## Install developer toolchain
-	./hack/toolchain.sh
+	cd hack/tools && go install tool
 
 run: ## Run Karpenter controller binary against your local cluster
 	SYSTEM_NAMESPACE=${KARPENTER_NAMESPACE} \
@@ -173,7 +173,7 @@ download: ## Run "go mod download"
 update-pricing:
 	@tmpdir=$$(mktemp -d); \
 	trap "rm -rf $$tmpdir" EXIT; \
-	go run ./hack/tools/price_validate --work-dir=$$tmpdir && \
+	(cd hack/tools/price_validate && go run . --work-dir=$$tmpdir) && \
 	cp $$tmpdir/computed.json pkg/providers/pricing/initial-prices.json && \
 	echo "Updated pkg/providers/pricing/initial-prices.json"
 
