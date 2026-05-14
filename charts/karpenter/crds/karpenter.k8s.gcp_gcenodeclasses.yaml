@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.21.0
+    controller-gen.kubebuilder.io/version: v0.20.1
   name: gcenodeclasses.karpenter.k8s.gcp
 spec:
   group: karpenter.k8s.gcp
@@ -145,19 +145,6 @@ spec:
                       || (has(self.provisionedIOPS) == has(self.provisionedThroughput))'
                 maxItems: 10
                 type: array
-              gpuDriverVersion:
-                default: default
-                description: |-
-                  GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.
-                  Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.
-                  Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),
-                  "disabled" (skip automatic installation).
-                  Ignored for non-GPU instance types.
-                enum:
-                - default
-                - latest
-                - disabled
-                type: string
               imageFamily:
                 description: |-
                   ImageFamily dictates the instance template used when generating launch templates.
@@ -167,18 +154,18 @@ spec:
                 - ContainerOptimizedOS
                 type: string
               imageSelectorTerms:
-                description: |-
-                  ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
-                  Remove or adjust mutual exclusivity rules since there's only one field
+                description: ImageSelectorTerms is a list of or image selector terms.
+                  The terms are ORed.
                 items:
                   description: |-
                     ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
-                    If multiple fields are used for selection, the requirements are ANDed.
+                    Exactly one of alias, id, or family (with channel or version) must be set.
                   properties:
                     alias:
                       description: |-
+                        Deprecated: use Family with Channel or Version instead.
                         Alias specifies which GKE image to select.
-                        Valid families include: ContainerOptimizedOS,Ubuntu
+                        Valid families include: ContainerOptimizedOS, Ubuntu
                       maxLength: 60
                       type: string
                       x-kubernetes-validations:
@@ -188,28 +175,78 @@ spec:
                       - message: 'family is not supported, must be one of the following:
                           ''ContainerOptimizedOS,Ubuntu'''
                         rule: self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']
-                      - message: ContainerOptimizedOS version must be 'latest' or
-                          'milestone.build.build.build' (e.g. '125.19216.104.126')
-                        rule: '!self.startsWith(''ContainerOptimizedOS@'') || self.matches(''^ContainerOptimizedOS@(latest|[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)$'')'
-                      - message: Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g.
-                          'v20260416')
-                        rule: '!self.startsWith(''Ubuntu@'') || self.matches(''^Ubuntu@(latest|v[0-9]{8})$'')'
+                    channel:
+                      description: |-
+                        Channel specifies the GKE release channel to follow. Only valid when Family is ContainerOptimizedOS.
+                        Use "cluster" to track the channel the cluster is enrolled in.
+                      enum:
+                      - rapid
+                      - regular
+                      - stable
+                      - extended
+                      - cluster
+                      type: string
+                    family:
+                      description: |-
+                        Family specifies the OS image family. Required when using Channel or Version.
+                        Valid values: ContainerOptimizedOS, Ubuntu2404, Ubuntu2204.
+                      enum:
+                      - ContainerOptimizedOS
+                      - Ubuntu2404
+                      - Ubuntu2204
+                      type: string
                     id:
-                      description: ID specifies which GKE image to select.
+                      description: ID specifies a GKE image by its full resource URL.
                       maxLength: 160
                       type: string
                       x-kubernetes-validations:
                       - message: '''id'' is improperly formatted, must match the format
                           ''id'''
                         rule: self.matches('^.*$')
+                    version:
+                      description: |-
+                        Version pins the image to a specific version or "latest".
+                        For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").
+                        For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" (e.g. "v20260416").
+                      type: string
                   type: object
+                  x-kubernetes-validations:
+                  - message: family requires either channel or version to be set
+                    rule: '!has(self.family) || has(self.channel) || has(self.version)'
+                  - message: channel and version require family to be set
+                    rule: '!(has(self.channel) || has(self.version)) || has(self.family)'
+                  - message: channel and version cannot both be set
+                    rule: '!(has(self.channel) && has(self.version))'
+                  - message: channel is only supported for family ContainerOptimizedOS
+                    rule: '!has(self.channel) || self.family == ''ContainerOptimizedOS'''
+                  - message: exactly one of alias, id, or family must be set
+                    rule: '(has(self.alias) ? 1 : 0) + (has(self.id) ? 1 : 0) + (has(self.family)
+                      ? 1 : 0) == 1'
+                  - message: ContainerOptimizedOS version must be 'latest' or 'milestone.build.build.build'
+                      (e.g. '125.19216.104.126')
+                    rule: '!has(self.version) || !has(self.family) || self.family
+                      != ''ContainerOptimizedOS'' || self.version == ''latest'' ||
+                      self.version.matches(''^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'')'
+                  - message: Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g.
+                      'v20260416')
+                    rule: '!has(self.version) || !has(self.family) || !(self.family
+                      in [''Ubuntu2204'', ''Ubuntu2404'']) || self.version == ''latest''
+                      || self.version.matches(''^v[0-9]{8}$'')'
+                  - message: family 'Ubuntu' is not valid; use Ubuntu2404 for Ubuntu
+                      24.04 or Ubuntu2204 for Ubuntu 22.04
+                    rule: '!has(self.family) || self.family != ''Ubuntu'''
                 maxItems: 30
                 minItems: 1
                 type: array
                 x-kubernetes-validations:
-                - message: '''alias'' is improperly formatted, must match the format
-                    ''family'''
-                  rule: self.all(x, has(x.alias) || has(x.id))
+                - message: 'each term must set exactly one of: alias, id, or family
+                    (with channel or version)'
+                  rule: self.all(x, has(x.alias) || has(x.id) || has(x.family))
+                - message: 'channel: and version: latest cannot both appear in the
+                    same imageSelectorTerms'
+                  rule: '!(self.exists(t, has(t.channel)) && self.exists(t, has(t.family)
+                    && t.family == ''ContainerOptimizedOS'' && has(t.version) && t.version
+                    == ''latest''))'
               kubeletConfiguration:
                 description: |-
                   KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
