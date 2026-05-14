@@ -1,6 +1,6 @@
 # Proposal: GKE Release Channel Awareness for Image Selection
 
-- **Status**: Provisional
+- **Status**: Implemented
 - **Authors**: @dm3ch
 - **Created**: 2026-05-12
 - **Related Issues**: [#330](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/330)
