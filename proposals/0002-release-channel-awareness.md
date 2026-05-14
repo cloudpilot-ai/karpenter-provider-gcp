@@ -332,18 +332,24 @@ The migration from `alias` to structured fields requires no behavioral change fo
 
 ## Observability
 
-`GCENodeClass.Status.Images` is populated with resolved image URLs as normal. `Status.Conditions.ImagesReady` message records the resolution path taken — these messages are normative (implementations must include the stated key phrases):
+`GCENodeClass.Status.Images` is populated with resolved image URLs as normal. `Status.Conditions.ImagesReady` message records the resolution path taken.
 
-| Situation                                       | Status.Conditions.ImagesReady message                                                                                                               |
+> **Implementation note (initial release):** The exact-format messages below reflect the intended steady-state observability surface. The initial implementation surfaces the key error phrases listed below as error strings returned from `imagefamily.Provider.List()`, which the GCENodeClass controller forwards to the `ImagesReady` condition. Two planned messages are not yet produced in the initial release:
+> 1. **Normal success path** (`"resolved channel STABLE build gke1068000 → ..."`) — not yet emitted; only error paths produce condition messages. Adding success-path logging to the controller is tracked as a follow-up.
+> 2. **Ubuntu version-pin catalog miss** (`"Ubuntu2404: image version v20260416 not found in catalog"`) — not yet a named error; a pinned Ubuntu image that does not exist in the catalog is silently filtered by `filterExistingImages`, resulting in an empty `Status.Images` list and a generic `ImagesReady = False`. A specific error message requires explicit catalog lookup for the pinned date, which is deferred to a follow-up.
+>
+> All error paths (channel resolution failure, UNSPECIFIED cluster, `GetServerConfig` failure, channel not in server config) produce condition messages containing the key phrases listed in the table. The functional behavior (correct images on success; `ImagesReady = False` on failure) is identical for all cases in the initial release.
+
+| Situation                                       | Status.Conditions.ImagesReady message (key phrases required)                                                                                        |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| Normal — exact build found                      | `ContainerOptimizedOS: resolved channel STABLE build gke1068000 → gke-1346-gke1068000-cos-...`                                                      |
+| Normal — exact build found                      | `ContainerOptimizedOS: resolved channel STABLE build gke1068000 → gke-1346-gke1068000-cos-...` *(follow-up)*                                        |
 | Exact build not in catalog (propagation delay)  | `ContainerOptimizedOS: build gke1068000 not yet in catalog; retrying until propagation completes` — `ImagesReady = False`                           |
 | Step 3 — explicit channel, no minor match       | `ContainerOptimizedOS: channel STABLE has no valid version for cluster minor 1.35; the requested channel may not yet support this Kubernetes minor` |
 | `channel: cluster` on UNSPECIFIED cluster       | `ContainerOptimizedOS: cluster has no enrolled release channel (UNSPECIFIED); channel: cluster requires an enrolled channel`                        |
 | `GetServerConfig` failure                       | `getServerConfig failed: <error>; image resolution suspended`                                                                                       |
 | `GetClusterConfig` failure (`channel: cluster`) | `GetClusterConfig failed: <error>; image resolution suspended`                                                                                      |
 | Channel name not in server config               | `channel STABLE not found in getServerConfig response; image resolution suspended`                                                                  |
-| Ubuntu version pin not in catalog               | `Ubuntu2404: image version v20260416 not found in catalog; check that the version exists for cluster minor 1.35`                                    |
+| Ubuntu version pin not in catalog               | `Ubuntu2404: image version v20260416 not found in catalog; check that the version exists for cluster minor 1.35` *(follow-up)*                      |
 
 ---
 
