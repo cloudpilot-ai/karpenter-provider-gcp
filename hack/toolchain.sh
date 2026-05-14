@@ -28,7 +28,7 @@ tools() {
     go install k8s.io/code-generator/cmd/deepcopy-gen@v0.27.0
     go install github.com/elastic/crd-ref-docs@v0.3.0
     go install github.com/bwplotka/mdox@v0.9.0
-    go install golang.org/x/tools/cmd/deadcode@v0.45.0
+    go install golang.org/x/tools/cmd/deadcode@v0.44.0
 
     if ! echo "$PATH" | grep -q "${GOPATH:-undefined}/bin\|$HOME/go/bin"; then
         echo "Go workspace's \"bin\" directory is not in PATH. Run 'export PATH=\"\$PATH:\${GOPATH:-\$HOME/go}/bin\"'."
