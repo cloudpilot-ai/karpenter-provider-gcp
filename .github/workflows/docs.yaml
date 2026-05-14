@@ -5,11 +5,9 @@ on:
     branches: ["main"]
     paths:
       - "docs/**"
-      - "proposals/**"
   pull_request:
     paths:
       - "docs/**"
-      - "proposals/**"
 
 jobs:
   lint:
@@ -24,7 +22,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Install mdox
-        run: go install github.com/bwplotka/mdox@v0.9.0
+        run: go install github.com/bwplotka/mdox@latest
 
       - name: Lint markdown
         run: make docs-lint

@@ -26,12 +26,6 @@ Additional labels (applied directly, not via /kind):
 
 #### What this PR does / why we need it:
 
-#### Related proposal (if applicable):
-<!--
-Link the proposal this PR implements, e.g. proposals/0001-short-title.md
-Leave blank if this PR does not correspond to a design proposal.
--->
-
 #### Which issue(s) this PR fixes:
 <!--
 *Automatically closes linked issue when PR is merged.
