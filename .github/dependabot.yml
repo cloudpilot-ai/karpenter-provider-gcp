@@ -1,22 +1,35 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
 version: 2
 updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
+    # k8s.io/* are transitive deps driven by karpenter-core/controller-runtime;
+    # never update them in isolation.
     ignore:
       - dependency-name: "k8s.io/*"
     groups:
+      # karpenter-core and controller-runtime must be updated together and
+      # require e2e validation + interface adoption before merging.
       karpenter-core:
+        applies-to: version-updates
         patterns:
           - "sigs.k8s.io/karpenter"
+          - "sigs.k8s.io/controller-runtime"
       go-dependencies:
+        applies-to: version-updates
         patterns:
           - "*"
         exclude-patterns:
           - "sigs.k8s.io/karpenter"
+          - "sigs.k8s.io/controller-runtime"
+          - "k8s.io/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
