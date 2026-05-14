@@ -41,6 +41,7 @@ Key capabilities:
 
 ## Features
 
+- [Image selection](image-selection.md) — select node images by GKE release channel, version pin, or raw image ID
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
 - [Static capacity](examples/static-capacity.md) — keep a fixed number of nodes running with `spec.replicas`
 
