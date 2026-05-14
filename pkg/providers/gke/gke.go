@@ -154,13 +154,7 @@ func (p *DefaultProvider) GetServerConfig(ctx context.Context) (*containerv1.Ser
 func ResolveVersionForChannel(sc *containerv1.ServerConfig, channelName, clusterVersion string) (string, error) {
 	channelName = strings.ToUpper(channelName)
 
-	var ch *containerv1.ReleaseChannelConfig
-	for _, c := range sc.Channels {
-		if c.Channel == channelName {
-			ch = c
-			break
-		}
-	}
+	ch := findChannelConfig(sc, channelName)
 	if ch == nil {
 		return "", fmt.Errorf("channel %s not found in getServerConfig response", channelName)
 	}
@@ -177,31 +171,49 @@ func ResolveVersionForChannel(sc *containerv1.ServerConfig, channelName, cluster
 		}
 	}
 
-	// Step 2: scan validVersions for the highest semver entry matching clusterMinor.
-	var candidates []string
-	for _, v := range ch.ValidVersions {
-		if m, err := extractMinorVersion(v); err == nil && m == clusterMinor {
-			candidates = append(candidates, v)
-		}
-	}
-	if len(candidates) > 0 {
-		sort.Slice(candidates, func(i, j int) bool {
-			vi, erri := k8sversion.ParseGeneric(candidates[i])
-			if erri != nil {
-				return candidates[i] > candidates[j]
-			}
-			cmp, err := vi.Compare(candidates[j])
-			if err != nil {
-				return candidates[i] > candidates[j]
-			}
-			return cmp > 0 // descending: highest first
-		})
-		return candidates[0], nil
+	// Step 2: highest validVersion matching clusterMinor.
+	if v := highestVersionForMinor(ch.ValidVersions, clusterMinor); v != "" {
+		return v, nil
 	}
 
 	return "", fmt.Errorf("channel %s has no valid version for cluster minor %s; "+
 		"the requested channel may not yet support this Kubernetes minor — "+
 		"switch to a channel that does, or use version: latest explicitly", channelName, clusterMinor)
+}
+
+func findChannelConfig(sc *containerv1.ServerConfig, channelName string) *containerv1.ReleaseChannelConfig {
+	for _, c := range sc.Channels {
+		if c.Channel == channelName {
+			return c
+		}
+	}
+	return nil
+}
+
+// highestVersionForMinor returns the semver-highest entry in versions whose major.minor
+// equals minor, or "" if no match is found.
+func highestVersionForMinor(versions []string, minor string) string {
+	var candidates []string
+	for _, v := range versions {
+		if m, err := extractMinorVersion(v); err == nil && m == minor {
+			candidates = append(candidates, v)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		vi, erri := k8sversion.ParseGeneric(candidates[i])
+		if erri != nil {
+			return candidates[i] > candidates[j]
+		}
+		cmp, err := vi.Compare(candidates[j])
+		if err != nil {
+			return candidates[i] > candidates[j]
+		}
+		return cmp > 0
+	})
+	return candidates[0]
 }
 
 // extractMinorVersion returns "major.minor" from a version string.

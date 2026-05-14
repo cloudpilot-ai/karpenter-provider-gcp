@@ -58,9 +58,9 @@ type Provider interface {
 
 type DefaultProvider struct {
 	sync.Mutex
-	cache          *cache.Cache
-	computeService *compute.Service
-	gkeProvider    gke.Provider
+	cache           *cache.Cache
+	computeService  *compute.Service
+	gkeProvider     gke.Provider
 	versionProvider versionprovider.Provider
 
 	containerOptimizedOSProvider *ContainerOptimizedOS
@@ -121,7 +121,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 
 func (p *DefaultProvider) resolveImageFromTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
 	switch {
-	case term.Alias != "":
+	case term.Alias != "": //nolint:staticcheck
 		return p.resolveAliasTerm(ctx, term)
 	case term.ID != "":
 		return p.resolveIDTerm(ctx, term)
@@ -133,8 +133,10 @@ func (p *DefaultProvider) resolveImageFromTerm(ctx context.Context, term v1alpha
 }
 
 func (p *DefaultProvider) resolveAliasTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
+	//nolint:staticcheck
 	components := strings.SplitN(term.Alias, "@", 2)
 	if len(components) != 2 {
+		//nolint:staticcheck
 		return nil, fmt.Errorf("malformed alias %q: expected family@version", term.Alias)
 	}
 	family, version := components[0], components[1]
@@ -150,7 +152,7 @@ func (p *DefaultProvider) resolveAliasTerm(ctx context.Context, term v1alpha1.Im
 }
 
 func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
-	img, err := p.resolveImage(term.ID)
+	img, err := p.resolveImage(ctx, term.ID)
 	if err != nil {
 		return nil, fmt.Errorf("resolving image %q: %w", term.ID, err)
 	}
@@ -209,7 +211,7 @@ func (p *DefaultProvider) resolveVersion(ctx context.Context, term v1alpha1.Imag
 			cluster.ReleaseChannel.Channel == "UNSPECIFIED" {
 			return "", fmt.Errorf("cluster has no enrolled release channel (UNSPECIFIED); " +
 				"channel: cluster requires an enrolled channel — " +
-				"enrol the cluster in a release channel or use version: latest explicitly")
+				"enroll the cluster in a release channel or use version: latest explicitly")
 		}
 		channelName = cluster.ReleaseChannel.Channel
 	}
@@ -241,7 +243,7 @@ func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
 func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) (Images, error) {
 	var result Images
 	for _, im := range ims {
-		gceim, err := p.resolveImage(im.SourceImage)
+		gceim, err := p.resolveImage(ctx, im.SourceImage)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
 			return nil, err
@@ -254,13 +256,13 @@ func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) 
 	return result, nil
 }
 
-func (p *DefaultProvider) resolveImage(sourceImage string) (*compute.Image, error) {
+func (p *DefaultProvider) resolveImage(ctx context.Context, sourceImage string) (*compute.Image, error) {
 	projectID, imageName, err := parseImageSource(sourceImage)
 	if err != nil {
 		return nil, err
 	}
 
-	image, err := p.computeService.Images.Get(projectID, imageName).Do()
+	image, err := p.computeService.Images.Get(projectID, imageName).Context(ctx).Do()
 	if err != nil && !strings.Contains(err.Error(), "404") {
 		return nil, err
 	}
