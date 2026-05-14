@@ -120,6 +120,60 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily str
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithFamilyChannel creates a GCENodeClass using the new
+// family+channel image selector (e.g. family=ContainerOptimizedOS, channel=stable).
+func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name, family, channel string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if strings.HasPrefix(family, "Ubuntu") {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"family": family, "channel": channel},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithFamilyVersion creates a GCENodeClass using the new
+// family+version image selector (e.g. family=ContainerOptimizedOS, version=latest).
+func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name, family, version string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if strings.HasPrefix(family, "Ubuntu") {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"family": family, "version": version},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
 // CreateNodeClass but with networkConfig.enablePrivateNodes set to true,
 // so Karpenter provisions nodes with no external (public) IP.
