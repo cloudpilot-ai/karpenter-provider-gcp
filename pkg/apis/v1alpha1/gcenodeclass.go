@@ -38,8 +38,8 @@ type GCENodeClassSpec struct {
 	// +optional
 	Disks []Disk `json:"disks,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
-	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family'",rule="self.all(x, has(x.alias) || has(x.id))"
-	// Remove or adjust mutual exclusivity rules since there's only one field
+	// +kubebuilder:validation:XValidation:message="each term must set exactly one of: alias, id, or family (with channel or version)",rule="self.all(x, has(x.alias) || has(x.id) || has(x.family))"
+	// +kubebuilder:validation:XValidation:message="channel: and version: latest cannot both appear in the same imageSelectorTerms",rule="!(self.exists(t, has(t.channel)) && self.exists(t, has(t.family) && t.family == 'ContainerOptimizedOS' && has(t.version) && t.version == 'latest'))"
 	// +kubebuilder:validation:MinItems:=1
 	// +kubebuilder:validation:MaxItems:=30
 	// +required
@@ -141,10 +141,19 @@ type AdditionalNetworkInterface struct {
 }
 
 // ImageSelectorTerm defines selection logic for an image used by Karpenter to launch nodes.
-// If multiple fields are used for selection, the requirements are ANDed.
+// Exactly one of alias, id, or family (with channel or version) must be set.
+// +kubebuilder:validation:XValidation:message="family requires either channel or version to be set",rule="!has(self.family) || has(self.channel) || has(self.version)"
+// +kubebuilder:validation:XValidation:message="channel and version require family to be set",rule="!(has(self.channel) || has(self.version)) || has(self.family)"
+// +kubebuilder:validation:XValidation:message="channel and version cannot both be set",rule="!(has(self.channel) && has(self.version))"
+// +kubebuilder:validation:XValidation:message="channel is only supported for family ContainerOptimizedOS",rule="!has(self.channel) || self.family == 'ContainerOptimizedOS'"
+// +kubebuilder:validation:XValidation:message="exactly one of alias, id, or family must be set",rule="(has(self.alias) ? 1 : 0) + (has(self.id) ? 1 : 0) + (has(self.family) ? 1 : 0) == 1"
+// +kubebuilder:validation:XValidation:message="ContainerOptimizedOS version must be 'latest' or 'milestone.build.build.build' (e.g. '125.19216.104.126')",rule="!has(self.version) || !has(self.family) || self.family != 'ContainerOptimizedOS' || self.version == 'latest' || self.version.matches('^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$')"
+// +kubebuilder:validation:XValidation:message="Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')",rule="!has(self.version) || !has(self.family) || !(self.family in ['Ubuntu2204', 'Ubuntu2404']) || self.version == 'latest' || self.version.matches('^v[0-9]{8}$')"
+// +kubebuilder:validation:XValidation:message="family 'Ubuntu' is not valid; use Ubuntu2404 for Ubuntu 24.04 or Ubuntu2204 for Ubuntu 22.04",rule="!has(self.family) || self.family != 'Ubuntu'"
 type ImageSelectorTerm struct {
+	// Deprecated: use Family with Channel or Version instead.
 	// Alias specifies which GKE image to select.
-	// Valid families include: ContainerOptimizedOS,Ubuntu
+	// Valid families include: ContainerOptimizedOS, Ubuntu
 	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family@version'",rule="self.matches('^[a-zA-Z0-9]+@.+$')"
 	// +kubebuilder:validation:XValidation:message="family is not supported, must be one of the following: 'ContainerOptimizedOS,Ubuntu'",rule="self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']"
 	// +kubebuilder:validation:XValidation:message="ContainerOptimizedOS version must be 'latest' or 'milestone.build.build.build' (e.g. '125.19216.104.126')",rule="!self.startsWith('ContainerOptimizedOS@') || self.matches('^ContainerOptimizedOS@(latest|[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)$')"
@@ -152,11 +161,26 @@ type ImageSelectorTerm struct {
 	// +kubebuilder:validation:MaxLength=60
 	// +optional
 	Alias string `json:"alias,omitempty"`
-	// ID specifies which GKE image to select.
+	// ID specifies a GKE image by its full resource URL.
 	// +kubebuilder:validation:XValidation:message="'id' is improperly formatted, must match the format 'id'",rule="self.matches('^.*$')"
 	// +kubebuilder:validation:MaxLength=160
 	// +optional
 	ID string `json:"id,omitempty"`
+	// Family specifies the OS image family. Required when using Channel or Version.
+	// Valid values: ContainerOptimizedOS, Ubuntu2404, Ubuntu2204.
+	// +kubebuilder:validation:Enum=ContainerOptimizedOS;Ubuntu2404;Ubuntu2204
+	// +optional
+	Family string `json:"family,omitempty"`
+	// Channel specifies the GKE release channel to follow. Only valid when Family is ContainerOptimizedOS.
+	// Use "cluster" to track the channel the cluster is enrolled in.
+	// +kubebuilder:validation:Enum=rapid;regular;stable;extended;cluster
+	// +optional
+	Channel string `json:"channel,omitempty"`
+	// Version pins the image to a specific version or "latest".
+	// For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").
+	// For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" (e.g. "v20260416").
+	// +optional
+	Version string `json:"version,omitempty"`
 }
 
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
@@ -352,12 +376,19 @@ func (in *GCENodeClass) ImageFamily() string {
 	if in.Spec.ImageFamily != nil {
 		return *in.Spec.ImageFamily
 	}
-
 	if alias := in.Alias(); alias != nil {
 		return alias.Family
 	}
-
-	// Unreachable: validation enforces that one of the above conditions must be met
+	// Scan family-based ImageSelectorTerms. Ubuntu2404 and Ubuntu2204 both map to
+	// ImageFamilyUbuntu so downstream code (PatchKubeEnvForOSType) keeps working.
+	for _, term := range in.Spec.ImageSelectorTerms {
+		switch term.Family {
+		case ImageFamilyContainerOptimizedOS:
+			return ImageFamilyContainerOptimizedOS
+		case ImageFamilyUbuntu2404, ImageFamilyUbuntu2204:
+			return ImageFamilyUbuntu
+		}
+	}
 	return ImageFamilyCustom
 }
 

@@ -82,8 +82,16 @@ var (
 	GCEClusterIDTagKey                     = "gce:gce-cluster-id"
 
 	ImageFamilyUbuntu               = "Ubuntu"
+	ImageFamilyUbuntu2404           = "Ubuntu2404"
+	ImageFamilyUbuntu2204           = "Ubuntu2204"
 	ImageFamilyContainerOptimizedOS = "ContainerOptimizedOS"
 	ImageFamilyCustom               = "Custom"
+
+	ImageChannelRapid    = "rapid"
+	ImageChannelRegular  = "regular"
+	ImageChannelStable   = "stable"
+	ImageChannelExtended = "extended"
+	ImageChannelCluster  = "cluster"
 
 	// GKE readiness-gate labels are applied by the GKE control plane after node
 	// registration. System DaemonSets use these as nodeSelector to gate scheduling
