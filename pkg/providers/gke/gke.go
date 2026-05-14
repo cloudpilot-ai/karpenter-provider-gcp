@@ -19,6 +19,7 @@ package gke
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
+	k8sversion "k8s.io/apimachinery/pkg/util/version"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
@@ -35,14 +37,17 @@ const (
 	zoneCacheExpiration      = 5 * time.Minute
 	zoneCacheCleanupInterval = 1 * time.Minute
 	clusterCacheTTL          = 30 * time.Minute
+	serverConfigCacheTTL     = 30 * time.Minute
 
-	zoneCacheKey    = "zone-cache"
-	clusterCacheKey = "cluster"
+	zoneCacheKey         = "zone-cache"
+	clusterCacheKey      = "cluster"
+	serverConfigCacheKey = "server-config"
 )
 
 type Provider interface {
 	ResolveClusterZones(ctx context.Context) ([]string, error)
 	GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error)
+	GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error)
 }
 
 type DefaultProvider struct {
@@ -54,21 +59,23 @@ type DefaultProvider struct {
 	nodeLocation string
 	clusterName  string
 
-	zoneCache    *cache.Cache
-	clusterCache *cache.Cache
+	zoneCache         *cache.Cache
+	clusterCache      *cache.Cache
+	serverConfigCache *cache.Cache
 }
 
 func NewDefaultProvider(gkeClient *containerapiv1.ClusterManagerClient, computeService *compute.Service,
 	containerService *containerv1.Service, projectID, nodeLocation, clusterName string) Provider {
 	return &DefaultProvider{
-		gkeClient:        gkeClient,
-		computeService:   computeService,
-		containerService: containerService,
-		projectID:        projectID,
-		nodeLocation:     nodeLocation,
-		clusterName:      clusterName,
-		zoneCache:        cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
-		clusterCache:     cache.New(clusterCacheTTL, clusterCacheTTL),
+		gkeClient:         gkeClient,
+		computeService:    computeService,
+		containerService:  containerService,
+		projectID:         projectID,
+		nodeLocation:      nodeLocation,
+		clusterName:       clusterName,
+		zoneCache:         cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
+		clusterCache:      cache.New(clusterCacheTTL, clusterCacheTTL),
+		serverConfigCache: cache.New(serverConfigCacheTTL, serverConfigCacheTTL),
 	}
 }
 
@@ -121,4 +128,87 @@ func (p *DefaultProvider) GetClusterConfig(ctx context.Context) (*containerv1.Cl
 	}
 	p.clusterCache.SetDefault(clusterCacheKey, cluster)
 	return cluster, nil
+}
+
+func (p *DefaultProvider) GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error) {
+	if v, ok := p.serverConfigCache.Get(serverConfigCacheKey); ok {
+		return v.(*containerv1.ServerConfig), nil
+	}
+	location := fmt.Sprintf("projects/%s/locations/%s", p.projectID, p.nodeLocation)
+	sc, err := p.containerService.Projects.Locations.GetServerConfig(location).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetching server config: %w", err)
+	}
+	p.serverConfigCache.SetDefault(serverConfigCacheKey, sc)
+	return sc, nil
+}
+
+// ResolveVersionForChannel returns the GKE version string for channelName that matches
+// the minor version of clusterVersion. channelName is normalised to uppercase.
+//
+// Algorithm (proposal/0002 §Version Resolution Algorithm):
+//
+//	Step 1: if defaultVersion minor == clusterVersion minor → return defaultVersion.
+//	Step 2: filter validVersions by minor using semver; return the highest.
+//	Step 3: no match → return an error (no silent fallback).
+func ResolveVersionForChannel(sc *containerv1.ServerConfig, channelName, clusterVersion string) (string, error) {
+	channelName = strings.ToUpper(channelName)
+
+	var ch *containerv1.ReleaseChannelConfig
+	for _, c := range sc.Channels {
+		if c.Channel == channelName {
+			ch = c
+			break
+		}
+	}
+	if ch == nil {
+		return "", fmt.Errorf("channel %s not found in getServerConfig response", channelName)
+	}
+
+	clusterMinor, err := extractMinorVersion(clusterVersion)
+	if err != nil {
+		return "", fmt.Errorf("parsing cluster version %q: %w", clusterVersion, err)
+	}
+
+	// Step 1: defaultVersion minor matches.
+	if ch.DefaultVersion != "" {
+		if m, err := extractMinorVersion(ch.DefaultVersion); err == nil && m == clusterMinor {
+			return ch.DefaultVersion, nil
+		}
+	}
+
+	// Step 2: scan validVersions for the highest semver entry matching clusterMinor.
+	var candidates []string
+	for _, v := range ch.ValidVersions {
+		if m, err := extractMinorVersion(v); err == nil && m == clusterMinor {
+			candidates = append(candidates, v)
+		}
+	}
+	if len(candidates) > 0 {
+		sort.Slice(candidates, func(i, j int) bool {
+			vi, erri := k8sversion.ParseGeneric(candidates[i])
+			if erri != nil {
+				return candidates[i] > candidates[j]
+			}
+			cmp, err := vi.Compare(candidates[j])
+			if err != nil {
+				return candidates[i] > candidates[j]
+			}
+			return cmp > 0 // descending: highest first
+		})
+		return candidates[0], nil
+	}
+
+	return "", fmt.Errorf("channel %s has no valid version for cluster minor %s; "+
+		"the requested channel may not yet support this Kubernetes minor — "+
+		"switch to a channel that does, or use version: latest explicitly", channelName, clusterMinor)
+}
+
+// extractMinorVersion returns "major.minor" from a GKE version like "1.34.6-gke.1068000".
+func extractMinorVersion(v string) (string, error) {
+	parts := strings.SplitN(v, ".", 3)
+	if len(parts) < 2 {
+		return "", fmt.Errorf("cannot extract minor from version %q", v)
+	}
+	return parts[0] + "." + parts[1], nil
 }
