@@ -8,7 +8,6 @@ require (
 	cloud.google.com/go/container v1.45.0
 	github.com/aws/aws-sdk-go v1.55.7
 	github.com/awslabs/operatorpkg v0.0.0-20251222193911-34e9a1898737
-	github.com/go-openapi/swag v0.25.4
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
@@ -48,6 +47,7 @@ require (
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.22.4 // indirect
 	github.com/go-openapi/jsonreference v0.21.4 // indirect
+	github.com/go-openapi/swag v0.25.4 // indirect
 	github.com/go-openapi/swag/cmdutils v0.25.4 // indirect
 	github.com/go-openapi/swag/conv v0.25.4 // indirect
 	github.com/go-openapi/swag/fileutils v0.25.4 // indirect
