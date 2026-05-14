@@ -55,6 +55,7 @@ func TestResolveLatestUbuntuImage_PicksNewestNonDeprecated(t *testing.T) {
 	p := &Ubuntu{
 		computeService:  buildComputeService(t, srv),
 		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+		release:         "2404",
 	}
 
 	got, err := p.resolveLatestUbuntuImage(context.Background())
@@ -90,6 +91,7 @@ func TestResolveLatestUbuntuImage_ExcludesNonUsable(t *testing.T) {
 	p := &Ubuntu{
 		computeService:  buildComputeService(t, srv),
 		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+		release:         "2404",
 	}
 
 	got, err := p.resolveLatestUbuntuImage(context.Background())
@@ -98,7 +100,7 @@ func TestResolveLatestUbuntuImage_ExcludesNonUsable(t *testing.T) {
 }
 
 func TestResolveImages_Ubuntu_DrivesArm64Variant(t *testing.T) {
-	p := &Ubuntu{}
+	p := &Ubuntu{release: "2404"}
 	sourceImage := "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-amd64-v20260420"
 
 	imgs := p.resolveImages(sourceImage)
@@ -114,13 +116,13 @@ func TestResolveImages_Ubuntu_DrivesArm64Variant(t *testing.T) {
 }
 
 func TestBuildImageFilter_Ubuntu_UsesVersionPrefix(t *testing.T) {
-	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1"}, release: "2404"}
 	got := p.buildImageFilter(context.Background())
 	require.Equal(t, `name=ubuntu-gke-2404-1-35*`, got)
 }
 
 func TestBuildImageFilter_Ubuntu_FallsBackOnNilProvider(t *testing.T) {
-	p := &Ubuntu{}
+	p := &Ubuntu{release: "2404"}
 	got := p.buildImageFilter(context.Background())
 	require.Equal(t, `name=ubuntu-gke-2404*`, got)
 }

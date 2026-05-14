@@ -204,11 +204,13 @@ func ResolveVersionForChannel(sc *containerv1.ServerConfig, channelName, cluster
 		"switch to a channel that does, or use version: latest explicitly", channelName, clusterMinor)
 }
 
-// extractMinorVersion returns "major.minor" from a GKE version like "1.34.6-gke.1068000".
+// extractMinorVersion returns "major.minor" from a version string.
+// It uses k8sversion.ParseGeneric so that "v1.34.7" and "1.34.6-gke.1068000"
+// both normalise to "1.34".
 func extractMinorVersion(v string) (string, error) {
-	parts := strings.SplitN(v, ".", 3)
-	if len(parts) < 2 {
-		return "", fmt.Errorf("cannot extract minor from version %q", v)
+	parsed, err := k8sversion.ParseGeneric(v)
+	if err != nil {
+		return "", fmt.Errorf("cannot parse version %q: %w", v, err)
 	}
-	return parts[0] + "." + parts[1], nil
+	return fmt.Sprintf("%d.%d", parsed.Major(), parsed.Minor()), nil
 }

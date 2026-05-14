@@ -109,7 +109,6 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		log.FromContext(ctx).Error(nil, "failed to initialize node pool template provider")
 		os.Exit(1)
 	}
-	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider)
 	billingClient, err := instanceprice.New(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create GCP billing client")
@@ -138,6 +137,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).NodeLocation,
 		options.FromContext(ctx).ClusterName,
 	)
+	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider, gkeProvider)
 
 	projectID := options.FromContext(ctx).ProjectID
 	computeDefaultSA := ""

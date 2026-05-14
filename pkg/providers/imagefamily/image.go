@@ -33,7 +33,8 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
+	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
 // imageResolutionError marks a non-transient failure caused by the NodeClass
@@ -59,22 +60,35 @@ type DefaultProvider struct {
 	sync.Mutex
 	cache          *cache.Cache
 	computeService *compute.Service
+	gkeProvider    gke.Provider
+	versionProvider versionprovider.Provider
 
 	containerOptimizedOSProvider *ContainerOptimizedOS
-	ubuntuOSProvider             *Ubuntu
+	ubuntu2404Provider           *Ubuntu
+	ubuntu2204Provider           *Ubuntu
 }
 
-func NewDefaultProvider(computeService *compute.Service, versionProvider version.Provider) *DefaultProvider {
+// NewDefaultProvider creates the image provider. gkeProvider is used for channel-based
+// resolution; pass a no-op implementation if channel: terms are not needed.
+func NewDefaultProvider(computeService *compute.Service, versionProvider versionprovider.Provider, gkeProvider gke.Provider) *DefaultProvider {
 	return &DefaultProvider{
-		cache:          cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
-		computeService: computeService,
+		cache:           cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
+		computeService:  computeService,
+		gkeProvider:     gkeProvider,
+		versionProvider: versionProvider,
 		containerOptimizedOSProvider: &ContainerOptimizedOS{
 			computeService:  computeService,
 			versionProvider: versionProvider,
 		},
-		ubuntuOSProvider: &Ubuntu{
+		ubuntu2404Provider: &Ubuntu{
 			computeService:  computeService,
 			versionProvider: versionProvider,
+			release:         "2404",
+		},
+		ubuntu2204Provider: &Ubuntu{
+			computeService:  computeService,
+			versionProvider: versionProvider,
+			release:         "2204",
 		},
 	}
 }
@@ -87,98 +101,157 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	if err != nil {
 		return nil, err
 	}
-	if images, ok := p.cache.Get(fmt.Sprintf("%d", hash)); ok {
+	cacheKey := fmt.Sprintf("%d", hash)
+	if images, ok := p.cache.Get(cacheKey); ok {
 		return images.(Images), nil
 	}
 
-	images, ok, err := p.resolveImageFromAlias(ctx, nodeClass)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		p.cache.SetDefault(fmt.Sprintf("%d", hash), images)
-		return images, nil
-	}
-
-	images, _, err = p.resolveImageFromID(ctx, nodeClass)
-	if err != nil {
-		return nil, err
-	}
-	p.cache.SetDefault(fmt.Sprintf("%d", hash), images)
-	return images, nil
-}
-
-func (p *DefaultProvider) resolveImageFromID(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, bool, error) {
-	images := Images{}
+	var result Images
 	for _, term := range nodeClass.Spec.ImageSelectorTerms {
-		image, err := p.resolveImage(term.ID)
+		imgs, err := p.resolveImageFromTerm(ctx, term)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", term.ID)
-			return nil, false, err
+			return nil, err
 		}
-		if image == nil {
-			continue
-		}
-
-		var requirements scheduling.Requirements
-		switch image.Architecture {
-		case OSArchitectureX86:
-			requirements = scheduling.NewRequirements(
-				scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
-			)
-		case OSArchitectureARM:
-			requirements = scheduling.NewRequirements(
-				scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchARM64Requirement),
-			)
-		default:
-			log.FromContext(ctx).Error(err, "unsupported architecture", "imageSource", term.ID)
-			return nil, false, fmt.Errorf("unsupported architecture: %s", image.Architecture)
-		}
-
-		images = append(images, Image{
-			SourceImage:  term.ID,
-			Requirements: requirements,
-		})
+		result = append(result, imgs...)
 	}
 
-	return images, true, nil
+	p.cache.SetDefault(cacheKey, result)
+	return result, nil
 }
 
-func (p *DefaultProvider) resolveImageFromAlias(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, bool, error) {
-	alias := nodeClass.Alias()
-	if alias == nil {
-		return Images{}, false, nil
+func (p *DefaultProvider) resolveImageFromTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
+	switch {
+	case term.Alias != "":
+		return p.resolveAliasTerm(ctx, term)
+	case term.ID != "":
+		return p.resolveIDTerm(ctx, term)
+	case term.Family != "":
+		return p.resolveFamilyTerm(ctx, term)
+	default:
+		return nil, fmt.Errorf("ImageSelectorTerm has no selection field (alias, id, or family)")
 	}
+}
 
-	images := Images{}
-	familyProvider := p.getImageFamilyProvider(alias.Family)
-	ims, err := familyProvider.ResolveImages(ctx, alias.Version)
+func (p *DefaultProvider) resolveAliasTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
+	components := strings.SplitN(term.Alias, "@", 2)
+	if len(components) != 2 {
+		return nil, fmt.Errorf("malformed alias %q: expected family@version", term.Alias)
+	}
+	family, version := components[0], components[1]
+	provider := p.getImageFamilyProvider(family)
+	if provider == nil {
+		return nil, fmt.Errorf("unsupported alias family %q", family)
+	}
+	ims, err := provider.ResolveImages(ctx, version)
 	if err != nil {
-		return nil, false, err
+		return nil, err
+	}
+	return p.filterExistingImages(ctx, ims)
+}
+
+func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
+	img, err := p.resolveImage(term.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving image %q: %w", term.ID, err)
+	}
+	if img == nil {
+		return nil, nil
 	}
 
-	// Ensure the image exists in GCP
+	var requirements scheduling.Requirements
+	switch img.Architecture {
+	case OSArchitectureX86:
+		requirements = scheduling.NewRequirements(
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
+		)
+	case OSArchitectureARM:
+		requirements = scheduling.NewRequirements(
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchARM64Requirement),
+		)
+	default:
+		return nil, fmt.Errorf("unsupported architecture %q for image %q", img.Architecture, term.ID)
+	}
+	return Images{{SourceImage: term.ID, Requirements: requirements}}, nil
+}
+
+func (p *DefaultProvider) resolveFamilyTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
+	version, err := p.resolveVersion(ctx, term)
+	if err != nil {
+		return nil, err
+	}
+	provider := p.getImageFamilyProvider(term.Family)
+	if provider == nil {
+		return nil, fmt.Errorf("unsupported family %q", term.Family)
+	}
+	ims, err := provider.ResolveImages(ctx, version)
+	if err != nil {
+		return nil, err
+	}
+	return p.filterExistingImages(ctx, ims)
+}
+
+// resolveVersion returns the version string to pass to the image family provider.
+// For channel terms it fetches serverConfig and resolves the build version;
+// for version terms it returns the version string directly.
+func (p *DefaultProvider) resolveVersion(ctx context.Context, term v1alpha1.ImageSelectorTerm) (string, error) {
+	if term.Version != "" {
+		return term.Version, nil
+	}
+
+	channelName := term.Channel
+	if channelName == v1alpha1.ImageChannelCluster {
+		cluster, err := p.gkeProvider.GetClusterConfig(ctx)
+		if err != nil {
+			return "", fmt.Errorf("GetClusterConfig for channel: cluster: %w", err)
+		}
+		if cluster.ReleaseChannel == nil ||
+			cluster.ReleaseChannel.Channel == "" ||
+			cluster.ReleaseChannel.Channel == "UNSPECIFIED" {
+			return "", fmt.Errorf("cluster has no enrolled release channel (UNSPECIFIED); " +
+				"channel: cluster requires an enrolled channel — " +
+				"enrol the cluster in a release channel or use version: latest explicitly")
+		}
+		channelName = cluster.ReleaseChannel.Channel
+	}
+
+	sc, err := p.gkeProvider.GetServerConfig(ctx)
+	if err != nil {
+		return "", fmt.Errorf("GetServerConfig for channel resolution: %w", err)
+	}
+	clusterVersion, err := p.versionProvider.Get(ctx)
+	if err != nil {
+		return "", fmt.Errorf("getting cluster version for channel resolution: %w", err)
+	}
+	return gke.ResolveVersionForChannel(sc, channelName, clusterVersion)
+}
+
+func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
+	switch family {
+	case v1alpha1.ImageFamilyContainerOptimizedOS:
+		return p.containerOptimizedOSProvider
+	case v1alpha1.ImageFamilyUbuntu, v1alpha1.ImageFamilyUbuntu2404:
+		return p.ubuntu2404Provider
+	case v1alpha1.ImageFamilyUbuntu2204:
+		return p.ubuntu2204Provider
+	default:
+		return nil
+	}
+}
+
+func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) (Images, error) {
+	var result Images
 	for _, im := range ims {
 		gceim, err := p.resolveImage(im.SourceImage)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
-			return nil, false, err
+			return nil, err
 		}
 		if gceim == nil {
 			continue
 		}
-
-		images = append(images, im)
+		result = append(result, im)
 	}
-
-	if alias.Version != "latest" && len(images) == 0 {
-		return nil, false, &imageResolutionError{msg: fmt.Sprintf(
-			"pinned version %q for %s not found in GCP; "+
-				"verify the version exists and matches your cluster's K8s version",
-			alias.Version, alias.Family)}
-	}
-
-	return images, true, nil
+	return result, nil
 }
 
 func (p *DefaultProvider) resolveImage(sourceImage string) (*compute.Image, error) {
@@ -195,42 +268,24 @@ func (p *DefaultProvider) resolveImage(sourceImage string) (*compute.Image, erro
 	return image, nil
 }
 
-// parseImageSource parses a GCP image source string
-// Supports formats like:
-// - projects/PROJECT_ID/global/images/IMAGE_NAME
-// - global/images/IMAGE_NAME (requires project context)
-// - IMAGE_NAME (requires project context)
+// parseImageSource parses a GCP image source string.
+// Supports: projects/PROJECT_ID/global/images/IMAGE_NAME
 func parseImageSource(imageSource string) (projectID, imageName string, err error) {
-	// Remove any leading/trailing whitespace
 	imageSource = strings.TrimSpace(imageSource)
 
-	// Pattern: projects/PROJECT_ID/global/images/IMAGE_NAME
 	projectPattern := regexp.MustCompile(`^projects/([^/]+)/global/images/(.+)$`)
 	if matches := projectPattern.FindStringSubmatch(imageSource); matches != nil {
 		return matches[1], matches[2], nil
 	}
 
-	// Pattern: global/images/IMAGE_NAME
 	globalPattern := regexp.MustCompile(`^global/images/(.+)$`)
 	if matches := globalPattern.FindStringSubmatch(imageSource); matches != nil {
 		return "", "", fmt.Errorf("project ID required for global image reference: %s", imageSource)
 	}
 
-	// Pattern: IMAGE_NAME only
 	if !strings.Contains(imageSource, "/") {
 		return "", "", fmt.Errorf("project ID required for image name: %s", imageSource)
 	}
 
 	return "", "", fmt.Errorf("invalid image source format: %s", imageSource)
-}
-
-func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
-	switch family {
-	case v1alpha1.ImageFamilyUbuntu:
-		return p.ubuntuOSProvider
-	case v1alpha1.ImageFamilyContainerOptimizedOS:
-		return p.containerOptimizedOSProvider
-	default:
-		return nil
-	}
 }

@@ -34,13 +34,19 @@ import (
 
 const ubuntuGKEImageProject = "ubuntu-os-gke-cloud"
 
-// ubuntuVersionRe matches the GKE version token in an Ubuntu image name (e.g. "-v20260416").
 var ubuntuVersionRe = regexp.MustCompile(`-v\d+(-|$)`)
 var ubuntuPinnedVersionRe = regexp.MustCompile(`^v\d{8}$`)
 
+// Ubuntu resolves GKE Ubuntu images from the ubuntu-os-gke-cloud project.
+// The release field selects the OS series: "2404" for Ubuntu 24.04 or "2204" for Ubuntu 22.04.
 type Ubuntu struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
+	release         string // "2404" or "2204"
+}
+
+func (u *Ubuntu) imagePrefix() string {
+	return "ubuntu-gke-" + u.release
 }
 
 func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, error) {
@@ -69,12 +75,8 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 }
 
 // resolveLatestUbuntuImage queries the ubuntu-os-gke-cloud project for the most recent
-// non-deprecated Ubuntu 24.04 GKE image for amd64 that matches the cluster's K8s minor
-// version. The arm64 variant is derived from it by resolveImages via a simple string
-// replacement.
-//
-// ubuntu-gke-2404 images use explicit arch in the name (e.g. ubuntu-gke-2404-1-35-amd64-v20260416),
-// unlike the older ubuntu-gke-2204 series which had no arch suffix on amd64 images.
+// non-deprecated amd64 Ubuntu GKE image matching the cluster's K8s minor version.
+// The arm64 variant is derived by resolveImages.
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 	filter := u.buildImageFilter(ctx)
 
@@ -83,7 +85,7 @@ func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 		Filter(filter).
 		Pages(ctx, func(page *compute.ImageList) error {
 			for _, img := range page.Items {
-				if isUsableUbuntuImage(img) && (best == nil || img.CreationTimestamp > best.CreationTimestamp) {
+				if u.isUsable(img) && (best == nil || img.CreationTimestamp > best.CreationTimestamp) {
 					best = img
 				}
 			}
@@ -93,13 +95,22 @@ func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("listing Ubuntu GKE images in %s: %w", ubuntuGKEImageProject, err)
 	}
 	if best == nil {
-		return "", fmt.Errorf("no non-deprecated ubuntu-gke-2404 amd64 image found in %s (filter: %s)", ubuntuGKEImageProject, filter)
+		return "", fmt.Errorf("no non-deprecated ubuntu-gke-%s amd64 image found in %s (filter: %s)",
+			u.release, ubuntuGKEImageProject, filter)
 	}
 	return fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, best.Name), nil
 }
 
+// isUsable dispatches to the release-specific usability check.
+func (u *Ubuntu) isUsable(img *compute.Image) bool {
+	if u.release == "2204" {
+		return isUsableUbuntu2204Image(img)
+	}
+	return isUsableUbuntuImage(img)
+}
+
 // isUsableUbuntuImage reports whether img is a non-deprecated general-purpose amd64
-// ubuntu-gke-2404 image suitable for use as a GKE node image.
+// ubuntu-gke-2404 image. The 2404 series uses explicit "-amd64-" in the name.
 func isUsableUbuntuImage(img *compute.Image) bool {
 	if img.Deprecated != nil {
 		switch img.Deprecated.State {
@@ -118,38 +129,58 @@ func isUsableUbuntuImage(img *compute.Image) bool {
 	return true
 }
 
-// buildImageFilter returns a GCP Images.List filter string scoped to the cluster's
-// K8s minor version (e.g. "name=ubuntu-gke-2404-1-35*").
-// Falls back to "ubuntu-gke-2404*" if the version provider is unavailable.
+// isUsableUbuntu2204Image reports whether img is a non-deprecated amd64
+// ubuntu-gke-2204 image. Unlike 2404, the 2204 series does not include "-amd64-"
+// in the name for amd64 images, so we exclude arm64 images instead of requiring -amd64-.
+func isUsableUbuntu2204Image(img *compute.Image) bool {
+	if img.Deprecated != nil {
+		switch img.Deprecated.State {
+		case "DEPRECATED", "OBSOLETE", "DELETED":
+			return false
+		}
+	}
+	if strings.Contains(img.Name, "-arm64-") {
+		return false
+	}
+	for _, skip := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test"} {
+		if strings.Contains(img.Name, skip) {
+			return false
+		}
+	}
+	return true
+}
+
+// buildImageFilter returns a GCP Images.List filter scoped to the cluster's K8s minor version.
 func (u *Ubuntu) buildImageFilter(ctx context.Context) string {
+	prefix := u.imagePrefix()
 	if u.versionProvider == nil {
-		return `name=ubuntu-gke-2404*`
+		return fmt.Sprintf(`name=%s*`, prefix)
 	}
 	k8sVer, err := u.versionProvider.Get(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to get K8s version for Ubuntu image filter, using broad filter")
-		return `name=ubuntu-gke-2404*`
+		return fmt.Sprintf(`name=%s*`, prefix)
 	}
 	parsed, err := k8sversion.ParseGeneric(k8sVer)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to parse K8s version for Ubuntu image filter, using broad filter", "version", k8sVer)
-		return `name=ubuntu-gke-2404*`
+		return fmt.Sprintf(`name=%s*`, prefix)
 	}
-	return fmt.Sprintf(`name=ubuntu-gke-2404-%d-%d*`, parsed.Major(), parsed.Minor())
+	return fmt.Sprintf(`name=%s-%d-%d*`, prefix, parsed.Major(), parsed.Minor())
 }
 
 func (u *Ubuntu) resolveImages(sourceImage string) Images {
 	ret := Images{}
 
-	// x86 & gpu
+	// amd64
 	ret = append(ret, Image{
 		SourceImage: sourceImage,
 		Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement)),
 	})
 
-	// arm64: ubuntu-gke-2404 uses explicit "-amd64-" in the name; replace it with "-arm64-".
-	arm64Image := strings.Replace(sourceImage, "-amd64-", "-arm64-", 1)
+	// arm64: derivation is release-specific.
+	arm64Image := u.deriveArm64Image(sourceImage)
 	ret = append(ret, Image{
 		SourceImage: arm64Image,
 		Requirements: scheduling.NewRequirements(
@@ -158,4 +189,21 @@ func (u *Ubuntu) resolveImages(sourceImage string) Images {
 	})
 
 	return ret
+}
+
+// deriveArm64Image returns the arm64 variant of a source Ubuntu image.
+//   - 2404: replace "-amd64-" with "-arm64-" (explicit arch in name)
+//   - 2204: insert "-arm64" before the "-v{date}" version suffix
+func (u *Ubuntu) deriveArm64Image(sourceImage string) string {
+	if u.release == "2404" {
+		return strings.Replace(sourceImage, "-amd64-", "-arm64-", 1)
+	}
+	// 2204: ubuntu-gke-2204-1-34-v20231201 → ubuntu-gke-2204-1-34-arm64-v20231201
+	return ubuntuVersionRe.ReplaceAllStringFunc(sourceImage, func(m string) string {
+		suffix := ""
+		if strings.HasSuffix(m, "-") {
+			suffix = "-"
+		}
+		return "-arm64-v" + strings.TrimPrefix(strings.TrimSuffix(strings.TrimPrefix(m, "-v"), "-"), "") + suffix
+	})
 }
