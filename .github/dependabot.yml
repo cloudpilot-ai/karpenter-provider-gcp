@@ -9,18 +9,20 @@ updates:
     ignore:
       - dependency-name: "k8s.io/*"
     groups:
-      # karpenter upgrades require interface adoption and e2e validation;
-      # keep isolated so they don't auto-merge with routine dep bumps.
+      # karpenter-core and controller-runtime must be updated together and
+      # require e2e validation + interface adoption before merging.
       karpenter-core:
         applies-to: version-updates
         patterns:
           - "sigs.k8s.io/karpenter"
+          - "sigs.k8s.io/controller-runtime"
       go-dependencies:
         applies-to: version-updates
         patterns:
           - "*"
         exclude-patterns:
           - "sigs.k8s.io/karpenter"
+          - "sigs.k8s.io/controller-runtime"
           - "k8s.io/*"
 
   - package-ecosystem: "github-actions"
