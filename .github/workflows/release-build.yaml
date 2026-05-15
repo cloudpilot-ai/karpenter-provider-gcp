@@ -5,7 +5,6 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
-
 jobs:
   image-publish:
     runs-on: ubuntu-latest
@@ -105,13 +104,13 @@ jobs:
           helm repo add karpenter-gcp "${PAGES_URL}" --force-update
 
           for CHART in karpenter karpenter-crd; do
-            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions -o json 2>/dev/null | jq -r '.[].version' || true)
+            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json 2>/dev/null | jq -r '.[].version' || true)
             [ -z "${VERSIONS}" ] && continue
 
             echo "${VERSIONS}" | while read VERSION; do
               if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
                 echo "Pulling ${CHART} ${VERSION}..."
-                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --destination charts/ || \
+                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination charts/ || \
                   echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
               fi
             done
