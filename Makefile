@@ -25,7 +25,8 @@ KARPENTER_CORE_DIR = $(shell go list -m -f '{{ .Dir }}' sigs.k8s.io/karpenter)
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-presubmit: toolchain verify-codegen verify verify-deadcode chart-lint ut-test docs-lint ## Run all steps in the developer loop
+presubmit: toolchain verify ci ## Run all steps in the developer loop
+ci: verify-codegen verify-deadcode chart-lint ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
 	cd hack/tools && go install tool
@@ -183,7 +184,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

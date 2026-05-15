@@ -1,4 +1,4 @@
-name: Pre-submit check
+name: Verify
 
 on:
   push:
@@ -7,10 +7,10 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 jobs:
-  presubmit:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -21,18 +21,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Cache toolchain binaries
-        id: cache-toolchain
-        uses: actions/cache@v5
-        with:
-          path: ~/go/bin
-          key: toolchain-${{ runner.os }}-${{ hashFiles('hack/tools/go.sum') }}
+          cache-dependency-path: |
+            go.sum
+            hack/tools/go.sum
 
       - name: Install toolchain
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        run: |
-          make toolchain
+        run: make toolchain
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
@@ -40,7 +34,5 @@ jobs:
           version: v2.12.2
           only-new-issues: true
 
-      - name: Presubmit check
-        run: |
-          make presubmit
-
+      - name: Verify
+        run: make ci
