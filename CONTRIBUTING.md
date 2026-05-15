@@ -1,10 +1,10 @@
 # Contributing
 
-# Design Proposals
+## Design Proposals
 
 For significant changes — architectural redesigns, new API fields, operator-visible behaviour changes, or multi-phase work — opening a proposal before writing code helps align on the approach early and produces a useful design record.
 
-## When to write a proposal
+### When to write a proposal
 
 Write a proposal when your change involves any of the following:
 
@@ -16,7 +16,7 @@ Write a proposal when your change involves any of the following:
 
 A proposal is **not required** for bug fixes, small flag additions, doc-only changes, or refactors that do not change observable behaviour.
 
-## How to submit a proposal
+### How to submit a proposal
 
 1. Copy [`proposals/0000-template.md`](proposals/0000-template.md) to `proposals/NNNN-short-title.md`, where `NNNN` is the next available four-digit number.
 2. Fill in all **required** sections (Summary, Motivation, Proposal). Optional sections can be omitted or marked N/A.
@@ -26,7 +26,7 @@ A proposal is **not required** for bug fixes, small flag additions, doc-only cha
 
 Proposals are reviewed by project maintainers via GitHub PR review. Assign the PR for review or mention `@cloudpilot-ai/karpenter-gcp` when the proposal is ready for feedback.
 
-## Status values
+### Status values
 
 | Status | Meaning |
 |--------|---------|
@@ -41,11 +41,11 @@ Proposals are reviewed by project maintainers via GitHub PR review. Assign the P
 
 ---
 
-# Development
+## Development
 
 This doc explains how to set up a development environment so you can get started contributing to this project
 
-## Prerequisites
+### Prerequisites
 
 1. [`go`](https://golang.org/doc/install): For building the project
 1. [`git`](https://help.github.com/articles/set-up-git/): For source control
@@ -55,7 +55,7 @@ This guides breaks down into two parts
 1. Setting up the GKE cluster - If you have already setup the GKE cluster, you can skip this part
 2. Setting up the development environment - This part is required for all the contributors
 
-## Setting up the GKE cluster
+### Setting up the GKE cluster
 
 1. First Go ahead and create new project in the Google Cloud Platform and enable billing for the project if you don't have it already enabled. You can follow the below links as guide on how to create a new project and enable billing for the project
     - [Creating the project](https://cloud.google.com/resource-manager/docs/creating-managing-projects)
@@ -123,7 +123,7 @@ This guides breaks down into two parts
     export GOOGLE_APPLICATION_CREDENTIALS="/path/to/key.json"
     ```
 
-## Setting up the development environment
+### Setting up the development environment
 
 1. If you already setup the PROJECT_ID ,REGION and CLUSTER_NAME environment variables in the while setting up the GKE cluster, you can skip this step. If not, go ahead and export the below environment variables
 
@@ -144,11 +144,11 @@ This guides breaks down into two parts
     make run
     ```
 
-## End-to-end tests
+### End-to-end tests
 
 E2e tests run against a real GKE cluster. The cluster is **not** torn down between runs — it is reused across test sessions to save setup time.
 
-### Prerequisites
+#### Prerequisites
 
 ```bash
 export E2E_PROJECT_ID=<gcp-project-id>
@@ -158,7 +158,7 @@ export E2E_LOCATION=<zone-or-region>   # e.g. us-central1-f or us-central1
 
 `E2E_REGION` (default: `us-central1`) and `E2E_PREFIX` (default: `karpenter-e2e`) can be overridden if needed. `E2E_REGION` must match the region of `E2E_LOCATION` when using a zonal location.
 
-### Required permissions
+#### Required permissions
 
 The service account pointed to by `E2E_SA_PATH` must have the following IAM roles on the project:
 
@@ -171,7 +171,7 @@ The service account pointed to by `E2E_SA_PATH` must have the following IAM role
 | `roles/resourcemanager.projectIamAdmin` | Bind roles to the karpenter service account |
 | `roles/artifactregistry.admin` | Create/delete Artifact Registry repo and push images |
 
-### One-time cluster setup
+#### One-time cluster setup
 
 ```bash
 make e2e-setup
@@ -181,7 +181,7 @@ This idempotently creates a GKE cluster, VPC, subnet, Cloud Router, Cloud NAT, s
 
 Cloud NAT is required for the `networking` suite: nodes provisioned with `enableExternalIPAccess: false` have no public IP and need NAT for outbound internet access.
 
-### Deploy a new controller image
+#### Deploy a new controller image
 
 ```bash
 make e2e-deploy
@@ -189,7 +189,7 @@ make e2e-deploy
 
 Builds the controller image with `ko` and runs `helm upgrade --install`.
 
-### Run all suites
+#### Run all suites
 
 ```bash
 make e2e-tests
@@ -197,7 +197,7 @@ make e2e-tests
 
 Runs all suites in parallel (default `GINKGO_PROCS=4`). Override with `GINKGO_PROCS=N`.
 
-### Run a single spec
+#### Run a single spec
 
 ```bash
 make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
@@ -205,13 +205,13 @@ make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
 
 Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`, `scheduling`, `networking`.
 
-### Tear down all e2e infrastructure
+#### Tear down all e2e infrastructure
 
 ```bash
 make e2e-teardown
 ```
 
-### Check for orphaned resources (without deleting)
+#### Check for orphaned resources (without deleting)
 
 ```bash
 make e2e-check-clean
