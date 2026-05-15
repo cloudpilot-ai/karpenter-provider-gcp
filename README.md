@@ -31,7 +31,7 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 
 ## Documentation
 
-See [`docs/`](docs/) for installation, configuration, networking, troubleshooting, and contributing guides.
+See [`docs/`](docs/) for installation, configuration, networking, troubleshooting, and contributing guides. See [`proposals/`](proposals/) for accepted and in-progress design proposals.
 
 ## Release notes / upgrades
 
