@@ -1,3 +1,46 @@
+# Contributing
+
+# Design Proposals
+
+For significant changes — architectural redesigns, new API fields, operator-visible behaviour changes, or multi-phase work — opening a proposal before writing code helps align on the approach early and produces a useful design record.
+
+## When to write a proposal
+
+Write a proposal when your change involves any of the following:
+
+- Architectural redesign or replacement of a major subsystem
+- New `GCENodeClass` fields, new CRDs, or changes to existing API fields
+- Multi-phase implementation spanning several PRs
+- Changes that require operator action on upgrade (new required config, migration steps)
+- Large changes from external contributors (strongly encouraged)
+
+A proposal is **not required** for bug fixes, small flag additions, doc-only changes, or refactors that do not change observable behaviour.
+
+## How to submit a proposal
+
+1. Copy [`proposals/0000-template.md`](proposals/0000-template.md) to `proposals/NNNN-short-title.md`, where `NNNN` is the next available four-digit number.
+2. Fill in all **required** sections (Summary, Motivation, Proposal). Optional sections can be omitted or marked N/A.
+3. Open a draft PR with the proposal. The `Status` field should be `Draft` while the approach is still being formed. Update it to `Provisional` when you are ready for initial feedback.
+4. Iterate in review. When the approach is agreed by maintainers, update `Status` to `Implementable`.
+5. Implementation PRs reference the proposal via the "Related proposal" field in the PR template.
+
+Proposals are reviewed by project maintainers via GitHub PR review. Assign the PR for review or mention `@cloudpilot-ai/karpenter-gcp` when the proposal is ready for feedback.
+
+## Status values
+
+| Status | Meaning |
+|--------|---------|
+| `Draft` | Work in progress, not ready for review |
+| `Provisional` | Ready for feedback, approach not yet agreed |
+| `Implementable` | Approach agreed; implementation may proceed |
+| `Implemented` | Fully implemented and merged |
+| `Deferred` | Accepted but not currently scheduled |
+| `Rejected` | Reviewed and rejected |
+| `Withdrawn` | Author withdrew the proposal |
+| `Replaced` | Superseded by a newer proposal (include link) |
+
+---
+
 # Development
 
 This doc explains how to set up a development environment so you can get started contributing to this project
