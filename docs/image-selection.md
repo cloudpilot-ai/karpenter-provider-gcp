@@ -21,11 +21,11 @@ spec:
 
 Each term in `imageSelectorTerms` must use exactly one of three selection modes:
 
-| Mode | Fields | Behavior |
-|------|--------|----------|
+| Mode              | Fields               | Behavior                                                                                        |
+|-------------------|----------------------|-------------------------------------------------------------------------------------------------|
 | Channel reference | `family` + `channel` | Resolves to the GKE build promoted for that channel. Nodes drift when GKE promotes a new build. |
-| Version pin | `family` + `version` | Fixed image. Nodes never drift from image changes. |
-| Raw image ID | `id` | Explicit GCE image URL. Nodes never drift from image changes. |
+| Version pin       | `family` + `version` | Fixed image. Nodes never drift from image changes.                                              |
+| Raw image ID      | `id`                 | Explicit GCE image URL. Nodes never drift from image changes.                                   |
 
 ### Channel reference (live)
 
