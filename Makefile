@@ -57,7 +57,8 @@ chart-lint: ## Lint the Helm charts (validates values.schema.json and templates)
 	helm lint charts/karpenter-crd/
 
 verify: ## Verify code. Includes linting, formatting, etc
-	golangci-lint run --new-from-rev=origin/main --timeout=20m
+	@command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not found — install it from https://golangci-lint.run/welcome/install/" && exit 1)
+	golangci-lint run --timeout=20m
 	git diff --exit-code || (echo "golangci-lint reformatted files above — stage and commit them" && exit 1)
 
 verify-deadcode: ## Check for dead code using whole-program analysis

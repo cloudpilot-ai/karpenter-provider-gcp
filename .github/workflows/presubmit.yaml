@@ -1,4 +1,4 @@
-name: Verify
+name: Pre-submit check
 
 on:
   push:
@@ -7,10 +7,10 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
 jobs:
-  verify:
+  presubmit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
