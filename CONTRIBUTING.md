@@ -50,6 +50,7 @@ This doc explains how to set up a development environment so you can get started
 1. [`go`](https://golang.org/doc/install): For building the project
 1. [`git`](https://help.github.com/articles/set-up-git/): For source control
 1. [`gcloud`](https://cloud.google.com/sdk/docs/install): For Interacting with the Google Cloud Platform
+1. [`golangci-lint`](https://golangci-lint.run/welcome/install/): Required by `make presubmit` — install separately, not via `go install`
 
 This guides breaks down into two parts 
 1. Setting up the GKE cluster - If you have already setup the GKE cluster, you can skip this part
