@@ -26,8 +26,6 @@ import (
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -85,34 +83,6 @@ func NewController(kubeClient client.Client,
 	}
 }
 
-// getZonesFromNodes lists all zones by inspecting node labels
-func getZonesFromNodes(ctx context.Context, kubeClient client.Client) ([]string, error) {
-	nodeList := &corev1.NodeList{}
-	if err := kubeClient.List(ctx, nodeList, &client.ListOptions{}); err != nil {
-		return nil, fmt.Errorf("listing nodes: %w", err)
-	}
-
-	zoneSet := sets.Set[string]{}
-	for _, node := range nodeList.Items {
-		zone := node.Labels[corev1.LabelTopologyZone]
-		if zone == "" {
-			// fallback to legacy label
-			zone = node.Labels[corev1.LabelFailureDomainBetaZone]
-		}
-		if zone != "" {
-			zoneSet.Insert(zone)
-		}
-	}
-
-	// convert set to sorted slice
-	var zones []string
-	for zone := range zoneSet {
-		zones = append(zones, zone)
-	}
-
-	return zones, nil
-}
-
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err := c.handleStoppingSpotInstances(ctx); err != nil {
 		return reconciler.Result{}, fmt.Errorf("handling stopped spot instances: %w", err)
@@ -164,23 +134,6 @@ func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceN
 	}
 
 	return nil
-}
-
-func (c *Controller) isInstanceFromKarpenter(ctx context.Context, instanceName string) bool {
-	var node corev1.Node
-	err := c.kubeClient.Get(ctx, client.ObjectKey{Name: instanceName}, &node)
-	if err == nil {
-		// The node is in the cluster, but does it have the karpenter label?
-		if node.Labels == nil || node.Labels[utils.LabelNodePoolKey] == "" {
-			return false
-		}
-		return true
-	}
-	if apierrors.IsNotFound(err) {
-		return false
-	}
-	log.FromContext(ctx).Error(err, "getting node", "node", instanceName)
-	return false
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

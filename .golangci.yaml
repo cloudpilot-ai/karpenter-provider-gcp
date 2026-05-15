@@ -17,9 +17,9 @@ linters:
     - tparallel
     - unconvert
     - unparam
+    - unused
   disable:
     - prealloc
-    - unused
   settings:
     gocyclo:
       min-complexity: 11

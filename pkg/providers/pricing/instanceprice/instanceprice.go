@@ -56,10 +56,6 @@ func (c *Client) FetchAllPrices(ctx context.Context) (map[string]Prices, error) 
 	return fetchAll(ctx)
 }
 
-func IsBlacklisted(_ string) bool {
-	return false
-}
-
 func fetchAll(ctx context.Context) (map[string]Prices, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cyclenerdURL, nil)
 	if err != nil {
