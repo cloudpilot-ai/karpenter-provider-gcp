@@ -5,7 +5,6 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
-
 jobs:
   image-publish:
     runs-on: ubuntu-latest
@@ -19,11 +18,11 @@ jobs:
           echo "tag_semver=${TAG#v}" >> $GITHUB_ENV
         shell: bash
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -41,7 +40,7 @@ jobs:
         run: |
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/cloudpilotai
 
-      - uses: ko-build/setup-ko@v0.6
+      - uses: ko-build/setup-ko@v0.9
 
       - name: build and publish image
         run: |
@@ -66,7 +65,7 @@ jobs:
         shell: bash
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Fetch existing Pages index
         run: |
@@ -105,13 +104,13 @@ jobs:
           helm repo add karpenter-gcp "${PAGES_URL}" --force-update
 
           for CHART in karpenter karpenter-crd; do
-            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions -o json 2>/dev/null | jq -r '.[].version' || true)
+            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json 2>/dev/null | jq -r '.[].version' || true)
             [ -z "${VERSIONS}" ] && continue
 
             echo "${VERSIONS}" | while read VERSION; do
               if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
                 echo "Pulling ${CHART} ${VERSION}..."
-                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --destination charts/ || \
+                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination charts/ || \
                   echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
               fi
             done
@@ -129,13 +128,13 @@ jobs:
           done
 
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: charts/
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

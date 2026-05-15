@@ -22,7 +22,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/go-openapi/swag"
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 	"gopkg.in/yaml.v3"
@@ -50,7 +49,7 @@ func GetClusterName(metadata *compute.Metadata) (string, error) {
 	if len(clusterNameEntry) != 1 {
 		return "", errors.New("cluster name label not found")
 	}
-	clusterName := swag.StringValue(clusterNameEntry[0].Value)
+	clusterName := lo.FromPtr(clusterNameEntry[0].Value)
 	if clusterName == "" {
 		return "", errors.New("cluster name label is empty")
 	}
@@ -68,7 +67,7 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	memoryMB := fmt.Sprintf("%dMi", instanceType.Overhead.KubeReserved.Memory().Value()/(1024*1024))
 	ephemeralStorage := instanceType.Overhead.KubeReserved.StorageEphemeral().String()
 
-	configStr := swag.StringValue(targetEntry.Value)
+	configStr := lo.FromPtr(targetEntry.Value)
 	if configStr == "" {
 		return errors.New("kubelet-config metadata is empty")
 	}
@@ -106,7 +105,7 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 		return fmt.Errorf("failed to marshal updated kubelet-config YAML: %w", err)
 	}
 
-	targetEntry.Value = swag.String(string(updatedYAML))
+	targetEntry.Value = lo.ToPtr(string(updatedYAML))
 	metaData.Items[index] = targetEntry
 
 	return nil
@@ -120,7 +119,7 @@ func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) err
 			continue
 		}
 
-		item.Value = swag.String(strings.ReplaceAll(swag.StringValue(item.Value), nodePoolLabelEntry, ""))
+		item.Value = lo.ToPtr(strings.ReplaceAll(lo.FromPtr(item.Value), nodePoolLabelEntry, ""))
 	}
 	return nil
 }
@@ -138,8 +137,8 @@ func SetMaxPodsPerNode(metadata *compute.Metadata, nodeClass *v1alpha1.GCENodeCl
 		if !ok || index == -1 {
 			return fmt.Errorf("%s metadata not found", key)
 		}
-		targetEntry.Value = swag.String(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
-		targetEntry.Value = swag.String(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPodsStr))
+		targetEntry.Value = lo.ToPtr(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
+		targetEntry.Value = lo.ToPtr(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPodsStr))
 
 		metadata.Items[index] = targetEntry
 	}
@@ -157,7 +156,7 @@ func SetProvisioningModel(metadata *compute.Metadata, model string) error {
 		if !ok || index == -1 {
 			return fmt.Errorf("%s metadata not found", key)
 		}
-		targetEntry.Value = swag.String(gkeProvisioningRegex.ReplaceAllString(*targetEntry.Value, gkeProvisioning))
+		targetEntry.Value = lo.ToPtr(gkeProvisioningRegex.ReplaceAllString(*targetEntry.Value, gkeProvisioning))
 
 		metadata.Items[index] = targetEntry
 	}
@@ -170,7 +169,7 @@ func PatchUnregisteredTaints(metadata *compute.Metadata) error {
 	// Remove nodePoolLabelEntry from kube-labels and kube-env
 	for _, item := range metadata.Items {
 		if item.Key == "kube-env" {
-			kubeEnv := swag.StringValue(item.Value)
+			kubeEnv := lo.FromPtr(item.Value)
 
 			lines := strings.Split(kubeEnv, "\n")
 			for i, line := range lines {
@@ -183,7 +182,7 @@ func PatchUnregisteredTaints(metadata *compute.Metadata) error {
 				}
 			}
 			// Rejoin the updated lines into a single string
-			item.Value = swag.String(strings.Join(lines, "\n"))
+			item.Value = lo.ToPtr(strings.Join(lines, "\n"))
 		}
 	}
 
@@ -236,7 +235,7 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 		if item.Key != "kube-env" {
 			continue
 		}
-		kubeEnv := swag.StringValue(item.Value)
+		kubeEnv := lo.FromPtr(item.Value)
 		if kubeEnv == "" {
 			return fmt.Errorf("kube-env metadata is empty")
 		}
@@ -250,7 +249,7 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 		}
 
 		if updated != kubeEnv {
-			item.Value = swag.String(updated)
+			item.Value = lo.ToPtr(updated)
 		}
 	}
 
@@ -283,7 +282,7 @@ func AppendNodeClaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENo
 				// Append the nodeclaim label to kube-labels
 				labelString = append(labelString, fmt.Sprintf("%s=%s", k, v))
 			}
-			item.Value = swag.String(*item.Value + "," + strings.Join(labelString, ","))
+			item.Value = lo.ToPtr(*item.Value + "," + strings.Join(labelString, ","))
 		}
 	}
 }
@@ -292,7 +291,7 @@ func AppendRegisteredLabel(metadata *compute.Metadata) {
 	// Add registered label in metadata
 	for _, item := range metadata.Items {
 		if item.Key == "kube-labels" {
-			item.Value = swag.String(*item.Value + "," + RegisteredLabel)
+			item.Value = lo.ToPtr(*item.Value + "," + RegisteredLabel)
 		}
 	}
 }
@@ -316,13 +315,13 @@ func AppendSecondaryBootDisks(projectID string, nodeClass *v1alpha1.GCENodeClass
 		for _, item := range metadata.Items {
 			if item.Key == "kube-env" {
 				// Add SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/DISK_IMAGE_NAME
-				kubeEnv := swag.StringValue(item.Value)
+				kubeEnv := lo.FromPtr(item.Value)
 				lines := strings.Split(kubeEnv, "\n")
 				lines = append(lines, fmt.Sprintf("SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/%s", deviceName))
-				item.Value = swag.String(strings.Join(lines, "\n"))
+				item.Value = lo.ToPtr(strings.Join(lines, "\n"))
 			}
 			if item.Key == "kube-labels" {
-				item.Value = swag.String(*item.Value + "," + secondaryBootDiskLabel(name, projectID, disk.SecondaryBootMode))
+				item.Value = lo.ToPtr(*item.Value + "," + secondaryBootDiskLabel(name, projectID, disk.SecondaryBootMode))
 			}
 		}
 	}
@@ -366,14 +365,14 @@ func ApplyCustomMetadata(metadata *compute.Metadata, customMetadata map[string]s
 
 		if ok && index != -1 {
 			// Key exists, append the value with comma separator
-			targetEntry.Value = swag.String(*targetEntry.Value + "," + value)
+			targetEntry.Value = lo.ToPtr(*targetEntry.Value + "," + value)
 			metadata.Items[index] = targetEntry
 			continue
 		}
 		// Key doesn't exist, create a new metadata item
 		newItem := &compute.MetadataItems{
 			Key:   key,
-			Value: swag.String(value),
+			Value: lo.ToPtr(value),
 		}
 		metadata.Items = append(metadata.Items, newItem)
 	}

@@ -231,6 +231,10 @@ func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePo
 
 func (c *CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
 	providerID := nodeClaim.Status.ProviderID
+	if providerID == "" {
+		// No instance was ever created (e.g. every Create attempt hit STOCKOUT).
+		return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeclaim has no providerID"))
+	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("id", providerID))
 	return c.instanceProvider.Delete(ctx, providerID)
 }
