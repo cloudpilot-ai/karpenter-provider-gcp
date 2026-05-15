@@ -41,13 +41,13 @@ When GKE promotes a new build for the channel, Karpenter marks existing nodes as
 
 Available channels:
 
-| Channel | Description |
-|---------|-------------|
-| `rapid` | Newest builds, least validation |
-| `regular` | Balance of new features and stability |
-| `stable` | Most validated, recommended for production |
-| `extended` | Extended support for older Kubernetes versions |
-| `cluster` | Follows whatever channel the cluster is enrolled in |
+| Channel    | Description                                      |
+|------------|--------------------------------------------------|
+| `rapid`    | Newest builds, least validation                  |
+| `regular`  | Balance of new features and stability            |
+| `stable`   | Most validated, recommended for production       |
+| `extended` | Extended support for older Kubernetes versions   |
+| `cluster`  | Follows whatever channel the cluster is enrolled in |
 
 Use `channel: cluster` as the default for most deployments. It automatically tracks the cluster's enrolled channel without hardcoding a specific one.
 
@@ -88,21 +88,21 @@ imageSelectorTerms:
 
 ## OS families
 
-| Family | OS | Notes |
-|--------|-----|-------|
+| Family                 | OS                     | Notes                            |
+|------------------------|------------------------|----------------------------------|
 | `ContainerOptimizedOS` | Container-Optimized OS | Supports `channel` and `version` |
-| `Ubuntu2404` | Ubuntu 24.04 LTS | Supports `version` only |
-| `Ubuntu2204` | Ubuntu 22.04 LTS | Supports `version` only |
+| `Ubuntu2404`           | Ubuntu 24.04 LTS       | Supports `version` only          |
+| `Ubuntu2204`           | Ubuntu 22.04 LTS       | Supports `version` only          |
 
 The bare `Ubuntu` family name is not supported. Use `Ubuntu2404` or `Ubuntu2204` explicitly.
 
 ## Version formats
 
-| Family | `version: latest` | Version pin format | Example |
-|--------|-------------------|-------------------|---------|
-| `ContainerOptimizedOS` | Newest COS for cluster's K8s version | `milestone.build.build.build` | `125.19216.104.126` |
-| `Ubuntu2404` | Newest Ubuntu 24.04 for cluster's K8s minor | `vYYYYMMDD` | `v20260416` |
-| `Ubuntu2204` | Newest Ubuntu 22.04 for cluster's K8s minor | `vYYYYMMDD` | `v20231201` |
+| Family                 | `version: latest`                             | Version pin format              | Example             |
+|------------------------|-----------------------------------------------|---------------------------------|---------------------|
+| `ContainerOptimizedOS` | Newest COS for cluster's K8s version          | `milestone.build.build.build`   | `125.19216.104.126` |
+| `Ubuntu2404`           | Newest Ubuntu 24.04 for cluster's K8s minor   | `vYYYYMMDD`                     | `v20260416`         |
+| `Ubuntu2204`           | Newest Ubuntu 22.04 for cluster's K8s minor   | `vYYYYMMDD`                     | `v20231201`         |
 
 ## Examples
 
@@ -165,10 +165,10 @@ spec:
 
 The `alias` field is deprecated. Migrate to the new structured fields:
 
-| Old syntax | New syntax |
-|------------|------------|
-| `alias: ContainerOptimizedOS@latest` | `family: ContainerOptimizedOS`<br>`version: latest` |
-| `alias: Ubuntu@latest` | `family: Ubuntu2404`<br>`version: latest` |
-| `alias: ContainerOptimizedOS@125.19216.104.126` | `family: ContainerOptimizedOS`<br>`version: "125.19216.104.126"` |
+| Old syntax                                       | New syntax                                                       |
+|--------------------------------------------------|------------------------------------------------------------------|
+| `alias: ContainerOptimizedOS@latest`             | `family: ContainerOptimizedOS`<br>`version: latest`              |
+| `alias: Ubuntu@latest`                           | `family: Ubuntu2404`<br>`version: latest`                        |
+| `alias: ContainerOptimizedOS@125.19216.104.126`  | `family: ContainerOptimizedOS`<br>`version: "125.19216.104.126"` |
 
 The `alias` field continues to work but will be removed in a future release. New configurations should use `family` with `channel` or `version`.
