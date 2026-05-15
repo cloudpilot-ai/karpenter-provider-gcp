@@ -37,17 +37,6 @@ cloud.google.com/go/container/internal
 # github.com/Masterminds/semver/v3 v3.4.0
 ## explicit; go 1.21
 github.com/Masterminds/semver/v3
-# github.com/aws/aws-sdk-go v1.55.8
-## explicit; go 1.19
-github.com/aws/aws-sdk-go/aws
-github.com/aws/aws-sdk-go/aws/awserr
-github.com/aws/aws-sdk-go/aws/credentials
-github.com/aws/aws-sdk-go/aws/endpoints
-github.com/aws/aws-sdk-go/internal/context
-github.com/aws/aws-sdk-go/internal/ini
-github.com/aws/aws-sdk-go/internal/sdkio
-github.com/aws/aws-sdk-go/internal/shareddefaults
-github.com/aws/aws-sdk-go/internal/sync/singleflight
 # github.com/awslabs/operatorpkg v0.0.0-20251222193911-34e9a1898737
 ## explicit; go 1.25.0
 github.com/awslabs/operatorpkg/controller
