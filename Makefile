@@ -173,7 +173,7 @@ download: ## Run "go mod download"
 update-pricing:
 	@tmpdir=$$(mktemp -d); \
 	trap "rm -rf $$tmpdir" EXIT; \
-	(cd hack/tools/price_validate && go run . --work-dir=$$tmpdir) && \
+	go run ./hack/price_validate --work-dir=$$tmpdir && \
 	cp $$tmpdir/computed.json pkg/providers/pricing/initial-prices.json && \
 	echo "Updated pkg/providers/pricing/initial-prices.json"
 
