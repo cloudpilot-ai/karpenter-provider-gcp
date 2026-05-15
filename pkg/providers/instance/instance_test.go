@@ -532,22 +532,6 @@ func amd64InstanceType() *cloudprovider.InstanceType {
 	}
 }
 
-// nonBootDisk builds a GCENodeClass containing a single non-boot data disk.
-func nonBootDisk(category v1alpha1.DiskCategory, iops, throughput *int64) *v1alpha1.GCENodeClass {
-	disk := v1alpha1.Disk{
-		SizeGiB:               100,
-		Category:              category,
-		Boot:                  false,
-		ProvisionedIOPS:       iops,
-		ProvisionedThroughput: throughput,
-	}
-	return &v1alpha1.GCENodeClass{
-		Spec: v1alpha1.GCENodeClassSpec{
-			Disks: []v1alpha1.Disk{disk},
-		},
-	}
-}
-
 // bootDiskNodeClass builds a GCENodeClass with a single boot disk and a resolved amd64 image.
 func bootDiskNodeClass(category v1alpha1.DiskCategory, iops, throughput *int64) *v1alpha1.GCENodeClass {
 	return &v1alpha1.GCENodeClass{
