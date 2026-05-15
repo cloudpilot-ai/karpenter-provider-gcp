@@ -20,8 +20,6 @@ import (
 	"fmt"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 )
 
 const (
@@ -39,12 +37,3 @@ var (
 	RegisteredLabel = fmt.Sprintf("%s=%s", karpv1.NodeRegisteredLabelKey, "true")
 )
 
-type Metadata struct {
-	nodePoolTemplateProvider nodepooltemplate.Provider
-}
-
-func NewMetadata(nodePoolTemplateProvider nodepooltemplate.Provider) *Metadata {
-	return &Metadata{
-		nodePoolTemplateProvider: nodePoolTemplateProvider,
-	}
-}
