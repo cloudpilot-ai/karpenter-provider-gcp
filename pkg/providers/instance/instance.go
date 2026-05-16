@@ -686,8 +686,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
 
-	isGPUInstance := len(template.Properties.GuestAccelerators) > 0 ||
-		instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
+	isGPUInstance := len(template.Properties.GuestAccelerators) > 0 || instanceTypeHasGPU(instanceType)
 
 	// Setup metadata
 	if err := p.setupInstanceMetadata(template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType, isGPUInstance); err != nil {
@@ -733,7 +732,7 @@ func (p *DefaultProvider) buildInstance(nodeClaim *karpv1.NodeClaim, nodeClass *
 	p.configureInstanceCapacityProvision(instance, capacityType)
 
 	// A2, A3, G2 machine types have built-in GPUs and do not support live migration.
-	if instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0 {
+	if isGPUInstance {
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 
@@ -880,6 +879,15 @@ func (p *DefaultProvider) setupInstanceMetadata(instanceMetadata *compute.Metada
 	}
 
 	return nil
+}
+
+// instanceTypeHasGPU reports whether the instance type has a built-in GPU requirement.
+// It uses direct map access because Requirements.Get() for a missing key returns
+// NodeSelectorOpExists with Len()=MaxInt64, which would incorrectly classify all
+// instance types as GPU instances.
+func instanceTypeHasGPU(instanceType *cloudprovider.InstanceType) bool {
+	req := instanceType.Requirements[v1alpha1.LabelInstanceGPUCount]
+	return req != nil && req.Operator() == corev1.NodeSelectorOpIn && req.Len() > 0
 }
 
 // setupGPUMetadata handles all GPU-specific metadata injection.

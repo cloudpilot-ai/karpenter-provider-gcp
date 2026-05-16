@@ -1104,7 +1104,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 			Metadata: &compute.Metadata{
 				Items: []*compute.MetadataItems{
 					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
-					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n")},
 					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
 				},
 			},
@@ -1161,7 +1161,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 			Metadata: &compute.Metadata{
 				Items: []*compute.MetadataItems{
 					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
-					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n")},
 					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
 				},
 			},
@@ -1222,7 +1222,7 @@ func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
 			Metadata: &compute.Metadata{
 				Items: []*compute.MetadataItems{
 					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
-					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n")},
 					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
 				},
 			},
@@ -1282,7 +1282,9 @@ func makeGPUTemplate(kubeLabels string) *compute.InstanceTemplate {
 			Metadata: &compute.Metadata{
 				Items: []*compute.MetadataItems{
 					{Key: "kube-labels", Value: ptr.To(kubeLabels)},
-					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\ngke-provisioning=standard\n")},
+					// kube-env mirrors kube-labels: KUBELET_ARGS carries the same labels in --node-labels=,
+					// which is the canonical path GKE COS uses to pass labels to kubelet.
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110 --node-labels=" + kubeLabels + "\ngke-provisioning=standard\n")},
 					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
 				},
 			},
@@ -1298,6 +1300,17 @@ func kubeLabelsFrom(t *testing.T, instance *compute.Instance) string {
 		}
 	}
 	t.Fatal("kube-labels not found in instance metadata")
+	return ""
+}
+
+func kubeEnvFrom(t *testing.T, instance *compute.Instance) string {
+	t.Helper()
+	for _, item := range instance.Metadata.Items {
+		if item.Key == "kube-env" {
+			return ptr.Deref(item.Value, "")
+		}
+	}
+	t.Fatal("kube-env not found in instance metadata")
 	return ""
 }
 
@@ -1325,9 +1338,13 @@ func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
 				karpv1.CapacityTypeOnDemand,
 			)
 			require.NoError(t, err)
-			got := kubeLabelsFrom(t, instance)
-			require.Contains(t, got, "cloud.google.com/gke-gpu-driver-version="+tc.wantVersion)
-			require.Contains(t, got, "cloud.google.com/gke-accelerator=nvidia-l4")
+			kl := kubeLabelsFrom(t, instance)
+			ke := kubeEnvFrom(t, instance)
+			require.Contains(t, kl, "cloud.google.com/gke-gpu-driver-version="+tc.wantVersion)
+			require.Contains(t, kl, "cloud.google.com/gke-accelerator=nvidia-l4")
+			// kube-env --node-labels is the canonical kubelet label source.
+			require.Contains(t, ke, "cloud.google.com/gke-gpu-driver-version="+tc.wantVersion)
+			require.Contains(t, ke, "cloud.google.com/gke-accelerator=nvidia-l4")
 		})
 	}
 }
