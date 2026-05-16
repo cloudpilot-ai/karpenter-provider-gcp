@@ -1275,14 +1275,21 @@ func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, instance)
-	var kubeEnv string
+	var kubeEnv, kubeLabels string
 	for _, item := range instance.Metadata.Items {
-		if item.Key == "kube-env" {
+		switch item.Key {
+		case "kube-env":
 			kubeEnv = ptr.Deref(item.Value, "")
-			break
+		case "kube-labels":
+			kubeLabels = ptr.Deref(item.Value, "")
 		}
 	}
 	require.Contains(t, kubeEnv, metadata.GPUTaintArg, "GPU taint must be injected when GuestAccelerators present and AutoGPUTaint=true")
+	// Driver-version label applies to all GPU nodes, including attached-GPU instances.
+	require.Contains(t, kubeEnv, "gke-gpu-driver-version=default", "driver-version label must be set for attached-GPU nodes")
+	// No accelerator label: nonGPUIT has no LabelGKEAccelerator requirement, so gpuName resolves
+	// to "" via direct map access and SetGPUAcceleratorLabel must not be called.
+	require.NotContains(t, kubeLabels, "gke-accelerator=", "attached-GPU instance type without LabelGKEAccelerator must not get a bogus accelerator label")
 }
 
 func makeProvider() *DefaultProvider {

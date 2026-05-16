@@ -892,8 +892,9 @@ func instanceTypeHasGPU(instanceType *cloudprovider.InstanceType) bool {
 
 // setupGPUMetadata handles all GPU-specific metadata injection.
 // AutoGPUTaint applies to any GPU node (including attached GPU instances).
-// Accelerator and driver-version labels are set only for built-in GPU families
-// where the accelerator type is known from instance type requirements.
+// The accelerator label is set only for built-in GPU families where the
+// accelerator type is known from instance type requirements.
+// The driver-version label is set for all GPU nodes (built-in and attached).
 func setupGPUMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, isGPU bool) error {
 	if !isGPU {
 		return nil
@@ -903,7 +904,12 @@ func setupGPUMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GC
 			return fmt.Errorf("failed to append GPU taint to kube-env: %w", err)
 		}
 	}
-	gpuName := instanceType.Requirements.Get(v1alpha1.LabelGKEAccelerator).Any()
+	// Use direct map access: Requirements.Get() for a missing key returns NodeSelectorOpExists
+	// with Len()=MaxInt64 and Any()=random integer, which would inject a bogus accelerator label.
+	var gpuName string
+	if req := instanceType.Requirements[v1alpha1.LabelGKEAccelerator]; req != nil && req.Operator() == corev1.NodeSelectorOpIn && req.Len() > 0 {
+		gpuName = req.Any()
+	}
 	if gpuName != "" {
 		if err := metadata.SetGPUAcceleratorLabel(instanceMetadata, gpuName); err != nil {
 			return fmt.Errorf("gke-accelerator: %w", err)
