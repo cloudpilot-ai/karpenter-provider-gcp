@@ -1076,6 +1076,38 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 	require.NotNil(t, instance)
 	require.Equal(t, "SPOT", instance.Scheduling.ProvisioningModel,
 		"buildInstance must use the passed capacityType, not recompute it from instanceType offerings")
+	// Instance type has no LabelInstanceGPUCount — GPU metadata must not be injected.
+	// Previously, Requirements.Get() for a missing key returned NodeSelectorOpExists with
+	// Len()=MaxInt64, causing isGPUInstance=true for every instance type.
+	got := kubeLabelsFrom(t, instance)
+	require.NotContains(t, got, "gke-gpu-driver-version", "non-GPU instance must not get GPU driver version label")
+	require.NotContains(t, got, "gke-accelerator", "non-GPU instance must not get accelerator label")
+}
+
+func TestInstanceTypeHasGPU(t *testing.T) {
+	t.Parallel()
+
+	gpuIT := &cloudprovider.InstanceType{
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1"),
+		),
+	}
+	noGPUExplicit := &cloudprovider.InstanceType{
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist),
+		),
+	}
+	// Key is entirely absent — this was the bug: Requirements.Get() returned NodeSelectorOpExists
+	// with Len()=MaxInt64, causing isGPUInstance=true for every instance type.
+	noGPUAbsent := &cloudprovider.InstanceType{
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+		),
+	}
+
+	require.True(t, instanceTypeHasGPU(gpuIT), "In=1 must be detected as GPU")
+	require.False(t, instanceTypeHasGPU(noGPUExplicit), "DoesNotExist must not be detected as GPU")
+	require.False(t, instanceTypeHasGPU(noGPUAbsent), "absent key must not be detected as GPU")
 }
 
 func TestBuildInstance_GPUTaintInjected(t *testing.T) {
