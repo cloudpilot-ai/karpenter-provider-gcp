@@ -324,7 +324,7 @@ const (
 	// 1. A field changes its default value for an existing field that is already hashed
 	// 2. A field is added to the hash calculation with an already-set value
 	// 3. A field is removed from the hash calculations
-	GCENodeClassHashVersion = "v3"
+	GCENodeClassHashVersion = "v4"
 )
 
 func (in *GCENodeClass) Hash() string {

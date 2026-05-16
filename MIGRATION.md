@@ -34,6 +34,8 @@ spec:
   gpuDriverVersion: default
 ```
 
+**Node rotation on upgrade:** `GCENodeClassHashVersion` is bumped to `v4`. On upgrade, Karpenter detects that all existing `GCENodeClass` objects carry a stale hash version and triggers a rolling node replacement for every affected NodePool. This is a one-time, controlled rotation — nodes are replaced gradually, not all at once.
+
 ---
 
 ### Node service account
