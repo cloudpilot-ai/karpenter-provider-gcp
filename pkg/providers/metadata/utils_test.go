@@ -221,6 +221,18 @@ func TestSetGPUDriverVersionLabel_InjectsLabel(t *testing.T) {
 	require.Contains(t, kubeEnvValue(meta), "cloud.google.com/gke-gpu-driver-version=latest")
 }
 
+func TestSetGPUDriverVersionLabel_ReplacesWhenLabelIsFirst(t *testing.T) {
+	// GPU label is the first entry in --node-labels=. The strip regex eats only the
+	// preceding comma, leaving "--node-labels=,next" without the fix.
+	baseLabels := "cloud.google.com/gke-gpu-driver-version=default,max-pods-per-node=110"
+	meta := gpuTestMeta(baseLabels, baseLabels)
+	require.NoError(t, SetGPUDriverVersionLabel(meta, "latest"))
+	ke := kubeEnvValue(meta)
+	require.Contains(t, ke, "cloud.google.com/gke-gpu-driver-version=latest")
+	require.NotContains(t, ke, "--node-labels=,", "leading comma must not appear in --node-labels after strip")
+	require.Equal(t, 1, strings.Count(ke, "gke-gpu-driver-version="), "kube-env: must appear exactly once")
+}
+
 func TestSetGPUDriverVersionLabel_ReplacesExistingValue(t *testing.T) {
 	baseLabels := "max-pods-per-node=110,cloud.google.com/gke-gpu-driver-version=default"
 	meta := gpuTestMeta(baseLabels, baseLabels)

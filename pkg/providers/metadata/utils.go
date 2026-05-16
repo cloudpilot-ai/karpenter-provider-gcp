@@ -366,7 +366,11 @@ func appendNodeLabelToKubeEnv(metadata *compute.Metadata, labelKey, labelValue s
 			return fmt.Errorf("--node-labels flag not found in kube-env KUBELET_ARGS")
 		}
 		// Remove any existing entry with this label key (idempotent).
+		// The strip regex eats the preceding comma; when the label is the first entry
+		// in --node-labels= there is no preceding comma, so a trailing comma is left
+		// behind. Clean that up explicitly.
 		updated := stripRe.ReplaceAllString(kubeEnv, "")
+		updated = strings.ReplaceAll(updated, "--node-labels=,", "--node-labels=")
 		// Append new label to the --node-labels value.
 		updated = kubeEnvNodeLabelsRegex.ReplaceAllStringFunc(updated, func(match string) string {
 			return match + "," + label
