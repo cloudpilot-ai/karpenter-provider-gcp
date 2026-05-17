@@ -1,10 +1,5 @@
 title: Karpenter Controller
-description: >
-  Minimal GCP IAM permissions for the karpenter-provider-gcp controller
-  service account. This file is the single source of truth — Terraform,
-  e2e scripts, and install docs all reference it directly.
-  Update this file and docs/MIGRATION.md whenever a GCP API call is added
-  or removed. Only e2e tests (not make presubmit) can validate completeness.
+description: Minimal IAM role for the karpenter-provider-gcp controller service account.
 stage: GA
 includedPermissions:
   # Compute Engine — instance lifecycle
