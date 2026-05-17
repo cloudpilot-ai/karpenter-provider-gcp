@@ -1,12 +1,6 @@
 # Migration Guide
 
-This document tracks changes that require action when upgrading karpenter-provider-gcp. Check this file on every upgrade.
-
----
-
-## IAM changes
-
-Karpenter's GCP IAM permissions are defined in [`deploy/iam/karpenter-controller-role.yaml`](../deploy/iam/karpenter-controller-role.yaml). That file is the canonical reference — when permissions change, this document records what changed and why, so you know whether your deployment needs updating.
+This document tracks breaking changes and required actions when upgrading karpenter-provider-gcp. Check this file on every upgrade. The canonical IAM permission list is in [`deploy/iam/karpenter-controller-role.yaml`](../deploy/iam/karpenter-controller-role.yaml).
 
 ---
 
@@ -28,9 +22,7 @@ Previous installation instructions granted two broad predefined roles to the con
 - `roles/compute.admin` — full write access to all Compute Engine resources in the project
 - `roles/container.admin` — full admin access to all GKE resources in the project
 
-These are far broader than required and violate the principle of least privilege.
-
-**Replacement:** Create a minimal custom role from [`deploy/iam/karpenter-controller-role.yaml`](../deploy/iam/karpenter-controller-role.yaml):
+These are far broader than required. Create a minimal custom role instead:
 
 ```sh
 gcloud iam roles create karpenter_controller \
@@ -54,24 +46,26 @@ gcloud projects remove-iam-policy-binding $PROJECT_ID \
     --role="roles/container.admin"
 ```
 
-**`iam.serviceAccountUser` — scope change.** The previous guide granted `roles/iam.serviceAccountUser` at project level (actAs any SA in the project). Scope it to just the node SA instead. Add the SA-scoped binding before removing the broad one to avoid a permission gap:
+### Scope `iam.serviceAccountUser` to the node SA (not project-wide)
+
+**Action required if you followed the previous installation guide.**
+
+The previous guide granted `roles/iam.serviceAccountUser` at project level (actAs any SA in the project). This should be scoped to only the SA(s) Karpenter attaches to nodes. Add the scoped binding before removing the broad one to avoid a permission gap:
 
 ```sh
-# Add the SA-scoped binding first (before removing the broad one) to avoid a permission gap.
-# To find your node SA, see the install guide Step 1.
+# Add the SA-scoped binding first to avoid a permission gap.
+# Use the Compute Engine default SA or your custom node SA — see install guide Step 1.
 export NODE_SA_EMAIL=<your-node-sa>@<your-project-id>.iam.gserviceaccount.com
 gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
     --role roles/iam.serviceAccountUser \
     --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 
-# Now remove the overly broad project-wide binding.
+# Remove the broad project-wide binding.
 gcloud projects remove-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/iam.serviceAccountUser"
 ```
 
-### Cloud Billing API permissions — not currently required
+If you override the node SA via `GCENodeClass.spec.serviceAccount` or `--node-pool-service-account`, repeat the `add-iam-policy-binding` step for each SA you use.
 
-The pricing provider currently fetches prices from a third-party CSV source and does not call the GCP Cloud Billing API. No billing permissions are needed.
-
-> **Note:** When live GCP pricing is added (see [#231](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/231)), `cloudbilling.services.get` and `cloudbilling.skus.list` will need to be added to `deploy/iam/karpenter-controller-role.yaml`. This migration guide will be updated at that point.
+> **Note:** When live GCP pricing is added (see [#231](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/231)), `cloudbilling.services.get` and `cloudbilling.skus.list` will need to be added to `deploy/iam/karpenter-controller-role.yaml`. This guide will be updated at that point.
