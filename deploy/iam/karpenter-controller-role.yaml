@@ -16,8 +16,8 @@ includedPermissions:
   - compute.machineTypes.list
   - compute.networks.get
   - compute.projects.get
-  - compute.regionInstanceTemplates.get
-  - compute.regionInstanceTemplates.list
+  - compute.instanceTemplates.get
+  - compute.instanceTemplates.list
   - compute.regions.get
   - compute.subnetworks.get
   - compute.subnetworks.use
