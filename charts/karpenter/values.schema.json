@@ -4,6 +4,11 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Reserved for Helm parent-chart globals; not consumed by this chart."
+    },
     "nameOverride": {
       "type": "string",
       "description": "Override the default chart name."
