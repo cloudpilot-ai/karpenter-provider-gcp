@@ -158,6 +158,14 @@ else
   log "Created role ${KARPENTER_ROLE_ID}"
 fi
 
+log "Removing legacy broad role bindings if present..."
+for OLD_ROLE in roles/compute.admin roles/container.admin roles/iam.serviceAccountUser; do
+  gcloud projects remove-iam-policy-binding "${E2E_PROJECT_ID}" \
+    --member "serviceAccount:${GSA_EMAIL}" \
+    --role "${OLD_ROLE}" \
+    --quiet 2>/dev/null || true
+done
+
 log "Binding controller SA to minimal role..."
 gcloud projects add-iam-policy-binding "${E2E_PROJECT_ID}" \
     --member "serviceAccount:${GSA_EMAIL}" \

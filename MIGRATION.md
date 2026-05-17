@@ -96,9 +96,8 @@ export GSA_NAME=karpenter-gsa   # the name of your Karpenter controller GCP serv
 
 curl -fsSL https://raw.githubusercontent.com/cloudpilot-ai/karpenter-provider-gcp/main/deploy/iam/karpenter-controller-role.yaml \
     -o karpenter-controller-role.yaml
-gcloud iam roles create karpenter_controller \
-    --project=$PROJECT_ID \
-    --file=karpenter-controller-role.yaml
+gcloud iam roles create karpenter_controller --project=$PROJECT_ID --file=karpenter-controller-role.yaml 2>/dev/null || \
+gcloud iam roles update karpenter_controller --project=$PROJECT_ID --file=karpenter-controller-role.yaml
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \

@@ -49,7 +49,8 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 export NODE_SA_EMAIL=<your-node-sa>@<your-project-id>.iam.gserviceaccount.com
 gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
     --role roles/iam.serviceAccountUser \
-    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
+    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --project $PROJECT_ID
 ```
 
 > **Recommendation:** The Compute Engine default SA has broad `roles/editor`-equivalent permissions. Create a dedicated node SA with only the permissions your workloads need and pass it via `GCENodeClass.spec.serviceAccount` or the `--node-pool-service-account` controller flag.
