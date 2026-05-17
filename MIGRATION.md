@@ -15,6 +15,64 @@ The service account resolution order is now:
 
 The fallback to the template's service account list has been removed. If your NodeClass and operator flag are both unset, provisioned nodes will use the Compute Engine default SA. This matches GKE's own default, but GKE recommends using a dedicated SA with minimal permissions ([`roles/container.nodeServiceAccount`](https://cloud.google.com/kubernetes-engine/docs/how-to/hardening-your-cluster#use_least_privilege_sa)) for production clusters. Set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` or `spec.serviceAccount` accordingly.
 
+### Minimal custom IAM role replaces broad predefined roles
+
+**Action required for all existing installations.**
+
+Previous installation instructions granted two broad predefined roles to the controller service account:
+
+- `roles/compute.admin` — full write access to all Compute Engine resources in the project
+- `roles/container.admin` — full admin access to all GKE resources in the project
+
+These are far broader than required. The canonical permission list is now in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). Create a minimal custom role from that file:
+
+```sh
+export PROJECT_ID=<your-project-id>
+export GSA_NAME=karpenter-gsa   # the name of your Karpenter controller GCP service account
+
+gcloud iam roles create karpenter_controller \
+    --project=$PROJECT_ID \
+    --file=deploy/iam/karpenter-controller-role.yaml
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="projects/$PROJECT_ID/roles/karpenter_controller"
+```
+
+Then remove the old broad bindings:
+
+```sh
+gcloud projects remove-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/compute.admin"
+
+gcloud projects remove-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/container.admin"
+```
+
+### Scope `iam.serviceAccountUser` to the node SA
+
+**Action required if you followed the previous installation guide.**
+
+The previous guide granted `roles/iam.serviceAccountUser` at project level (actAs any SA in the project). This should be scoped to only the SA(s) Karpenter attaches to nodes. Add the scoped binding before removing the broad one to avoid a permission gap:
+
+```sh
+# Add the SA-scoped binding first.
+# Use the Compute Engine default SA or your custom node SA.
+export NODE_SA_EMAIL=<your-node-sa>@<your-project-id>.iam.gserviceaccount.com
+gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
+    --role roles/iam.serviceAccountUser \
+    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
+
+# Remove the broad project-wide binding.
+gcloud projects remove-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/iam.serviceAccountUser"
+```
+
+If you override the node SA via `GCENodeClass.spec.serviceAccount` or `--node-pool-service-account`, repeat the `add-iam-policy-binding` step for each SA you use.
+
 ## v0.3.0
 
 ### CRDs moved to a separate Helm chart (`karpenter-crd`)
