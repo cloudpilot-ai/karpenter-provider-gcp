@@ -17,12 +17,12 @@ includedPermissions:
   - compute.images.list
   - compute.instanceGroupManagers.get
   - compute.machineTypes.list
-  - compute.networks.get
+  - compute.networks.get      # required for Shared VPC (cross-project network validation)
   - compute.projects.get
   - compute.instanceTemplates.get
   - compute.instanceTemplates.list
   - compute.regions.get
-  - compute.subnetworks.get
+  - compute.subnetworks.get   # required for Shared VPC (cross-project subnet validation)
   - compute.subnetworks.use
   - compute.subnetworks.useExternalIp
   - compute.zones.list
