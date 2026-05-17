@@ -1,0 +1,34 @@
+title: Karpenter Controller
+description: >
+  Minimal GCP IAM permissions for the karpenter-provider-gcp controller
+  service account. This file is the single source of truth — Terraform,
+  e2e scripts, and install docs all reference it directly.
+  Update this file and docs/MIGRATION.md whenever a GCP API call is added
+  or removed. Only e2e tests (not make presubmit) can validate completeness.
+stage: GA
+includedPermissions:
+  # Compute Engine — instance lifecycle
+  - compute.instances.create
+  - compute.instances.delete
+  - compute.instances.get
+  - compute.instances.list
+  - compute.instances.setLabels
+  # Compute Engine — infrastructure discovery
+  - compute.disks.create  # implicit: required by Instances.Insert (boot disk)
+  - compute.images.get
+  - compute.images.list
+  - compute.instanceGroupManagers.get
+  - compute.machineTypes.list
+  - compute.networks.get
+  - compute.projects.get
+  - compute.regionInstanceTemplates.get
+  - compute.regionInstanceTemplates.list
+  - compute.regions.get
+  - compute.subnetworks.get
+  - compute.subnetworks.use
+  - compute.zones.list
+  - compute.zoneOperations.get
+  # GKE Container Engine — cluster config and node pool templates
+  - container.clusters.get
+  - container.nodePools.create
+  - container.nodePools.get

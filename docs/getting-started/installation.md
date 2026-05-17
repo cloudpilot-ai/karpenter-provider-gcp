@@ -17,7 +17,7 @@ gcloud services enable compute.googleapis.com container.googleapis.com
 
 ## Step 1 — Create a GCP service account
 
-Karpenter needs permissions to manage Compute Engine instances and read GKE cluster configuration.
+Karpenter needs a minimal set of GCP permissions to manage Compute Engine instances and read GKE cluster configuration. The canonical permission list is in [`deploy/iam/karpenter-controller-role.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/deploy/iam/karpenter-controller-role.yaml) in the repository — that file is the source of truth for all IAM references.
 
 ```sh
 export PROJECT_ID=<your-project-id>
@@ -25,20 +25,26 @@ export GSA_NAME=karpenter-gsa
 
 gcloud iam service-accounts create $GSA_NAME --project=$PROJECT_ID
 
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/compute.admin"
+# Create the minimal custom role from the canonical permission list.
+# Clone the repo or copy deploy/iam/karpenter-controller-role.yaml locally first.
+# If upgrading and the role already exists, use `gcloud iam roles update` with the same flags.
+gcloud iam roles create karpenter_controller \
+    --project=$PROJECT_ID \
+    --file=deploy/iam/karpenter-controller-role.yaml
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/container.admin"
+    --role="projects/$PROJECT_ID/roles/karpenter_controller"
 
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/iam.serviceAccountUser"
+# iam.serviceAccountUser must be scoped to the specific node SA — not project-wide.
+# This is the SA Karpenter attaches to provisioned nodes. To find it:
+#   GKE node pool SA: gcloud container node-pools describe <pool> --cluster=$CLUSTER_NAME --region=$REGION --format="value(config.serviceAccount)"
+#   Compute Engine default SA: echo "$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
+export NODE_SA_EMAIL=<your-node-sa>@<your-project-id>.iam.gserviceaccount.com
+gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
+    --role roles/iam.serviceAccountUser \
+    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 ```
-
-If you use a custom minimal IAM role instead of `roles/container.admin`, ensure it includes `container.clusters.get`. Karpenter reads the cluster API to derive network configuration for provisioned nodes.
 
 ## Step 2 — Install Karpenter with Helm
 
