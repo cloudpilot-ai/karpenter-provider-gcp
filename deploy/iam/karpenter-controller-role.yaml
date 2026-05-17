@@ -24,6 +24,7 @@ includedPermissions:
   - compute.zones.list
   - compute.zoneOperations.get
   # GKE Container Engine — cluster config and node pool templates
+  # nodePools.get is covered by container.clusters.get
+  # nodePools.create/delete map to container.clusters.update in GCP IAM
   - container.clusters.get
-  - container.nodePools.create
-  - container.nodePools.get
+  - container.clusters.update
