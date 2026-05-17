@@ -26,11 +26,12 @@ export GSA_NAME=karpenter-gsa
 gcloud iam service-accounts create $GSA_NAME --project=$PROJECT_ID
 
 # Create the minimal custom role from the canonical permission list.
-# Clone the repo or copy deploy/iam/karpenter-controller-role.yaml locally first.
 # If upgrading and the role already exists, use `gcloud iam roles update` with the same flags.
+curl -fsSL https://raw.githubusercontent.com/cloudpilot-ai/karpenter-provider-gcp/main/deploy/iam/karpenter-controller-role.yaml \
+    -o karpenter-controller-role.yaml
 gcloud iam roles create karpenter_controller \
     --project=$PROJECT_ID \
-    --file=deploy/iam/karpenter-controller-role.yaml
+    --file=karpenter-controller-role.yaml
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \

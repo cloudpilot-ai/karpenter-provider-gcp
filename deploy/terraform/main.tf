@@ -1,18 +1,3 @@
-variable "common_name" {
-  type    = string
-  default = "karpenter-provider-gcp"
-}
-
-variable "google_region" {
-  type = string
-  default = "us-central1"
-}
-
-variable "project_id" {
-  type = string
-  default = "karpenter-provider-gcp"
-}
-
 terraform {
   required_providers {
     google = {
