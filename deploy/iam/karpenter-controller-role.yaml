@@ -8,6 +8,9 @@ includedPermissions:
   - compute.instances.get
   - compute.instances.list
   - compute.instances.setLabels
+  - compute.instances.setMetadata
+  - compute.instances.setServiceAccount
+  - compute.instances.setTags
   # Compute Engine — infrastructure discovery
   - compute.disks.create  # implicit: required by Instances.Insert (boot disk)
   - compute.images.get
@@ -21,6 +24,7 @@ includedPermissions:
   - compute.regions.get
   - compute.subnetworks.get
   - compute.subnetworks.use
+  - compute.subnetworks.useExternalIp
   - compute.zones.list
   - compute.zoneOperations.get
   # GKE Container Engine — cluster config and node pool templates
