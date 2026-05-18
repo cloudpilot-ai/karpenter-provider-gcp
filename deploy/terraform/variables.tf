@@ -33,6 +33,6 @@ variable "kubernetes_service_account" {
 # rather than relying on the broad Compute Engine default SA.
 variable "node_service_account_email" {
   type        = string
-  description = "Email of the GCP SA attached to provisioned nodes (iam.serviceAccountUser is bound here). Defaults to the Compute Engine default SA if left empty — set this to a minimal-privilege SA instead."
+  description = "Email of the GCP SA attached to provisioned nodes. When empty, iam.serviceAccountUser is bound on the Compute Engine default SA. Set this to a minimal-privilege SA instead."
   default     = ""
 }
