@@ -36,6 +36,35 @@ spec:
 
 **Node rotation on upgrade:** `GCENodeClassHashVersion` is bumped to `v4`. On upgrade, Karpenter detects that all existing `GCENodeClass` objects carry a stale hash version and triggers a rolling node replacement for every affected NodePool. This is a one-time, controlled rotation — nodes are replaced gradually, not all at once.
 
+### Release channel awareness (`imageSelectorTerms[].family` / `.channel` / `.version`)
+
+**No migration action required.** This section describes the new preferred way to configure image selection.
+
+New structured fields replace the `alias` string for image selection:
+
+```yaml
+# Follow the cluster's enrolled GKE release channel (recommended)
+imageSelectorTerms:
+  - family: ContainerOptimizedOS
+    channel: cluster
+
+# Pin to a specific COS milestone
+imageSelectorTerms:
+  - family: ContainerOptimizedOS
+    version: "125.19216.104.126"
+
+# Pin to a specific Ubuntu 24.04 date build
+imageSelectorTerms:
+  - family: Ubuntu2404
+    version: "v20260416"
+```
+
+The `alias` field continues to work unchanged. See [Image selection](docs/image-selection.md) for the full reference and [Image management](docs/image-management.md#legacy-image-alias-format) for the alias → structured field migration table.
+
+**New IAM permission required** (if you use `channel:` terms and have a minimal custom role): `container.clusters.getServerConfig` is now included in `deploy/iam/karpenter-controller-role.yaml`. If you manage the role manually, add this permission before enabling `channel:` terms.
+
+---
+
 ### Image alias version pinning (`imageSelectorTerms[].alias`)
 
 > **For new configurations, prefer the `family`/`channel`/`version` structured fields over the `alias` field.** See [Image selection](docs/image-selection.md) and [Image management](docs/image-management.md#legacy-image-alias-format) for the migration table.
