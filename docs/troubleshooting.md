@@ -79,9 +79,9 @@ This is a known limitation tracked in [GitHub issue #245](https://github.com/clo
 
 ## Private node clusters (org policy)
 
-Karpenter correctly omits external IPs from **provisioned nodes** on clusters with `enablePrivateNodes: true`. However, Karpenter still creates zero-node bootstrap node pools at startup. On clusters where an org policy enforces private nodes (e.g. `container.managed.enablePrivateNodes`), this pool creation request may be rejected by GKE, preventing Karpenter from starting.
+Karpenter correctly omits external IPs from **provisioned nodes** on clusters with `enablePrivateNodes: true`. No extra configuration is required.
 
-Full support for such clusters — eliminating bootstrap pool creation entirely — is tracked in [#230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230).
+Karpenter discovers an existing RUNNING node pool for bootstrap metadata rather than creating new pools. If no pool exists and Karpenter must create the `karpenter-fallback` pool, it mirrors the cluster's private-node setting automatically so clusters with `container.managed.enablePrivateNodes` org policy are supported. See [Bootstrap pool selection](bootstrap-pool.md).
 
 ---
 
@@ -124,11 +124,11 @@ disks:
 
 ## arm64 provisioning not available
 
-arm64 node provisioning may be unavailable if the cluster's region does not support arm64 machine types or if arm64 template pools could not be created. Check Karpenter startup logs for related messages.
+arm64 node provisioning may be unavailable if the cluster's region does not support arm64 machine types. Check Karpenter startup logs for related messages.
 
 Karpenter detects arm64 architecture directly from the GCP Compute API. All arm64-capable instance families (`c4a`, `t2a`, `n4a`) are supported automatically.
 
-Image resolution queries GCP image catalogs directly and does not depend on template pool availability, so arm64 images can be resolved even without arm64 template pools. However, the template pools are still used for network and kubelet configuration.
+Image resolution queries GCP image catalogs directly and does not depend on the bootstrap pool. Bootstrap pool discovery and kube-env patching allow a single source pool (of any architecture) to bootstrap nodes of any OS and architecture combination. See [Bootstrap pool selection](bootstrap-pool.md) for details.
 
 To verify arm64 machine types are available in your cluster's region:
 
