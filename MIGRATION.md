@@ -116,6 +116,19 @@ gcloud projects remove-iam-policy-binding $PROJECT_ID \
     --role="roles/container.admin"
 ```
 
+**Using Terraform?** The [`deploy/terraform/`](../deploy/terraform/) module handles all of the
+above automatically — it creates the controller SA, the minimal custom role (sourced from
+`deploy/iam/karpenter-controller-role.yaml`), and the project IAM binding in one apply:
+
+```hcl
+module "karpenter_iam" {
+  source     = "./deploy/terraform"
+  project_id = "<your-project-id>"
+}
+```
+
+Run `terraform apply` and then remove the old broad bindings with the `gcloud` commands above.
+
 ### Scope `iam.serviceAccountUser` to the node SA (not project-wide)
 
 **Action required if you followed the previous installation guide.**
