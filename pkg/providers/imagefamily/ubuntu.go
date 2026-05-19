@@ -204,6 +204,6 @@ func (u *Ubuntu) deriveArm64Image(sourceImage string) string {
 		if strings.HasSuffix(m, "-") {
 			suffix = "-"
 		}
-		return "-arm64-v" + strings.TrimPrefix(strings.TrimSuffix(strings.TrimPrefix(m, "-v"), "-"), "") + suffix
+		return "-arm64-v" + strings.TrimSuffix(strings.TrimPrefix(m, "-v"), "-") + suffix
 	})
 }

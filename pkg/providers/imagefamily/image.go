@@ -237,6 +237,9 @@ func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) 
 		}
 		result = append(result, im)
 	}
+	if len(ims) > 0 && len(result) == 0 {
+		return nil, &imageResolutionError{msg: fmt.Sprintf("%d candidate image(s) were resolved but none exist in GCP; verify the pinned version is available", len(ims))}
+	}
 	return result, nil
 }
 
