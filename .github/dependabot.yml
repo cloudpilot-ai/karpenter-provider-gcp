@@ -38,6 +38,10 @@ updates:
     directory: "/hack/tools"
     schedule:
       interval: "weekly"
+    # Go 1.24 tool directives cause all entries (including tool binaries) to
+    # appear as //indirect in go.mod; allow indirect so the group can match them.
+    allow:
+      - dependency-type: "all"
     groups:
       dev-tools:
         patterns:
