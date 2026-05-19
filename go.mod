@@ -6,7 +6,6 @@ require (
 	cloud.google.com/go/compute v1.63.0
 	cloud.google.com/go/compute/metadata v0.9.0
 	cloud.google.com/go/container v1.46.0
-	github.com/aws/aws-sdk-go v1.55.8
 	github.com/awslabs/operatorpkg v0.0.0-20251222193911-34e9a1898737
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/onsi/ginkgo/v2 v2.28.3
