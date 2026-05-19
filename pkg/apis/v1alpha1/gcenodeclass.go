@@ -147,8 +147,9 @@ type AdditionalNetworkInterface struct {
 // +kubebuilder:validation:XValidation:message="channel and version cannot both be set",rule="!(has(self.channel) && has(self.version))"
 // +kubebuilder:validation:XValidation:message="channel is only supported for family ContainerOptimizedOS",rule="!has(self.channel) || self.family == 'ContainerOptimizedOS'"
 // +kubebuilder:validation:XValidation:message="exactly one of alias, id, or family must be set",rule="(has(self.alias) ? 1 : 0) + (has(self.id) ? 1 : 0) + (has(self.family) ? 1 : 0) == 1"
-// +kubebuilder:validation:XValidation:message="ContainerOptimizedOS version must be 'latest' or 'milestone.build.build.build' (e.g. '125.19216.104.126')",rule="!has(self.version) || !has(self.family) || self.family != 'ContainerOptimizedOS' || self.version == 'latest' || self.version.matches('^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$')"
-// +kubebuilder:validation:XValidation:message="Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')",rule="!has(self.version) || !has(self.family) || !(self.family in ['Ubuntu2204', 'Ubuntu2404']) || self.version == 'latest' || self.version.matches('^v[0-9]{8}$')"
+// +kubebuilder:validation:XValidation:message="ContainerOptimizedOS version must be 'latest' or 'milestone.build.build.build' (e.g. '125.19216.104.126')",rule="!has(self.version) || !has(self.family) || self.family != 'ContainerOptimizedOS' || self.version == 'latest' || self.version.matches('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$')"
+// +kubebuilder:validation:XValidation:message="Ubuntu2404 version must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')",rule="!has(self.version) || !has(self.family) || self.family != 'Ubuntu2404' || self.version == 'latest' || self.version.matches('^v[0-9]{8}$')"
+// +kubebuilder:validation:XValidation:message="Ubuntu2204 version must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')",rule="!has(self.version) || !has(self.family) || self.family != 'Ubuntu2204' || self.version == 'latest' || self.version.matches('^v[0-9]{8}$')"
 // +kubebuilder:validation:XValidation:message="family 'Ubuntu' is not valid; use Ubuntu2404 for Ubuntu 24.04 or Ubuntu2204 for Ubuntu 22.04",rule="!has(self.family) || self.family != 'Ubuntu'"
 type ImageSelectorTerm struct {
 	// Deprecated: use Family with Channel or Version instead.
