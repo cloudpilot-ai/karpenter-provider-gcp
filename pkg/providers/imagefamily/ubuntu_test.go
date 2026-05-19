@@ -144,6 +144,7 @@ func TestResolveImages_Ubuntu_PinnedVersion_Valid(t *testing.T) {
 	p := &Ubuntu{
 		computeService:  buildComputeService(t, srv),
 		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+		release:         "2404",
 	}
 
 	// Pin to an older date than the latest image.
