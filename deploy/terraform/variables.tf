@@ -25,14 +25,8 @@ variable "kubernetes_service_account" {
   description = "Kubernetes service account name for the Karpenter controller."
 }
 
-# By default, Karpenter attaches the Compute Engine default SA to provisioned nodes.
-# You can override this with a dedicated minimal-privilege node SA via GCENodeClass.spec.serviceAccount
-# or the --node-pool-service-account controller flag. Providing a custom SA here binds
-# iam.serviceAccountUser on that SA for the controller; repeat for each SA you use.
-# Recommended: create a dedicated node SA with only the permissions your workloads need
-# rather than relying on the broad Compute Engine default SA.
 variable "node_service_account_email" {
   type        = string
-  description = "Email of the GCP SA attached to provisioned nodes. When empty, iam.serviceAccountUser is bound on the Compute Engine default SA. Set this to a minimal-privilege SA instead."
+  description = "Email of an existing GCP SA to attach to provisioned nodes. When empty, the module creates a dedicated node SA (karpenter_node) with roles/container.nodeServiceAccount."
   default     = ""
 }

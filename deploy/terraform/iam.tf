@@ -1,17 +1,24 @@
-data "google_project" "project" {
-  project_id = var.project_id
-}
-
 locals {
-  iam_role = yamldecode(file("${path.module}/../iam/karpenter-controller-role.yaml"))
-  node_sa_email = var.node_service_account_email != "" ? var.node_service_account_email :
-    "${data.google_project.project.number}-compute@developer.gserviceaccount.com"
+  iam_role      = yamldecode(file("${path.module}/../iam/karpenter-controller-role.yaml"))
+  node_sa_email = var.node_service_account_email != "" ? var.node_service_account_email : google_service_account.karpenter_node.email
 }
 
 resource "google_service_account" "karpenter_controller" {
   account_id   = "${var.common_name}-ctrl"
   display_name = "Karpenter controller"
   project      = var.project_id
+}
+
+resource "google_service_account" "karpenter_node" {
+  account_id   = "${var.common_name}-node"
+  display_name = "Karpenter node"
+  project      = var.project_id
+}
+
+resource "google_project_iam_member" "karpenter_node" {
+  project = var.project_id
+  role    = "roles/container.nodeServiceAccount"
+  member  = "serviceAccount:${google_service_account.karpenter_node.email}"
 }
 
 resource "google_project_iam_custom_role" "karpenter_controller" {
@@ -35,7 +42,6 @@ resource "google_service_account_iam_member" "workload_identity" {
 }
 
 # Bind iam.serviceAccountUser on the node SA so the controller can attach it to VMs.
-# Defaults to the Compute Engine default SA when node_service_account_email is unset.
 resource "google_service_account_iam_member" "node_sa_actAs" {
   service_account_id = "projects/${var.project_id}/serviceAccounts/${local.node_sa_email}"
   role               = "roles/iam.serviceAccountUser"
@@ -44,4 +50,8 @@ resource "google_service_account_iam_member" "node_sa_actAs" {
 
 output "karpenter_controller_sa_email" {
   value = google_service_account.karpenter_controller.email
+}
+
+output "karpenter_node_sa_email" {
+  value = local.node_sa_email
 }
