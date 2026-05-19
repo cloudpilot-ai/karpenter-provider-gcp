@@ -111,8 +111,9 @@ func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8
 		return "", fmt.Errorf("listing COS images with filter %q: %w", filter, err)
 	}
 	if best == nil {
-		return "", fmt.Errorf("no COS image found for GKE build gke%s (k8s %s) in %s — "+
-			"the channel version may not yet have a published COS image", build, k8sKey, cosImageProject)
+		return "", &imageResolutionError{msg: fmt.Sprintf(
+			"no COS image found for GKE build gke%s (k8s %s) in %s — "+
+				"the channel version may not yet have a published COS image", build, k8sKey, cosImageProject)}
 	}
 	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, best.Name), nil
 }
