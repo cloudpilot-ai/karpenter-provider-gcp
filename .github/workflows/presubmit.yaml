@@ -21,22 +21,18 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Cache toolchain binaries
-        id: cache-toolchain
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/go/bin
-            ~/.local/kubebuilder
-          key: toolchain-${{ runner.os }}-${{ hashFiles('hack/toolchain.sh') }}
+          cache-dependency-path: |
+            go.sum
+            hack/tools/go.sum
 
       - name: Install toolchain
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        run: |
-          make toolchain
+        run: make toolchain
 
-      - name: Presubmit check
-        run: |
-          make presubmit
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+          only-new-issues: true
 
+      - name: Verify
+        run: make ci

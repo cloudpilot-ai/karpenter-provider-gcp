@@ -2,7 +2,7 @@
 
 This tool checks the quality of machineType price generation in
 `karpenter-provider-gcp`. It compares the hourly prices computed by
-[`instanceprice`](../../pkg/providers/pricing/instanceprice/) against two independent
+[`instanceprice`](../pkg/providers/pricing/instanceprice/) against two independent
 reference sources simultaneously, making it easy to catch regressions in pricing
 accuracy before they ship.
 
@@ -43,7 +43,7 @@ Diffs computed prices against both reference sources (GCP web is authoritative, 
 ## Usage
 
 ```sh
-go run ./hack/tools/price_validate
+go run ./hack/price_validate
 ```
 
 The GCP project is resolved in this order:

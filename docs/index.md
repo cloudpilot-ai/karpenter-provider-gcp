@@ -22,8 +22,8 @@ Key capabilities:
 ## GCP-specific features
 
 - **GCENodeClass** — a custom resource that captures all GCP-specific node configuration: image family, disk type and size, service account, network tags, Shielded VM settings, kubelet configuration, and network overrides
-- **Template pool bootstrap** — Karpenter creates lightweight zero-node GKE node pools to ensure provisioned nodes are fully GKE-compatible
-- **Direct image catalog queries** — image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu), independent of template pool availability
+- **Bootstrap pool discovery** — Karpenter discovers and reuses an existing cluster node pool for bootstrap metadata, avoiding the need to create dedicated template pools (see [Bootstrap pool selection](bootstrap-pool.md))
+- **Direct image catalog queries** — image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu), independent of the bootstrap pool
 - **Node repair policies** — integrates with GKE's node problem detection to trigger replacement of unhealthy nodes (see [Node repair](node-repair.md))
 
 ## Known limitations
@@ -41,6 +41,7 @@ Key capabilities:
 
 ## Features
 
+- [Image selection](image-selection.md) — select node images by GKE release channel, version pin, or raw image ID
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
 - [Static capacity](examples/static-capacity.md) — keep a fixed number of nodes running with `spec.replicas`
 - [Image management](image-management.md) — controlling GKE node image selection, version pinning, and drift
