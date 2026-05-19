@@ -132,6 +132,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUManufacturer, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUMemory, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelGKEAccelerator, corev1.NodeSelectorOpDoesNotExist),
 	)
 	// Only add zone-id label when available in offerings. It may not be available if a user has upgraded from a
 	// previous version of Karpenter w/o zone-id support and the nodeclass vswitch status has not yet updated.
@@ -147,6 +148,9 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		gpuName := extractGPUName(mt)
 		requirements.Get(v1alpha1.LabelInstanceGPUName).Insert(gpuName)
 		requirements.Get(v1alpha1.LabelInstanceGPUCount).Insert(fmt.Sprintf("%d", len(mt.GetAccelerators())))
+		// LabelGKEAccelerator is required by the NVIDIA device plugin DaemonSet's nodeAffinity;
+		// without it the device plugin will not schedule onto this node.
+		requirements.Get(v1alpha1.LabelGKEAccelerator).Insert(gpuName)
 	}
 
 	// The format looks like: n1-standard-1, the family is n1-standard, the category is n, the instance size is 1

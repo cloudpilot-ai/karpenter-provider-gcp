@@ -66,6 +66,10 @@ type TestCase struct {
 	// allowing any GPU instance family. Use when Families is empty to avoid
 	// restricting to a specific GPU family (useful when one family is in STOCKOUT).
 	GPUCountExists bool
+	// GPUCount, when non-empty, adds an instance-gpu-count: In [value] requirement.
+	// Use to restrict to instances with exactly N GPUs (e.g. "1" to stay within a
+	// GPUS_ALL_REGIONS quota of 1).
+	GPUCount string
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
 	ImageFamily         string
@@ -145,14 +149,15 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 
 // CreateNodeClassWithAutoGPUTaint creates a GCENodeClass with autoGPUTaint: true
 // and the GKE GPU driver auto-install label set. Used by GPU e2e tests.
-func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name string) {
+func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name, gpuDriverVersion string) {
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
 		"metadata":   map[string]any{"name": name},
 		"spec": map[string]any{
-			"autoGPUTaint": true,
+			"autoGPUTaint":     true,
+			"gpuDriverVersion": gpuDriverVersion,
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
@@ -167,10 +172,9 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name 
 	e.trackNodeClass(name)
 }
 
-// CreateDeploymentOnGPUNode creates a single-replica Deployment that tolerates
-// the nvidia.com/gpu=present:NoSchedule taint but does NOT request GPU resources.
-// This allows the pod to run on a GPU node without requiring the NVIDIA device
-// plugin to be installed, making it suitable for testing autoGPUTaint in isolation.
+// CreateDeploymentOnGPUNode creates a single-replica Deployment that requests
+// one nvidia.com/gpu resource, ensuring the pod only schedules once the NVIDIA
+// device plugin has registered the GPU as allocatable (driver installed + plugin running).
 func (e *Environment) CreateDeploymentOnGPUNode(ctx context.Context, name, appLabel, nodePoolName string) {
 	replicas := int32(1)
 	zero := int64(0)
@@ -204,6 +208,10 @@ func (e *Environment) CreateDeploymentOnGPUNode(ctx context.Context, name, appLa
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("100m"),
 								corev1.ResourceMemory: resource.MustParse("128Mi"),
+								"nvidia.com/gpu":      resource.MustParse("1"),
+							},
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": resource.MustParse("1"),
 							},
 						},
 					}},
@@ -261,6 +269,11 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	if tc.GPUCountExists {
 		requirements = append(requirements, map[string]any{
 			"key": gcpv1alpha1.LabelInstanceGPUCount, "operator": "Exists",
+		})
+	}
+	if tc.GPUCount != "" {
+		requirements = append(requirements, map[string]any{
+			"key": gcpv1alpha1.LabelInstanceGPUCount, "operator": "In", "values": []any{tc.GPUCount},
 		})
 	}
 	templateSpec := map[string]any{

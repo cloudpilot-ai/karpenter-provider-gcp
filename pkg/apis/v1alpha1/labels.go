@@ -51,6 +51,7 @@ func init() {
 		LabelGKEReadinessMasqAgentReady,
 		LabelGKEReadinessNetdReady,
 		LabelGKEReadinessNodeLocalDNSReady,
+		LabelGKEAccelerator,
 	)
 }
 
@@ -96,6 +97,14 @@ var (
 	LabelGKEReadinessMasqAgentReady        = "node.kubernetes.io/masq-agent-ds-ready"
 	LabelGKEReadinessNetdReady             = "cloud.google.com/gke-netd-ready"
 	LabelGKEReadinessNodeLocalDNSReady     = "addon.gke.io/node-local-dns-ds-ready"
+
+	// LabelGKEAccelerator is the GPU accelerator type label required by the NVIDIA device plugin
+	// DaemonSet's nodeAffinity. GKE injects it on native GPU node pools; Karpenter must inject
+	// it via kube-labels so the device plugin schedules onto provisioned GPU nodes.
+	LabelGKEAccelerator = "cloud.google.com/gke-accelerator"
+	// LabelGKEGPUDriverVersion is the kube-labels key read by GKE's GPU driver installer DaemonSet
+	// to decide which NVIDIA driver version to install. Corresponds to GCENodeClass.spec.gpuDriverVersion.
+	LabelGKEGPUDriverVersion = "cloud.google.com/gke-gpu-driver-version"
 
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
