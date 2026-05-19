@@ -9,7 +9,7 @@ On startup and every 12 minutes, Karpenter runs pool discovery:
 1. **Pinned pool** (if `DEFAULT_NODEPOOL_TEMPLATE_NAME` is set): Use that pool exclusively. Return an error if it does not exist or is not RUNNING.
 2. **default-pool**: If the cluster's `default-pool` exists and is RUNNING or RUNNING_WITH_ERROR, use it.
 3. **Alphabetical fallback**: Sort all remaining RUNNING or RUNNING_WITH_ERROR pools by name and use the first one.
-4. **No eligible pool**: If no pool passes the above checks, Karpenter logs a warning and retries with exponential backoff. After 5 consecutive failures (~7.5 minutes), it creates a minimal `karpenter-fallback` pool as a last resort.
+4. **No eligible pool**: If no pool passes the above checks, Karpenter creates a minimal `karpenter-fallback` pool and polls every 15 seconds until it becomes RUNNING.
 
 A pool is eligible when its status is `RUNNING` or `RUNNING_WITH_ERROR`. Pools in `PROVISIONING`, `STOPPING`, `ERROR`, or `RECONCILING` states are skipped.
 
@@ -31,7 +31,7 @@ When set, Karpenter uses only that pool and returns an error if it is not RUNNIN
 
 ## The fallback pool
 
-If no RUNNING pool exists after 5 retries, Karpenter creates a zero-node pool named `karpenter-fallback`. This pool is hardened against common GCP org policy constraints:
+When no RUNNING pool exists, Karpenter creates a zero-node pool named `karpenter-fallback`. This pool is hardened against common GCP org policy constraints:
 
 | Constraint                                             | Fallback pool setting                                    |
 |--------------------------------------------------------|----------------------------------------------------------|
