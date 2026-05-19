@@ -1063,6 +1063,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 
 	cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		&v1alpha1.GCENodeClass{},
 		onDemandOnlyIT,
@@ -1146,6 +1147,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: true}}
 	cluster := makeCluster("net", "subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		nc,
 		gpuIT,
@@ -1203,6 +1205,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: false}}
 	cluster := makeCluster("net", "subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		nc,
 		gpuIT,
@@ -1264,6 +1267,7 @@ func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: true}}
 	cluster := makeCluster("net", "subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		nc,
 		nonGPUIT,
@@ -1371,6 +1375,7 @@ func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
 			p := makeProvider()
 			nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: tc.version}}
 			instance, err := p.buildInstance(
+				context.Background(),
 				spotOrOnDemandNodeClaim(), nc, makeGPUIT(), makeGPUTemplate("max-pods-per-node=110"),
 				makeCluster("net", "subnet", "pods", false),
 				"default-pool", "us-central1-a", "karpenter-gpu-test",
@@ -1408,6 +1413,7 @@ func TestBuildInstance_GPUDriverVersionNotInjectedForNonGPU(t *testing.T) {
 	p := makeProvider()
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: "default"}}
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(), nc, nonGPUIT, makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
 		"default-pool", "us-central1-a", "karpenter-test",
@@ -1427,6 +1433,7 @@ func TestBuildInstance_GPUDriverVersionOverridesTemplate(t *testing.T) {
 	p := makeProvider()
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: "latest"}}
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(), nc, makeGPUIT(),
 		makeGPUTemplate("max-pods-per-node=110,cloud.google.com/gke-gpu-driver-version=default"),
 		makeCluster("net", "subnet", "pods", false),
@@ -1463,6 +1470,7 @@ func TestBuildInstance_NodePoolLabelDoesNotOverrideGPUDriverAtBootTime(t *testin
 	p := makeProvider()
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUDriverVersion: "default"}}
 	instance, err := p.buildInstance(
+		context.Background(),
 		nodeClaim, nc, makeGPUIT(), makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
 		"default-pool", "us-central1-a", "karpenter-gpu-test",
