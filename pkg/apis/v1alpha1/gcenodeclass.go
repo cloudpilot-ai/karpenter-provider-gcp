@@ -180,6 +180,7 @@ type ImageSelectorTerm struct {
 	// Version pins the image to a specific version or "latest".
 	// For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").
 	// For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" (e.g. "v20260416").
+	// +kubebuilder:validation:MaxLength=32
 	// +optional
 	Version string `json:"version,omitempty"`
 }

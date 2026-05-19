@@ -169,7 +169,7 @@ _Appears in:_
 | `id` _string_ | ID specifies a GKE image by its full resource URL. |  | MaxLength: 160 <br />Optional: \{\} <br /> |
 | `family` _string_ | Family specifies the OS image family. Required when using Channel or Version.<br />Valid values: ContainerOptimizedOS, Ubuntu2404, Ubuntu2204. |  | Enum: [ContainerOptimizedOS Ubuntu2404 Ubuntu2204] <br />Optional: \{\} <br /> |
 | `channel` _string_ | Channel specifies the GKE release channel to follow. Only valid when Family is ContainerOptimizedOS.<br />Use "cluster" to track the channel the cluster is enrolled in. |  | Enum: [rapid regular stable extended cluster] <br />Optional: \{\} <br /> |
-| `version` _string_ | Version pins the image to a specific version or "latest".<br />For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").<br />For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" (e.g. "v20260416"). |  | Optional: \{\} <br /> |
+| `version` _string_ | Version pins the image to a specific version or "latest".<br />For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").<br />For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" (e.g. "v20260416"). |  | MaxLength: 32 <br />Optional: \{\} <br /> |
 
 
 #### KubeletConfiguration

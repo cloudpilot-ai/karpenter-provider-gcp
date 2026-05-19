@@ -59,9 +59,9 @@ imageSelectorTerms:
     version: "v20260416"
 ```
 
-The `alias` field continues to work unchanged. See [Image selection](docs/image-selection.md) for the full reference and [Image management](docs/image-management.md#legacy-image-alias-format) for the alias → structured field migration table.
+The `alias` field continues to work unchanged but is now soft-deprecated. Migrate existing configurations to the structured fields at your own pace — there is no deadline or forced removal in this release. See [Image selection](docs/image-selection.md) for the full reference and [Image management](docs/image-management.md#legacy-image-alias-format) for the alias → structured field migration table.
 
-**New IAM permission required** (if you use `channel:` terms and have a minimal custom role): `container.clusters.getServerConfig` is now included in `deploy/iam/karpenter-controller-role.yaml`. If you manage the role manually, add this permission before enabling `channel:` terms.
+**IAM note:** `container.clusters.getServerConfig` is included in `deploy/iam/karpenter-controller-role.yaml` and in the Terraform module. No additional action is required for users who followed the standard installation guide. Users on custom roles that predate this release may need to add the permission manually if they enable `channel:` terms.
 
 ---
 
