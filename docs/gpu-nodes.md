@@ -21,11 +21,11 @@ Karpenter automatically applies both labels at node boot time. The accelerator t
 
 The `gpuDriverVersion` field on `GCENodeClass` controls which NVIDIA driver GKE installs on GPU nodes. Valid values:
 
-| Value | Description |
-|-------|-------------|
-| `default` | GKE-recommended stable driver (default) |
-| `latest` | Newest available driver (COS only) |
-| `disabled` | Skip automatic driver installation |
+| Value      | Description                             |
+|------------|-----------------------------------------|
+| `default`  | GKE-recommended stable driver (default) |
+| `latest`   | Newest available driver (COS only)      |
+| `disabled` | Skip automatic driver installation      |
 
 ```yaml
 apiVersion: karpenter.k8s.gcp/v1alpha1
