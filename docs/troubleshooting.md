@@ -58,12 +58,15 @@ Check `status.conditions`. The `ImagesReady` condition shows whether Karpenter c
 
 - **Unsupported family** — Only `ContainerOptimizedOS` and `Ubuntu` are supported.
 
-Example of a valid alias:
+Example using the recommended structured fields:
 
 ```yaml
 imageSelectorTerms:
-  - alias: ContainerOptimizedOS@latest
+  - family: ContainerOptimizedOS
+    channel: cluster
 ```
+
+The `alias` field (e.g. `alias: ContainerOptimizedOS@latest`) is deprecated — use `family`/`channel`/`version` for new configurations.
 
 See [Image management](image-management.md) for version pinning options and format details.
 

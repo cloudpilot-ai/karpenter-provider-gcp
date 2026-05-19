@@ -18,7 +18,8 @@ metadata:
   name: subnetwork-override-example
 spec:
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
   networkConfig:
     subnetwork: regions/us-central1/subnetworks/karpenter-nodes
   disks:

@@ -13,7 +13,8 @@ spec:
   autoGPUTaint: true
   gpuDriverVersion: default  # or: latest, disabled
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
   disks:
     - category: pd-balanced
       sizeGiB: 100

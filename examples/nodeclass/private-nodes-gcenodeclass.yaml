@@ -26,7 +26,8 @@ metadata:
   name: private-nodes-example
 spec:
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
   networkTags:
     - karpenter-private
   networkConfig:

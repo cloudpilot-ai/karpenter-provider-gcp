@@ -35,7 +35,8 @@ metadata:
 spec:
   gpuDriverVersion: default  # or: latest, disabled
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
 ```
 
 Defaults to `"default"`, matching GKE's native behavior for GPU node pools.
@@ -57,7 +58,8 @@ spec:
   autoGPUTaint: true
   gpuDriverVersion: default
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
 ```
 
 When `autoGPUTaint: true`, Karpenter injects `--register-with-taints=nvidia.com/gpu=present:NoSchedule` into the node's `KUBELET_ARGS` at provisioning time. The node registers with the taint, preventing non-GPU workloads from landing on it.
