@@ -6,7 +6,7 @@ metadata:
     {{- with .Values.additionalAnnotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    controller-gen.kubebuilder.io/version: v0.20.1
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: gcenodeclasses.karpenter.k8s.gcp
 spec:
   group: karpenter.k8s.gcp
@@ -148,6 +148,19 @@ spec:
                       || (has(self.provisionedIOPS) == has(self.provisionedThroughput))'
                 maxItems: 10
                 type: array
+              gpuDriverVersion:
+                default: default
+                description: |-
+                  GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.
+                  Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.
+                  Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),
+                  "disabled" (skip automatic installation).
+                  Ignored for non-GPU instance types.
+                enum:
+                - default
+                - latest
+                - disabled
+                type: string
               imageFamily:
                 description: |-
                   ImageFamily dictates the instance template used when generating launch templates.
@@ -178,6 +191,12 @@ spec:
                       - message: 'family is not supported, must be one of the following:
                           ''ContainerOptimizedOS,Ubuntu'''
                         rule: self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']
+                      - message: ContainerOptimizedOS version must be 'latest' or
+                          'milestone.build.build.build' (e.g. '125.19216.104.126')
+                        rule: '!self.startsWith(''ContainerOptimizedOS@'') || self.matches(''^ContainerOptimizedOS@(latest|[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)$'')'
+                      - message: Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g.
+                          'v20260416')
+                        rule: '!self.startsWith(''Ubuntu@'') || self.matches(''^Ubuntu@(latest|v[0-9]{8})$'')'
                     id:
                       description: ID specifies which GKE image to select.
                       maxLength: 160

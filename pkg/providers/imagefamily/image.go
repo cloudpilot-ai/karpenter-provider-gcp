@@ -18,6 +18,7 @@ package imagefamily
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -32,8 +33,23 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
-	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
+
+// imageResolutionError marks a non-transient failure caused by the NodeClass
+// configuration (invalid alias version, pinned version absent from GCP).
+// The reconciler surfaces these as a status condition instead of returning
+// them for controller-runtime exponential backoff.
+type imageResolutionError struct{ msg string }
+
+func (e *imageResolutionError) Error() string { return e.msg }
+
+// IsImageResolutionError reports whether err originated from user-controlled
+// NodeClass configuration rather than a transient infrastructure failure.
+func IsImageResolutionError(err error) bool {
+	var e *imageResolutionError
+	return errors.As(err, &e)
+}
 
 type Provider interface {
 	List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, error)
@@ -48,7 +64,7 @@ type DefaultProvider struct {
 	ubuntuOSProvider             *Ubuntu
 }
 
-func NewDefaultProvider(computeService *compute.Service, versionProvider versionprovider.Provider) *DefaultProvider {
+func NewDefaultProvider(computeService *compute.Service, versionProvider version.Provider) *DefaultProvider {
 	return &DefaultProvider{
 		cache:          cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
 		computeService: computeService,
@@ -153,6 +169,13 @@ func (p *DefaultProvider) resolveImageFromAlias(ctx context.Context, nodeClass *
 		}
 
 		images = append(images, im)
+	}
+
+	if alias.Version != "latest" && len(images) == 0 {
+		return nil, false, &imageResolutionError{msg: fmt.Sprintf(
+			"pinned version %q for %s not found in GCP; "+
+				"verify the version exists and matches your cluster's K8s version",
+			alias.Version, alias.Family)}
 	}
 
 	return images, true, nil

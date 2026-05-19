@@ -4,6 +4,11 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Reserved for Helm parent-chart globals; not consumed by this chart."
+    },
     "nameOverride": {
       "type": "string",
       "description": "Override the default chart name."
@@ -338,6 +343,16 @@
               "type": "string",
               "description": "Idle timeout that ends a batch window when no new pods arrive (e.g. 1s).",
               "default": "1s"
+            },
+            "defaultNodePoolTemplateName": {
+              "type": "string",
+              "description": "Pin the GKE node pool used as the bootstrap metadata source. Leave empty for automatic discovery.",
+              "default": ""
+            },
+            "defaultNodepoolServiceAccount": {
+              "type": "string",
+              "description": "Default GCP service account email to attach to provisioned nodes. Overrides the Compute Engine default SA. Leave empty to use the Compute Engine default SA.",
+              "default": ""
             }
           }
         }

@@ -34,7 +34,9 @@ import (
 
 const ubuntuGKEImageProject = "ubuntu-os-gke-cloud"
 
+// ubuntuVersionRe matches the GKE version token in an Ubuntu image name (e.g. "-v20260416").
 var ubuntuVersionRe = regexp.MustCompile(`-v\d+(-|$)`)
+var ubuntuPinnedVersionRe = regexp.MustCompile(`^v\d{8}$`)
 
 type Ubuntu struct {
 	computeService  *compute.Service
@@ -42,6 +44,11 @@ type Ubuntu struct {
 }
 
 func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, error) {
+	if version != "latest" && !ubuntuPinnedVersionRe.MatchString(version) {
+		return nil, &imageResolutionError{msg: fmt.Sprintf(
+			"invalid Ubuntu version %q: must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')", version)}
+	}
+
 	sourceImage, err := u.resolveLatestUbuntuImage(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to resolve Ubuntu GKE image from catalog")
@@ -71,8 +78,6 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 	filter := u.buildImageFilter(ctx)
 
-	// GCP does not support Filter + OrderBy together. Track the newest usable image
-	// seen so far to avoid accumulating the full result set in memory.
 	var best *compute.Image
 	err := u.computeService.Images.List(ubuntuGKEImageProject).
 		Filter(filter).

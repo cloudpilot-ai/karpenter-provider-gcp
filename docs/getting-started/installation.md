@@ -17,7 +17,7 @@ gcloud services enable compute.googleapis.com container.googleapis.com
 
 ## Step 1 — Create a GCP service account
 
-Karpenter needs permissions to manage Compute Engine instances and read GKE cluster configuration.
+Karpenter needs a minimal set of GCP permissions to manage Compute Engine instances and read GKE cluster configuration. The canonical permission list is in [`deploy/iam/karpenter-controller-role.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/deploy/iam/karpenter-controller-role.yaml) in the repository — that file is the source of truth for all IAM references.
 
 ```sh
 export PROJECT_ID=<your-project-id>
@@ -25,20 +25,55 @@ export GSA_NAME=karpenter-gsa
 
 gcloud iam service-accounts create $GSA_NAME --project=$PROJECT_ID
 
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/compute.admin"
+# Create the minimal custom role from the canonical permission list.
+# If upgrading and the role already exists, use `gcloud iam roles update` with the same flags.
+curl -fsSL https://raw.githubusercontent.com/cloudpilot-ai/karpenter-provider-gcp/main/deploy/iam/karpenter-controller-role.yaml \
+    -o karpenter-controller-role.yaml
+gcloud iam roles create karpenter_controller \
+    --project=$PROJECT_ID \
+    --file=karpenter-controller-role.yaml
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/container.admin"
+    --role="projects/$PROJECT_ID/roles/karpenter_controller"
 
+# Create a dedicated node SA with the GKE-recommended minimal permissions.
+# This replaces the Compute Engine default SA (which has broad editor-equivalent access).
+export NODE_SA_NAME=karpenter-node
+
+gcloud iam service-accounts create $NODE_SA_NAME --project=$PROJECT_ID
+export NODE_SA_EMAIL=$NODE_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com
+
+# roles/container.nodeServiceAccount bundles the minimum GKE node permissions:
+# logging.logWriter, monitoring.metricWriter, monitoring.viewer,
+# stackdriver.resourceMetadata.writer.
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/iam.serviceAccountUser"
+    --member="serviceAccount:$NODE_SA_EMAIL" \
+    --role="roles/container.nodeServiceAccount"
+
+# If nodes pull images from Artifact Registry, also grant read access:
+# gcloud projects add-iam-policy-binding $PROJECT_ID \
+#     --member="serviceAccount:$NODE_SA_EMAIL" \
+#     --role="roles/artifactregistry.reader"
+
+# iam.serviceAccountUser must be scoped to each SA Karpenter may attach to nodes.
+# If you also use GCENodeClass.spec.serviceAccount or --default-nodepool-service-account
+# to set a different node SA, grant iam.serviceAccountUser on that SA as well.
+gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
+    --role roles/iam.serviceAccountUser \
+    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --project $PROJECT_ID
 ```
 
-If you use a custom minimal IAM role instead of `roles/container.admin`, ensure it includes `container.clusters.get`. Karpenter reads the cluster API to derive network configuration for provisioned nodes.
+Tell Karpenter to use the dedicated node SA by adding this flag to the `helm upgrade` command in Step 2:
+
+```sh
+--set "controller.settings.defaultNodepoolServiceAccount=$NODE_SA_EMAIL" \
+```
+
+Or set it per-NodeClass via `GCENodeClass.spec.serviceAccount: <email>`.
+
+> **Fallback:** If you skip node SA creation, Karpenter uses the Compute Engine default SA (`<project-number>-compute@developer.gserviceaccount.com`), which has broad `roles/editor`-equivalent permissions. This is not recommended for production clusters.
 
 ## Step 2 — Install Karpenter with Helm
 

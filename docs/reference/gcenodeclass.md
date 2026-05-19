@@ -114,6 +114,7 @@ _Appears in:_
 | `shieldedInstanceConfig` _[ShieldedInstanceConfig](#shieldedinstanceconfig)_ | ShieldedInstanceConfig is the Shielded VM configuration for the instance. |  | Optional: \{\} <br /> |
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
 | `autoGPUTaint` _boolean_ | AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule<br />to any GPU node at provisioning time, regardless of the NodePool configuration.<br />Disabled by default to preserve backward compatibility. |  | Optional: \{\} <br /> |
+| `gpuDriverVersion` _string_ | GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.<br />Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.<br />Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),<br />"disabled" (skip automatic installation).<br />Ignored for non-GPU instance types. | default | Enum: [default latest disabled] <br />Optional: \{\} <br /> |
 
 
 #### GCENodeClassStatus

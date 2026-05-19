@@ -135,14 +135,46 @@ else
     --quiet
 fi
 
-log "Ensuring IAM bindings for ${GSA_EMAIL}..."
-for role in roles/compute.admin roles/container.admin roles/iam.serviceAccountUser; do
-  gcloud projects add-iam-policy-binding "${E2E_PROJECT_ID}" \
+PROJECT_NUMBER=$(gcloud projects describe "${E2E_PROJECT_ID}" \
+  --format='value(projectNumber)')
+
+KARPENTER_ROLE_ID="karpenter_controller"
+KARPENTER_ROLE_NAME="projects/${E2E_PROJECT_ID}/roles/${KARPENTER_ROLE_ID}"
+IAM_ROLE_FILE="${REPO_ROOT}/deploy/iam/karpenter-controller-role.yaml"
+
+log "Ensuring minimal IAM role ${KARPENTER_ROLE_ID}..."
+if gcloud iam roles describe "${KARPENTER_ROLE_ID}" \
+    --project "${E2E_PROJECT_ID}" &>/dev/null; then
+  gcloud iam roles update "${KARPENTER_ROLE_ID}" \
+    --project "${E2E_PROJECT_ID}" \
+    --file "${IAM_ROLE_FILE}" \
+    --quiet >/dev/null
+  log "Updated role ${KARPENTER_ROLE_ID}"
+else
+  gcloud iam roles create "${KARPENTER_ROLE_ID}" \
+    --project "${E2E_PROJECT_ID}" \
+    --file "${IAM_ROLE_FILE}" \
+    --quiet >/dev/null
+  log "Created role ${KARPENTER_ROLE_ID}"
+fi
+
+log "Binding controller SA to minimal role..."
+gcloud projects add-iam-policy-binding "${E2E_PROJECT_ID}" \
     --member "serviceAccount:${GSA_EMAIL}" \
-    --role "${role}" \
+    --role "${KARPENTER_ROLE_NAME}" \
     --condition=None \
     --quiet >/dev/null
-done
+
+# iam.serviceAccounts.actAs must be scoped to the specific node SA,
+# not granted project-wide. Karpenter attaches the Compute Engine default
+# SA to provisioned VMs unless DEFAULT_NODEPOOL_SERVICE_ACCOUNT overrides it.
+COMPUTE_DEFAULT_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+log "Binding iam.serviceAccountUser on node SA ${COMPUTE_DEFAULT_SA}..."
+gcloud iam service-accounts add-iam-policy-binding "${COMPUTE_DEFAULT_SA}" \
+  --role roles/iam.serviceAccountUser \
+  --member "serviceAccount:${GSA_EMAIL}" \
+  --project "${E2E_PROJECT_ID}" \
+  --quiet >/dev/null
 
 # Artifact Registry
 if gcloud artifacts repositories describe "${AR_REPO}" \
