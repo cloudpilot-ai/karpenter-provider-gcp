@@ -5,6 +5,37 @@
 
 ## Unreleased
 
+### GPU node provisioning (`gpuDriverVersion`)
+
+Karpenter now automatically sets the two node labels required by the GKE GPU software stack
+at boot time:
+
+- `cloud.google.com/gke-accelerator=<type>` — required by the NVIDIA device plugin DaemonSet.
+- `cloud.google.com/gke-gpu-driver-version=<value>` — read by the GKE GPU driver installer.
+
+The driver version is controlled by the new `spec.gpuDriverVersion` field on `GCENodeClass`
+(default: `"default"`, matching GKE's native behaviour).
+
+**Action required if you set `cloud.google.com/gke-gpu-driver-version` via NodePool
+`spec.template.spec.labels`:** remove the label from the NodePool and set
+`spec.gpuDriverVersion` on `GCENodeClass` instead — it is now injected at boot time,
+before the driver installer runs.
+
+```yaml
+# Before — NodePool:
+spec:
+  template:
+    spec:
+      labels:
+        cloud.google.com/gke-gpu-driver-version: default
+
+# After — remove the NodePool label; set in GCENodeClass:
+spec:
+  gpuDriverVersion: default
+```
+
+**Node rotation on upgrade:** `GCENodeClassHashVersion` is bumped to `v4`. On upgrade, Karpenter detects that all existing `GCENodeClass` objects carry a stale hash version and triggers a rolling node replacement for every affected NodePool. This is a one-time, controlled rotation — nodes are replaced gradually, not all at once.
+
 ### Image alias version pinning (`imageSelectorTerms[].alias`)
 
 **If you use `@latest` aliases:** Karpenter now reliably updates `GCENodeClass.status.images` whenever a new GKE node image is published. Combined with Karpenter's Drift mechanism, this means **all nodes using `@latest` will be replaced automatically when GKE releases a new image.** If you want to control when image updates roll out, pin to a specific version:

@@ -36,4 +36,3 @@ const (
 var (
 	RegisteredLabel = fmt.Sprintf("%s=%s", karpv1.NodeRegisteredLabelKey, "true")
 )
-
