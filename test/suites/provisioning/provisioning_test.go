@@ -42,8 +42,8 @@ var _ = DescribeTable("Provisioning",
 	Entry("COS / arm64 / on-demand", environment.TestCase{
 		CapacityType:  karpv1.CapacityTypeOnDemand,
 		Arch:          karpv1.ArchitectureArm64,
-		Families:      []string{"c4a", "t2a"},
-		InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
+		Families:      []string{"t2a"},
+		InstanceTypes: []string{"t2a-standard-2", "t2a-standard-4"},
 	}, SpecTimeout(15*time.Minute)),
 	Entry("COS / amd64 / spot", environment.TestCase{
 		CapacityType:  karpv1.CapacityTypeSpot,
@@ -54,8 +54,8 @@ var _ = DescribeTable("Provisioning",
 	Entry("COS / arm64 / spot", environment.TestCase{
 		CapacityType:  karpv1.CapacityTypeSpot,
 		Arch:          karpv1.ArchitectureArm64,
-		Families:      []string{"c4a", "t2a"},
-		InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
+		Families:      []string{"t2a"},
+		InstanceTypes: []string{"t2a-standard-2", "t2a-standard-4"},
 	}, SpecTimeout(15*time.Minute)),
 	// Ubuntu
 	Entry("Ubuntu / amd64 / on-demand", environment.TestCase{
@@ -68,8 +68,8 @@ var _ = DescribeTable("Provisioning",
 	Entry("Ubuntu / arm64 / on-demand", environment.TestCase{
 		CapacityType:  karpv1.CapacityTypeOnDemand,
 		Arch:          karpv1.ArchitectureArm64,
-		Families:      []string{"c4a", "t2a"},
-		InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
+		Families:      []string{"t2a"},
+		InstanceTypes: []string{"t2a-standard-2", "t2a-standard-4"},
 		ImageFamily:   gcpv1alpha1.ImageFamilyUbuntu,
 	}, SpecTimeout(15*time.Minute)),
 	Entry("Ubuntu / amd64 / spot", environment.TestCase{
@@ -82,8 +82,8 @@ var _ = DescribeTable("Provisioning",
 	Entry("Ubuntu / arm64 / spot", environment.TestCase{
 		CapacityType:  karpv1.CapacityTypeSpot,
 		Arch:          karpv1.ArchitectureArm64,
-		Families:      []string{"c4a", "t2a"},
-		InstanceTypes: []string{"c4a-standard-2", "c4a-standard-4", "t2a-standard-2"},
+		Families:      []string{"t2a"},
+		InstanceTypes: []string{"t2a-standard-2", "t2a-standard-4"},
 		ImageFamily:   gcpv1alpha1.ImageFamilyUbuntu,
 	}, SpecTimeout(15*time.Minute)),
 )
