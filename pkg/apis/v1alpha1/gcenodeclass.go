@@ -138,6 +138,8 @@ type ImageSelectorTerm struct {
 	// Valid families include: ContainerOptimizedOS,Ubuntu
 	// +kubebuilder:validation:XValidation:message="'alias' is improperly formatted, must match the format 'family@version'",rule="self.matches('^[a-zA-Z0-9]+@.+$')"
 	// +kubebuilder:validation:XValidation:message="family is not supported, must be one of the following: 'ContainerOptimizedOS,Ubuntu'",rule="self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']"
+	// +kubebuilder:validation:XValidation:message="ContainerOptimizedOS version must be 'latest' or 'milestone.build.build.build' (e.g. '125.19216.104.126')",rule="!self.startsWith('ContainerOptimizedOS@') || self.matches('^ContainerOptimizedOS@(latest|[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)$')"
+	// +kubebuilder:validation:XValidation:message="Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')",rule="!self.startsWith('Ubuntu@') || self.matches('^Ubuntu@(latest|v[0-9]{8})$')"
 	// +kubebuilder:validation:MaxLength=60
 	// +optional
 	Alias string `json:"alias,omitempty"`

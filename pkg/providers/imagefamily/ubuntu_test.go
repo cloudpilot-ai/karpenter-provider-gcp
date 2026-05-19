@@ -125,6 +125,48 @@ func TestBuildImageFilter_Ubuntu_FallsBackOnNilProvider(t *testing.T) {
 	require.Equal(t, `name=ubuntu-gke-2404*`, got)
 }
 
+func TestResolveImages_Ubuntu_PinnedVersion_Valid(t *testing.T) {
+	images := []*compute.Image{
+		{
+			Name:              "ubuntu-gke-2404-1-35-amd64-v20260420",
+			CreationTimestamp: "2026-04-20T00:00:00Z",
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &compute.ImageList{Items: images}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := &Ubuntu{
+		computeService:  buildComputeService(t, srv),
+		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+	}
+
+	// Pin to an older date than the latest image.
+	// Verifies the ubuntuVersionRe substitution replaces the -v<date> segment.
+	got, err := p.ResolveImages(context.Background(), "v20260416")
+	require.NoError(t, err)
+	require.Len(t, got, 2) // amd64, arm64
+
+	srcs := make([]string, len(got))
+	for i, img := range got {
+		srcs[i] = img.SourceImage
+	}
+	require.Contains(t, srcs, "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-amd64-v20260416")
+	require.Contains(t, srcs, "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-arm64-v20260416")
+}
+
+func TestResolveImages_Ubuntu_PinnedVersion_InvalidFormat(t *testing.T) {
+	p := &Ubuntu{}
+	for _, version := range []string{"20260416", "v202604161", "v2026041", "vABCDEFGH", "v20260416-extra"} {
+		_, err := p.ResolveImages(context.Background(), version)
+		require.Errorf(t, err, "expected error for version %q", version)
+		require.Contains(t, err.Error(), "invalid Ubuntu version", "version %q", version)
+	}
+}
+
 func TestIsUsableUbuntuImage(t *testing.T) {
 	usable := []*compute.Image{
 		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420"},

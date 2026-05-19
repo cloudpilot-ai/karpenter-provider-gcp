@@ -5,6 +5,26 @@
 
 ## Unreleased
 
+### Image alias version pinning (`imageSelectorTerms[].alias`)
+
+**If you use `@latest` aliases:** Karpenter now reliably updates `GCENodeClass.status.images` whenever a new GKE node image is published. Combined with Karpenter's Drift mechanism, this means **all nodes using `@latest` will be replaced automatically when GKE releases a new image.** If you want to control when image updates roll out, pin to a specific version:
+
+```yaml
+# ContainerOptimizedOS — milestone.build.build.build format
+imageSelectorTerms:
+  - alias: ContainerOptimizedOS@125.19216.104.126
+
+# Ubuntu — vYYYYMMDD format
+imageSelectorTerms:
+  - alias: Ubuntu@v20260416
+```
+
+See [docs/image-management.md](docs/image-management.md) for commands to discover available versions.
+
+**If you use pinned alias versions:** Invalid version formats (e.g. `ContainerOptimizedOS@125`) are now rejected at admission by the CRD webhook. Update any aliases that use partial or incorrectly formatted version strings before upgrading.
+
+**If a pinned version does not exist in GCP:** The `GCENodeClass` `ImagesReady` condition now shows `False` with reason `ImageResolutionFailed` and a descriptive message within one minute, instead of failing silently.
+
 ### Bootstrap pool discovery (template pool elimination)
 
 Karpenter no longer creates `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. Instead, it discovers an existing RUNNING cluster pool to read bootstrap metadata. The upgrade itself requires no action.

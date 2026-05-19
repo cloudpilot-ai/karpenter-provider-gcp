@@ -178,6 +178,12 @@ spec:
                       - message: 'family is not supported, must be one of the following:
                           ''ContainerOptimizedOS,Ubuntu'''
                         rule: self.find('^[^@]+') in ['ContainerOptimizedOS', 'Ubuntu']
+                      - message: ContainerOptimizedOS version must be 'latest' or
+                          'milestone.build.build.build' (e.g. '125.19216.104.126')
+                        rule: '!self.startsWith(''ContainerOptimizedOS@'') || self.matches(''^ContainerOptimizedOS@(latest|[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)$'')'
+                      - message: Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g.
+                          'v20260416')
+                        rule: '!self.startsWith(''Ubuntu@'') || self.matches(''^Ubuntu@(latest|v[0-9]{8})$'')'
                     id:
                       description: ID specifies which GKE image to select.
                       maxLength: 160
