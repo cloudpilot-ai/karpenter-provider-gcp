@@ -41,12 +41,8 @@ Key capabilities:
 
 ## Features
 
-<<<<<<< HEAD
 - [GPU nodes](gpu-nodes.md) — GPU instance types, driver version control, and device plugin scheduling
-||||||| 907a7e21
-=======
 - [Image selection](image-selection.md) — select node images by GKE release channel, version pin, or raw image ID
->>>>>>> main
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
 - [Static capacity](examples/static-capacity.md) — keep a fixed number of nodes running with `spec.replicas`
 
