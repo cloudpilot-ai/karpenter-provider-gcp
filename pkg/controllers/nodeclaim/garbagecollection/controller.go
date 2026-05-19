@@ -38,8 +38,12 @@ import (
 const (
 	gcInterval = 2 * time.Minute
 	// gcGracePeriod prevents newly created instances from being GC'd before their
-	// NodeClaim has been written to the API server.
-	gcGracePeriod = 30 * time.Second
+	// NodeClaim has been written to the API server. GCE VMs appear in instances.list
+	// within seconds of the create call, but the lifecycle controller only writes the
+	// providerID back to the NodeClaim after the zone operation completes (30-90s).
+	// 3 minutes covers the full provisioning cycle (fast path ~30s, slow path ~90s)
+	// plus API-server write latency, at the cost of one extra GC cycle for orphans.
+	gcGracePeriod = 3 * time.Minute
 )
 
 type Controller struct {
