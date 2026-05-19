@@ -17,9 +17,11 @@ limitations under the License.
 package provisioning_test
 
 import (
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -85,3 +87,25 @@ var _ = DescribeTable("Provisioning",
 		ImageFamily:   gcpv1alpha1.ImageFamilyUbuntu,
 	}, SpecTimeout(15*time.Minute)),
 )
+
+var _ = Describe("Image Pinning", func() {
+	It("should provision a node with a pinned ContainerOptimizedOS alias", func(ctx SpecContext) {
+		imageURL := env.ResolveCurrentCOSImage(ctx)
+		m := cosVersionFromImageRe.FindStringSubmatch(imageURL)
+		Expect(m).To(HaveLen(2), "could not extract COS version from %q", imageURL)
+		version := strings.ReplaceAll(m[1], "-", ".")
+		alias := "ContainerOptimizedOS@" + version
+		runPinnedAliasTest(ctx, alias, "cos-"+m[1]+"-c-pre")
+	}, SpecTimeout(15*time.Minute))
+
+	It("should provision a node with a pinned Ubuntu alias", func(ctx SpecContext) {
+		version := env.ResolveCurrentUbuntuVersion(ctx)
+		alias := "Ubuntu@" + version
+		runPinnedAliasTest(ctx, alias, version)
+	}, SpecTimeout(15*time.Minute))
+
+	It("should provision a node with an exact image id", func(ctx SpecContext) {
+		imageURL := env.ResolveCurrentCOSImage(ctx)
+		runImageIDTest(ctx, gcpv1alpha1.ImageFamilyContainerOptimizedOS, imageURL)
+	}, SpecTimeout(15*time.Minute))
+})
