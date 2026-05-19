@@ -34,6 +34,7 @@ import (
 
 const ubuntuGKEImageProject = "ubuntu-os-gke-cloud"
 
+// ubuntuVersionRe matches the GKE version token in an Ubuntu image name (e.g. "-v20260416").
 var ubuntuVersionRe = regexp.MustCompile(`-v\d+(-|$)`)
 
 type Ubuntu struct {
@@ -71,8 +72,6 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 func (u *Ubuntu) resolveLatestUbuntuImage(ctx context.Context) (string, error) {
 	filter := u.buildImageFilter(ctx)
 
-	// GCP does not support Filter + OrderBy together. Track the newest usable image
-	// seen so far to avoid accumulating the full result set in memory.
 	var best *compute.Image
 	err := u.computeService.Images.List(ubuntuGKEImageProject).
 		Filter(filter).
