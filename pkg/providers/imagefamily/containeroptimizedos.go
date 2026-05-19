@@ -36,12 +36,19 @@ import (
 // cosImageProject is the GCP project that owns all Container-Optimized OS GKE images.
 const cosImageProject = "gke-node-images"
 
+var cosVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
+
 type ContainerOptimizedOS struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
 }
 
 func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
+	if version != "latest" && !cosVersionRe.MatchString(version) {
+		return nil, &imageResolutionError{msg: fmt.Sprintf(
+			"invalid ContainerOptimizedOS version %q: must be 'latest' or 'milestone.build.build.build' (e.g. '125.19216.104.126')", version)}
+	}
+
 	sourceImage, err := c.resolveLatestCOSImage(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to resolve COS GKE image from catalog")

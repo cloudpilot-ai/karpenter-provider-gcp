@@ -21,8 +21,8 @@ import (
 	"net/http"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	containerv1 "google.golang.org/api/container/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -61,9 +61,9 @@ func (f *fakePricingProvider) UpdatePrices(_ context.Context) error   { return n
 // with one machine type so that List can return results without network calls.
 func newTestProvider() *DefaultProvider {
 	mt := &computepb.MachineType{
-		Name:      aws.String("n2-standard-4"),
-		GuestCpus: aws.Int32(4),
-		MemoryMb:  aws.Int32(16384),
+		Name:      lo.ToPtr("n2-standard-4"),
+		GuestCpus: lo.ToPtr[int32](4),
+		MemoryMb:  lo.ToPtr[int32](16384),
 	}
 	return &DefaultProvider{
 		authOptions:       &auth.Credential{Region: "us-central1"},

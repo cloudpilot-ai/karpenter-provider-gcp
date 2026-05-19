@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
-	"github.com/aws/aws-sdk-go/aws"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -113,9 +113,9 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			name:      "BundledLocalSsds standard family: 2 partitions × 375 GiB",
 			nodeClass: &v1alpha1.GCENodeClass{},
 			mt: &computepb.MachineType{
-				Name: aws.String("n2-standard-8"),
+				Name: lo.ToPtr("n2-standard-8"),
 				BundledLocalSsds: &computepb.BundledLocalSsds{
-					PartitionCount: aws.Int32(2),
+					PartitionCount: lo.ToPtr[int32](2),
 				},
 			},
 			expectedBootGiB:  100,
@@ -126,9 +126,9 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			name:      "BundledLocalSsds z3 family: 4 partitions × 3000 GiB",
 			nodeClass: &v1alpha1.GCENodeClass{},
 			mt: &computepb.MachineType{
-				Name: aws.String("z3-highmem-88-standardlssd"),
+				Name: lo.ToPtr("z3-highmem-88-standardlssd"),
 				BundledLocalSsds: &computepb.BundledLocalSsds{
-					PartitionCount: aws.Int32(4),
+					PartitionCount: lo.ToPtr[int32](4),
 				},
 			},
 			expectedBootGiB:  100,
@@ -139,9 +139,9 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			name:      "BundledLocalSsds PartitionCount=0 treated as no SSDs",
 			nodeClass: &v1alpha1.GCENodeClass{},
 			mt: &computepb.MachineType{
-				Name: aws.String("n2-standard-8"),
+				Name: lo.ToPtr("n2-standard-8"),
 				BundledLocalSsds: &computepb.BundledLocalSsds{
-					PartitionCount: aws.Int32(0),
+					PartitionCount: lo.ToPtr[int32](0),
 				},
 			},
 			expectedBootGiB:  100,
@@ -152,9 +152,9 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			name:      "c4d-highmem-8-lssd: API reports 1 partition but total override applies",
 			nodeClass: &v1alpha1.GCENodeClass{},
 			mt: &computepb.MachineType{
-				Name: aws.String("c4d-highmem-8-lssd"),
+				Name: lo.ToPtr("c4d-highmem-8-lssd"),
 				BundledLocalSsds: &computepb.BundledLocalSsds{
-					PartitionCount: aws.Int32(1),
+					PartitionCount: lo.ToPtr[int32](1),
 				},
 			},
 			expectedBootGiB:  100,
@@ -165,9 +165,9 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			name:      "c4d-highmem-16-lssd: API reports 1 partition but total override applies",
 			nodeClass: &v1alpha1.GCENodeClass{},
 			mt: &computepb.MachineType{
-				Name: aws.String("c4d-highmem-16-lssd"),
+				Name: lo.ToPtr("c4d-highmem-16-lssd"),
 				BundledLocalSsds: &computepb.BundledLocalSsds{
-					PartitionCount: aws.Int32(1),
+					PartitionCount: lo.ToPtr[int32](1),
 				},
 			},
 			expectedBootGiB:  100,
@@ -197,11 +197,11 @@ func TestComputeRequirements(t *testing.T) {
 		{
 			name: "Standard Instance (n1-standard-1)",
 			mt: &computepb.MachineType{
-				Name:        aws.String("n1-standard-1"),
-				GuestCpus:   aws.Int32(1),
-				MemoryMb:    aws.Int32(3840),
-				Zone:        aws.String("us-central1-a"),
-				Description: aws.String("1 vCPU, 3.75 GB RAM"),
+				Name:        lo.ToPtr("n1-standard-1"),
+				GuestCpus:   lo.ToPtr[int32](1),
+				MemoryMb:    lo.ToPtr[int32](3840),
+				Zone:        lo.ToPtr("us-central1-a"),
+				Description: lo.ToPtr("1 vCPU, 3.75 GB RAM"),
 			},
 			offerings: cloudprovider.Offerings{
 				{
@@ -239,10 +239,10 @@ func TestComputeRequirements(t *testing.T) {
 		{
 			name: "ARM Instance (t2a-standard-1)",
 			mt: &computepb.MachineType{
-				Name:         aws.String("t2a-standard-1"),
-				GuestCpus:    aws.Int32(1),
-				MemoryMb:     aws.Int32(4096),
-				Architecture: aws.String("ARM64"),
+				Name:         lo.ToPtr("t2a-standard-1"),
+				GuestCpus:    lo.ToPtr[int32](1),
+				MemoryMb:     lo.ToPtr[int32](4096),
+				Architecture: lo.ToPtr("ARM64"),
 			},
 			offerings: cloudprovider.Offerings{
 				{
@@ -279,13 +279,13 @@ func TestComputeRequirements(t *testing.T) {
 		{
 			name: "GPU Instance (a2-highgpu-1g)",
 			mt: &computepb.MachineType{
-				Name:      aws.String("a2-highgpu-1g"),
-				GuestCpus: aws.Int32(12),
-				MemoryMb:  aws.Int32(86016),
+				Name:      lo.ToPtr("a2-highgpu-1g"),
+				GuestCpus: lo.ToPtr[int32](12),
+				MemoryMb:  lo.ToPtr[int32](86016),
 				Accelerators: []*computepb.Accelerators{
 					{
-						GuestAcceleratorCount: aws.Int32(1),
-						GuestAcceleratorType:  aws.String("nvidia-tesla-a100"),
+						GuestAcceleratorCount: lo.ToPtr[int32](1),
+						GuestAcceleratorType:  lo.ToPtr("nvidia-tesla-a100"),
 					},
 				},
 			},
@@ -325,9 +325,9 @@ func TestComputeRequirements(t *testing.T) {
 		{
 			name: "E2 Instance (e2-medium)",
 			mt: &computepb.MachineType{
-				Name:      aws.String("e2-medium"),
-				GuestCpus: aws.Int32(2),
-				MemoryMb:  aws.Int32(4096),
+				Name:      lo.ToPtr("e2-medium"),
+				GuestCpus: lo.ToPtr[int32](2),
+				MemoryMb:  lo.ToPtr[int32](4096),
 			},
 			offerings: cloudprovider.Offerings{
 				{
@@ -365,9 +365,9 @@ func TestComputeRequirements(t *testing.T) {
 		{
 			name: "Offering with ZoneID",
 			mt: &computepb.MachineType{
-				Name:      aws.String("n1-standard-1"),
-				GuestCpus: aws.Int32(1),
-				MemoryMb:  aws.Int32(3840),
+				Name:      lo.ToPtr("n1-standard-1"),
+				GuestCpus: lo.ToPtr[int32](1),
+				MemoryMb:  lo.ToPtr[int32](3840),
 			},
 			offerings: cloudprovider.Offerings{
 				{
@@ -406,9 +406,9 @@ func TestComputeRequirements(t *testing.T) {
 		{
 			name: "GPU Instance (c3d-highmem-8-lssd)",
 			mt: &computepb.MachineType{
-				Name:      aws.String("c3d-highmem-8-lssd"),
-				GuestCpus: aws.Int32(8),
-				MemoryMb:  aws.Int32(65536),
+				Name:      lo.ToPtr("c3d-highmem-8-lssd"),
+				GuestCpus: lo.ToPtr[int32](8),
+				MemoryMb:  lo.ToPtr[int32](65536),
 			},
 			offerings: cloudprovider.Offerings{
 				{

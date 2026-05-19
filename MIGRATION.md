@@ -36,22 +36,46 @@ spec:
 
 **Node rotation on upgrade:** `GCENodeClassHashVersion` is bumped to `v4`. On upgrade, Karpenter detects that all existing `GCENodeClass` objects carry a stale hash version and triggers a rolling node replacement for every affected NodePool. This is a one-time, controlled rotation — nodes are replaced gradually, not all at once.
 
-### Template pool elimination
+### Image alias version pinning (`imageSelectorTerms[].alias`)
 
-Karpenter no longer creates or relies on `karpenter-default`, `karpenter-ubuntu`,
-`karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. It discovers an existing
-RUNNING cluster pool automatically. No action required on upgrade.
+**If you use `@latest` aliases:** Karpenter now reliably updates `GCENodeClass.status.images` whenever a new GKE node image is published. Combined with Karpenter's Drift mechanism, this means **all nodes using `@latest` will be replaced automatically when GKE releases a new image.** If you want to control when image updates roll out, pin to a specific version:
 
-After confirming provisioning works, delete the legacy pools at your own pace:
+```yaml
+# ContainerOptimizedOS — milestone.build.build.build format
+imageSelectorTerms:
+  - alias: ContainerOptimizedOS@125.19216.104.126
+
+# Ubuntu — vYYYYMMDD format
+imageSelectorTerms:
+  - alias: Ubuntu@v20260416
+```
+
+See [docs/image-management.md](docs/image-management.md) for commands to discover available versions.
+
+**If you use pinned alias versions:** Invalid version formats (e.g. `ContainerOptimizedOS@125`) are now rejected at admission by the CRD webhook. Update any aliases that use partial or incorrectly formatted version strings before upgrading.
+
+**If a pinned version does not exist in GCP:** The `GCENodeClass` `ImagesReady` condition now shows `False` with reason `ImageResolutionFailed` and a descriptive message within one minute, instead of failing silently.
+
+### Bootstrap pool discovery (template pool elimination)
+
+Karpenter no longer creates `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. Instead, it discovers an existing RUNNING cluster pool to read bootstrap metadata. The upgrade itself requires no action.
+
+After confirming provisioning works correctly with the new version, delete the legacy pools at your own pace:
 
 ```bash
 for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpenter-default; do
-  gcloud container node-pools delete "$pool" --cluster=<CLUSTER> --region=<REGION> --quiet
+  gcloud container node-pools delete "$pool" \
+    --cluster=CLUSTER_NAME \
+    --location=CLUSTER_LOCATION \
+    --quiet
 done
 ```
 
-The new fallback pool is named `karpenter-fallback`, so deleting all four names above is
-unambiguous. Rolling back re-creates the legacy pools automatically.
+The new last-resort fallback pool is named `karpenter-fallback` (not `karpenter-default`), so deleting the four legacy names is safe and unambiguous.
+
+Rolling back to the previous version will re-create the legacy pools automatically.
+
+See [Bootstrap pool selection](docs/bootstrap-pool.md) for configuration options and troubleshooting.
 
 ---
 

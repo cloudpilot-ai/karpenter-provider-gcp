@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"regexp"
 	"strings"
 	"time"
 
@@ -779,6 +780,187 @@ func (e *Environment) AddNodeClassMetadataEntry(ctx context.Context, name, key, 
 	Expect(err).NotTo(HaveOccurred(), "marshaling metadata patch for GCENodeClass %s", name)
 	_, err = e.DynamicClient.Resource(gceNodeClassGVR).Patch(ctx, name, types.MergePatchType, body, metav1.PatchOptions{})
 	Expect(err).NotTo(HaveOccurred(), "patching spec.metadata on GCENodeClass %s", name)
+}
+
+// CreateNodeClassWithAlias creates a GCENodeClass whose imageSelectorTerms uses
+// the given full alias string (e.g. "ContainerOptimizedOS@125.19216.104.126").
+// Ubuntu aliases get a 50 GiB boot disk; all others use DefaultE2EDiskGiB.
+func (e *Environment) CreateNodeClassWithAlias(ctx context.Context, name, alias string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if strings.HasPrefix(alias, "Ubuntu@") {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": alias},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s with alias %s", name, alias)
+	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithImageID creates a GCENodeClass that selects an image by
+// exact resource URL via spec.imageSelectorTerms[0].id.
+// Ubuntu image families get a 50 GiB boot disk; all others use DefaultE2EDiskGiB.
+func (e *Environment) CreateNodeClassWithImageID(ctx context.Context, name, imageFamily, imageID string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageFamily": imageFamily,
+			"imageSelectorTerms": []any{
+				map[string]any{"id": imageID},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s with imageID %s", name, imageID)
+	e.trackNodeClass(name)
+}
+
+// NodeClassSourceImages returns the list of sourceImage strings from
+// status.images of the named GCENodeClass. Returns nil if the field is absent.
+func (e *Environment) NodeClassSourceImages(ctx context.Context, name string) []string {
+	obj, err := e.DynamicClient.Resource(gceNodeClassGVR).Get(ctx, name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "getting GCENodeClass %s", name)
+	items, _, _ := unstructured.NestedSlice(obj.Object, "status", "images")
+	var out []string
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if s, ok := m["sourceImage"].(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ResolveCurrentCOSImage queries the gke-node-images project for the most
+// recent non-deprecated amd64 COS GKE image matching the cluster's K8s patch
+// version and returns its full resource URL.
+func (e *Environment) ResolveCurrentCOSImage(ctx context.Context) string {
+	serverVer, err := e.KubeClient.Discovery().ServerVersion()
+	Expect(err).NotTo(HaveOccurred(), "getting server version")
+
+	raw := strings.TrimPrefix(serverVer.GitVersion, "v")
+	raw = strings.SplitN(raw, "+", 2)[0] // strip +gke.X suffix (standard K8s format)
+	raw = strings.SplitN(raw, "-", 2)[0] // strip -gke.X suffix (GKE format: v1.35.3-gke.1389000)
+	parts := strings.Split(raw, ".")     // ["1","35","3"]
+	Expect(len(parts)).To(BeNumerically(">=", 3),
+		"unexpected server version format: %s", serverVer.GitVersion)
+
+	filter := fmt.Sprintf("name=gke-%s%s%s-*", parts[0], parts[1], parts[2])
+
+	var best *compute.Image
+	listErr := e.computeSvc.Images.List("gke-node-images").
+		Filter(filter).
+		Pages(ctx, func(page *compute.ImageList) error {
+			for _, img := range page.Items {
+				if img.Deprecated != nil {
+					switch img.Deprecated.State {
+					case "DEPRECATED", "OBSOLETE", "DELETED":
+						continue
+					}
+				}
+				skip := false
+				for _, substr := range []string{"arm64", "kmod", "nvda", "gvisor", "-test", "cgpv1"} {
+					if strings.Contains(img.Name, substr) {
+						skip = true
+						break
+					}
+				}
+				if skip {
+					continue
+				}
+				if best == nil || img.CreationTimestamp > best.CreationTimestamp {
+					best = img
+				}
+			}
+			return nil
+		})
+	Expect(listErr).NotTo(HaveOccurred(), "listing COS images in gke-node-images")
+	Expect(best).NotTo(BeNil(), "no COS image found for K8s version %s", serverVer.GitVersion)
+	return fmt.Sprintf("projects/gke-node-images/global/images/%s", best.Name)
+}
+
+// ResolveCurrentUbuntuVersion queries the ubuntu-os-gke-cloud project for the
+// most recent non-deprecated amd64 Ubuntu 24.04 GKE image matching the cluster's
+// K8s minor version and returns the version token (e.g. "v20260416").
+func (e *Environment) ResolveCurrentUbuntuVersion(ctx context.Context) string {
+	serverVer, err := e.KubeClient.Discovery().ServerVersion()
+	Expect(err).NotTo(HaveOccurred(), "getting server version")
+
+	raw := strings.TrimPrefix(serverVer.GitVersion, "v")
+	raw = strings.SplitN(raw, "+", 2)[0] // strip +gke.X suffix (standard K8s format)
+	raw = strings.SplitN(raw, "-", 2)[0] // strip -gke.X suffix (GKE format: v1.35.3-gke.1389000)
+	parts := strings.Split(raw, ".")
+	Expect(len(parts)).To(BeNumerically(">=", 2),
+		"unexpected server version format: %s", serverVer.GitVersion)
+
+	filter := fmt.Sprintf("name=ubuntu-gke-2404-%s-%s*", parts[0], parts[1])
+
+	var best *compute.Image
+	listErr := e.computeSvc.Images.List("ubuntu-os-gke-cloud").
+		Filter(filter).
+		Pages(ctx, func(page *compute.ImageList) error {
+			for _, img := range page.Items {
+				if img.Deprecated != nil {
+					switch img.Deprecated.State {
+					case "DEPRECATED", "OBSOLETE", "DELETED":
+						continue
+					}
+				}
+				if !strings.Contains(img.Name, "-amd64-") {
+					continue
+				}
+				skip := false
+				for _, substr := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test"} {
+					if strings.Contains(img.Name, substr) {
+						skip = true
+						break
+					}
+				}
+				if skip {
+					continue
+				}
+				if best == nil || img.CreationTimestamp > best.CreationTimestamp {
+					best = img
+				}
+			}
+			return nil
+		})
+	Expect(listErr).NotTo(HaveOccurred(), "listing Ubuntu images in ubuntu-os-gke-cloud")
+	Expect(best).NotTo(BeNil(), "no Ubuntu image found for K8s version %s", serverVer.GitVersion)
+
+	versionRe := regexp.MustCompile(`-v(\d{8})`)
+	m := versionRe.FindStringSubmatch(best.Name)
+	Expect(m).To(HaveLen(2), "could not extract Ubuntu version from %q", best.Name)
+	version := "v" + m[1]
+	Expect(version).NotTo(BeEmpty(), "could not extract Ubuntu version from %q", best.Name)
+	return version
 }
 
 // deleteIfExists deletes a resource if it exists and waits for it to be fully
