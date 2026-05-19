@@ -36,8 +36,6 @@ import (
 // cosImageProject is the GCP project that owns all Container-Optimized OS GKE images.
 const cosImageProject = "gke-node-images"
 
-var cosVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
-
 type ContainerOptimizedOS struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
