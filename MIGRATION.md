@@ -141,35 +141,6 @@ gcloud projects remove-iam-policy-binding $PROJECT_ID \
 If you override the node SA via `GCENodeClass.spec.serviceAccount` or `--node-pool-service-account`,
 repeat the `add-iam-policy-binding` step for each SA you use.
 
-#### Terraform
-
-If you manage IAM with Terraform, the `deploy/terraform/` module already provisions the
-minimal custom role. To replicate the equivalent resources in your own configuration:
-
-```hcl
-resource "google_project_iam_custom_role" "karpenter_controller" {
-  role_id     = "karpenter_controller"
-  title       = "Karpenter Controller"
-  description = "Minimal permissions for the Karpenter GCP provider controller."
-  permissions = yamldecode(file("deploy/iam/karpenter-controller-role.yaml")).includedPermissions
-  project     = "<your-project-id>"
-}
-
-resource "google_project_iam_member" "karpenter_controller" {
-  project = "<your-project-id>"
-  role    = google_project_iam_custom_role.karpenter_controller.id
-  member  = "serviceAccount:<karpenter-gsa>@<your-project-id>.iam.gserviceaccount.com"
-}
-```
-
-Remove the old broad bindings from your Terraform config and reconcile state:
-
-```sh
-# After removing the resources from .tf files, import or remove the old bindings from state
-terraform state rm google_project_iam_member.<compute_admin_resource>
-terraform state rm google_project_iam_member.<container_admin_resource>
-terraform apply
-```
 
 ### Node service account
 
