@@ -38,16 +38,20 @@ spec:
 
 ### Image alias version pinning (`imageSelectorTerms[].alias`)
 
-**If you use `@latest` aliases:** Karpenter now reliably updates `GCENodeClass.status.images` whenever a new GKE node image is published. Combined with Karpenter's Drift mechanism, this means **all nodes using `@latest` will be replaced automatically when GKE releases a new image.** If you want to control when image updates roll out, pin to a specific version:
+> **For new configurations, prefer the `family`/`channel`/`version` structured fields over the `alias` field.** See [Image selection](docs/image-selection.md) and [Image management](docs/image-management.md#legacy-image-alias-format) for the migration table.
+
+**If you use `@latest` aliases:** Karpenter now reliably updates `GCENodeClass.status.images` whenever a new GKE node image is published. Combined with Karpenter's Drift mechanism, this means **all nodes using `@latest` will be replaced automatically when GKE releases a new image.** If you want to control when image updates roll out, pin to a specific version using the new structured fields:
 
 ```yaml
 # ContainerOptimizedOS — milestone.build.build.build format
 imageSelectorTerms:
-  - alias: ContainerOptimizedOS@125.19216.104.126
+  - family: ContainerOptimizedOS
+    version: "125.19216.104.126"
 
 # Ubuntu — vYYYYMMDD format
 imageSelectorTerms:
-  - alias: Ubuntu@v20260416
+  - family: Ubuntu2404
+    version: "v20260416"
 ```
 
 See [docs/image-management.md](docs/image-management.md) for commands to discover available versions.
