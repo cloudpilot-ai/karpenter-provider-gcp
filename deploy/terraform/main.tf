@@ -1,18 +1,3 @@
-variable "common_name" {
-  type = string
-  default = "karpenter-provider-gcp"
-}
-
-variable "google_region" {
-  type = string
-  default = "us-central1"
-}
-
-variable "project_id" {
-  type = string
-  default = "karpenter-provider-gcp"
-}
-
 terraform {
   required_providers {
     google = {
@@ -79,4 +64,8 @@ resource "google_container_cluster" "default" {
 
   remove_default_node_pool = true
   initial_node_count       = 1
+
+  workload_identity_config {
+    workload_pool = "${var.project_id}.svc.id.goog"
+  }
 }

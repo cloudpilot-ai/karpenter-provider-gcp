@@ -348,6 +348,11 @@
               "type": "string",
               "description": "Pin the GKE node pool used as the bootstrap metadata source. Leave empty for automatic discovery.",
               "default": ""
+            },
+            "defaultNodepoolServiceAccount": {
+              "type": "string",
+              "description": "Default GCP service account email to attach to provisioned nodes. Overrides the Compute Engine default SA. Leave empty to use the Compute Engine default SA.",
+              "default": ""
             }
           }
         }
