@@ -1,0 +1,34 @@
+title: Karpenter Controller
+description: Minimal IAM role for the karpenter-provider-gcp controller service account.
+stage: GA
+includedPermissions:
+  # Compute Engine — instance lifecycle
+  - compute.instances.create
+  - compute.instances.delete
+  - compute.instances.get
+  - compute.instances.list
+  - compute.instances.setLabels
+  - compute.instances.setMetadata
+  - compute.instances.setServiceAccount
+  - compute.instances.setTags
+  # Compute Engine — infrastructure discovery
+  - compute.disks.create  # implicit: required by Instances.Insert (boot disk)
+  - compute.images.get
+  - compute.images.list
+  - compute.instanceGroupManagers.get
+  - compute.machineTypes.list
+  - compute.networks.get      # required for Shared VPC (cross-project network validation)
+  - compute.projects.get
+  - compute.instanceTemplates.get
+  - compute.instanceTemplates.list
+  - compute.regions.get
+  - compute.subnetworks.get   # required for Shared VPC (cross-project subnet validation)
+  - compute.subnetworks.use
+  - compute.subnetworks.useExternalIp
+  - compute.zones.list
+  - compute.zoneOperations.get
+  # GKE Container Engine — cluster config and node pool templates
+  # nodePools.get is covered by container.clusters.get
+  # nodePools.create/delete map to container.clusters.update in GCP IAM
+  - container.clusters.get
+  - container.clusters.update
