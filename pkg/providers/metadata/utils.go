@@ -33,12 +33,12 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex        = regexp.MustCompile(`max-pods=\d+`)
-	gkeProvisioningRegex      = regexp.MustCompile(`gke-provisioning=\w+`)
-	kubeEnvArchRegex          = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
-	kubeEnvFamilyRegex        = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
-	registerWithTaintsRegex   = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	maxPodsPerNodeRegex     = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex            = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
 	// kubeEnvNodeLabelsRegex matches the entire --node-labels=<value> flag in kube-env.
 	// The value is comma-separated Kubernetes labels with no whitespace.
 	kubeEnvNodeLabelsRegex    = regexp.MustCompile(`--node-labels=\S+`)
