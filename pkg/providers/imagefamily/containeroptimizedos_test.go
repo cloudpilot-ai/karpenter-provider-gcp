@@ -138,6 +138,95 @@ func TestBuildImageFilter_FallsBackOnNilProvider(t *testing.T) {
 }
 
 func TestRenderVersion(t *testing.T) {
-	require.Equal(t, "1-35-1", renderVersion("v1.35.1"))
-	require.Equal(t, "1-35-1", renderVersion("1.35.1"))
+	cases := []struct {
+		input string
+		want  string
+	}{
+		// K8s semver format (original)
+		{"v1.35.1", "1-35-1"},
+		{"1.35.1", "1-35-1"},
+		// COS milestone.build.build.build format
+		{"125.19216.104.126", "125-19216-104-126"},
+		{"125.0.0.1", "125-0-0-1"},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, renderVersion(tc.input), "input: %q", tc.input)
+	}
+}
+
+func TestResolveImages_COS_PinnedVersion_InvalidFormat(t *testing.T) {
+	p := &ContainerOptimizedOS{}
+	for _, version := range []string{"125", "v1.35.1", "125.19216", "125.19216.104", "latest-1"} {
+		_, err := p.ResolveImages(context.Background(), version)
+		require.Errorf(t, err, "expected error for version %q", version)
+		require.Contains(t, err.Error(), "invalid ContainerOptimizedOS version", "version %q", version)
+	}
+}
+
+func TestResolveImages_COS_PinnedVersion_Valid(t *testing.T) {
+	// Pin to the same version the fake latest image already carries — the regex
+	// substitution runs but produces the same image name.
+	images := []*compute.Image{
+		{
+			Name:              "gke-1351-gke1396004-cos-125-19216-104-126-c-pre",
+			CreationTimestamp: "2025-04-01T00:00:00Z",
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &compute.ImageList{Items: images}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := &ContainerOptimizedOS{
+		computeService:  buildComputeService(t, srv),
+		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+	}
+
+	got, err := p.ResolveImages(context.Background(), "125.19216.104.126")
+	require.NoError(t, err)
+	require.Len(t, got, 3) // x86, arm64, gpu
+
+	srcs := make([]string, len(got))
+	for i, img := range got {
+		srcs[i] = img.SourceImage
+	}
+	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre")
+	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-arm64-125-19216-104-126-c-pre")
+	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-nvda")
+}
+
+func TestResolveImages_COS_PinnedVersion_DifferentMilestone(t *testing.T) {
+	// Pin to a different milestone than what the latest image carries.
+	// Verifies the regex substitution replaces the COS milestone+build segment.
+	images := []*compute.Image{
+		{
+			Name:              "gke-1351-gke1396004-cos-125-19216-104-126-c-pre",
+			CreationTimestamp: "2025-04-01T00:00:00Z",
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &compute.ImageList{Items: images}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := &ContainerOptimizedOS{
+		computeService:  buildComputeService(t, srv),
+		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+	}
+
+	got, err := p.ResolveImages(context.Background(), "124.18935.44.10")
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+
+	srcs := make([]string, len(got))
+	for i, img := range got {
+		srcs[i] = img.SourceImage
+	}
+	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-124-18935-44-10-c-pre")
+	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-arm64-124-18935-44-10-c-pre")
+	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-124-18935-44-10-c-nvda")
 }
