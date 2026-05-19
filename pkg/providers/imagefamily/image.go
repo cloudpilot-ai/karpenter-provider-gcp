@@ -63,32 +63,25 @@ type DefaultProvider struct {
 	gkeProvider     gke.Provider
 	versionProvider versionprovider.Provider
 
-	containerOptimizedOSProvider *ContainerOptimizedOS
-	ubuntu2404Provider           *Ubuntu
-	ubuntu2204Provider           *Ubuntu
+	providers map[string]ImageFamily
 }
 
 // NewDefaultProvider creates the image provider. gkeProvider is used for channel-based
 // resolution; pass a no-op implementation if channel: terms are not needed.
 func NewDefaultProvider(computeService *compute.Service, versionProvider versionprovider.Provider, gkeProvider gke.Provider) *DefaultProvider {
+	cos := &ContainerOptimizedOS{computeService: computeService, versionProvider: versionProvider}
+	ubuntu2404 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2404"}
+	ubuntu2204 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2204"}
 	return &DefaultProvider{
 		cache:           cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
 		computeService:  computeService,
 		gkeProvider:     gkeProvider,
 		versionProvider: versionProvider,
-		containerOptimizedOSProvider: &ContainerOptimizedOS{
-			computeService:  computeService,
-			versionProvider: versionProvider,
-		},
-		ubuntu2404Provider: &Ubuntu{
-			computeService:  computeService,
-			versionProvider: versionProvider,
-			release:         "2404",
-		},
-		ubuntu2204Provider: &Ubuntu{
-			computeService:  computeService,
-			versionProvider: versionProvider,
-			release:         "2204",
+		providers: map[string]ImageFamily{
+			v1alpha1.ImageFamilyContainerOptimizedOS: cos,
+			v1alpha1.ImageFamilyUbuntu2404:           ubuntu2404,
+			v1alpha1.ImageFamilyUbuntu:               ubuntu2404, // legacy alias path
+			v1alpha1.ImageFamilyUbuntu2204:           ubuntu2204,
 		},
 	}
 }
@@ -228,16 +221,7 @@ func (p *DefaultProvider) resolveVersion(ctx context.Context, term v1alpha1.Imag
 }
 
 func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
-	switch family {
-	case v1alpha1.ImageFamilyContainerOptimizedOS:
-		return p.containerOptimizedOSProvider
-	case v1alpha1.ImageFamilyUbuntu, v1alpha1.ImageFamilyUbuntu2404:
-		return p.ubuntu2404Provider
-	case v1alpha1.ImageFamilyUbuntu2204:
-		return p.ubuntu2204Provider
-	default:
-		return nil
-	}
+	return p.providers[family]
 }
 
 func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) (Images, error) {
