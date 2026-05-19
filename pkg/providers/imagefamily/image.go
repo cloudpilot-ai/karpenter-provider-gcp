@@ -202,9 +202,9 @@ func (p *DefaultProvider) resolveVersion(ctx context.Context, term v1alpha1.Imag
 		if cluster.ReleaseChannel == nil ||
 			cluster.ReleaseChannel.Channel == "" ||
 			cluster.ReleaseChannel.Channel == "UNSPECIFIED" {
-			return "", fmt.Errorf("cluster has no enrolled release channel (UNSPECIFIED); " +
+			return "", &imageResolutionError{msg: "cluster has no enrolled release channel (UNSPECIFIED); " +
 				"channel: cluster requires an enrolled channel — " +
-				"enroll the cluster in a release channel or use version: latest explicitly")
+				"enroll the cluster in a release channel or use version: latest explicitly"}
 		}
 		channelName = cluster.ReleaseChannel.Channel
 	}
@@ -217,7 +217,11 @@ func (p *DefaultProvider) resolveVersion(ctx context.Context, term v1alpha1.Imag
 	if err != nil {
 		return "", fmt.Errorf("getting cluster version for channel resolution: %w", err)
 	}
-	return gke.ResolveVersionForChannel(sc, channelName, clusterVersion)
+	version, err := gke.ResolveVersionForChannel(sc, channelName, clusterVersion)
+	if err != nil {
+		return "", &imageResolutionError{msg: err.Error()}
+	}
+	return version, nil
 }
 
 func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
