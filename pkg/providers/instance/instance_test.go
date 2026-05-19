@@ -1062,6 +1062,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 
 	cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		&v1alpha1.GCENodeClass{},
 		onDemandOnlyIT,
@@ -1113,6 +1114,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: true}}
 	cluster := makeCluster("net", "subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		nc,
 		gpuIT,
@@ -1170,6 +1172,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: false}}
 	cluster := makeCluster("net", "subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		nc,
 		gpuIT,
@@ -1231,6 +1234,7 @@ func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: true}}
 	cluster := makeCluster("net", "subnet", "pods", false)
 	instance, err := p.buildInstance(
+		context.Background(),
 		spotOrOnDemandNodeClaim(),
 		nc,
 		nonGPUIT,

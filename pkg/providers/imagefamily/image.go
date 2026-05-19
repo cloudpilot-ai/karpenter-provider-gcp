@@ -33,7 +33,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
-	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
 // imageResolutionError marks a non-transient failure caused by the NodeClass
@@ -64,7 +64,7 @@ type DefaultProvider struct {
 	ubuntuOSProvider             *Ubuntu
 }
 
-func NewDefaultProvider(computeService *compute.Service, versionProvider versionprovider.Provider) *DefaultProvider {
+func NewDefaultProvider(computeService *compute.Service, versionProvider version.Provider) *DefaultProvider {
 	return &DefaultProvider{
 		cache:          cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
 		computeService: computeService,
