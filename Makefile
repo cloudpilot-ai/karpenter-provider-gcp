@@ -185,11 +185,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-<<<<<<< HEAD
 .PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
-=======
-.PHONY: help presubmit run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify image apply delete toolchain tidy download
->>>>>>> bcc0c15e (codegen: regenerate CRDs with controller-gen v0.20.1)
 
 define newline
 
