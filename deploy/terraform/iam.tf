@@ -23,6 +23,13 @@ resource "google_project_iam_member" "karpenter_node" {
   member  = "serviceAccount:${google_service_account.karpenter_node[0].email}"
 }
 
+resource "google_project_iam_member" "karpenter_node_ar_reader" {
+  count   = (var.node_service_account_email == "" && var.bind_artifactregistry_reader) ? 1 : 0
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.karpenter_node[0].email}"
+}
+
 resource "google_project_iam_custom_role" "karpenter_controller" {
   role_id     = "${replace(var.common_name, "-", "_")}_controller"
   title       = local.iam_role.title

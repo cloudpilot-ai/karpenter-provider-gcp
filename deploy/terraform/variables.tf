@@ -34,3 +34,9 @@ variable "node_service_account_email" {
   description = "Email of an existing GCP SA to attach to provisioned nodes. When empty, the module creates a dedicated node SA (karpenter_node) with roles/container.nodeServiceAccount."
   default     = ""
 }
+
+variable "bind_artifactregistry_reader" {
+  type        = bool
+  default     = false
+  description = "Bind roles/artifactregistry.reader to the node SA at the project level. Set to true when nodes pull images from a project-owned Artifact Registry repository. Has no effect when node_service_account_email is provided (BYOSA manages its own permissions)."
+}

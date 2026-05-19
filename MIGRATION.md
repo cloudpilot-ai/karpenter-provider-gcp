@@ -142,6 +142,76 @@ gcloud projects remove-iam-policy-binding $PROJECT_ID \
 If you override the node SA via `GCENodeClass.spec.serviceAccount` or `--node-pool-service-account`,
 repeat the `add-iam-policy-binding` step for each SA you use.
 
+### Use a dedicated minimal-privilege node service account (recommended)
+
+**No immediate action required.** This section documents the recommended hardening step for new
+and existing installations. Karpenter continues to work with the Compute Engine default SA if you
+skip it.
+
+By default, Karpenter attaches the Compute Engine default SA
+(`<project-number>-compute@developer.gserviceaccount.com`) to provisioned nodes. This SA carries
+broad `roles/editor`-equivalent permissions. Creating a dedicated node SA with only the
+permissions GKE nodes actually need reduces blast radius if a node is compromised.
+
+Create and configure the dedicated SA:
+
+```sh
+export PROJECT_ID=<your-project-id>
+export GSA_NAME=karpenter-gsa          # your Karpenter controller SA name
+export NODE_SA_NAME=karpenter-node
+
+gcloud iam service-accounts create $NODE_SA_NAME --project=$PROJECT_ID
+export NODE_SA_EMAIL=$NODE_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com
+
+# Minimal GKE node permissions (logging, monitoring, stackdriver metadata).
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$NODE_SA_EMAIL" \
+    --role="roles/container.nodeServiceAccount"
+
+# If nodes pull images from Artifact Registry:
+# gcloud projects add-iam-policy-binding $PROJECT_ID \
+#     --member="serviceAccount:$NODE_SA_EMAIL" \
+#     --role="roles/artifactregistry.reader"
+
+# Grant iam.serviceAccountUser on the new SA so the controller can attach it to VMs.
+# (If you already have iam.serviceAccountUser scoped to the Compute Engine default SA
+# from the section above, keep that binding until you confirm the new SA works.)
+gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
+    --role roles/iam.serviceAccountUser \
+    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --project $PROJECT_ID
+```
+
+Tell Karpenter to use the new SA. Choose one of:
+
+- **Cluster-wide default** — set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` on the controller (Helm
+  `controller.env` or the `--default-nodepool-service-account` flag):
+
+  ```sh
+  # Example: Helm upgrade with the env var injected
+  helm upgrade karpenter ... \
+    --set "controller.env[0].name=DEFAULT_NODEPOOL_SERVICE_ACCOUNT" \
+    --set "controller.env[0].value=$NODE_SA_EMAIL"
+  ```
+
+- **Per-NodeClass** — set `spec.serviceAccount` on each `GCENodeClass`:
+
+  ```yaml
+  spec:
+    serviceAccount: karpenter-node@<project-id>.iam.gserviceaccount.com
+  ```
+
+Once nodes are rolling with the new SA, optionally revoke `iam.serviceAccountUser` from the
+Compute Engine default SA to close the broad binding:
+
+```sh
+gcloud iam service-accounts remove-iam-policy-binding \
+    $(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com \
+    --role roles/iam.serviceAccountUser \
+    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --project $PROJECT_ID
+```
+
 ### Node service account
 
 The service account resolution order is now:

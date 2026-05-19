@@ -37,23 +37,44 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="projects/$PROJECT_ID/roles/karpenter_controller"
 
-# iam.serviceAccountUser must be scoped to each SA that Karpenter may attach to nodes.
-# By default, Karpenter uses the Compute Engine default SA (broad editor-equivalent permissions).
-# We recommend creating a dedicated minimal-privilege node SA instead — see the note below.
-#
-# If you override the node SA via GCENodeClass.spec.serviceAccount or the
-# --node-pool-service-account controller flag, grant iam.serviceAccountUser on that SA too.
-#
-# To find the Compute Engine default SA:
-#   echo "$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
-export NODE_SA_EMAIL=<your-node-sa>@<your-project-id>.iam.gserviceaccount.com
+# Create a dedicated node SA with the GKE-recommended minimal permissions.
+# This replaces the Compute Engine default SA (which has broad editor-equivalent access).
+export NODE_SA_NAME=karpenter-node
+
+gcloud iam service-accounts create $NODE_SA_NAME --project=$PROJECT_ID
+export NODE_SA_EMAIL=$NODE_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com
+
+# roles/container.nodeServiceAccount bundles the minimum GKE node permissions:
+# logging.logWriter, monitoring.metricWriter, monitoring.viewer,
+# stackdriver.resourceMetadata.writer.
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+    --member="serviceAccount:$NODE_SA_EMAIL" \
+    --role="roles/container.nodeServiceAccount"
+
+# If nodes pull images from Artifact Registry, also grant read access:
+# gcloud projects add-iam-policy-binding $PROJECT_ID \
+#     --member="serviceAccount:$NODE_SA_EMAIL" \
+#     --role="roles/artifactregistry.reader"
+
+# iam.serviceAccountUser must be scoped to each SA Karpenter may attach to nodes.
+# If you also use GCENodeClass.spec.serviceAccount or --default-nodepool-service-account
+# to set a different node SA, grant iam.serviceAccountUser on that SA as well.
 gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
     --role roles/iam.serviceAccountUser \
     --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --project $PROJECT_ID
 ```
 
-> **Recommendation:** The Compute Engine default SA has broad `roles/editor`-equivalent permissions. Create a dedicated node SA with only the permissions your workloads need and pass it via `GCENodeClass.spec.serviceAccount` or the `--node-pool-service-account` controller flag.
+Tell Karpenter to use the dedicated node SA by setting `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` in your Helm values (add to the `helm upgrade` command in Step 2):
+
+```sh
+--set "controller.env[0].name=DEFAULT_NODEPOOL_SERVICE_ACCOUNT" \
+--set "controller.env[0].value=$NODE_SA_EMAIL" \
+```
+
+Or set it per-NodeClass via `GCENodeClass.spec.serviceAccount: <email>`.
+
+> **Fallback:** If you skip node SA creation, Karpenter uses the Compute Engine default SA (`<project-number>-compute@developer.gserviceaccount.com`), which has broad `roles/editor`-equivalent permissions. This is not recommended for production clusters.
 
 ## Step 2 — Install Karpenter with Helm
 
