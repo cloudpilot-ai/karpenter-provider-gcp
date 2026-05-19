@@ -140,4 +140,3 @@ func (p *DefaultProvider) GetServerConfig(ctx context.Context) (*containerv1.Ser
 	p.serverConfigCache.SetDefault(serverConfigCacheKey, sc)
 	return sc, nil
 }
-
