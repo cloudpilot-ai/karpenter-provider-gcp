@@ -45,7 +45,7 @@ v20260416
 
 ## Controlling Image Replacement
 
-### Option 1: Channel tracking (recommended — always current)
+### Option 1: Channel tracking (recommended)
 
 Track a GKE release channel for automatic updates:
 
@@ -57,7 +57,7 @@ imageSelectorTerms:
 
 When GKE promotes a new build for the channel, Karpenter marks existing nodes as drifted and replaces them according to your disruption budgets.
 
-### Option 2: Pin to a specific version (recommended for production stability)
+### Option 2: Pin to a specific version
 
 Nodes are only replaced when you explicitly update the version. This gives full control over when image changes roll out:
 
