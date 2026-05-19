@@ -43,6 +43,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 )
 
 const (
@@ -1014,6 +1015,24 @@ func (e *Environment) ResolveCurrentUbuntuVersion(ctx context.Context) string {
 	Expect(m).To(HaveLen(2), "could not extract Ubuntu version from %q", best.Name)
 	version := "v" + m[1]
 	Expect(version).NotTo(BeEmpty(), "could not extract Ubuntu version from %q", best.Name)
+	return version
+}
+
+// GetChannelVersion fetches the GKE server config and returns the version string
+// that Karpenter would select for channelName given the current cluster version
+// (e.g., "1.34.7-gke.1068000"). Fails the test if the channel or version cannot
+// be resolved.
+func (e *Environment) GetChannelVersion(ctx context.Context, channelName string) string {
+	sc, err := e.containerSvc.Projects.Locations.
+		GetServerConfig(fmt.Sprintf("projects/%s/locations/%s", e.ProjectID, e.ClusterLocation)).
+		Context(ctx).Do()
+	Expect(err).NotTo(HaveOccurred(), "getting GKE server config")
+
+	serverVer, err := e.KubeClient.Discovery().ServerVersion()
+	Expect(err).NotTo(HaveOccurred(), "getting server version")
+
+	version, err := gke.ResolveVersionForChannel(sc, channelName, serverVer.GitVersion)
+	Expect(err).NotTo(HaveOccurred(), "resolving version for channel %s", channelName)
 	return version
 }
 

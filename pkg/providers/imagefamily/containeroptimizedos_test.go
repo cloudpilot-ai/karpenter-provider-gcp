@@ -246,7 +246,7 @@ func TestParseGKEVersion(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			key, build, ok := parseGKEVersion(tc.input)
+			key, build, ok := ParseGKEVersion(tc.input)
 			require.Equal(t, tc.wantOK, ok)
 			require.Equal(t, tc.wantKey, key)
 			require.Equal(t, tc.wantBuild, build)

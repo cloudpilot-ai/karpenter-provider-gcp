@@ -53,7 +53,7 @@ func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string
 		return c.resolveImages(sourceImage), nil
 	}
 
-	if k8sKey, build, ok := parseGKEVersion(version); ok {
+	if k8sKey, build, ok := ParseGKEVersion(version); ok {
 		// Channel-based resolution: use exact-build filter; no fallback on miss.
 		sourceImage, err := c.resolveExactBuildCOSImage(ctx, k8sKey, build)
 		if err != nil {
@@ -78,10 +78,10 @@ func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string
 	return c.resolveImages(modifiedImage), nil
 }
 
-// parseGKEVersion parses a GKE version string (e.g. "1.34.6-gke.1068000") into
+// ParseGKEVersion parses a GKE version string (e.g. "1.34.6-gke.1068000") into
 // the image name key ("1346") and build number ("1068000"). Returns ok=false if
 // v is not a GKE version string.
-func parseGKEVersion(v string) (k8sKey, build string, ok bool) {
+func ParseGKEVersion(v string) (k8sKey, build string, ok bool) {
 	parts := strings.SplitN(v, "-gke.", 2)
 	if len(parts) != 2 {
 		return "", "", false
