@@ -1,6 +1,6 @@
 locals {
   iam_role      = yamldecode(file("${path.module}/../iam/karpenter-controller-role.yaml"))
-  node_sa_email = var.node_service_account_email != "" ? var.node_service_account_email : google_service_account.karpenter_node[0].email
+  node_sa_email = var.node_service_account_email != "" ? var.node_service_account_email : one(google_service_account.karpenter_node[*].email)
 }
 
 resource "google_service_account" "karpenter_controller" {

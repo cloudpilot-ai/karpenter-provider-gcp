@@ -130,7 +130,8 @@ binding before removing the broad one to avoid a permission gap:
 export NODE_SA_EMAIL=<your-node-sa>@<your-project-id>.iam.gserviceaccount.com
 gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
     --role roles/iam.serviceAccountUser \
-    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
+    --member "serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+    --project $PROJECT_ID
 
 # Remove the broad project-wide binding.
 gcloud projects remove-iam-policy-binding $PROJECT_ID \
