@@ -1,6 +1,10 @@
 variable "common_name" {
   type    = string
   default = "karpenter-provider-gcp"
+  validation {
+    condition     = length(var.common_name) <= 25
+    error_message = "common_name must be at most 25 characters (service account IDs are suffixed with -ctrl/-node and must fit GCP's 30-character limit)."
+  }
 }
 
 variable "google_region" {

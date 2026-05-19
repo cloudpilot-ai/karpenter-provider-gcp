@@ -1,6 +1,6 @@
 locals {
   iam_role      = yamldecode(file("${path.module}/../iam/karpenter-controller-role.yaml"))
-  node_sa_email = var.node_service_account_email != "" ? var.node_service_account_email : google_service_account.karpenter_node.email
+  node_sa_email = var.node_service_account_email != "" ? var.node_service_account_email : google_service_account.karpenter_node[0].email
 }
 
 resource "google_service_account" "karpenter_controller" {
@@ -10,19 +10,21 @@ resource "google_service_account" "karpenter_controller" {
 }
 
 resource "google_service_account" "karpenter_node" {
+  count        = var.node_service_account_email == "" ? 1 : 0
   account_id   = "${var.common_name}-node"
   display_name = "Karpenter node"
   project      = var.project_id
 }
 
 resource "google_project_iam_member" "karpenter_node" {
+  count   = var.node_service_account_email == "" ? 1 : 0
   project = var.project_id
   role    = "roles/container.nodeServiceAccount"
-  member  = "serviceAccount:${google_service_account.karpenter_node.email}"
+  member  = "serviceAccount:${google_service_account.karpenter_node[0].email}"
 }
 
 resource "google_project_iam_custom_role" "karpenter_controller" {
-  role_id     = "karpenter_controller"
+  role_id     = "${replace(var.common_name, "-", "_")}_controller"
   title       = local.iam_role.title
   description = local.iam_role.description
   permissions = local.iam_role.includedPermissions
