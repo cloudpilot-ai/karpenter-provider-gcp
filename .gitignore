@@ -50,7 +50,7 @@ _go
 lefthook.yml
 
 # price_validate cache, output, and compiled binary
-hack/tools/price_validate/data/
+hack/price_validate/data/
 data/
 /price_validate
 

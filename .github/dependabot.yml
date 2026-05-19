@@ -33,3 +33,12 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: "gomod"
+    directory: "/hack/tools"
+    schedule:
+      interval: "weekly"
+    groups:
+      dev-tools:
+        patterns:
+          - "*"
