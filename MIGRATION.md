@@ -104,19 +104,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
     --role="projects/$PROJECT_ID/roles/karpenter_controller"
 ```
 
-Add the SA-scoped `iam.serviceAccountUser` binding on the node SA that Karpenter will attach to provisioned VMs. If you are using the Compute Engine default SA, discover its email first:
-
-```sh
-# Find the node SA email (Compute Engine default SA, or your custom node SA):
-export NODE_SA_EMAIL=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com
-
-gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
-    --role="roles/iam.serviceAccountUser" \
-    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --project=$PROJECT_ID
-```
-
-Then remove the old broad bindings, including the project-wide `iam.serviceAccountUser` binding if it was previously granted at that level:
+Then remove the old broad bindings:
 
 ```sh
 gcloud projects remove-iam-policy-binding $PROJECT_ID \
@@ -126,11 +114,6 @@ gcloud projects remove-iam-policy-binding $PROJECT_ID \
 gcloud projects remove-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/container.admin"
-
-# Remove the old project-wide iam.serviceAccountUser binding if it was granted:
-gcloud projects remove-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:$GSA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/iam.serviceAccountUser" 2>/dev/null || true
 ```
 
 ### Scope `iam.serviceAccountUser` to the node SA (not project-wide)
