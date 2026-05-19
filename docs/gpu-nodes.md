@@ -8,6 +8,40 @@ Karpenter can provision GPU-equipped GKE nodes for workloads that request `nvidi
 
 > **Note:** Attached GPU instances (e.g. `n1-standard-*` + NVIDIA T4/P100/V100 accelerators) are not yet fully supported. Tracked in [#84](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/84).
 
+## GKE GPU software stack labels
+
+GKE's GPU software stack requires two labels for GPU nodes to function:
+
+- `cloud.google.com/gke-accelerator=<type>` — used by the NVIDIA device plugin DaemonSet to target GPU nodes via node affinity.
+- `cloud.google.com/gke-gpu-driver-version=<value>` — used by the GKE GPU driver installer to select the NVIDIA driver version.
+
+Karpenter automatically applies both labels at node boot time. The accelerator type is derived from the instance type. The driver version is controlled by `spec.gpuDriverVersion`.
+
+## GPU driver version
+
+The `gpuDriverVersion` field on `GCENodeClass` controls which NVIDIA driver GKE installs on GPU nodes. Valid values:
+
+| Value      | Description                             |
+|------------|-----------------------------------------|
+| `default`  | GKE-recommended stable driver (default) |
+| `latest`   | Newest available driver (COS only)      |
+| `disabled` | Skip automatic driver installation      |
+
+```yaml
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: gpu
+spec:
+  gpuDriverVersion: default  # or: latest, disabled
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+```
+
+Defaults to `"default"`, matching GKE's native behavior for GPU node pools.
+
+> **Note:** NodePool `spec.template.spec.labels` does not affect the driver version at boot time. NodePool labels are applied post-registration, after the GPU driver installer has already run. Use `GCENodeClass.spec.gpuDriverVersion` to control which driver GKE installs.
+
 ## Auto GPU taint
 
 GKE natively taints GPU nodes with `nvidia.com/gpu=present:NoSchedule` so that only GPU-tolerating workloads are scheduled on them. Karpenter does not apply this taint by default.
@@ -21,6 +55,7 @@ metadata:
   name: gpu
 spec:
   autoGPUTaint: true
+  gpuDriverVersion: default
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
 ```
