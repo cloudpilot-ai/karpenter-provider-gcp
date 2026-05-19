@@ -97,14 +97,18 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		operator.GetClient(),
 		computeService,
 		containerService,
-		versionProvider,
 		options.FromContext(ctx).ClusterName,
 		region,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodePoolServiceAccount,
 		options.FromContext(ctx).ClusterLocation,
 		options.FromContext(ctx).NodeLocation,
+		options.FromContext(ctx).DefaultNodePoolTemplateName,
 	)
+	if nodeTemplateProvider == nil {
+		log.FromContext(ctx).Error(nil, "failed to initialize node pool template provider")
+		os.Exit(1)
+	}
 	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider)
 	billingClient, err := instanceprice.New(ctx)
 	if err != nil {
@@ -152,6 +156,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeDefaultSA,
 		computeService,
 		gkeProvider,
+		nodeTemplateProvider,
+		versionProvider,
 		unavailableOfferingsCache,
 	)
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache)
