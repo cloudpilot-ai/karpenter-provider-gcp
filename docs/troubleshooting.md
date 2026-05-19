@@ -48,14 +48,24 @@ If the node never becomes `Ready`, check kubelet logs on the instance (via seria
 kubectl describe gcenodeclass <name>
 ```
 
-Check `status.conditions`. A common cause: `imageSelectorTerms` alias does not resolve to any image. Verify that the alias family and version are valid:
+Check `status.conditions`. The `ImagesReady` condition shows whether Karpenter can resolve the configured image.
+
+**Common causes:**
+
+- **Invalid version format** — Pinned versions must match the family's format: `milestone.build.build.build` for ContainerOptimizedOS (e.g. `125.19216.104.126`), `vYYYYMMDD` for Ubuntu (e.g. `v20260416`). Invalid formats are rejected at admission.
+
+- **Version not found** — If `ImagesReady` shows `ImageResolutionFailed`, the pinned version does not exist in GCP. Verify availability using the `gcloud compute images list` commands in [Image management](image-management.md#finding-available-versions).
+
+- **Unsupported family** — Only `ContainerOptimizedOS` and `Ubuntu` are supported.
+
+Example of a valid alias:
 
 ```yaml
 imageSelectorTerms:
   - alias: ContainerOptimizedOS@latest
 ```
 
-Supported families: `ContainerOptimizedOS`, `Ubuntu`.
+See [Image management](image-management.md) for version pinning options and format details.
 
 ---
 
