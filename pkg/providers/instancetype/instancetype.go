@@ -29,7 +29,6 @@ import (
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
@@ -145,7 +144,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for _, mt := range p.instanceTypesInfo {
-		instanceType := aws.StringValue(mt.Name)
+		instanceType := lo.FromPtr(mt.Name)
 		if instanceType == "" || mt.MemoryMb == nil || mt.GuestCpus == nil {
 			continue
 		}
