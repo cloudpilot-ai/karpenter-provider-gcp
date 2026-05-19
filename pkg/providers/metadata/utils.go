@@ -33,12 +33,15 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex       = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex              = regexp.MustCompile(`max-pods=\d+`)
-	gkeProvisioningRegex      = regexp.MustCompile(`gke-provisioning=\w+`)
-	kubeEnvArchRegex          = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
-	kubeEnvFamilyRegex        = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
-	registerWithTaintsRegex   = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	maxPodsPerNodeRegex     = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex            = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	// kubeEnvNodeLabelsRegex matches the entire --node-labels=<value> flag in kube-env.
+	// The value is comma-separated Kubernetes labels with no whitespace.
+	kubeEnvNodeLabelsRegex    = regexp.MustCompile(`--node-labels=\S+`)
 	osDistributionCOSRegex    = regexp.MustCompile(`\bgke-os-distribution=cos\b`)
 	osDistributionUbuntuRegex = regexp.MustCompile(`\bgke-os-distribution=ubuntu\b`)
 )
@@ -345,6 +348,100 @@ func GetSecondaryDiskImageName(image string) string {
 
 func secondaryBootDiskLabel(name, projectID string, mode v1alpha1.SecondaryBootDiskMode) string {
 	return fmt.Sprintf("%s-%s=%s.%s", GKESecondaryBootDiskLabelPrefix, name, mode, projectID)
+}
+
+// appendNodeLabelToKubeEnv appends (or replaces) a label in the --node-labels flag within
+// kube-env. In GKE COS, kubelet reads node labels from --node-labels in KUBELET_ARGS of
+// kube-env, not from the kube-labels metadata item. Modifying kube-labels alone is not
+// sufficient for labels that must be present at kubelet startup (e.g. GPU driver version).
+func appendNodeLabelToKubeEnv(metadata *compute.Metadata, labelKey, labelValue string) error {
+	prefix := regexp.QuoteMeta(labelKey + "=")
+	stripRe := regexp.MustCompile(`,?` + prefix + `[^,\s]*`)
+	label := labelKey + "=" + labelValue
+
+	for _, item := range metadata.Items {
+		if item.Key != "kube-env" {
+			continue
+		}
+		kubeEnv := lo.FromPtr(item.Value)
+		if !strings.Contains(kubeEnv, "--node-labels=") {
+			return fmt.Errorf("--node-labels flag not found in kube-env KUBELET_ARGS")
+		}
+		// Remove any existing entry with this label key (idempotent).
+		// The strip regex eats the preceding comma; when the label is the first entry
+		// in --node-labels= there is no preceding comma, so a trailing comma is left
+		// behind. Clean that up explicitly.
+		updated := stripRe.ReplaceAllString(kubeEnv, "")
+		updated = strings.ReplaceAll(updated, "--node-labels=,", "--node-labels=")
+		// Append new label to the --node-labels value.
+		updated = kubeEnvNodeLabelsRegex.ReplaceAllStringFunc(updated, func(match string) string {
+			return match + "," + label
+		})
+		item.Value = lo.ToPtr(updated)
+		return nil
+	}
+	return fmt.Errorf("kube-env metadata key not found in instance template")
+}
+
+// SetGPUAcceleratorLabel sets cloud.google.com/gke-accelerator=<gpuName> in kube-labels and
+// in the --node-labels flag of KUBELET_ARGS in kube-env (the canonical kubelet label source).
+// The NVIDIA device plugin DaemonSet uses this label as a nodeAffinity selector; without it the
+// plugin will not schedule onto Karpenter-provisioned GPU nodes.
+// This always replaces any existing value so that the instance type's accelerator type is
+// authoritative over the base template.
+// Returns an error if the kube-labels or kube-env metadata keys are absent.
+func SetGPUAcceleratorLabel(metadata *compute.Metadata, gpuName string) error {
+	prefix := v1alpha1.LabelGKEAccelerator + "="
+	label := prefix + gpuName
+	kubeLabelsFound := false
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			kubeLabelsFound = true
+			current := lo.FromPtr(item.Value)
+			parts := strings.Split(current, ",")
+			filtered := parts[:0]
+			for _, p := range parts {
+				if !strings.HasPrefix(p, prefix) {
+					filtered = append(filtered, p)
+				}
+			}
+			item.Value = lo.ToPtr(strings.Join(append(filtered, label), ","))
+		}
+	}
+	if !kubeLabelsFound {
+		return fmt.Errorf("kube-labels metadata key not found in instance template")
+	}
+	return appendNodeLabelToKubeEnv(metadata, v1alpha1.LabelGKEAccelerator, gpuName)
+}
+
+// SetGPUDriverVersionLabel sets cloud.google.com/gke-gpu-driver-version=<version> in kube-labels and
+// in the --node-labels flag of KUBELET_ARGS in kube-env (the canonical kubelet label source).
+// GKE's GPU driver installer DaemonSet reads this label to select which driver to install.
+// This always replaces any existing value so that spec.gpuDriverVersion is authoritative over
+// whatever the base instance template or spec.metadata may have set.
+// Returns an error if the kube-labels or kube-env metadata keys are absent.
+func SetGPUDriverVersionLabel(metadata *compute.Metadata, version string) error {
+	prefix := v1alpha1.LabelGKEGPUDriverVersion + "="
+	label := prefix + version
+	kubeLabelsFound := false
+	for _, item := range metadata.Items {
+		if item.Key == "kube-labels" {
+			kubeLabelsFound = true
+			current := lo.FromPtr(item.Value)
+			parts := strings.Split(current, ",")
+			filtered := parts[:0]
+			for _, p := range parts {
+				if !strings.HasPrefix(p, prefix) {
+					filtered = append(filtered, p)
+				}
+			}
+			item.Value = lo.ToPtr(strings.Join(append(filtered, label), ","))
+		}
+	}
+	if !kubeLabelsFound {
+		return fmt.Errorf("kube-labels metadata key not found in instance template")
+	}
+	return appendNodeLabelToKubeEnv(metadata, v1alpha1.LabelGKEGPUDriverVersion, version)
 }
 
 // PatchKubeEnvForOSType patches the kube-env metadata item so a single bootstrap source pool can serve nodes of either OS family.

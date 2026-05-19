@@ -672,8 +672,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
 
-	isGPUInstance := len(template.Properties.GuestAccelerators) > 0 ||
-		instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0
+	isGPUInstance := len(template.Properties.GuestAccelerators) > 0 || instanceTypeHasGPU(instanceType)
 
 	// Setup metadata
 	if err := p.setupInstanceMetadata(ctx, template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType, isGPUInstance); err != nil {
@@ -719,7 +718,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	p.configureInstanceCapacityProvision(instance, capacityType)
 
 	// A2, A3, G2 machine types have built-in GPUs and do not support live migration.
-	if instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0 {
+	if isGPUInstance {
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 
@@ -845,12 +844,6 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMet
 		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
 	}
 
-	if isGPUInstance {
-		if err := setupGPUMetadata(instanceMetadata, nodeClass); err != nil {
-			return err
-		}
-	}
-
 	if err := p.patchKubeEnv(ctx, instanceMetadata, nodeClass, instanceType); err != nil {
 		return err
 	}
@@ -864,9 +857,25 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMet
 	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
 	metadata.AppendRegisteredLabel(instanceMetadata)
 	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
+
 	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
 
+	// GPU labels are injected last so that spec.gpuDriverVersion is always authoritative,
+	// overriding both the base template value and any spec.metadata entry.
+	if err := setupGPUMetadata(instanceMetadata, nodeClass, instanceType, isGPUInstance); err != nil {
+		return fmt.Errorf("failed to inject GPU metadata labels: %w", err)
+	}
+
 	return nil
+}
+
+// instanceTypeHasGPU reports whether the instance type has a built-in GPU requirement.
+// It uses direct map access because Requirements.Get() for a missing key returns
+// NodeSelectorOpExists with Len()=MaxInt64, which would incorrectly classify all
+// instance types as GPU instances.
+func instanceTypeHasGPU(instanceType *cloudprovider.InstanceType) bool {
+	req := instanceType.Requirements[v1alpha1.LabelInstanceGPUCount]
+	return req != nil && req.Operator() == corev1.NodeSelectorOpIn && req.Len() > 0
 }
 
 // patchKubeEnv applies all kube-env patches: instance type (arch/family), OS type, and arch binary URLs.
@@ -913,13 +922,37 @@ func (p *DefaultProvider) resolveGKEVersion(ctx context.Context) string {
 	return v
 }
 
-// setupGPUMetadata injects the nvidia.com/gpu=present:NoSchedule taint into KUBELET_ARGS
-// when autoGPUTaint is enabled, so GPU nodes register with the taint from the start.
-func setupGPUMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass) error {
+// setupGPUMetadata handles all GPU-specific metadata injection.
+// AutoGPUTaint applies to any GPU node (including attached GPU instances).
+// The accelerator label is set only for built-in GPU families where the
+// accelerator type is known from instance type requirements.
+// The driver-version label is set for all GPU nodes (built-in and attached).
+func setupGPUMetadata(instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, isGPU bool) error {
+	if !isGPU {
+		return nil
+	}
 	if nodeClass.Spec.AutoGPUTaint {
 		if err := metadata.AppendGPUTaint(instanceMetadata); err != nil {
 			return fmt.Errorf("failed to append GPU taint to kube-env: %w", err)
 		}
+	}
+	// Use direct map access: Requirements.Get() for a missing key returns NodeSelectorOpExists
+	// with Len()=MaxInt64 and Any()=random integer, which would inject a bogus accelerator label.
+	var gpuName string
+	if req := instanceType.Requirements[v1alpha1.LabelGKEAccelerator]; req != nil && req.Operator() == corev1.NodeSelectorOpIn && req.Len() > 0 {
+		gpuName = req.Any()
+	}
+	if gpuName != "" {
+		if err := metadata.SetGPUAcceleratorLabel(instanceMetadata, gpuName); err != nil {
+			return fmt.Errorf("gke-accelerator: %w", err)
+		}
+	}
+	version := nodeClass.Spec.GPUDriverVersion
+	if version == "" {
+		version = "default"
+	}
+	if err := metadata.SetGPUDriverVersionLabel(instanceMetadata, version); err != nil {
+		return fmt.Errorf("gke-gpu-driver-version: %w", err)
 	}
 	return nil
 }

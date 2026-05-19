@@ -11,7 +11,12 @@ metadata:
   name: gpu
 spec:
   autoGPUTaint: true
+<<<<<<< HEAD
   gpuDriverVersion: default  # or: latest, disabled
+||||||| 25007d77
+=======
+  gpuDriverVersion: default
+>>>>>>> main
   imageSelectorTerms:
     - alias: ContainerOptimizedOS@latest
   disks:

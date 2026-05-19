@@ -94,6 +94,15 @@ type GCENodeClassSpec struct {
 	// Disabled by default to preserve backward compatibility.
 	// +optional
 	AutoGPUTaint bool `json:"autoGPUTaint,omitempty"`
+	// GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.
+	// Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.
+	// Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),
+	// "disabled" (skip automatic installation).
+	// Ignored for non-GPU instance types.
+	// +kubebuilder:validation:Enum=default;latest;disabled
+	// +kubebuilder:default=default
+	// +optional
+	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
 }
 
 // NetworkConfig holds network settings for provisioned nodes.
@@ -317,7 +326,7 @@ const (
 	// 1. A field changes its default value for an existing field that is already hashed
 	// 2. A field is added to the hash calculation with an already-set value
 	// 3. A field is removed from the hash calculations
-	GCENodeClassHashVersion = "v3"
+	GCENodeClassHashVersion = "v4"
 )
 
 func (in *GCENodeClass) Hash() string {
