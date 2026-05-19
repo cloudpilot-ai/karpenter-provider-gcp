@@ -36,30 +36,46 @@ spec:
 
 **Node rotation on upgrade:** `GCENodeClassHashVersion` is bumped to `v4`. On upgrade, Karpenter detects that all existing `GCENodeClass` objects carry a stale hash version and triggers a rolling node replacement for every affected NodePool. This is a one-time, controlled rotation — nodes are replaced gradually, not all at once.
 
-### Release channel awareness (`imageSelectorTerms[].family` / `.channel` / `.version`)
+### Image selection redesigned — `alias` deprecated
 
-**No migration action required.** This section describes the new preferred way to configure image selection.
+`imageSelectorTerms` now supports structured `family`, `channel`, and `version` fields. The old `alias` string field is deprecated and will be removed in a future release — **migrate at your own pace, but do not leave it in place indefinitely.**
 
-New structured fields replace the `alias` string for image selection:
+Replace `alias` with the equivalent structured form:
 
 ```yaml
-# Follow the cluster's enrolled GKE release channel (recommended)
+# Before
+imageSelectorTerms:
+  - alias: ContainerOptimizedOS@latest
+
+# After — follow the cluster's enrolled GKE release channel
 imageSelectorTerms:
   - family: ContainerOptimizedOS
     channel: cluster
+```
 
-# Pin to a specific COS milestone
+```yaml
+# Before
+imageSelectorTerms:
+  - alias: ContainerOptimizedOS@125.19216.104.126
+
+# After — pin to a specific COS milestone
 imageSelectorTerms:
   - family: ContainerOptimizedOS
     version: "125.19216.104.126"
+```
 
-# Pin to a specific Ubuntu 24.04 date build
+```yaml
+# Before
+imageSelectorTerms:
+  - alias: Ubuntu@v20260416
+
+# After — pin to a specific Ubuntu 24.04 date build
 imageSelectorTerms:
   - family: Ubuntu2404
     version: "v20260416"
 ```
 
-The `alias` field continues to work unchanged but is now soft-deprecated. Migrate existing configurations to the structured fields at your own pace — there is no deadline or forced removal in this release. See [Image selection](docs/image-selection.md) for the full reference and [Image management](docs/image-management.md#legacy-image-alias-format) for the alias → structured field migration table.
+See [Image selection](docs/image-selection.md) for the full field reference and [Image management](docs/image-management.md#legacy-image-alias-format) for the complete migration table.
 
 **IAM note:** `container.clusters.getServerConfig` is included in `deploy/iam/karpenter-controller-role.yaml` and in the Terraform module. No additional action is required for users who followed the standard installation guide. Users on custom roles that predate this release may need to add the permission manually if they enable `channel:` terms.
 
