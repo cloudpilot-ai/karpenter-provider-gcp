@@ -254,21 +254,28 @@ func (p *DefaultProvider) resolveImage(ctx context.Context, sourceImage string) 
 	return image, nil
 }
 
-// parseImageSource parses a GCP image source string.
-// Supports: projects/PROJECT_ID/global/images/IMAGE_NAME
+// parseImageSource parses a GCP image source string
+// Supports formats like:
+// - projects/PROJECT_ID/global/images/IMAGE_NAME
+// - global/images/IMAGE_NAME (requires project context)
+// - IMAGE_NAME (requires project context)
 func parseImageSource(imageSource string) (projectID, imageName string, err error) {
+	// Remove any leading/trailing whitespace
 	imageSource = strings.TrimSpace(imageSource)
 
+	// Pattern: projects/PROJECT_ID/global/images/IMAGE_NAME
 	projectPattern := regexp.MustCompile(`^projects/([^/]+)/global/images/(.+)$`)
 	if matches := projectPattern.FindStringSubmatch(imageSource); matches != nil {
 		return matches[1], matches[2], nil
 	}
 
+	// Pattern: global/images/IMAGE_NAME
 	globalPattern := regexp.MustCompile(`^global/images/(.+)$`)
 	if matches := globalPattern.FindStringSubmatch(imageSource); matches != nil {
 		return "", "", fmt.Errorf("project ID required for global image reference: %s", imageSource)
 	}
 
+	// Pattern: IMAGE_NAME only
 	if !strings.Contains(imageSource, "/") {
 		return "", "", fmt.Errorf("project ID required for image name: %s", imageSource)
 	}
