@@ -118,6 +118,7 @@ serviceMonitor:
 | controller.settings.clusterLocation | string | `""` | The GCP region for instance type discovery (e.g., us-central1) |
 | controller.settings.clusterName | string | `""` | The GCP cluster name. |
 | controller.settings.defaultNodePoolTemplateName | string | `""` | Pin the GKE node pool used as the bootstrap metadata source. When set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING. Leave empty to use automatic discovery (default-pool → first alphabetical RUNNING pool → fallback karpenter-fallback creation). |
+| controller.settings.defaultNodepoolServiceAccount | string | `""` | Default GCP service account email to attach to provisioned nodes. When set, overrides the Compute Engine default SA. Corresponds to the DEFAULT_NODEPOOL_SERVICE_ACCOUNT env var. Recommended: set to a dedicated SA with roles/container.nodeServiceAccount. Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount. |
 | controller.settings.nodeLocation | string | `""` | The exact GCP cluster location for GKE API calls (e.g., us-central1-a for zonal, us-central1 for regional). If not set, defaults to 'clusterLocation' for backward compatibility. |
 | controller.settings.projectID | string | `""` | The GCP project ID. |
 | controller.settings.vmMemoryOverheadPercent | float | `0.065` | The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%. |

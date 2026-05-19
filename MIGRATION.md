@@ -184,14 +184,11 @@ gcloud iam service-accounts add-iam-policy-binding $NODE_SA_EMAIL \
 
 Tell Karpenter to use the new SA. Choose one of:
 
-- **Cluster-wide default** — set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` on the controller (Helm
-  `controller.env` or the `--default-nodepool-service-account` flag):
+- **Cluster-wide default** — set via Helm or the `--default-nodepool-service-account` flag:
 
   ```sh
-  # Example: Helm upgrade with the env var injected
   helm upgrade karpenter ... \
-    --set "controller.env[0].name=DEFAULT_NODEPOOL_SERVICE_ACCOUNT" \
-    --set "controller.env[0].value=$NODE_SA_EMAIL"
+    --set "controller.settings.defaultNodepoolServiceAccount=$NODE_SA_EMAIL"
   ```
 
 - **Per-NodeClass** — set `spec.serviceAccount` on each `GCENodeClass`:

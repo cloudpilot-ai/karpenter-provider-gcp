@@ -128,6 +128,11 @@ controller:
     # exclusively and returns an error if it is not RUNNING. Leave empty to use automatic discovery
     # (default-pool → first alphabetical RUNNING pool → fallback karpenter-fallback creation).
     defaultNodePoolTemplateName: ""
+    # -- Default GCP service account email to attach to provisioned nodes. When set, overrides the
+    # Compute Engine default SA. Corresponds to the DEFAULT_NODEPOOL_SERVICE_ACCOUNT env var.
+    # Recommended: set to a dedicated SA with roles/container.nodeServiceAccount.
+    # Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount.
+    defaultNodepoolServiceAccount: ""
 
 # -- GCP credentials configuration
 credentials:
