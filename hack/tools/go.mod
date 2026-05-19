@@ -116,12 +116,12 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/analysis v0.24.1 // indirect
-	github.com/go-openapi/errors v0.22.5 // indirect
+	github.com/go-openapi/errors v0.22.6 // indirect
 	github.com/go-openapi/jsonpointer v0.23.1 // indirect
 	github.com/go-openapi/jsonreference v0.21.5 // indirect
 	github.com/go-openapi/loads v0.23.2 // indirect
 	github.com/go-openapi/runtime v0.29.2 // indirect
-	github.com/go-openapi/spec v0.22.2 // indirect
+	github.com/go-openapi/spec v0.22.3 // indirect
 	github.com/go-openapi/strfmt v0.25.0 // indirect
 	github.com/go-openapi/swag v0.26.0 // indirect
 	github.com/go-openapi/swag/cmdutils v0.26.0 // indirect
@@ -210,7 +210,7 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sigstore/cosign/v2 v2.6.3 // indirect
 	github.com/sigstore/protobuf-specs v0.5.0 // indirect
-	github.com/sigstore/rekor v1.4.3 // indirect
+	github.com/sigstore/rekor v1.5.0 // indirect
 	github.com/sigstore/rekor-tiles/v2 v2.0.1 // indirect
 	github.com/sigstore/sigstore v1.10.3 // indirect
 	github.com/sigstore/sigstore-go v1.1.4 // indirect
