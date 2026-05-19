@@ -5,6 +5,29 @@
 
 ## Unreleased
 
+### Bootstrap pool discovery (template pool elimination)
+
+Karpenter no longer creates `karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, or `karpenter-ubuntu-arm64` node pools. Instead, it discovers an existing RUNNING cluster pool to read bootstrap metadata. The upgrade itself requires no action.
+
+After confirming provisioning works correctly with the new version, delete the legacy pools at your own pace:
+
+```bash
+for pool in karpenter-ubuntu karpenter-cos-arm64 karpenter-ubuntu-arm64 karpenter-default; do
+  gcloud container node-pools delete "$pool" \
+    --cluster=CLUSTER_NAME \
+    --location=CLUSTER_LOCATION \
+    --quiet
+done
+```
+
+The new last-resort fallback pool is named `karpenter-fallback` (not `karpenter-default`), so deleting the four legacy names is safe and unambiguous.
+
+Rolling back to the previous version will re-create the legacy pools automatically.
+
+See [Bootstrap pool selection](docs/bootstrap-pool.md) for configuration options and troubleshooting.
+
+---
+
 ### Node service account
 
 The service account resolution order is now:

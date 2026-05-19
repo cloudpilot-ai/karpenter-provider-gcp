@@ -2,28 +2,17 @@
 
 This page explains how to control external IP assignment and subnetwork placement for nodes provisioned by Karpenter.
 
-## How Karpenter manages node pool templates
+## How Karpenter reads network configuration
 
-When Karpenter starts, it creates four zero-node GKE node pools that act as instance templates:
+Karpenter discovers an existing RUNNING node pool in your cluster and reads its network configuration (subnetwork, private-node setting, kubelet settings). It does not create dedicated template pools. See [Bootstrap pool selection](../bootstrap-pool.md) for details on pool selection and the fallback behaviour when no pool exists.
 
-| Pool name                | Image                  | Architecture |
-|--------------------------|------------------------|--------------|
-| `karpenter-default`      | Container-Optimized OS | amd64        |
-| `karpenter-ubuntu`       | Ubuntu                 | amd64        |
-| `karpenter-cos-arm64`    | Container-Optimized OS | arm64        |
-| `karpenter-ubuntu-arm64` | Ubuntu                 | arm64        |
-
-These pools have `InitialNodeCount: 0` — they hold no running nodes and exist purely to give Karpenter a GKE-managed instance template for network and kubelet configuration. The network configuration of these templates comes from the GKE cluster itself, not from Karpenter.
-
-Image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu) and does not depend on template pool boot disks.
-
-The arm64 pools (`karpenter-cos-arm64` and `karpenter-ubuntu-arm64`) are created on a best-effort basis. If the cluster's region does not support arm64 machine types, those pools are skipped.
+Image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu) and does not depend on the bootstrap pool's boot disk.
 
 ## Cluster-level private nodes
 
 Karpenter reads `PrivateClusterConfig.EnablePrivateNodes` from the cluster API and automatically omits the `ONE_TO_ONE_NAT` access config from all **provisioned instances** on private clusters — no extra NodeClass configuration is required for this.
 
-However, Karpenter still creates bootstrap node pool templates at startup. On clusters that enforce private nodes via org policy (e.g. `container.managed.enablePrivateNodes`), this creation request may be rejected by GKE, preventing Karpenter from starting. Full support for such clusters is tracked in [#230](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/230), which eliminates bootstrap pool creation entirely.
+When Karpenter creates the `karpenter-fallback` pool (only when no RUNNING pool exists), it mirrors the cluster's private-node setting automatically, so clusters with `container.managed.enablePrivateNodes` org policy are supported.
 
 To override the automatic external-IP behaviour on a per-NodeClass basis:
 
