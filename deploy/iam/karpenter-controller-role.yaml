@@ -31,4 +31,5 @@ includedPermissions:
   # nodePools.get is covered by container.clusters.get
   # nodePools.create/delete map to container.clusters.update in GCP IAM
   - container.clusters.get
+  - container.clusters.getServerConfig  # required for release-channel image resolution
   - container.clusters.update

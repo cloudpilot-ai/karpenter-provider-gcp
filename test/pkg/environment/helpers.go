@@ -43,6 +43,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 )
 
 const (
@@ -108,6 +109,60 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily str
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithFamilyChannel creates a GCENodeClass using the new
+// family+channel image selector (e.g. family=ContainerOptimizedOS, channel=stable).
+func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name, family, channel string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if strings.HasPrefix(family, "Ubuntu") {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"family": family, "channel": channel},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithFamilyVersion creates a GCENodeClass using the new
+// family+version image selector (e.g. family=ContainerOptimizedOS, version=latest).
+func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name, family, version string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if strings.HasPrefix(family, "Ubuntu") {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"family": family, "version": version},
 			},
 			"disks": []any{
 				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
@@ -960,6 +1015,24 @@ func (e *Environment) ResolveCurrentUbuntuVersion(ctx context.Context) string {
 	Expect(m).To(HaveLen(2), "could not extract Ubuntu version from %q", best.Name)
 	version := "v" + m[1]
 	Expect(version).NotTo(BeEmpty(), "could not extract Ubuntu version from %q", best.Name)
+	return version
+}
+
+// GetChannelVersion fetches the GKE server config and returns the version string
+// that Karpenter would select for channelName given the current cluster version
+// (e.g., "1.34.7-gke.1068000"). Fails the test if the channel or version cannot
+// be resolved.
+func (e *Environment) GetChannelVersion(ctx context.Context, channelName string) string {
+	sc, err := e.containerSvc.Projects.Locations.
+		GetServerConfig(fmt.Sprintf("projects/%s/locations/%s", e.ProjectID, e.ClusterLocation)).
+		Context(ctx).Do()
+	Expect(err).NotTo(HaveOccurred(), "getting GKE server config")
+
+	serverVer, err := e.KubeClient.Discovery().ServerVersion()
+	Expect(err).NotTo(HaveOccurred(), "getting server version")
+
+	version, err := gke.ResolveVersionForChannel(sc, channelName, serverVer.GitVersion)
+	Expect(err).NotTo(HaveOccurred(), "resolving version for channel %s", channelName)
 	return version
 }
 

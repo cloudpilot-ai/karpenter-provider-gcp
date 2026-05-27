@@ -55,6 +55,7 @@ func TestResolveLatestUbuntuImage_PicksNewestNonDeprecated(t *testing.T) {
 	p := &Ubuntu{
 		computeService:  buildComputeService(t, srv),
 		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+		release:         "2404",
 	}
 
 	got, err := p.resolveLatestUbuntuImage(context.Background())
@@ -90,6 +91,7 @@ func TestResolveLatestUbuntuImage_ExcludesNonUsable(t *testing.T) {
 	p := &Ubuntu{
 		computeService:  buildComputeService(t, srv),
 		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+		release:         "2404",
 	}
 
 	got, err := p.resolveLatestUbuntuImage(context.Background())
@@ -98,7 +100,7 @@ func TestResolveLatestUbuntuImage_ExcludesNonUsable(t *testing.T) {
 }
 
 func TestResolveImages_Ubuntu_DrivesArm64Variant(t *testing.T) {
-	p := &Ubuntu{}
+	p := &Ubuntu{release: "2404"}
 	sourceImage := "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-amd64-v20260420"
 
 	imgs := p.resolveImages(sourceImage)
@@ -114,13 +116,13 @@ func TestResolveImages_Ubuntu_DrivesArm64Variant(t *testing.T) {
 }
 
 func TestBuildImageFilter_Ubuntu_UsesVersionPrefix(t *testing.T) {
-	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1"}, release: "2404"}
 	got := p.buildImageFilter(context.Background())
 	require.Equal(t, `name=ubuntu-gke-2404-1-35*`, got)
 }
 
 func TestBuildImageFilter_Ubuntu_FallsBackOnNilProvider(t *testing.T) {
-	p := &Ubuntu{}
+	p := &Ubuntu{release: "2404"}
 	got := p.buildImageFilter(context.Background())
 	require.Equal(t, `name=ubuntu-gke-2404*`, got)
 }
@@ -142,6 +144,7 @@ func TestResolveImages_Ubuntu_PinnedVersion_Valid(t *testing.T) {
 	p := &Ubuntu{
 		computeService:  buildComputeService(t, srv),
 		versionProvider: &fakeVersionProvider{version: "v1.35.1"},
+		release:         "2404",
 	}
 
 	// Pin to an older date than the latest image.
@@ -189,4 +192,84 @@ func TestIsUsableUbuntuImage(t *testing.T) {
 	for _, img := range unusable {
 		require.False(t, isUsableUbuntuImage(img), "expected %q to be unusable", img.Name)
 	}
+}
+
+// Ubuntu 2204 tests
+
+func TestIsUsableUbuntu2204Image(t *testing.T) {
+	usable := []*compute.Image{
+		// 2204 amd64 images have no -amd64- suffix
+		{Name: "ubuntu-gke-2204-1-34-v20260420"},
+		{Name: "ubuntu-gke-2204-1-34-v20260420", Deprecated: &compute.DeprecationStatus{State: ""}},
+	}
+	for _, img := range usable {
+		require.True(t, isUsableUbuntu2204Image(img), "expected %q to be usable", img.Name)
+	}
+
+	unusable := []*compute.Image{
+		{Name: "ubuntu-gke-2204-1-34-v20260420", Deprecated: &compute.DeprecationStatus{State: "DEPRECATED"}},
+		{Name: "ubuntu-gke-2204-1-34-v20260420", Deprecated: &compute.DeprecationStatus{State: "OBSOLETE"}},
+		{Name: "ubuntu-gke-2204-1-34-arm64-v20260420"},
+		{Name: "ubuntu-gke-2204-1-34-v20260420-test"},
+		{Name: "ubuntu-gke-2204-1-34-cgroupsv1-v20260420"},
+		{Name: "ubuntu-gke-2204-1-34-linux64k-v20260420"},
+		{Name: "ubuntu-gke-2204-1-34-tpu-v20260420"},
+	}
+	for _, img := range unusable {
+		require.False(t, isUsableUbuntu2204Image(img), "expected %q to be unusable", img.Name)
+	}
+}
+
+func TestResolveImages_Ubuntu2204_DrivesArm64Variant(t *testing.T) {
+	p := &Ubuntu{release: "2204"}
+	sourceImage := "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2204-1-34-v20260420"
+
+	imgs := p.resolveImages(sourceImage)
+	require.Len(t, imgs, 2)
+
+	var srcs []string
+	for _, img := range imgs {
+		srcs = append(srcs, img.SourceImage)
+	}
+	// 2204 arm64: insert -arm64- before the -v{date} suffix
+	require.Contains(t, srcs, "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2204-1-34-v20260420")
+	require.Contains(t, srcs, "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2204-1-34-arm64-v20260420")
+}
+
+func TestBuildImageFilter_Ubuntu2204_UsesVersionPrefix(t *testing.T) {
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.34.7"}, release: "2204"}
+	got := p.buildImageFilter(context.Background())
+	require.Equal(t, `name=ubuntu-gke-2204-1-34*`, got)
+}
+
+func TestBuildImageFilter_Ubuntu2204_FallsBackOnNilProvider(t *testing.T) {
+	p := &Ubuntu{release: "2204"}
+	got := p.buildImageFilter(context.Background())
+	require.Equal(t, `name=ubuntu-gke-2204*`, got)
+}
+
+func TestResolveLatestUbuntu2204Image_PicksAmd64NotArm64(t *testing.T) {
+	images := []*compute.Image{
+		// arm64 — must be excluded
+		{Name: "ubuntu-gke-2204-1-34-arm64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z"},
+		// valid amd64 (no -amd64- suffix in 2204)
+		{Name: "ubuntu-gke-2204-1-34-v20260401", CreationTimestamp: "2026-04-01T00:00:00Z"},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &compute.ImageList{Items: images}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := &Ubuntu{
+		computeService:  buildComputeService(t, srv),
+		versionProvider: &fakeVersionProvider{version: "v1.34.7"},
+		release:         "2204",
+	}
+
+	got, err := p.resolveLatestUbuntuImage(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2204-1-34-v20260401", got)
 }

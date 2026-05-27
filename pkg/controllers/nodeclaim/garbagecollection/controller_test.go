@@ -122,7 +122,7 @@ func cloudProviderOf(c *Controller) *fakeCloudProvider {
 func TestGC_DeletesOrphanedInstance(t *testing.T) {
 	t.Parallel()
 
-	orphan := newNC("gce://proj/zone/orphan", 2*time.Minute)
+	orphan := newNC("gce://proj/zone/orphan", 4*time.Minute)
 	c := newController([]*karpv1.NodeClaim{orphan}, nil)
 
 	_, err := c.Reconcile(context.Background())
@@ -134,7 +134,7 @@ func TestGC_DeletesOrphanedInstance(t *testing.T) {
 func TestGC_SkipsKnownInstance(t *testing.T) {
 	t.Parallel()
 
-	nc := newNC("gce://proj/zone/known", 2*time.Minute)
+	nc := newNC("gce://proj/zone/known", 4*time.Minute)
 	c := newController([]*karpv1.NodeClaim{nc}, []karpv1.NodeClaim{*nc})
 
 	_, err := c.Reconcile(context.Background())
@@ -159,7 +159,7 @@ func TestGC_SkipsAlreadyDeletingInstance(t *testing.T) {
 	t.Parallel()
 
 	ts := metav1.Now()
-	deleting := newNC("gce://proj/zone/deleting", 2*time.Minute)
+	deleting := newNC("gce://proj/zone/deleting", 4*time.Minute)
 	deleting.DeletionTimestamp = &ts
 	c := newController([]*karpv1.NodeClaim{deleting}, nil)
 
@@ -191,7 +191,7 @@ func TestGC_SkipsInstanceWithEmptyProviderID(t *testing.T) {
 	noID := &karpv1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "no-provider-id",
-			CreationTimestamp: metav1.Time{Time: time.Now().Add(-2 * time.Minute)},
+			CreationTimestamp: metav1.Time{Time: time.Now().Add(-4 * time.Minute)},
 		},
 	}
 	c := newController([]*karpv1.NodeClaim{noID}, nil)
@@ -205,8 +205,8 @@ func TestGC_SkipsInstanceWithEmptyProviderID(t *testing.T) {
 func TestGC_ContinuesAfterDeleteError(t *testing.T) {
 	t.Parallel()
 
-	first := newNC("gce://proj/zone/first", 2*time.Minute)
-	second := newNC("gce://proj/zone/second", 2*time.Minute)
+	first := newNC("gce://proj/zone/first", 4*time.Minute)
+	second := newNC("gce://proj/zone/second", 4*time.Minute)
 	cp := &errorOnFirstDeleteProvider{
 		fakeCloudProvider: fakeCloudProvider{instances: []*karpv1.NodeClaim{first, second}},
 		failID:            first.Status.ProviderID,
@@ -229,7 +229,7 @@ func TestGC_SkipsLegacyInstanceWithoutLocationLabel(t *testing.T) {
 	// Instances without goog-k8s-cluster-location were created by an older Karpenter
 	// version. The cache includes them for backward compatibility, but GC must not touch
 	// them — we cannot confirm they belong exclusively to this cluster.
-	legacy := newNCLegacy("gce://proj/zone/legacy", 2*time.Minute)
+	legacy := newNCLegacy("gce://proj/zone/legacy", 4*time.Minute)
 	c := newController([]*karpv1.NodeClaim{legacy}, nil)
 
 	_, err := c.Reconcile(context.Background())

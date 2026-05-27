@@ -4,7 +4,8 @@ metadata:
   name: default-example
 spec:
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
   labels:
     env: dev
   networkTags:

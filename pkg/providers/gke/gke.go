@@ -35,14 +35,17 @@ const (
 	zoneCacheExpiration      = 5 * time.Minute
 	zoneCacheCleanupInterval = 1 * time.Minute
 	clusterCacheTTL          = 30 * time.Minute
+	serverConfigCacheTTL     = 30 * time.Minute
 
-	zoneCacheKey    = "zone-cache"
-	clusterCacheKey = "cluster"
+	zoneCacheKey         = "zone-cache"
+	clusterCacheKey      = "cluster"
+	serverConfigCacheKey = "server-config"
 )
 
 type Provider interface {
 	ResolveClusterZones(ctx context.Context) ([]string, error)
 	GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error)
+	GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error)
 }
 
 type DefaultProvider struct {
@@ -54,21 +57,23 @@ type DefaultProvider struct {
 	nodeLocation string
 	clusterName  string
 
-	zoneCache    *cache.Cache
-	clusterCache *cache.Cache
+	zoneCache         *cache.Cache
+	clusterCache      *cache.Cache
+	serverConfigCache *cache.Cache
 }
 
 func NewDefaultProvider(gkeClient *containerapiv1.ClusterManagerClient, computeService *compute.Service,
 	containerService *containerv1.Service, projectID, nodeLocation, clusterName string) Provider {
 	return &DefaultProvider{
-		gkeClient:        gkeClient,
-		computeService:   computeService,
-		containerService: containerService,
-		projectID:        projectID,
-		nodeLocation:     nodeLocation,
-		clusterName:      clusterName,
-		zoneCache:        cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
-		clusterCache:     cache.New(clusterCacheTTL, clusterCacheTTL),
+		gkeClient:         gkeClient,
+		computeService:    computeService,
+		containerService:  containerService,
+		projectID:         projectID,
+		nodeLocation:      nodeLocation,
+		clusterName:       clusterName,
+		zoneCache:         cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
+		clusterCache:      cache.New(clusterCacheTTL, clusterCacheTTL),
+		serverConfigCache: cache.New(serverConfigCacheTTL, serverConfigCacheTTL),
 	}
 }
 
@@ -121,4 +126,17 @@ func (p *DefaultProvider) GetClusterConfig(ctx context.Context) (*containerv1.Cl
 	}
 	p.clusterCache.SetDefault(clusterCacheKey, cluster)
 	return cluster, nil
+}
+
+func (p *DefaultProvider) GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error) {
+	if v, ok := p.serverConfigCache.Get(serverConfigCacheKey); ok {
+		return v.(*containerv1.ServerConfig), nil
+	}
+	location := fmt.Sprintf("projects/%s/locations/%s", p.projectID, p.nodeLocation)
+	sc, err := p.containerService.Projects.Locations.GetServerConfig(location).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetching server config: %w", err)
+	}
+	p.serverConfigCache.SetDefault(serverConfigCacheKey, sc)
+	return sc, nil
 }

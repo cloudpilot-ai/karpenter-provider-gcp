@@ -225,6 +225,10 @@ func (f *fakeGKEProvider) GetClusterConfig(context.Context) (*containerv1.Cluste
 	}, nil
 }
 
+func (f *fakeGKEProvider) GetServerConfig(context.Context) (*containerv1.ServerConfig, error) {
+	return &containerv1.ServerConfig{}, nil
+}
+
 func TestSelectZone_OnDemandHonorsTopologyRequirement(t *testing.T) {
 	t.Parallel()
 

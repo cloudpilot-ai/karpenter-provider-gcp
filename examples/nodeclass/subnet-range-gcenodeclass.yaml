@@ -6,5 +6,6 @@ metadata:
   name: subnet-range-example
 spec:
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
   subnetRangeName: karpenter-pods

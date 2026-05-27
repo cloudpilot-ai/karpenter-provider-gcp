@@ -1,32 +1,10 @@
 # Managing GKE Node Images
 
-Karpenter for GCP automatically selects the newest non-deprecated GKE node image compatible with your cluster's Kubernetes version. This page explains how image selection works, how to control it, and the trade-offs between stability and keeping up with security patches.
+Karpenter automatically selects and tracks GKE node images based on your `imageSelectorTerms` configuration. This page covers how to find available image versions, control when image updates roll out, and manage the relationship between image selection and cluster upgrades.
 
-> **Warning:** Karpenter supports automatic image selection using the `@latest` version pin, but this is **not** recommended for production environments. When using `@latest`, a new GKE image release will cause Karpenter to drift all out-of-date nodes in the cluster, replacing them with nodes running the new image. We strongly recommend evaluating new images in a lower environment before rolling them out to production. More details on managing GKE node images can be found in this guide.
+For an overview of selection modes (channel tracking, version pin, raw image ID), see [Image selection](image-selection.md).
 
-## How Karpenter Selects Images
-
-Every `GCENodeClass` requires an `imageSelectorTerms` field. The simplest form uses an `alias` to let Karpenter pick the right image automatically:
-
-```yaml
-imageSelectorTerms:
-  - alias: ContainerOptimizedOS@latest
-```
-
-Karpenter queries the `gke-node-images` GCP project (ContainerOptimizedOS) or `ubuntu-os-gke-cloud` (Ubuntu) for the newest non-deprecated image that matches your cluster's Kubernetes patch version. It derives arm64 and GPU variants from the same image name.
-
-When a newer image is published — during a GKE node image patch or control-plane upgrade — Karpenter's Drift mechanism marks nodes using the old image as drifted. Those nodes are then replaced according to your configured disruption budgets.
-
-## Image Alias Format
-
-The `alias` field takes the form `Family@version`:
-
-| Family                 | `@latest` behaviour                                      | Pinned version format         | Example                                  |
-|------------------------|----------------------------------------------------------|-------------------------------|------------------------------------------|
-| `ContainerOptimizedOS` | Newest COS GKE image for your K8s patch version          | `milestone.build.build.build` | `ContainerOptimizedOS@125.19216.104.126` |
-| `Ubuntu`               | Newest Ubuntu 24.04 GKE image for your K8s minor version | `vYYYYMMDD`                   | `Ubuntu@v20260416`                       |
-
-An invalid version format (for example `ContainerOptimizedOS@125`) is rejected at admission by the CRD webhook. If the pinned version does not exist in GCP, the `ImagesReady` condition on the `GCENodeClass` will be set to `False` with a descriptive message within one minute.
+> **Warning:** Using `version: latest` or `channel:` terms means Karpenter will detect new image releases and mark existing nodes as drifted, triggering replacement according to your disruption budgets. We strongly recommend evaluating new images in a lower environment before rolling them out to production.
 
 ## Finding Available Versions
 
@@ -67,38 +45,53 @@ v20260416
 
 ## Controlling Image Replacement
 
-### Option 1: Pin to a specific version (recommended for production)
+### Option 1: Channel tracking (recommended)
 
-Nodes are only replaced when you explicitly update the alias version. This gives full control over when image changes roll out:
+Track a GKE release channel for automatic updates:
 
 ```yaml
 imageSelectorTerms:
-  - alias: ContainerOptimizedOS@125.19216.104.126
+  - family: ContainerOptimizedOS
+    channel: stable   # or: rapid, regular, extended, cluster
+```
+
+When GKE promotes a new build for the channel, Karpenter marks existing nodes as drifted and replaces them according to your disruption budgets.
+
+### Option 2: Pin to a specific version
+
+Nodes are only replaced when you explicitly update the version. This gives full control over when image changes roll out:
+
+```yaml
+imageSelectorTerms:
+  - family: ContainerOptimizedOS
+    version: "125.19216.104.126"
 ```
 
 ```yaml
 imageSelectorTerms:
-  - alias: Ubuntu@v20260416
+  - family: Ubuntu2404
+    version: "v20260416"
 ```
 
 **Trade-off:** You opt out of automatic security patches. You must manually update the version when critical CVEs are patched in new node images.
 
-### Option 2: Pin to an exact image ID
+### Option 3: Pin to an exact image ID
 
-Use the full GCP image resource path when you need to reference a specific image regardless of alias resolution:
+Use the full GCP image resource path when you need to reference a specific image regardless of family resolution:
 
 ```yaml
 imageSelectorTerms:
   - id: projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre
 ```
 
-### Option 3: Use `@latest` with disruption budgets
+### Option 4: Use `version: latest` with disruption budgets
 
-Keep automatic image updates but control when and how fast nodes are replaced. With `@latest`, new nodes always receive the current image; existing nodes are replaced gradually as Karpenter's Drift mechanism marks them and disruption budgets permit replacement.
+Keep automatic image updates but control when and how fast nodes are replaced. With `version: latest`, new nodes always receive the current image; existing nodes are replaced gradually as Karpenter's Drift mechanism marks them and disruption budgets permit replacement.
 
 ```yaml
 imageSelectorTerms:
-  - alias: ContainerOptimizedOS@latest
+  - family: ContainerOptimizedOS
+    version: latest
 ```
 
 **Restrict drift replacement to a maintenance window** — nodes are replaced only during the scheduled window (here: Tue–Thu 15:00 UTC, 20 min); outside the window drift replacements are blocked. Consolidation (scale-down) and expiration still operate normally at all times.
@@ -139,8 +132,21 @@ disruption:
 
 ## Relationship to GKE Cluster Upgrades
 
-Karpenter selects images scoped to your cluster's current Kubernetes version. When GKE upgrades your control plane, new images appear in the `@latest` feed. Pinned versions from before the upgrade continue to work until you update the pin — GKE does not forcibly remove them.
+Karpenter selects images scoped to your cluster's current Kubernetes version. When GKE upgrades your control plane, new images appear for the new version. Pinned versions from before the upgrade continue to work until you update the pin — GKE does not forcibly remove them.
 
-After a cluster upgrade, run the `gcloud compute images list` commands above (with the new K8s version prefix) to discover the available images for the upgraded version and update your pin accordingly.
+After a cluster upgrade, run the `gcloud compute images list` commands above (with the new K8s version prefix) to discover available images for the upgraded version and update your pin accordingly.
 
-> **Note:** Exact image IDs are tied to a specific Kubernetes version (the version is embedded in the image name, e.g. `gke-1351-...`). After a control-plane upgrade, nodes launched from an old `id:` selector will use an image built for the previous K8s version. Unlike alias-based pins, Karpenter's Drift mechanism will not detect this mismatch. Update or remove `id:` selectors after every control-plane upgrade.
+> **Note:** Exact image IDs are tied to a specific Kubernetes version (the version is embedded in the image name, e.g. `gke-1351-...`). After a control-plane upgrade, nodes launched from an old `id:` selector will use an image built for the previous K8s version. Unlike channel or version-based selection, Karpenter's Drift mechanism will not detect this mismatch. Update or remove `id:` selectors after every control-plane upgrade.
+
+## Legacy: Image Alias Format
+
+The `alias` field (`Family@version`) is deprecated. Use `family` with `channel` or `version` for new configurations.
+
+| Old alias syntax                                | Replacement                                                    |
+|-------------------------------------------------|----------------------------------------------------------------|
+| `alias: ContainerOptimizedOS@latest`            | `family: ContainerOptimizedOS`, `version: latest`              |
+| `alias: Ubuntu@latest`                          | `family: Ubuntu2404`, `version: latest`                        |
+| `alias: ContainerOptimizedOS@125.19216.104.126` | `family: ContainerOptimizedOS`, `version: "125.19216.104.126"` |
+| `alias: Ubuntu@v20260416`                       | `family: Ubuntu2404`, `version: "v20260416"`                   |
+
+The `alias` field continues to work and is validated at admission. It will be removed in a future release.

@@ -30,6 +30,45 @@ import (
 	"google.golang.org/api/option"
 )
 
+func TestGetServerConfig_CacheHit(t *testing.T) {
+	var calls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		resp := &containerv1.ServerConfig{
+			Channels: []*containerv1.ReleaseChannelConfig{
+				{Channel: "STABLE", DefaultVersion: "1.34.6-gke.1068000"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	svc, err := containerv1.NewService(context.Background(),
+		option.WithoutAuthentication(),
+		option.WithEndpoint(srv.URL+"/"),
+	)
+	require.NoError(t, err)
+
+	p := &DefaultProvider{
+		containerService:  svc,
+		projectID:         "p",
+		nodeLocation:      "us-central1",
+		serverConfigCache: cache.New(serverConfigCacheTTL, serverConfigCacheTTL),
+	}
+
+	sc1, err := p.GetServerConfig(context.Background())
+	require.NoError(t, err)
+	require.Len(t, sc1.Channels, 1)
+	require.Equal(t, int32(1), calls.Load())
+
+	sc2, err := p.GetServerConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, sc1, sc2)
+	require.Equal(t, int32(1), calls.Load(), "second call must hit cache")
+}
+
 func TestGetClusterConfig_CacheHit(t *testing.T) {
 	var calls atomic.Int32
 

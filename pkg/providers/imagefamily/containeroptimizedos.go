@@ -44,28 +44,78 @@ type ContainerOptimizedOS struct {
 }
 
 func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
-	if version != "latest" && !cosVersionRe.MatchString(version) {
-		return nil, &imageResolutionError{msg: fmt.Sprintf(
-			"invalid ContainerOptimizedOS version %q: must be 'latest' or 'milestone.build.build.build' (e.g. '125.19216.104.126')", version)}
+	if version == "latest" {
+		sourceImage, err := c.resolveLatestCOSImage(ctx)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to resolve COS GKE image from catalog")
+			return nil, err
+		}
+		return c.resolveImages(sourceImage), nil
 	}
 
+	if k8sKey, build, ok := ParseGKEVersion(version); ok {
+		// Channel-based resolution: use exact-build filter; no fallback on miss.
+		sourceImage, err := c.resolveExactBuildCOSImage(ctx, k8sKey, build)
+		if err != nil {
+			return nil, err
+		}
+		return c.resolveImages(sourceImage), nil
+	}
+
+	// Explicit milestone version pin via alias (e.g. "125.19216.104.126").
+	if !cosVersionRe.MatchString(version) {
+		return nil, &imageResolutionError{msg: fmt.Sprintf(
+			"invalid ContainerOptimizedOS version %q: must be 'latest', a GKE version (e.g. '1.34.6-gke.1068000'), or 'milestone.build.build.build' (e.g. '125.19216.104.126')", version)}
+	}
 	sourceImage, err := c.resolveLatestCOSImage(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to resolve COS GKE image from catalog")
 		return nil, err
 	}
-
-	if version == "latest" {
-		return c.resolveImages(sourceImage), nil
-	}
-
-	// Replace the version segment in the image name with the requested version.
-	// Image format: gke-{major}{minor}{patch}-gke{kernel}-cos-{milestone}-...-c-pre
 	versionRe := regexp.MustCompile(`cos-\d+-([\d-]+)-c-pre`)
 	targetVersion := renderVersion(version)
 	modifiedImage := versionRe.ReplaceAllString(sourceImage, "cos-"+targetVersion+"-c-pre")
-
 	return c.resolveImages(modifiedImage), nil
+}
+
+// ParseGKEVersion parses a GKE version string (e.g. "1.34.6-gke.1068000") into
+// the image name key ("1346") and build number ("1068000"). Returns ok=false if
+// v is not a GKE version string.
+func ParseGKEVersion(v string) (k8sKey, build string, ok bool) {
+	parts := strings.SplitN(v, "-gke.", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	base := strings.TrimPrefix(parts[0], "v")
+	return strings.ReplaceAll(base, ".", ""), parts[1], true
+}
+
+// resolveExactBuildCOSImage fetches the COS image matching the exact GKE build
+// (filter: name=gke-{k8sKey}-gke{build}-*). Returns an error if no image is found;
+// there is no fallback — a miss should surface as ImagesReady=False.
+func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8sKey, build string) (string, error) {
+	filter := fmt.Sprintf("name=gke-%s-gke%s-*", k8sKey, build)
+
+	var best *compute.Image
+	err := c.computeService.Images.List(cosImageProject).
+		Filter(filter).
+		Pages(ctx, func(page *compute.ImageList) error {
+			for _, img := range page.Items {
+				if isUsableCOSImage(img) && (best == nil || img.CreationTimestamp > best.CreationTimestamp) {
+					best = img
+				}
+			}
+			return nil
+		})
+	if err != nil {
+		return "", fmt.Errorf("listing COS images with filter %q: %w", filter, err)
+	}
+	if best == nil {
+		return "", &imageResolutionError{msg: fmt.Sprintf(
+			"no COS image found for GKE build gke%s (k8s %s) in %s — "+
+				"the channel version may not yet have a published COS image", build, k8sKey, cosImageProject)}
+	}
+	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, best.Name), nil
 }
 
 // resolveLatestCOSImage queries the gke-node-images project for the most recent

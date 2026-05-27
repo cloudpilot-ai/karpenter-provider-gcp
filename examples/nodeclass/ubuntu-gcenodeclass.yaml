@@ -5,8 +5,10 @@ metadata:
 spec:
   serviceAccount: "" # fill me
   imageSelectorTerms:
-    - alias: Ubuntu@v20250106
-    # - alias: Ubuntu@latest
+    - family: Ubuntu2404
+      version: v20250106
+    # - family: Ubuntu2404
+    #   channel: cluster
   labels:
     env: dev
   networkTags:

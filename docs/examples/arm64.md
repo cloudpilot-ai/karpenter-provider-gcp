@@ -9,7 +9,8 @@ metadata:
   name: arm64
 spec:
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
   disks:
     - category: pd-balanced
       sizeGiB: 60

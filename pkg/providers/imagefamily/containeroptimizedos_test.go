@@ -230,3 +230,81 @@ func TestResolveImages_COS_PinnedVersion_DifferentMilestone(t *testing.T) {
 	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-arm64-124-18935-44-10-c-pre")
 	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-124-18935-44-10-c-nvda")
 }
+
+func TestParseGKEVersion(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantKey   string
+		wantBuild string
+		wantOK    bool
+	}{
+		{"standard", "1.34.6-gke.1068000", "1346", "1068000", true},
+		{"with v prefix", "v1.35.1-gke.1396004", "1351", "1396004", true},
+		{"latest is not GKE", "latest", "", "", false},
+		{"milestone pin is not GKE", "1351.19216.104.126", "", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			key, build, ok := ParseGKEVersion(tc.input)
+			require.Equal(t, tc.wantOK, ok)
+			require.Equal(t, tc.wantKey, key)
+			require.Equal(t, tc.wantBuild, build)
+		})
+	}
+}
+
+func TestResolveExactBuildCOSImage_PicksMatchingBuild(t *testing.T) {
+	images := []*compute.Image{
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+		// different build — must be excluded by filter (test server returns all, usability check won't exclude)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &compute.ImageList{Items: images}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv)}
+	got, err := p.resolveExactBuildCOSImage(context.Background(), "1346", "1068000")
+	require.NoError(t, err)
+	require.Equal(t, "projects/gke-node-images/global/images/gke-1346-gke1068000-cos-125-19216-220-72-c-pre", got)
+}
+
+func TestResolveExactBuildCOSImage_ReturnsErrorOnMiss(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &compute.ImageList{Items: []*compute.Image{}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv)}
+	_, err := p.resolveExactBuildCOSImage(context.Background(), "1346", "9999999")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "gke9999999")
+}
+
+func TestResolveImages_GKEVersion_UsesExactBuildFilter(t *testing.T) {
+	images := []*compute.Image{
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &compute.ImageList{Items: images}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv)}
+	imgs, err := p.ResolveImages(context.Background(), "1.34.6-gke.1068000")
+	require.NoError(t, err)
+	require.Len(t, imgs, 3) // amd64, arm64, gpu
+
+	var srcs []string
+	for _, img := range imgs {
+		srcs = append(srcs, img.SourceImage)
+	}
+	require.Contains(t, srcs, "projects/gke-node-images/global/images/gke-1346-gke1068000-cos-125-19216-220-72-c-pre")
+}

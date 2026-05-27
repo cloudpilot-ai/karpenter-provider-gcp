@@ -36,18 +36,67 @@ spec:
 
 **Node rotation on upgrade:** `GCENodeClassHashVersion` is bumped to `v4`. On upgrade, Karpenter detects that all existing `GCENodeClass` objects carry a stale hash version and triggers a rolling node replacement for every affected NodePool. This is a one-time, controlled rotation — nodes are replaced gradually, not all at once.
 
+### Image selection redesigned — `alias` deprecated
+
+`imageSelectorTerms` now supports structured `family`, `channel`, and `version` fields. The old `alias` string field is deprecated and will be removed in a future release — **migrate at your own pace, but do not leave it in place indefinitely.**
+
+Replace `alias` with the equivalent structured form:
+
+```yaml
+# Before
+imageSelectorTerms:
+  - alias: ContainerOptimizedOS@latest
+
+# After — follow the cluster's enrolled GKE release channel
+imageSelectorTerms:
+  - family: ContainerOptimizedOS
+    channel: cluster
+```
+
+```yaml
+# Before
+imageSelectorTerms:
+  - alias: ContainerOptimizedOS@125.19216.104.126
+
+# After — pin to a specific COS milestone
+imageSelectorTerms:
+  - family: ContainerOptimizedOS
+    version: "125.19216.104.126"
+```
+
+```yaml
+# Before
+imageSelectorTerms:
+  - alias: Ubuntu@v20260416
+
+# After — pin to a specific Ubuntu 24.04 date build
+imageSelectorTerms:
+  - family: Ubuntu2404
+    version: "v20260416"
+```
+
+See [Image selection](docs/image-selection.md) for the full field reference and [Image management](docs/image-management.md#legacy-image-alias-format) for the complete migration table.
+
+**IAM note:** `container.clusters.getServerConfig` is included in `deploy/iam/karpenter-controller-role.yaml` and in the Terraform module. No additional action is required for users who followed the standard installation guide. Users on custom roles that predate this release may need to add the permission manually if they enable `channel:` terms.
+
+---
+
 ### Image alias version pinning (`imageSelectorTerms[].alias`)
 
-**If you use `@latest` aliases:** Karpenter now reliably updates `GCENodeClass.status.images` whenever a new GKE node image is published. Combined with Karpenter's Drift mechanism, this means **all nodes using `@latest` will be replaced automatically when GKE releases a new image.** If you want to control when image updates roll out, pin to a specific version:
+> **For new configurations, prefer the `family`/`channel`/`version` structured fields over the `alias` field.** See [Image selection](docs/image-selection.md) and [Image management](docs/image-management.md#legacy-image-alias-format) for the migration table.
+
+**If you use `@latest` aliases:** Karpenter now reliably updates `GCENodeClass.status.images` whenever a new GKE node image is published. Combined with Karpenter's Drift mechanism, this means **all nodes using `@latest` will be replaced automatically when GKE releases a new image.** If you want to control when image updates roll out, pin to a specific version using the new structured fields:
 
 ```yaml
 # ContainerOptimizedOS — milestone.build.build.build format
 imageSelectorTerms:
-  - alias: ContainerOptimizedOS@125.19216.104.126
+  - family: ContainerOptimizedOS
+    version: "125.19216.104.126"
 
 # Ubuntu — vYYYYMMDD format
 imageSelectorTerms:
-  - alias: Ubuntu@v20260416
+  - family: Ubuntu2404
+    version: "v20260416"
 ```
 
 See [docs/image-management.md](docs/image-management.md) for commands to discover available versions.

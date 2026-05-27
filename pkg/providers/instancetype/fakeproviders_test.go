@@ -47,6 +47,10 @@ func (f *fakeGKEProvider) GetClusterConfig(_ context.Context) (*containerv1.Clus
 	}, nil
 }
 
+func (f *fakeGKEProvider) GetServerConfig(_ context.Context) (*containerv1.ServerConfig, error) {
+	return &containerv1.ServerConfig{}, nil
+}
+
 // fakePricingProvider returns a fixed price for every instance type without
 // making GCP API calls.
 type fakePricingProvider struct{}

@@ -6,7 +6,8 @@ metadata:
   name: secondary-boot-disk-example
 spec:
   imageSelectorTerms:
-    - alias: ContainerOptimizedOS@latest
+    - family: ContainerOptimizedOS
+      channel: cluster
   disks:
     - category: pd-balanced
       sizeGiB: 60
