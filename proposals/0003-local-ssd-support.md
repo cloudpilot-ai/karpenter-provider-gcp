@@ -13,7 +13,7 @@ Karpenter cannot currently provision GCE nodes with local SSDs. The existing `di
 
 This proposal replaces that shape with a per-pod count label (`karpenter.k8s.gcp/instance-local-ssd-count`) plus a NodeClass-level mode (`spec.localSsdMode: RawBlock | Ephemeral`). Local SSDs are attached as SCRATCH NVMe at instance create, and `kube-env` is patched with the same keys GKE-native node pools set, so the in-tree GKE bootstrap scripts handle format / RAID / mount unchanged.
 
-Configurable families (`n1`, `n2`, `n2d`, `c2`, `c2d`) emit one InstanceType variant per allowed SSD count. Bundled-SSD SKUs (`c4*-lssd`, `c4a-*-lssd`, `c4d-*-lssd`, `z3-*-{standard,high}lssd`, `a2-ultragpu-*`, `a3-*`, `a4*-*`, `h4d-*`) pin the count from the machine type.
+Configurable families (`n1`, `n2`, `n2d`, `c2`, `c2d`) emit one InstanceType variant per allowed SSD count. Bundled-SSD SKUs (`c4*-lssd`, `c4a-*-lssd`, `c4d-*-lssd`, `h4d-*-lssd`, `z3-*-{standard,high}lssd`, `a2-ultragpu-*`, `a3-*`, `a4*-*`) pin the count from the machine type.
 
 The proposal also fixes `Scheduling.OnHostMaintenance` for z3 SKUs. GCE requires `TERMINATE` on bare-metal and on > 18 TiB non-metal variants, but `MIGRATE` on smaller non-metal variants.
 
@@ -23,7 +23,7 @@ The proposal also fixes `Scheduling.OnHostMaintenance` for z3 SKUs. GCE requires
 
 ### Problem Statement
 
-GCE local SSDs are attached as SCRATCH NVMe disks, distinct from persistent disks. They ship on two kinds of machine type: **configurable families** (`n1`/`n2`/`n2d`/`c2`/`c2d`) where the operator picks the count, and **bundled-SSD SKUs** where the count is fixed by the machine type (`c4*-lssd`, `c4a-*-lssd`, `c4d-*-lssd`, the GPU families `a2-ultragpu-*` / `a3-*` / `a4-*` / `a4x-*` / `h4d-*`, and the storage-optimized `z3-*-{standard,high}lssd` family). z3 is GCE's local-SSD-first SKU line, with 3000 GiB partitions instead of the usual 375 GiB. GKE then exposes the attached SSDs in one of two modes:
+GCE local SSDs are attached as SCRATCH NVMe disks, distinct from persistent disks. They ship on two kinds of machine type: **configurable families** (`n1`/`n2`/`n2d`/`c2`/`c2d`) where the operator picks the count, and **bundled-SSD SKUs** where the count is fixed by the machine type (`c4*-lssd`, `c4a-*-lssd`, `c4d-*-lssd`, `h4d-*-lssd`, the GPU families `a2-ultragpu-*` / `a3-*` / `a4-*` / `a4x-*`, and the storage-optimized `z3-*-{standard,high}lssd` family). Families that ship both bundled and non-bundled variants (e.g. `c4d-*-lssd` / `c4d-*-nolssd`, `a3-*` / `a3-*-nolssd`) are distinguished by name suffix — see the `-nolssd` rule in Design Details. z3 is GCE's local-SSD-first SKU line, with 3000 GiB partitions instead of the usual 375 GiB. GKE then exposes the attached SSDs in one of two modes:
 
 - **RawBlock** — raw NVMe block devices the workload formats and mounts itself. Triggered by `NODE_LOCAL_SSDS_EXT: "<count>,nvme,block"` in `kube-env` and the `cloud.google.com/gke-local-nvme-ssd=true` kube-label.
 - **Ephemeral** — GKE's startup script RAID-0s the SSDs, formats ext4, mounts at `/mnt/stateful_partition/var/lib/containerd` etc., and reports the capacity as `ephemeral-storage`. Triggered by `NODE_LOCAL_SSDS_EPHEMERAL: "true"` plus the `cloud.google.com/gke-ephemeral-storage-local-ssd=true` kube-label.
@@ -90,7 +90,7 @@ The key is registered in `v1alpha1.WellKnownLabels` so Karpenter's scheduler tre
 
 `pkg/providers/instancetype/types.go` learns to emit the SSD-count requirement per variant:
 
-- **Bundled-SSD SKUs** (detected via `MachineType.BundledLocalSsds.PartitionCount` from the GCE API, with a name-suffix/-prefix fallback for cache-miss): one variant, count requirement pinned to the bundled value.
+- **Bundled-SSD SKUs** (detected via `MachineType.BundledLocalSsds.PartitionCount` from the GCE API, with a name-suffix/-prefix fallback for cache-miss): one variant, count requirement pinned to the bundled value. Names ending in `-nolssd` (e.g. `c4d-highmem-8-nolssd`, `a3-ultragpu-8g-nolssd`) override the family-level bundled classification — they are treated as non-bundled with count pinned to `0`, so the prefix-based GPU-family match (`a3-`, `a4-`, etc.) does not over-promote them. The override applies to the name-fallback path only; when the GCE API is the source of truth, `BundledLocalSsds.PartitionCount` is already correct.
 - **Configurable-SSD families**: one variant per count returned by `AllowedLocalSSDCounts(machineName, vCPUs)`, plus a zero-SSD variant for pods that don't request any SSDs. (e.g. for `n2d-standard-8` the allowed counts are 1, 2, 4, 8, 16, 24, so 7 variants including zero.)
 - **No-SSD families** (e.g. `e2`): one variant, count requirement pinned to `0`.
 
