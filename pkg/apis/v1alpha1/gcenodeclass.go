@@ -87,6 +87,14 @@ type GCENodeClassSpec struct {
 	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
+	// ConfidentialInstanceConfig enables Confidential VM for provisioned nodes,
+	// providing in-use memory encryption via AMD SEV / SEV-SNP or Intel TDX.
+	// Only supported on specific machine families; incompatible machine types
+	// are rejected by GCE at instance creation. When enabled, scheduling
+	// onHostMaintenance is forced to TERMINATE since Confidential VMs cannot
+	// live-migrate.
+	// +optional
+	ConfidentialInstanceConfig *ConfidentialInstanceConfig `json:"confidentialInstanceConfig,omitempty"`
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
 	// +optional
 	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
@@ -332,6 +340,21 @@ type ShieldedInstanceConfig struct {
 	EnableIntegrityMonitoring *bool `json:"enableIntegrityMonitoring,omitempty"`
 }
 
+// ConfidentialInstanceConfig defines the Confidential VM options for a GCE instance.
+type ConfidentialInstanceConfig struct {
+	// EnableConfidentialCompute defines whether the instance has Confidential VM enabled.
+	// When true, scheduling.onHostMaintenance is forced to TERMINATE since Confidential VMs
+	// cannot live-migrate.
+	// +optional
+	EnableConfidentialCompute *bool `json:"enableConfidentialCompute,omitempty"`
+	// ConfidentialInstanceType defines the underlying confidential computing technology.
+	// When unset and EnableConfidentialCompute is true, GCE picks the default for the
+	// selected machine family (SEV on N2D).
+	// +kubebuilder:validation:Enum=SEV;SEV_SNP;TDX
+	// +optional
+	ConfidentialInstanceType *string `json:"confidentialInstanceType,omitempty"`
+}
+
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:path=gcenodeclasses,scope=Cluster,categories=karpenter,shortName={gcenc,gcencs}
@@ -353,7 +376,7 @@ const (
 	// 1. A field changes its default value for an existing field that is already hashed
 	// 2. A field is added to the hash calculation with an already-set value
 	// 3. A field is removed from the hash calculations
-	GCENodeClassHashVersion = "v4"
+	GCENodeClassHashVersion = "v5"
 )
 
 func (in *GCENodeClass) Hash() string {
