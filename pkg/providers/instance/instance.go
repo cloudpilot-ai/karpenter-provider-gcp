@@ -722,6 +722,8 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 
+	p.configureConfidentialInstance(instance, nodeClass)
+
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
 
@@ -1014,6 +1016,28 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 		instance.Scheduling.ProvisioningModel = "SPOT"
 		instance.Scheduling.Preemptible = true
 		instance.Scheduling.AutomaticRestart = ptr.To(false)
+		instance.Scheduling.OnHostMaintenance = "TERMINATE"
+	}
+}
+
+// configureConfidentialInstance applies the NodeClass ConfidentialInstanceConfig
+// to the GCE instance. When confidential compute is enabled, scheduling
+// onHostMaintenance is forced to TERMINATE since Confidential VMs cannot
+// live-migrate and GCE rejects MIGRATE on create.
+func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass) {
+	cic := nodeClass.Spec.ConfidentialInstanceConfig
+	if cic == nil {
+		return
+	}
+	instance.ConfidentialInstanceConfig = &compute.ConfidentialInstanceConfig{}
+	if cic.EnableConfidentialCompute != nil {
+		instance.ConfidentialInstanceConfig.EnableConfidentialCompute = *cic.EnableConfidentialCompute
+		instance.ConfidentialInstanceConfig.ForceSendFields = append(instance.ConfidentialInstanceConfig.ForceSendFields, "EnableConfidentialCompute")
+	}
+	if cic.ConfidentialInstanceType != nil {
+		instance.ConfidentialInstanceConfig.ConfidentialInstanceType = *cic.ConfidentialInstanceType
+	}
+	if lo.FromPtr(cic.EnableConfidentialCompute) {
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 }
