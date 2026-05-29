@@ -489,8 +489,9 @@ spec:
                 pattern: ^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$
                 type: string
               shieldedInstanceConfig:
-                description: ShieldedInstanceConfig is the Shielded VM configuration
-                  for the instance.
+                description: |-
+                  ShieldedInstanceConfig enables Shielded VM for provisioned nodes: Secure Boot,
+                  virtual TPM, and integrity monitoring.
                 properties:
                   enableIntegrityMonitoring:
                     description: EnableIntegrityMonitoring defines whether the instance
