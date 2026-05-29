@@ -341,6 +341,7 @@ type ShieldedInstanceConfig struct {
 }
 
 // ConfidentialInstanceConfig defines the Confidential VM options for a GCE instance.
+// +kubebuilder:validation:XValidation:message="confidentialInstanceType requires enableConfidentialCompute: true",rule="!has(self.confidentialInstanceType) || (has(self.enableConfidentialCompute) && self.enableConfidentialCompute)"
 type ConfidentialInstanceConfig struct {
 	// EnableConfidentialCompute defines whether the instance has Confidential VM enabled.
 	// When true, scheduling.onHostMaintenance is forced to TERMINATE since Confidential VMs

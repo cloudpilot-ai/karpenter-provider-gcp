@@ -85,6 +85,11 @@ spec:
                       cannot live-migrate.
                     type: boolean
                 type: object
+                x-kubernetes-validations:
+                - message: 'confidentialInstanceType requires enableConfidentialCompute:
+                    true'
+                  rule: '!has(self.confidentialInstanceType) || (has(self.enableConfidentialCompute)
+                    && self.enableConfidentialCompute)'
               disks:
                 description: Disk defines the disks to attach to the provisioned instance.
                 items:
