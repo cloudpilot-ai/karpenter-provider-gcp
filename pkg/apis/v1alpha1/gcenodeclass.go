@@ -89,10 +89,6 @@ type GCENodeClassSpec struct {
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
 	// ConfidentialInstanceConfig enables Confidential VM for provisioned nodes,
 	// providing in-use memory encryption via AMD SEV / SEV-SNP or Intel TDX.
-	// Only supported on specific machine families; incompatible machine types
-	// are rejected by GCE at instance creation. When enabled, scheduling
-	// onHostMaintenance is forced to TERMINATE since Confidential VMs cannot
-	// live-migrate.
 	// +optional
 	ConfidentialInstanceConfig *ConfidentialInstanceConfig `json:"confidentialInstanceConfig,omitempty"`
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
