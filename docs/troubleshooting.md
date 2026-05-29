@@ -125,6 +125,23 @@ disks:
 
 ---
 
+## Confidential VM rejected by GCE
+
+Confidential VM is only supported on specific machine families. See the [GCP support matrix](https://cloud.google.com/confidential-computing/confidential-vm/docs/os-and-machine-type) for which families support which confidential type. If `enableConfidentialCompute` is set on a `GCENodeClass` whose requirements admit incompatible families, GCE rejects the instance create call and the error appears on the `NodeClaim` `Launched` condition.
+
+Constrain the family in the matching `NodePool` requirements. Example:
+
+```yaml
+requirements:
+  - key: karpenter.k8s.gcp/instance-family
+    operator: In
+    values: [n2d]
+```
+
+Karpenter also forces `scheduling.onHostMaintenance` to `TERMINATE` for these instances because Confidential VMs cannot live-migrate.
+
+---
+
 ## arm64 provisioning not available
 
 arm64 node provisioning may be unavailable if the cluster's region does not support arm64 machine types. Check Karpenter startup logs for related messages.

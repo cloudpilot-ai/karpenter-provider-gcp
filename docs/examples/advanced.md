@@ -53,6 +53,23 @@ The options are:
 
 See [GCP Shielded VM documentation](https://cloud.google.com/compute/shielded-vm/docs/shielded-vm) for details on each feature.
 
+## Confidential VM
+
+Confidential VM provides in-use memory encryption via AMD SEV / SEV-SNP or Intel TDX. It is only supported on specific machine families; see the [GCP support matrix](https://cloud.google.com/confidential-computing/confidential-vm/docs/os-and-machine-type) for the current list.
+
+```yaml
+confidentialInstanceConfig:
+  enableConfidentialCompute: true
+  confidentialInstanceType: SEV_SNP  # SEV | SEV_SNP | TDX
+```
+
+The options are:
+
+- **enableConfidentialCompute**: Enables in-use memory encryption on the instance. Karpenter forces `scheduling.onHostMaintenance` to `TERMINATE` on provisioned instances because Confidential VMs cannot live-migrate.
+- **confidentialInstanceType**: Selects the confidential compute technology (`SEV`, `SEV_SNP`, or `TDX`). Optional — when omitted with `enableConfidentialCompute: true`, GCE picks the default for the selected machine family.
+
+If the chosen machine type does not support the requested confidential type, GCE rejects the instance creation and the error surfaces on the `NodeClaim` `Launched` condition.
+
 ## Multiple NodePools
 
 Run independent pools for different workload tiers, each referencing a different GCENodeClass:
