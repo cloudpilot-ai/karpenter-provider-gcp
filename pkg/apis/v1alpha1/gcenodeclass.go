@@ -87,10 +87,12 @@ type GCENodeClassSpec struct {
 	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
-	// ConfidentialInstanceConfig enables Confidential VM for provisioned nodes,
-	// providing in-use memory encryption via AMD SEV / SEV-SNP or Intel TDX.
+	// ConfidentialInstanceType enables Confidential VM for provisioned nodes using the
+	// named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory
+	// encryption. Leave unset to disable. Only supported on specific machine families.
+	// +kubebuilder:validation:Enum=SEV;SEV_SNP;TDX
 	// +optional
-	ConfidentialInstanceConfig *ConfidentialInstanceConfig `json:"confidentialInstanceConfig,omitempty"`
+	ConfidentialInstanceType *string `json:"confidentialInstanceType,omitempty"`
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
 	// +optional
 	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
@@ -334,22 +336,6 @@ type ShieldedInstanceConfig struct {
 	// EnableIntegrityMonitoring defines whether the instance has integrity monitoring enabled.
 	// +optional
 	EnableIntegrityMonitoring *bool `json:"enableIntegrityMonitoring,omitempty"`
-}
-
-// ConfidentialInstanceConfig defines the Confidential VM options for a GCE instance.
-// +kubebuilder:validation:XValidation:message="confidentialInstanceType requires enableConfidentialCompute: true",rule="!has(self.confidentialInstanceType) || (has(self.enableConfidentialCompute) && self.enableConfidentialCompute)"
-type ConfidentialInstanceConfig struct {
-	// EnableConfidentialCompute defines whether the instance has Confidential VM enabled.
-	// When true, scheduling.onHostMaintenance is forced to TERMINATE since Confidential VMs
-	// cannot live-migrate.
-	// +optional
-	EnableConfidentialCompute *bool `json:"enableConfidentialCompute,omitempty"`
-	// ConfidentialInstanceType defines the underlying confidential computing technology.
-	// When unset and EnableConfidentialCompute is true, GCE picks the default for the
-	// selected machine family (SEV on N2D).
-	// +kubebuilder:validation:Enum=SEV;SEV_SNP;TDX
-	// +optional
-	ConfidentialInstanceType *string `json:"confidentialInstanceType,omitempty"`
 }
 
 // GCENodeClass is the Schema for the GCENodeClass API

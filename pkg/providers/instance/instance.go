@@ -1020,26 +1020,22 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 	}
 }
 
-// configureConfidentialInstance applies the NodeClass ConfidentialInstanceConfig
+// configureConfidentialInstance applies the NodeClass ConfidentialInstanceType
 // to the GCE instance. When confidential compute is enabled, scheduling
 // onHostMaintenance is forced to TERMINATE since Confidential VMs cannot
 // live-migrate and GCE rejects MIGRATE on create.
 func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass) {
-	cic := nodeClass.Spec.ConfidentialInstanceConfig
-	if cic == nil {
+	cit := nodeClass.Spec.ConfidentialInstanceType
+	if cit == nil {
 		return
 	}
-	instance.ConfidentialInstanceConfig = &compute.ConfidentialInstanceConfig{}
-	if cic.EnableConfidentialCompute != nil {
-		instance.ConfidentialInstanceConfig.EnableConfidentialCompute = *cic.EnableConfidentialCompute
-		instance.ConfidentialInstanceConfig.ForceSendFields = append(instance.ConfidentialInstanceConfig.ForceSendFields, "EnableConfidentialCompute")
+	instance.ConfidentialInstanceConfig = &compute.ConfidentialInstanceConfig{
+		EnableConfidentialCompute: true,
+		ConfidentialInstanceType:  *cit,
+		ForceSendFields:           []string{"EnableConfidentialCompute"},
 	}
-	if cic.ConfidentialInstanceType != nil {
-		instance.ConfidentialInstanceConfig.ConfidentialInstanceType = *cic.ConfidentialInstanceType
-	}
-	if lo.FromPtr(cic.EnableConfidentialCompute) {
-		instance.Scheduling.OnHostMaintenance = "TERMINATE"
-	}
+	// Confidential VMs cannot live-migrate; GCE rejects MIGRATE on create.
+	instance.Scheduling.OnHostMaintenance = "TERMINATE"
 }
 
 // setupInstanceLabels writes all GCE labels for a new instance. Cluster-identity labels
