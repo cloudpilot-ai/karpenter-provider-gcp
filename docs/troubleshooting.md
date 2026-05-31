@@ -127,7 +127,7 @@ disks:
 
 ## Confidential VM rejected by GCE
 
-Confidential VM is only supported on specific machine families. See the [GCP support matrix](https://cloud.google.com/confidential-computing/confidential-vm/docs/os-and-machine-type) for which families support which confidential type. If `enableConfidentialCompute` is set on a `GCENodeClass` whose requirements admit incompatible families, GCE rejects the instance create call and the error appears on the `NodeClaim` `Launched` condition.
+Confidential VM is only supported on specific machine families. See the [GCP support matrix](https://cloud.google.com/confidential-computing/confidential-vm/docs/os-and-machine-type) for which families support which confidential type. If `confidentialInstanceType` is set on a `GCENodeClass` whose requirements admit incompatible families, GCE rejects the instance create call and the error appears on the `NodeClaim` `Launched` condition.
 
 Constrain the family in the matching `NodePool` requirements. Example:
 
