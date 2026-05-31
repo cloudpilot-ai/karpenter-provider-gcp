@@ -375,6 +375,7 @@ func TestApplyCustomMetadata_SkipsEmptyValue(t *testing.T) {
 
 	ApplyCustomMetadata(meta, map[string]string{"serial-port-logging-enable": ""})
 
+	require.Len(t, meta.Items, 1, "empty value must not remove the existing key")
 	require.Equal(t, "true", metadataValue(meta, "serial-port-logging-enable"),
-		"empty custom value must be skipped, leaving the base value untouched")
+		"empty value is ignored: it cannot clear a value inherited from the base template")
 }

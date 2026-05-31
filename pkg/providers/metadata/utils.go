@@ -513,7 +513,8 @@ func removeKubeEnvLine(kubeEnv, key string) string {
 
 // ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.
 // User-supplied keys override any value inherited from the base instance template;
-// keys not already present are appended.
+// keys not already present are appended. Empty values are ignored, so a key cannot
+// be used to clear a value inherited from the base template.
 func ApplyCustomMetadata(metadata *compute.Metadata, customMetadata map[string]string) {
 	if len(customMetadata) == 0 {
 		return
