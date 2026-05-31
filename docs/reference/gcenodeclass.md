@@ -30,23 +30,6 @@ _Appears in:_
 
 
 
-#### ConfidentialInstanceConfig
-
-
-
-ConfidentialInstanceConfig defines the Confidential VM options for a GCE instance.
-
-
-
-_Appears in:_
-- [GCENodeClassSpec](#gcenodeclassspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `enableConfidentialCompute` _boolean_ | EnableConfidentialCompute defines whether the instance has Confidential VM enabled.<br />When true, scheduling.onHostMaintenance is forced to TERMINATE since Confidential VMs<br />cannot live-migrate. |  | Optional: \{\} <br /> |
-| `confidentialInstanceType` _string_ | ConfidentialInstanceType defines the underlying confidential computing technology.<br />When unset and EnableConfidentialCompute is true, GCE picks the default for the<br />selected machine family (SEV on N2D). |  | Enum: [SEV SEV_SNP TDX] <br />Optional: \{\} <br /> |
-
-
 #### Disk
 
 
@@ -129,7 +112,7 @@ _Appears in:_
 | `metadata` _object (keys:string, values:string)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  | Optional: \{\} <br /> |
 | `networkTags` _[NetworkTag](#networktag) array_ | NetworkTags is a list of network tags to apply to the node. |  | MaxItems: 20 <br />MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `shieldedInstanceConfig` _[ShieldedInstanceConfig](#shieldedinstanceconfig)_ | ShieldedInstanceConfig enables Shielded VM for provisioned nodes: Secure Boot,<br />virtual TPM, and integrity monitoring. |  | Optional: \{\} <br /> |
-| `confidentialInstanceConfig` _[ConfidentialInstanceConfig](#confidentialinstanceconfig)_ | ConfidentialInstanceConfig enables Confidential VM for provisioned nodes,<br />providing in-use memory encryption via AMD SEV / SEV-SNP or Intel TDX. |  | Optional: \{\} <br /> |
+| `confidentialInstanceType` _string_ | ConfidentialInstanceType enables Confidential VM for provisioned nodes using the<br />named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory<br />encryption. Leave unset to disable. Only supported on specific machine families. |  | Enum: [SEV SEV_SNP TDX] <br />Optional: \{\} <br /> |
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
 | `autoGPUTaint` _boolean_ | AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule<br />to any GPU node at provisioning time, regardless of the NodePool configuration.<br />Disabled by default to preserve backward compatibility. |  | Optional: \{\} <br /> |
 | `gpuDriverVersion` _string_ | GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.<br />Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.<br />Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),<br />"disabled" (skip automatic installation).<br />Ignored for non-GPU instance types. | default | Enum: [default latest disabled] <br />Optional: \{\} <br /> |

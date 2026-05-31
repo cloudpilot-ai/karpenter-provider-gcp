@@ -62,33 +62,16 @@ spec:
                   to any GPU node at provisioning time, regardless of the NodePool configuration.
                   Disabled by default to preserve backward compatibility.
                 type: boolean
-              confidentialInstanceConfig:
+              confidentialInstanceType:
                 description: |-
-                  ConfidentialInstanceConfig enables Confidential VM for provisioned nodes,
-                  providing in-use memory encryption via AMD SEV / SEV-SNP or Intel TDX.
-                properties:
-                  confidentialInstanceType:
-                    description: |-
-                      ConfidentialInstanceType defines the underlying confidential computing technology.
-                      When unset and EnableConfidentialCompute is true, GCE picks the default for the
-                      selected machine family (SEV on N2D).
-                    enum:
-                    - SEV
-                    - SEV_SNP
-                    - TDX
-                    type: string
-                  enableConfidentialCompute:
-                    description: |-
-                      EnableConfidentialCompute defines whether the instance has Confidential VM enabled.
-                      When true, scheduling.onHostMaintenance is forced to TERMINATE since Confidential VMs
-                      cannot live-migrate.
-                    type: boolean
-                type: object
-                x-kubernetes-validations:
-                - message: 'confidentialInstanceType requires enableConfidentialCompute:
-                    true'
-                  rule: '!has(self.confidentialInstanceType) || (has(self.enableConfidentialCompute)
-                    && self.enableConfidentialCompute)'
+                  ConfidentialInstanceType enables Confidential VM for provisioned nodes using the
+                  named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory
+                  encryption. Leave unset to disable. Only supported on specific machine families.
+                enum:
+                - SEV
+                - SEV_SNP
+                - TDX
+                type: string
               disks:
                 description: Disk defines the disks to attach to the provisioned instance.
                 items:
