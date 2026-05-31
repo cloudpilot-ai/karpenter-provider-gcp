@@ -1805,11 +1805,11 @@ func buildConfidentialInstance(t *testing.T, nc *v1alpha1.GCENodeClass) *compute
 	return instance
 }
 
-func TestConfidentialInstanceConfig_NilLeavesSchedulingUntouched(t *testing.T) {
+func TestConfidentialInstanceType_UnsetLeavesSchedulingUntouched(t *testing.T) {
 	t.Parallel()
 
 	nc := &v1alpha1.GCENodeClass{}
-	nc.Spec.ConfidentialInstanceConfig = nil
+	nc.Spec.ConfidentialInstanceType = nil
 
 	instance := buildConfidentialInstance(t, nc)
 
@@ -1819,34 +1819,28 @@ func TestConfidentialInstanceConfig_NilLeavesSchedulingUntouched(t *testing.T) {
 	require.NotEqual(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
 }
 
-func TestConfidentialInstanceConfig_EnableOnlyForcesTerminate(t *testing.T) {
+func TestConfidentialInstanceType_SEVForcesTerminate(t *testing.T) {
 	t.Parallel()
 
-	enabled := true
+	typ := "SEV"
 	nc := &v1alpha1.GCENodeClass{}
-	nc.Spec.ConfidentialInstanceConfig = &v1alpha1.ConfidentialInstanceConfig{
-		EnableConfidentialCompute: &enabled,
-	}
+	nc.Spec.ConfidentialInstanceType = &typ
 
 	instance := buildConfidentialInstance(t, nc)
 
 	require.NotNil(t, instance.ConfidentialInstanceConfig)
 	require.True(t, instance.ConfidentialInstanceConfig.EnableConfidentialCompute)
-	require.Empty(t, instance.ConfidentialInstanceConfig.ConfidentialInstanceType)
+	require.Equal(t, "SEV", instance.ConfidentialInstanceConfig.ConfidentialInstanceType)
 	require.Contains(t, instance.ConfidentialInstanceConfig.ForceSendFields, "EnableConfidentialCompute")
 	require.Equal(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
 }
 
-func TestConfidentialInstanceConfig_EnableWithTypeSEVSNP(t *testing.T) {
+func TestConfidentialInstanceType_SEVSNPForcesTerminate(t *testing.T) {
 	t.Parallel()
 
-	enabled := true
 	typ := "SEV_SNP"
 	nc := &v1alpha1.GCENodeClass{}
-	nc.Spec.ConfidentialInstanceConfig = &v1alpha1.ConfidentialInstanceConfig{
-		EnableConfidentialCompute: &enabled,
-		ConfidentialInstanceType:  &typ,
-	}
+	nc.Spec.ConfidentialInstanceType = &typ
 
 	instance := buildConfidentialInstance(t, nc)
 
@@ -1855,22 +1849,4 @@ func TestConfidentialInstanceConfig_EnableWithTypeSEVSNP(t *testing.T) {
 	require.Equal(t, "SEV_SNP", instance.ConfidentialInstanceConfig.ConfidentialInstanceType)
 	require.Contains(t, instance.ConfidentialInstanceConfig.ForceSendFields, "EnableConfidentialCompute")
 	require.Equal(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
-}
-
-func TestConfidentialInstanceConfig_ExplicitFalseDoesNotForceTerminate(t *testing.T) {
-	t.Parallel()
-
-	disabled := false
-	nc := &v1alpha1.GCENodeClass{}
-	nc.Spec.ConfidentialInstanceConfig = &v1alpha1.ConfidentialInstanceConfig{
-		EnableConfidentialCompute: &disabled,
-	}
-
-	instance := buildConfidentialInstance(t, nc)
-
-	require.NotNil(t, instance.ConfidentialInstanceConfig)
-	require.False(t, instance.ConfidentialInstanceConfig.EnableConfidentialCompute)
-	require.Contains(t, instance.ConfidentialInstanceConfig.ForceSendFields, "EnableConfidentialCompute")
-	// EnableConfidentialCompute=false must not force TERMINATE; scheduling is unchanged.
-	require.NotEqual(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
 }
