@@ -65,6 +65,8 @@ Setting `confidentialInstanceType` enables Confidential VM with the named techno
 
 If the chosen machine type does not support the requested confidential type, GCE rejects the instance creation and the error surfaces on the `NodeClaim` `Launched` condition.
 
+The default `ContainerOptimizedOS` and `Ubuntu` images boot as Confidential VMs on supported families without any image change. GPU Confidential VMs are an exception: an A3 instance with an attached H100 GPU using Intel TDX requires a TDX-specific image (for example `cos-tdx-*`), which is not available through the `family` image selectors. Pin such an image by its full resource URL with `imageSelectorTerms[].id`; see the [GCP supported configurations](https://cloud.google.com/confidential-computing/confidential-vm/docs/supported-configurations#supported-images-gpu).
+
 ## Multiple NodePools
 
 Run independent pools for different workload tiers, each referencing a different GCENodeClass:

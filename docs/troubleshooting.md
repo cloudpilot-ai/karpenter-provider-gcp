@@ -140,6 +140,8 @@ requirements:
 
 Karpenter also forces `scheduling.onHostMaintenance` to `TERMINATE` for these instances because Confidential VMs cannot live-migrate.
 
+The default `ContainerOptimizedOS` and `Ubuntu` images work for CPU Confidential VMs. GPU Confidential VMs (an A3 instance with an attached H100 GPU using Intel TDX) require a TDX-specific image that the `family` image selectors do not provide; pin one by its full resource URL with `imageSelectorTerms[].id` per the [GCP supported configurations](https://cloud.google.com/confidential-computing/confidential-vm/docs/supported-configurations#supported-images-gpu).
+
 ---
 
 ## arm64 provisioning not available
