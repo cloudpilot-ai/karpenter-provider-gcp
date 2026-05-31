@@ -83,7 +83,8 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:MaxItems=20
 	// +optional
 	NetworkTags []NetworkTag `json:"networkTags,omitempty"`
-	// ShieldedInstanceConfig is the Shielded VM configuration for the instance.
+	// ShieldedInstanceConfig enables Shielded VM for provisioned nodes: Secure Boot,
+	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
