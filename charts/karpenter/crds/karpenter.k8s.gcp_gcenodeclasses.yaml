@@ -297,6 +297,8 @@ spec:
                     x-kubernetes-validations:
                     - message: valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
                       rule: self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])
+                    - message: evictionHard values must be a percentage or a resource.Quantity
+                      rule: self.all(x, self[x].matches('^((\d{1,2}(\.\d{1,2})?|100(\.0{1,2})?)%||(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?)$'))
                   evictionMaxPodGracePeriod:
                     description: |-
                       EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in
@@ -313,6 +315,8 @@ spec:
                     x-kubernetes-validations:
                     - message: valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
                       rule: self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])
+                    - message: evictionSoft values must be a percentage or a resource.Quantity
+                      rule: self.all(x, self[x].matches('^((\d{1,2}(\.\d{1,2})?|100(\.0{1,2})?)%||(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?)$'))
                   evictionSoftGracePeriod:
                     additionalProperties:
                       type: string
@@ -357,6 +361,8 @@ spec:
                         || x=='pid')
                     - message: kubeReserved value cannot be a negative resource quantity
                       rule: self.all(x, !self[x].startsWith('-'))
+                    - message: kubeReserved values must be a resource.Quantity
+                      rule: self.all(x, self[x].matches('^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'))
                   maxPods:
                     description: |-
                       MaxPods is an override for the maximum number of pods that can run on
@@ -386,6 +392,8 @@ spec:
                     - message: systemReserved value cannot be a negative resource
                         quantity
                       rule: self.all(x, !self[x].startsWith('-'))
+                    - message: systemReserved values must be a resource.Quantity
+                      rule: self.all(x, self[x].matches('^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'))
                 type: object
                 x-kubernetes-validations:
                 - message: imageGCHighThresholdPercent must be greater than imageGCLowThresholdPercent
