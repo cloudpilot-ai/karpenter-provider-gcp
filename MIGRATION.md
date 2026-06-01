@@ -5,6 +5,20 @@
 
 ## Unreleased
 
+### `kubeletConfiguration` fields now take effect
+
+`spec.kubeletConfiguration` fields on `GCENodeClass` that were previously accepted by the CRD but silently dropped at provisioning time are now applied to the kubelet on every Karpenter-provisioned node and to Karpenter's scheduler bin-packing. The previously honoured fields (`maxPods`) are unchanged.
+
+Newly honoured fields:
+
+- `systemReserved`, `kubeReserved` — reservations passed to the kubelet via `--config` and used by the scheduler to compute allocatable.
+- `evictionHard`, `evictionSoft`, `evictionSoftGracePeriod`, `evictionMaxPodGracePeriod` — passed to the kubelet. For the scheduler's overhead, only `evictionHard.memory.available` and `evictionHard.nodefs.available` are modelled (matches `aws/karpenter-provider-aws` and the [Kubernetes node-pressure-eviction docs](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#eviction-thresholds)). `evictionSoft` is a warning threshold and is enforced by the kubelet at runtime but does not reduce scheduler allocatable.
+- `imageGCHighThresholdPercent`, `imageGCLowThresholdPercent`, `cpuCFSQuota`, `clusterDNS`, `podsPerCore` — passed to the kubelet. `podsPerCore` additionally caps `node.status.capacity.pods` at `podsPerCore × cpus`.
+
+**Action required:** audit existing `GCENodeClass` objects that set any of these fields. The values will now take effect on the next node provision, and a change to any field triggers Karpenter's standard drift-driven node rotation.
+
+The CRD value schema for `systemReserved`, `kubeReserved`, `evictionHard`, and `evictionSoft` is now validated against the `resource.Quantity` regex (and percentage syntax for the eviction fields). Existing values that already parsed as `resource.Quantity` are unaffected.
+
 ### GPU node provisioning (`gpuDriverVersion`)
 
 Karpenter now automatically sets the two node labels required by the GKE GPU software stack
