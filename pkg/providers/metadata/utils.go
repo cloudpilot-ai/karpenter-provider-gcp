@@ -17,6 +17,7 @@ limitations under the License.
 package metadata
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -61,7 +62,7 @@ func GetClusterName(metadata *compute.Metadata) (string, error) {
 	return clusterName, nil
 }
 
-func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloudprovider.InstanceType, capacityType string) error {
+func RenderKubeletConfigMetadata(metaData *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, capacityType string) error {
 	targetEntry, index, ok := lo.FindIndexOf(metaData.Items, func(item *compute.MetadataItems) bool {
 		return item.Key == KubeletConfigLabel
 	})
@@ -83,7 +84,9 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 		return fmt.Errorf("failed to parse kubelet-config YAML: %w", err)
 	}
 
-	// Update kubeReserved
+	// Update kubeReserved with provider-computed defaults first; user values
+	// in spec.kubeletConfiguration.kubeReserved overlay these per-sub-key
+	// below via mergeUserKubeletConfig.
 	kubeReserved, ok := config["kubeReserved"].(map[string]interface{})
 	if !ok {
 		kubeReserved = make(map[string]interface{})
@@ -93,6 +96,17 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	kubeReserved["ephemeral-storage"] = ephemeralStorage
 	config["kubeReserved"] = kubeReserved
 
+	// Merge user-supplied KubeletConfiguration on top of the provider defaults.
+	// Map fields (kubeReserved, systemReserved, eviction*) merge one level
+	// deep so user sub-keys win but computed sub-keys for unset keys survive
+	// (e.g. computed kubeReserved.ephemeral-storage from boot disk size).
+	if err := mergeUserKubeletConfig(config, nodeClass.Spec.KubeletConfiguration); err != nil {
+		return fmt.Errorf("failed to merge user KubeletConfiguration: %w", err)
+	}
+
+	// Spot-specific overrides are applied AFTER the user merge: graceful
+	// node shutdown is required for Spot preemption handling and must not
+	// be overridable from the nodeclass.
 	if capacityType == karpv1.CapacityTypeSpot {
 		featureGates, ok := config["featureGates"].(map[string]interface{})
 		if !ok {
@@ -113,6 +127,36 @@ func RenderKubeletConfigMetadata(metaData *compute.Metadata, instanceType *cloud
 	targetEntry.Value = lo.ToPtr(string(updatedYAML))
 	metaData.Items[index] = targetEntry
 
+	return nil
+}
+
+// mergeUserKubeletConfig overlays user KubeletConfiguration onto config.
+// Scalar/slice keys replace verbatim; map keys merge one level deep so
+// provider-computed sub-keys (e.g. kubeReserved.ephemeral-storage from #220)
+// survive a partial user override.
+func mergeUserKubeletConfig(config map[string]interface{}, kc *v1alpha1.KubeletConfiguration) error {
+	if kc == nil {
+		return nil
+	}
+	raw, err := json.Marshal(kc)
+	if err != nil {
+		return fmt.Errorf("marshal KubeletConfiguration: %w", err)
+	}
+	userMap := map[string]interface{}{}
+	if err := json.Unmarshal(raw, &userMap); err != nil {
+		return fmt.Errorf("unmarshal KubeletConfiguration: %w", err)
+	}
+	for k, v := range userMap {
+		if userSub, ok := v.(map[string]interface{}); ok {
+			if existingSub, ok := config[k].(map[string]interface{}); ok {
+				for sk, sv := range userSub {
+					existingSub[sk] = sv
+				}
+				continue
+			}
+		}
+		config[k] = v
+	}
 	return nil
 }
 
