@@ -46,7 +46,7 @@ jobs:
           cache: false
 
       - name: Authenticate to GCP
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           credentials_json: ${{ secrets.GCP_PRICING_SA_KEY }}
 
@@ -64,7 +64,7 @@ jobs:
 
       - name: Create PR if pricing changed
         if: ${{ !inputs.dry_run }}
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           commit-message: "chore(pricing): update initial-prices.json"
           title: "chore(pricing): scheduled pricing data refresh"
