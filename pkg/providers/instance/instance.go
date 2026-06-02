@@ -1032,7 +1032,6 @@ func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instan
 	instance.ConfidentialInstanceConfig = &compute.ConfidentialInstanceConfig{
 		EnableConfidentialCompute: true,
 		ConfidentialInstanceType:  *cit,
-		ForceSendFields:           []string{"EnableConfidentialCompute"},
 	}
 	// Confidential VMs cannot live-migrate; GCE rejects MIGRATE on create.
 	instance.Scheduling.OnHostMaintenance = "TERMINATE"
