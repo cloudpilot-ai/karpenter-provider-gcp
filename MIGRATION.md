@@ -77,7 +77,7 @@ imageSelectorTerms:
 
 See [Image selection](docs/image-selection.md) for the full field reference and [Image management](docs/image-management.md#legacy-image-alias-format) for the complete migration table.
 
-**IAM note:** `container.clusters.getServerConfig` is included in `deploy/iam/karpenter-controller-role.yaml` and in the Terraform module. No additional action is required for users who followed the standard installation guide. Users on custom roles that predate this release may need to add the permission manually if they enable `channel:` terms.
+**IAM note:** GKE release-channel image resolution calls the `projects.locations.getServerConfig` API method. Custom IAM roles must include `container.clusters.list`; update your controller role before using the `channel:` term.
 
 ---
 
