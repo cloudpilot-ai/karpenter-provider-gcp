@@ -214,6 +214,57 @@ func kubeEnvValue(meta *compute.Metadata) string {
 	return ""
 }
 
+func TestSetDiskTypeLabelsReplacesInheritedLabels(t *testing.T) {
+	meta := gpuTestMeta(
+		"cloud.google.com/machine-family=n2,disk-type.gke.io/pd-balanced=true,disk-type.gke.io/pd-standard=true,karpenter.sh/nodepool=np",
+		"cloud.google.com/machine-family=n2,disk-type.gke.io/pd-standard=true,karpenter.sh/nodepool=np",
+	)
+
+	require.NoError(t, SetDiskTypeLabels(meta, map[string]string{
+		"disk-type.gke.io/hyperdisk-balanced": "true",
+		"disk-type.gke.io/pd-ssd":             "true",
+	}))
+
+	require.Equal(t,
+		"cloud.google.com/machine-family=n2,karpenter.sh/nodepool=np,disk-type.gke.io/hyperdisk-balanced=true,disk-type.gke.io/pd-ssd=true",
+		kubeLabelsValue(meta),
+	)
+	require.Contains(t, kubeEnvValue(meta), "--node-labels=cloud.google.com/machine-family=n2,karpenter.sh/nodepool=np,disk-type.gke.io/hyperdisk-balanced=true,disk-type.gke.io/pd-ssd=true")
+	require.NotContains(t, kubeEnvValue(meta), "disk-type.gke.io/pd-standard=true")
+}
+
+func TestSetDiskTypeLabelsHandlesMultilineKubeletArgs(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: lo.ToPtr("cloud.google.com/machine-family=n2,disk-type.gke.io/pd-standard=true")},
+		{Key: "kube-env", Value: lo.ToPtr(`KUBELET_ARGS: --v=2 --cloud-provider=external
+  --cert-dir=/var/lib/kubelet/pki/ --node-labels=cloud.google.com/machine-family=n2,disk-type.gke.io/pd-standard=true,karpenter.sh/nodepool=np
+  --volume-plugin-dir=/home/kubernetes/flexvolume
+`)},
+	}}
+
+	require.NoError(t, SetDiskTypeLabels(meta, map[string]string{
+		"disk-type.gke.io/pd-balanced": "true",
+	}))
+
+	got := kubeEnvValue(meta)
+	require.Contains(t, got, "--node-labels=cloud.google.com/machine-family=n2,karpenter.sh/nodepool=np,disk-type.gke.io/pd-balanced=true")
+	require.Contains(t, got, "--volume-plugin-dir=/home/kubernetes/flexvolume")
+	require.NotContains(t, got, "disk-type.gke.io/pd-standard=true")
+}
+
+func TestSetDiskTypeLabelsAllowsEmptySet(t *testing.T) {
+	meta := gpuTestMeta(
+		"disk-type.gke.io/pd-standard=true,karpenter.sh/nodepool=np",
+		"disk-type.gke.io/pd-standard=true,karpenter.sh/nodepool=np",
+	)
+
+	require.NoError(t, SetDiskTypeLabels(meta, nil))
+
+	require.Equal(t, "karpenter.sh/nodepool=np", kubeLabelsValue(meta))
+	require.Contains(t, kubeEnvValue(meta), "--node-labels=karpenter.sh/nodepool=np")
+	require.NotContains(t, kubeEnvValue(meta), "disk-type.gke.io/")
+}
+
 func TestSetGPUDriverVersionLabel_InjectsLabel(t *testing.T) {
 	meta := gpuTestMeta("max-pods-per-node=110", "max-pods-per-node=110")
 	require.NoError(t, SetGPUDriverVersionLabel(meta, "latest"))

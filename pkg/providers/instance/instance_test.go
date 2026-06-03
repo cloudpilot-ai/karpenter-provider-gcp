@@ -1058,7 +1058,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 			Metadata: &compute.Metadata{
 				Items: []*compute.MetadataItems{
 					{Key: "kube-labels", Value: ptr.To("max-pods-per-node=110,max-pods=110")},
-					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110\narch=amd64\n")},
+					{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\narch=amd64\n")},
 					{Key: "kubelet-config", Value: ptr.To("nodeStatusUpdateFrequency: 10s\n")},
 				},
 			},
@@ -1359,6 +1359,55 @@ func kubeEnvFrom(t *testing.T, instance *compute.Instance) string {
 	}
 	t.Fatal("kube-env not found in instance metadata")
 	return ""
+}
+
+func TestBuildInstance_DiskTypeLabels(t *testing.T) {
+	t.Parallel()
+
+	p := makeProvider()
+	instanceType := &cloudprovider.InstanceType{
+		Name: "e2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, "e2"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	kubeLabels := "max-pods-per-node=110,max-pods=110,cloud.google.com/machine-family=n2,disk-type.gke.io/hyperdisk-throughput=true,disk-type.gke.io/pd-standard=true"
+	template := makeGPUTemplate(kubeLabels)
+	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		Metadata: map[string]string{
+			"kube-labels": "disk-type.gke.io/hyperdisk-throughput=true",
+			"kube-env":    "disk-type.gke.io/hyperdisk-throughput=true",
+		},
+	}}
+	cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
+
+	instance, err := p.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(),
+		nodeClass,
+		instanceType,
+		template,
+		cluster,
+		"default-pool", "us-central1-a", "karpenter-disk-label-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	for _, value := range []string{kubeLabelsFrom(t, instance), kubeEnvFrom(t, instance)} {
+		require.Contains(t, value, "disk-type.gke.io/pd-balanced=true")
+		require.Contains(t, value, "disk-type.gke.io/pd-extreme=true")
+		require.Contains(t, value, "disk-type.gke.io/pd-ssd=true")
+		require.Contains(t, value, "disk-type.gke.io/pd-standard=true")
+		require.NotContains(t, value, "disk-type.gke.io/hyperdisk-throughput=true")
+	}
 }
 
 func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
