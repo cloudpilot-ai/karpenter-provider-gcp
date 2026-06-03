@@ -236,13 +236,13 @@ type KubeletConfiguration struct {
 	KubeReserved map[string]string `json:"kubeReserved,omitempty"`
 	// EvictionHard is the map of signal names to quantities that define hard eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
-	// +kubebuilder:validation:XValidation:message="evictionHard values must be a percentage or a resource.Quantity",rule="self.all(x, self[x].matches('^((\\d{1,2}(\\.\\d{1,2})?|100(\\.0{1,2})?)%||(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?)$'))"
+	// +kubebuilder:validation:XValidation:message="evictionHard values must be a percentage or a resource.Quantity",rule="self.all(x, self[x].matches('^((\\d{1,2}(\\.\\d{1,2})?|100(\\.0{1,2})?)%|(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?)$'))"
 	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionHard map[string]string `json:"evictionHard,omitempty"`
 	// EvictionSoft is the map of signal names to quantities that define soft eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
-	// +kubebuilder:validation:XValidation:message="evictionSoft values must be a percentage or a resource.Quantity",rule="self.all(x, self[x].matches('^((\\d{1,2}(\\.\\d{1,2})?|100(\\.0{1,2})?)%||(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?)$'))"
+	// +kubebuilder:validation:XValidation:message="evictionSoft values must be a percentage or a resource.Quantity",rule="self.all(x, self[x].matches('^((\\d{1,2}(\\.\\d{1,2})?|100(\\.0{1,2})?)%|(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?)$'))"
 	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionSoft map[string]string `json:"evictionSoft,omitempty"`

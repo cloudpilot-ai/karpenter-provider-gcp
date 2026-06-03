@@ -301,7 +301,7 @@ spec:
                     - message: valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
                       rule: self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])
                     - message: evictionHard values must be a percentage or a resource.Quantity
-                      rule: self.all(x, self[x].matches('^((\d{1,2}(\.\d{1,2})?|100(\.0{1,2})?)%||(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?)$'))
+                      rule: self.all(x, self[x].matches('^((\d{1,2}(\.\d{1,2})?|100(\.0{1,2})?)%|(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?)$'))
                   evictionMaxPodGracePeriod:
                     description: |-
                       EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in
@@ -319,7 +319,7 @@ spec:
                     - message: valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
                       rule: self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])
                     - message: evictionSoft values must be a percentage or a resource.Quantity
-                      rule: self.all(x, self[x].matches('^((\d{1,2}(\.\d{1,2})?|100(\.0{1,2})?)%||(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?)$'))
+                      rule: self.all(x, self[x].matches('^((\d{1,2}(\.\d{1,2})?|100(\.0{1,2})?)%|(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?)$'))
                   evictionSoftGracePeriod:
                     additionalProperties:
                       type: string
