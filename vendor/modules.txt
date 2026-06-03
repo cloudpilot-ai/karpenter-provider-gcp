@@ -468,7 +468,7 @@ golang.org/x/tools/internal/versions
 # gomodules.xyz/jsonpatch/v2 v2.5.0
 ## explicit; go 1.20
 gomodules.xyz/jsonpatch/v2
-# google.golang.org/api v0.282.0
+# google.golang.org/api v0.283.0
 ## explicit; go 1.25.8
 google.golang.org/api/compute/v1
 google.golang.org/api/container/v1
@@ -1131,8 +1131,8 @@ sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics
 ## explicit; go 1.23
 sigs.k8s.io/json
 sigs.k8s.io/json/internal/golang/encoding/json
-# sigs.k8s.io/karpenter v1.12.0
-## explicit; go 1.26.2
+# sigs.k8s.io/karpenter v1.12.1
+## explicit; go 1.26.3
 sigs.k8s.io/karpenter/pkg/apis
 sigs.k8s.io/karpenter/pkg/apis/v1
 sigs.k8s.io/karpenter/pkg/apis/v1alpha1

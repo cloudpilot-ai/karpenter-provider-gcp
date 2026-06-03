@@ -1,6 +1,6 @@
 module github.com/cloudpilot-ai/karpenter-provider-gcp
 
-go 1.26.2
+go 1.26.3
 
 require (
 	cloud.google.com/go/compute v1.64.0
@@ -17,7 +17,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0
 	golang.org/x/oauth2 v0.36.0
-	google.golang.org/api v0.282.0
+	google.golang.org/api v0.283.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.36.0
 	k8s.io/apimachinery v0.36.0
@@ -25,7 +25,7 @@ require (
 	k8s.io/metrics v0.34.2
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
 	sigs.k8s.io/controller-runtime v0.24.1
-	sigs.k8s.io/karpenter v1.12.0
+	sigs.k8s.io/karpenter v1.12.1
 )
 
 require (
