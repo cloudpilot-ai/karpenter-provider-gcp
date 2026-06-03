@@ -12,13 +12,6 @@
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
 
-> [!NOTE]
-> A live version is now available.
->
-> **Feedback welcome!** Join our [Slack](https://kubernetes.slack.com/archives/C0B20K4KWP8) to share your ideas, ask questions, and discuss with the community.
->
-> Need enterprise support? [Get in touch](https://www.cloudpilot.ai/en/contact/)
-
 ## Introduction
 
 Karpenter is an open-source node provisioning project built for Kubernetes.
@@ -28,14 +21,6 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 * **Evaluating** scheduling constraints (resource requests, nodeselectors, affinities, tolerations, and topology spread constraints) requested by the pods
 * **Provisioning** nodes that meet the requirements of the pods
 * **Removing** the nodes when the nodes are no longer needed
-
-## Documentation
-
-See [`docs/`](docs/) for installation, configuration, networking, troubleshooting, and contributing guides. See [`proposals/`](proposals/) for accepted and in-progress design proposals.
-
-## Release notes / upgrades
-
-See [GitHub Releases](https://github.com/cloudpilot-ai/karpenter-provider-gcp/releases) for the full changelog. See [`MIGRATION.md`](MIGRATION.md) for breaking changes and upgrade steps.
 
 ## How it works
 
@@ -47,16 +32,28 @@ Karpenter observes the aggregate resource requests of unscheduled pods and makes
   </p>
 </div>
 
-<!--
-## Getting started
 
-* [Introduction](https://docs.cloudpilot.ai/karpenter/gcp)
-* [Installation](https://docs.cloudpilot.ai/karpenter/gcp/installation)
+## Managed optimization for production Kubernetes
+
+For teams running Karpenter in production, [CloudPilot AI](https://www.cloudpilot.ai/en/) adds managed cost optimization, reliability automation, deeper cluster visibility, and advanced production features.
+
+<div align="center">
+  <p align="center">
+    <a href="https://www.cloudpilot.ai/en/">
+      <img src="./docs/images/cloudpilot-hero.gif" width="100%" alt="CloudPilot AI Kubernetes optimization overview" style="border-radius: 16px;">
+    </a>
+  </p>
+</div>
+
+Learn more about [CloudPilot AI](https://www.cloudpilot.ai/en/) or [get in touch](https://www.cloudpilot.ai/en/contact/) for production support.
 
 ## Documentation
 
-Full documentation is available at [karpenter gcp cloud provider docs](https://docs.cloudpilot.ai/karpenter/gcp/).
--->
+See [`docs/`](docs/) for installation, configuration, networking, troubleshooting, and contributing guides. See [`proposals/`](proposals/) for accepted and in-progress design proposals.
+
+## Release notes / upgrades
+
+See [GitHub Releases](https://github.com/cloudpilot-ai/karpenter-provider-gcp/releases) for the full changelog. See [`MIGRATION.md`](MIGRATION.md) for breaking changes and upgrade steps.
 
 ## Community
 
