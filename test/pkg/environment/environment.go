@@ -39,9 +39,16 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
+var (
+	// KarpenterNamespace is the namespace the Karpenter controller runs in.
+	// Override with KARPENTER_NAMESPACE.
+	KarpenterNamespace = envOr("KARPENTER_NAMESPACE", "karpenter-system")
+	// KarpenterDeployment is the name of the Karpenter controller Deployment.
+	// Override with KARPENTER_DEPLOYMENT.
+	KarpenterDeployment = envOr("KARPENTER_DEPLOYMENT", "karpenter")
+)
+
 const (
-	KarpenterNamespace  = "karpenter-system"
-	KarpenterDeployment = "karpenter"
 	// TestNamespace is the namespace used by all e2e test suites for workloads.
 	TestNamespace = "karpenter-e2e-test"
 
@@ -298,4 +305,13 @@ func mustEnv(key string) string {
 		panic(fmt.Sprintf("required environment variable %q is not set", key))
 	}
 	return v
+}
+
+// envOr returns the value of the environment variable named by key, trimmed of
+// surrounding whitespace, or fallback when the variable is unset or empty.
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
 }

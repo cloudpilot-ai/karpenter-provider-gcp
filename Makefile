@@ -102,8 +102,10 @@ E2E_SA_PATH      ?=
 E2E_LOCATION     ?=
 E2E_PREFIX       ?= karpenter-e2e
 E2E_REGION       ?= us-central1
-E2E_CLUSTER_NAME ?= $(E2E_PREFIX)-cluster
-E2E_PODS_RANGE   ?= $(E2E_PREFIX)-pods
+E2E_CLUSTER_NAME         ?= $(E2E_PREFIX)-cluster
+E2E_PODS_RANGE           ?= $(E2E_PREFIX)-pods
+E2E_KARPENTER_NAMESPACE  ?=
+E2E_KARPENTER_DEPLOYMENT ?=
 
 e2e-setup: require-e2e-vars ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
 	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
@@ -135,6 +137,8 @@ e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_LOCATION) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
+	KARPENTER_NAMESPACE=$(E2E_KARPENTER_NAMESPACE) \
+	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
 	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
 
 FOCUS ?=
@@ -145,6 +149,8 @@ e2e-test: require-e2e-vars ## Run a single e2e suite or focused spec (SUITE=<nam
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_LOCATION) \
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
+	KARPENTER_NAMESPACE=$(E2E_KARPENTER_NAMESPACE) \
+	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
 	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=30m -v \
 	$(if $(FOCUS),--focus="$(FOCUS)",) \
 	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...)
