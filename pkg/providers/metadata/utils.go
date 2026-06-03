@@ -466,7 +466,7 @@ func replaceDiskTypeLabelsInKubeEnv(kubeEnv string, labels map[string]string) (s
 	}
 	stripped := diskTypeLabelEntryRegex.ReplaceAllString(kubeEnv, "")
 	stripped = strings.ReplaceAll(stripped, "--node-labels=,", "--node-labels=")
-	return kubeEnvNodeLabelsRegex.ReplaceAllStringFunc(stripped, func(match string) string {
+	return regexp.MustCompile(`--node-labels=\S*`).ReplaceAllStringFunc(stripped, func(match string) string {
 		return "--node-labels=" + replaceDiskTypeLabelsInCSV(strings.TrimPrefix(match, "--node-labels="), labels)
 	}), nil
 }

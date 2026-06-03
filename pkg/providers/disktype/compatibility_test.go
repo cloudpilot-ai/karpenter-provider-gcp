@@ -68,6 +68,18 @@ func TestLabelsForInstanceType(t *testing.T) {
 	}, labels)
 }
 
+func TestAllLabels(t *testing.T) {
+	t.Parallel()
+
+	labels := AllLabels()
+	require.Contains(t, labels, "disk-type.gke.io/pd-balanced")
+	require.Contains(t, labels, "disk-type.gke.io/pd-extreme")
+	require.Contains(t, labels, "disk-type.gke.io/pd-ssd")
+	require.Contains(t, labels, "disk-type.gke.io/pd-standard")
+	require.Contains(t, labels, "disk-type.gke.io/hyperdisk-throughput")
+	require.IsIncreasing(t, labels)
+}
+
 func TestLabelsForUnknownFamily(t *testing.T) {
 	t.Parallel()
 

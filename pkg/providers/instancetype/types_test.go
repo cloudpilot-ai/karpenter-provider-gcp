@@ -186,6 +186,34 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 	}
 }
 
+func TestComputeRequirementsIncludesDiskTypeCompatibility(t *testing.T) {
+	requirements := computeRequirements(&computepb.MachineType{
+		Name:      lo.ToPtr("e2-standard-4"),
+		GuestCpus: lo.ToPtr[int32](4),
+		MemoryMb:  lo.ToPtr[int32](16384),
+	}, cloudprovider.Offerings{{
+		Available: true,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"),
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+		),
+	}}, "us-central1")
+
+	assert.Equal(t, corev1.NodeSelectorOpIn, requirements.Get("disk-type.gke.io/pd-balanced").Operator())
+	assert.Equal(t, []string{"true"}, requirements.Get("disk-type.gke.io/pd-balanced").Values())
+	assert.Equal(t, corev1.NodeSelectorOpDoesNotExist, requirements.Get("disk-type.gke.io/hyperdisk-throughput").Operator())
+
+	supportedVolumeRequirement := scheduling.NewRequirements(
+		scheduling.NewRequirement("disk-type.gke.io/pd-balanced", corev1.NodeSelectorOpIn, "true"),
+	)
+	unsupportedVolumeRequirement := scheduling.NewRequirements(
+		scheduling.NewRequirement("disk-type.gke.io/hyperdisk-throughput", corev1.NodeSelectorOpIn, "true"),
+	)
+
+	assert.NoError(t, requirements.Intersects(supportedVolumeRequirement))
+	assert.Error(t, requirements.Intersects(unsupportedVolumeRequirement))
+}
+
 func TestComputeRequirements(t *testing.T) {
 	tests := []struct {
 		name      string

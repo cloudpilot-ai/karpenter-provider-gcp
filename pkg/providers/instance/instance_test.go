@@ -1384,7 +1384,7 @@ func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
 		Metadata: map[string]string{
 			"kube-labels": "disk-type.gke.io/hyperdisk-throughput=true",
-			"kube-env":    "disk-type.gke.io/hyperdisk-throughput=true",
+			"kube-env":    "KUBELET_ARGS: --max-pods=110 --node-labels=disk-type.gke.io/hyperdisk-throughput=true\n",
 		},
 	}}
 	cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)

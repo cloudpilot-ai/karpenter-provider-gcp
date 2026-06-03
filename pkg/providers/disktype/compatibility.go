@@ -37,6 +37,22 @@ type configMap struct {
 
 var compatibility = mustLoadCompatibility()
 
+func AllLabels() []string {
+	labels := map[string]struct{}{}
+	for _, familyLabels := range compatibility {
+		for _, label := range familyLabels {
+			labels[label] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(labels))
+	for label := range labels {
+		out = append(out, label)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func mustLoadCompatibility() map[string][]string {
 	contents, err := upstreamConfigMap.ReadFile("pdcsi/node-labeler-configmap.yaml")
 	if err != nil {

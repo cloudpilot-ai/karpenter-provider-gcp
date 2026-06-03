@@ -26,6 +26,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
 )
 
 func init() {
@@ -53,6 +54,7 @@ func init() {
 		LabelGKEReadinessNodeLocalDNSReady,
 		LabelGKEAccelerator,
 	)
+	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(disktype.AllLabels()...)
 }
 
 var (
