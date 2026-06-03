@@ -179,7 +179,21 @@ Disk compatibility is determined at the machine family level (`n2`, `c3`, `e2`),
 
 ### PD CSI topology scheduling
 
-The disk-type labels are also published as topology keys by the GCE Persistent Disk CSI driver. StorageClasses with `allowedTopologies` or `volumeBindingMode: WaitForFirstConsumer` can use these labels to schedule volumes only on nodes that support the required disk type.
+The disk-type labels are also published as topology keys by the GCE Persistent Disk CSI driver when the StorageClass enables disk topology:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hyperdisk-balanced
+provisioner: pd.csi.storage.gke.io
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: hyperdisk-balanced
+  use-allowed-disk-topology: "true"
+```
+
+StorageClasses with `use-allowed-disk-topology: "true"` can use disk-type labels in `allowedTopologies`, and bound PVs can carry these labels in node affinity so replacement pods schedule only on nodes that support the disk type.
 
 ## Multiple NodePools
 
