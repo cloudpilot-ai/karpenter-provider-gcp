@@ -40,9 +40,10 @@ var (
 	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
 	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
 	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
-	diskTypeLabelRegex      = regexp.MustCompile(`^disk-type\.gke\.io/`)
-	diskTypeLabelEntryRegex = regexp.MustCompile(`,?disk-type\.gke\.io/[^=,\s]+=[^,\s]*`)
-	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	diskTypeLabelRegex            = regexp.MustCompile(`^disk-type\.gke\.io/`)
+	diskTypeLabelEntryRegex       = regexp.MustCompile(`,?disk-type\.gke\.io/[^=,\s]+=[^,\s]*`)
+	kubeEnvNodeLabelsEmptyOKRegex = regexp.MustCompile(`--node-labels=\S*`)
+	registerWithTaintsRegex       = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
 	// kubeEnvNodeLabelsRegex matches the entire --node-labels=<value> flag in kube-env.
 	// The value is comma-separated Kubernetes labels with no whitespace.
 	kubeEnvNodeLabelsRegex    = regexp.MustCompile(`--node-labels=\S+`)
@@ -466,7 +467,7 @@ func replaceDiskTypeLabelsInKubeEnv(kubeEnv string, labels map[string]string) (s
 	}
 	stripped := diskTypeLabelEntryRegex.ReplaceAllString(kubeEnv, "")
 	stripped = strings.ReplaceAll(stripped, "--node-labels=,", "--node-labels=")
-	return regexp.MustCompile(`--node-labels=\S*`).ReplaceAllStringFunc(stripped, func(match string) string {
+	return kubeEnvNodeLabelsEmptyOKRegex.ReplaceAllStringFunc(stripped, func(match string) string {
 		return "--node-labels=" + replaceDiskTypeLabelsInNodeLabels(strings.TrimPrefix(match, "--node-labels="), labels)
 	}), nil
 }
