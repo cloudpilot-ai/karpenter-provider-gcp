@@ -128,6 +128,59 @@ If the chosen machine type does not support the requested confidential type, GCE
 
 The default `ContainerOptimizedOS` and `Ubuntu` images boot as Confidential VMs on supported families without any image change. GPU Confidential VMs are an exception: an A3 instance with an attached H100 GPU using Intel TDX requires a TDX-specific image (for example `cos-tdx-*`), which is not available through the `family` image selectors. Pin such an image by its full resource URL with `imageSelectorTerms[].id`; see the [GCP supported configurations](https://cloud.google.com/confidential-computing/confidential-vm/docs/supported-configurations#supported-images-gpu).
 
+## Disk type scheduling
+
+Karpenter applies `disk-type.gke.io/*` labels to provisioned nodes based on the instance type's machine family. These labels indicate which persistent disk types the instance supports, enabling two capabilities:
+
+1. **NodePool requirements** — constrain scheduling to instance types that support specific disk types
+2. **PD CSI topology scheduling** — enable StorageClasses with `allowedTopologies` based on disk-type labels
+
+### Constraining instance types by disk support
+
+Use disk-type labels in NodePool requirements to ensure Karpenter selects only instance types that support the disk types your workloads need:
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: hyperdisk-workloads
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.gcp
+        kind: GCENodeClass
+        name: default-example
+      requirements:
+        - key: disk-type.gke.io/hyperdisk-balanced
+          operator: In
+          values: ["true"]
+```
+
+This NodePool provisions only instance types from families that support Hyperdisk Balanced (such as n2, n4, c3, c4). Instance types from families without Hyperdisk Balanced support (such as e2, n1) are excluded.
+
+### Available disk-type labels
+
+The supported labels correspond to GCP disk types:
+
+| Label | Disk type |
+| --- | --- |
+| `disk-type.gke.io/pd-standard` | Standard persistent disk |
+| `disk-type.gke.io/pd-balanced` | Balanced persistent disk |
+| `disk-type.gke.io/pd-ssd` | SSD persistent disk |
+| `disk-type.gke.io/pd-extreme` | Extreme persistent disk |
+| `disk-type.gke.io/hyperdisk-balanced` | Hyperdisk Balanced |
+| `disk-type.gke.io/hyperdisk-extreme` | Hyperdisk Extreme |
+| `disk-type.gke.io/hyperdisk-throughput` | Hyperdisk Throughput |
+| `disk-type.gke.io/hyperdisk-ml` | Hyperdisk ML |
+| `disk-type.gke.io/hyperdisk-balanced-high-availability` | Hyperdisk Balanced High Availability |
+
+Disk compatibility is determined at the machine family level (`n2`, `c3`, `e2`), not the specific instance size. See the [GCP machine family disk support matrix](https://cloud.google.com/compute/docs/disks#disk-types) for which families support which disk types.
+
+### PD CSI topology scheduling
+
+The disk-type labels are also published as topology keys by the GCE Persistent Disk CSI driver. StorageClasses with `allowedTopologies` or `volumeBindingMode: WaitForFirstConsumer` can use these labels to schedule volumes only on nodes that support the required disk type.
+
 ## Multiple NodePools
 
 Run independent pools for different workload tiers, each referencing a different GCENodeClass:
