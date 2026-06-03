@@ -12,6 +12,11 @@
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
 
+> [!NOTE]
+> A live version is now available.
+>
+> **Feedback welcome!** Join our [Slack](https://kubernetes.slack.com/archives/C0B20K4KWP8) to share your ideas, ask questions, and discuss with the community.
+
 ## Introduction
 
 Karpenter is an open-source node provisioning project built for Kubernetes.
