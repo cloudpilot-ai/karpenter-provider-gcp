@@ -26,10 +26,11 @@ help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 presubmit: toolchain verify ci ## Run all steps in the developer loop
-ci: verify-codegen verify-deadcode chart-lint ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
+ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
 	cd hack/tools && go install tool
+	cd hack/crd-tools && go install tool
 
 run: ## Run Karpenter controller binary against your local cluster
 	SYSTEM_NAMESPACE=${KARPENTER_NAMESPACE} \
@@ -55,6 +56,12 @@ verify-codegen: update ## Verify generated code is up to date
 chart-lint: ## Lint the Helm charts (validates values.schema.json and templates)
 	helm lint charts/karpenter/
 	helm lint charts/karpenter-crd/
+
+verify-crds: ## Validate generated CRDs with Kubernetes API server validation logic
+	@tmpdir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	helm template karpenter-crd charts/karpenter-crd --include-crds > "$$tmpdir/karpenter-crd.yaml"; \
+	(cd hack/crd-tools && go tool kubectl-validate --version 1.35 ../../charts/karpenter/crds/ "$$tmpdir")
 
 verify: ## Verify code. Includes linting, formatting, etc
 	@command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not found — install it from https://golangci-lint.run/welcome/install/" && exit 1)
@@ -191,7 +198,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

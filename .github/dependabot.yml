@@ -46,3 +46,14 @@ updates:
       dev-tools:
         patterns:
           - "*"
+
+  - package-ecosystem: "gomod"
+    directory: "/hack/crd-tools"
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-type: "all"
+    groups:
+      crd-tools:
+        patterns:
+          - "*"

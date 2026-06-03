@@ -471,30 +471,6 @@ func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, node
 	Expect(err).NotTo(HaveOccurred(), "creating Deployment %s", name)
 }
 
-// WaitForRunningPodsOnNode polls until at least `n` pods with the given app
-// label are Running and Ready on the given node. Fails the test if
-// ProvisioningTimeout is exceeded. Used to verify the node can actually
-// schedule the configured number of pods (issue #120 guard: maxPods must
-// not exceed the node's pod-CIDR-derived IP capacity).
-func (e *Environment) WaitForRunningPodsOnNode(ctx context.Context, appLabel, nodeName string, n int) {
-	Eventually(func(g Gomega) {
-		pods, err := e.KubeClient.CoreV1().Pods(TestNamespace).List(ctx,
-			metav1.ListOptions{LabelSelector: fmt.Sprintf("app=%s", appLabel)})
-		g.Expect(err).NotTo(HaveOccurred())
-		running := 0
-		for i := range pods.Items {
-			if pods.Items[i].Spec.NodeName == nodeName && isRunningAndReady(&pods.Items[i]) {
-				running++
-			}
-		}
-		if running < n {
-			e.logWaitStatus(ctx, appLabel, pods.Items)
-		}
-		g.Expect(running).To(BeNumerically(">=", n),
-			"only %d/%d pods with label app=%s are Running on node %s", running, n, appLabel, nodeName)
-	}).WithTimeout(ProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
-}
-
 // WaitForRunningPod polls until a pod with the given app label is Running and
 // Ready. Returns the pod; fails the test if ProvisioningTimeout is exceeded.
 func (e *Environment) WaitForRunningPod(ctx context.Context, appLabel string) *corev1.Pod {

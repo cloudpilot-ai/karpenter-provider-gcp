@@ -44,7 +44,7 @@ func TestKCSystemReserved(t *testing.T) {
 		{
 			name: "cpu and memory parsed",
 			kc: &v1alpha1.KubeletConfiguration{
-				SystemReserved: map[string]string{"cpu": "1", "memory": "1Gi"},
+				SystemReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "1", "memory": "1Gi"},
 			},
 			want: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("1"),
@@ -78,7 +78,7 @@ func TestMergeKubeReserved(t *testing.T) {
 			// user setting kubeReserved.cpu does not crash the kubelet.
 			name: "partial user override preserves computed sub-keys (#220)",
 			kc: &v1alpha1.KubeletConfiguration{
-				KubeReserved: map[string]string{"cpu": "500m"},
+				KubeReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "500m"},
 			},
 			want: corev1.ResourceList{
 				corev1.ResourceCPU:              resource.MustParse("500m"),
@@ -118,7 +118,7 @@ func TestEvictionThreshold(t *testing.T) {
 			// signals (imagefs.available, pid.available) — all paths that
 			// must leave computed untouched.
 			name:        "evictionSoft and unmodelled signals → computed survives",
-			kc:          &v1alpha1.KubeletConfiguration{EvictionSoft: map[string]string{"memory.available": "1Gi"}},
+			kc:          &v1alpha1.KubeletConfiguration{EvictionSoft: map[string]v1alpha1.KubeletQuantity{"memory.available": "1Gi"}},
 			wantMemory:  resource.MustParse("100Mi"),
 			wantStorage: resource.MustParse("10Gi"),
 		},
@@ -126,13 +126,13 @@ func TestEvictionThreshold(t *testing.T) {
 			// 5% of 10 GiB. math.Ceil mirrors production rounding so the
 			// expectation tracks the implementation for any percentage.
 			name:        "evictionHard memory.available % → overhead reflects %",
-			kc:          &v1alpha1.KubeletConfiguration{EvictionHard: map[string]string{"memory.available": "5%"}},
+			kc:          &v1alpha1.KubeletConfiguration{EvictionHard: map[string]v1alpha1.KubeletQuantity{"memory.available": "5%"}},
 			wantMemory:  *resource.NewQuantity(int64(math.Ceil(0.05*float64(mem10Gi.Value()))), resource.BinarySI),
 			wantStorage: resource.MustParse("10Gi"),
 		},
 		{
 			name:        "evictionHard nodefs.available % → overhead reflects %",
-			kc:          &v1alpha1.KubeletConfiguration{EvictionHard: map[string]string{"nodefs.available": "10%"}},
+			kc:          &v1alpha1.KubeletConfiguration{EvictionHard: map[string]v1alpha1.KubeletQuantity{"nodefs.available": "10%"}},
 			wantMemory:  resource.MustParse("100Mi"),
 			wantStorage: *resource.NewQuantity(int64(math.Ceil(0.10*float64(storage100Gi.Value()))), resource.BinarySI),
 		},
@@ -140,8 +140,8 @@ func TestEvictionThreshold(t *testing.T) {
 			// Both set → evictionHard wins; evictionSoft remains ignored.
 			name: "evictionHard and evictionSoft both set → evictionHard wins",
 			kc: &v1alpha1.KubeletConfiguration{
-				EvictionHard: map[string]string{"memory.available": "500Mi"},
-				EvictionSoft: map[string]string{"memory.available": "1Gi"},
+				EvictionHard: map[string]v1alpha1.KubeletQuantity{"memory.available": "500Mi"},
+				EvictionSoft: map[string]v1alpha1.KubeletQuantity{"memory.available": "1Gi"},
 			},
 			wantMemory:  resource.MustParse("500Mi"),
 			wantStorage: resource.MustParse("10Gi"),
@@ -241,8 +241,8 @@ func TestNewInstanceType_RespectsKubeletConfiguration(t *testing.T) {
 			// .ephemeral-storage survive from provider-computed defaults.
 			name: "user reservations honored with computed sub-keys surviving (#398, #220)",
 			kc: &v1alpha1.KubeletConfiguration{
-				SystemReserved: map[string]string{"cpu": "1", "memory": "1Gi"},
-				KubeReserved:   map[string]string{"cpu": "500m"},
+				SystemReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "1", "memory": "1Gi"},
+				KubeReserved:   map[string]v1alpha1.KubeletQuantity{"cpu": "500m"},
 			},
 			assert: func(t *testing.T, it *cloudprovider.InstanceType) {
 				assert.Equal(t, "1", it.Overhead.SystemReserved.Cpu().String())

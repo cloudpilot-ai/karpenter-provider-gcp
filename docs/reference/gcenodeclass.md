@@ -192,15 +192,29 @@ _Appears in:_
 | `clusterDNS` _string array_ | clusterDNS is a list of IP addresses for the cluster DNS server.<br />Note that not all providers may use all addresses. |  | Optional: \{\} <br /> |
 | `maxPods` _integer_ | MaxPods is an override for the maximum number of pods that can run on<br />a worker node instance. |  | Minimum: 0 <br />Optional: \{\} <br /> |
 | `podsPerCore` _integer_ | PodsPerCore is an override for the number of pods that can run on a worker node<br />instance based on the number of cpu cores. This value cannot exceed MaxPods, so, if<br />MaxPods is a lower value, that value will be used. |  | Minimum: 0 <br />Optional: \{\} <br /> |
-| `systemReserved` _object (keys:string, values:string)_ | SystemReserved contains resources reserved for OS system daemons and kernel memory. |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
-| `kubeReserved` _object (keys:string, values:string)_ | KubeReserved contains resources reserved for Kubernetes system components. |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
-| `evictionHard` _object (keys:string, values:string)_ | EvictionHard is the map of signal names to quantities that define hard eviction thresholds |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
-| `evictionSoft` _object (keys:string, values:string)_ | EvictionSoft is the map of signal names to quantities that define soft eviction thresholds |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
+| `systemReserved` _object (keys:string, values:[KubeletQuantity](#kubeletquantity))_ | SystemReserved contains resources reserved for OS system daemons and kernel memory. |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
+| `kubeReserved` _object (keys:string, values:[KubeletQuantity](#kubeletquantity))_ | KubeReserved contains resources reserved for Kubernetes system components. |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
+| `evictionHard` _object (keys:string, values:[KubeletQuantity](#kubeletquantity))_ | EvictionHard is the map of signal names to quantities that define hard eviction thresholds |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
+| `evictionSoft` _object (keys:string, values:[KubeletQuantity](#kubeletquantity))_ | EvictionSoft is the map of signal names to quantities that define soft eviction thresholds |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
 | `evictionSoftGracePeriod` _object (keys:string, values:[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta))_ | EvictionSoftGracePeriod is the map of signal names to quantities that define grace periods for each eviction signal |  | MaxProperties: 10 <br />Optional: \{\} <br /> |
 | `evictionMaxPodGracePeriod` _integer_ | EvictionMaxPodGracePeriod is the maximum allowed grace period (in seconds) to use when terminating pods in<br />response to soft eviction thresholds being met. |  | Optional: \{\} <br /> |
 | `imageGCHighThresholdPercent` _integer_ | ImageGCHighThresholdPercent is the percent of disk usage after which image<br />garbage collection is always run. The percent is calculated by dividing this<br />field value by 100, so this field must be between 0 and 100, inclusive.<br />When specified, the value must be greater than ImageGCLowThresholdPercent. |  | Maximum: 100 <br />Minimum: 0 <br />Optional: \{\} <br /> |
 | `imageGCLowThresholdPercent` _integer_ | ImageGCLowThresholdPercent is the percent of disk usage before which image<br />garbage collection is never run. Lowest disk usage to garbage collect to.<br />The percent is calculated by dividing this field value by 100,<br />so the field value must be between 0 and 100, inclusive.<br />When specified, the value must be less than imageGCHighThresholdPercent |  | Maximum: 100 <br />Minimum: 0 <br />Optional: \{\} <br /> |
 | `cpuCFSQuota` _boolean_ | CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits. |  | Optional: \{\} <br /> |
+
+
+#### KubeletQuantity
+
+_Underlying type:_ _string_
+
+KubeletQuantity is a bounded kubelet resource quantity or percentage string.
+
+_Validation:_
+- MaxLength: 64
+
+_Appears in:_
+- [KubeletConfiguration](#kubeletconfiguration)
+
 
 
 #### NetworkConfig
