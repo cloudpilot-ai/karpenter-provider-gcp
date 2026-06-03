@@ -34,13 +34,13 @@ jobs:
           echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
 
       - name: AWS CLI Init
-        uses: unfor19/install-aws-cli-action@v1
+        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1.0.8
 
       - name: Config ECR
         run: |
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/cloudpilotai
 
-      - uses: ko-build/setup-ko@v0.9
+      - uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
 
       - name: build and publish image
         run: |
