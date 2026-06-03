@@ -21,7 +21,7 @@ Key capabilities:
 
 ## GCP-specific features
 
-- **GCENodeClass** — a custom resource that captures all GCP-specific node configuration: image family, disk type and size, service account, network tags, Shielded VM settings, kubelet configuration, and network overrides
+- **GCENodeClass** — a custom resource that captures all GCP-specific node configuration: image family, disk type and size, service account, network tags, Shielded VM and Confidential VM settings, kubelet configuration, and network overrides
 - **Bootstrap pool discovery** — Karpenter discovers and reuses an existing cluster node pool for bootstrap metadata, avoiding the need to create dedicated template pools (see [Bootstrap pool selection](bootstrap-pool.md))
 - **Direct image catalog queries** — image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu), independent of the bootstrap pool
 - **Node repair policies** — integrates with GKE's node problem detection to trigger replacement of unhealthy nodes (see [Node repair](node-repair.md))
@@ -61,7 +61,7 @@ Key capabilities:
 - [GPU](examples/gpu.md) — GPU workloads
 - [Networking](examples/networking.md) — private nodes, custom subnetwork, pod IP range
 - [Static capacity](examples/static-capacity.md) — fixed node count with `spec.replicas`
-- [Advanced](examples/advanced.md) — kubelet config, Shielded VM, metadata, secondary disk, multiple pools
+- [Advanced](examples/advanced.md) — kubelet config, Shielded VM, Confidential VM, metadata, secondary disk, multiple pools
 
 ## Community
 
