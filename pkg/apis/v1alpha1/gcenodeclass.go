@@ -87,6 +87,12 @@ type GCENodeClassSpec struct {
 	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
+	// ConfidentialInstanceType enables Confidential VM for provisioned nodes using the
+	// named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory
+	// encryption. Leave unset to disable. Only supported on specific machine families.
+	// +kubebuilder:validation:Enum=SEV;SEV_SNP;TDX
+	// +optional
+	ConfidentialInstanceType *string `json:"confidentialInstanceType,omitempty"`
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
 	// +optional
 	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`

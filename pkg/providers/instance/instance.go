@@ -722,6 +722,8 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 
+	p.configureConfidentialInstance(instance, nodeClass)
+
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
 
@@ -1016,6 +1018,23 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 		instance.Scheduling.AutomaticRestart = ptr.To(false)
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
+}
+
+// configureConfidentialInstance applies the NodeClass ConfidentialInstanceType
+// to the GCE instance. When confidential compute is enabled, scheduling
+// onHostMaintenance is forced to TERMINATE since Confidential VMs cannot
+// live-migrate and GCE rejects MIGRATE on create.
+func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass) {
+	cit := nodeClass.Spec.ConfidentialInstanceType
+	if cit == nil {
+		return
+	}
+	instance.ConfidentialInstanceConfig = &compute.ConfidentialInstanceConfig{
+		EnableConfidentialCompute: true,
+		ConfidentialInstanceType:  *cit,
+	}
+	// Confidential VMs cannot live-migrate; GCE rejects MIGRATE on create.
+	instance.Scheduling.OnHostMaintenance = "TERMINATE"
 }
 
 // setupInstanceLabels writes all GCE labels for a new instance. Cluster-identity labels

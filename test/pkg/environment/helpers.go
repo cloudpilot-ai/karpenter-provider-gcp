@@ -211,6 +211,31 @@ func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithConfidentialType creates a GCENodeClass with
+// confidentialInstanceType set to the given technology (SEV, SEV_SNP, or TDX).
+// Used by Confidential VM e2e tests.
+func (e *Environment) CreateNodeClassWithConfidentialType(ctx context.Context, name, confidentialType string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"confidentialInstanceType": confidentialType,
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
 // CreateNodeClass but with networkConfig.enablePrivateNodes set to true,
 // so Karpenter provisions nodes with no external (public) IP.

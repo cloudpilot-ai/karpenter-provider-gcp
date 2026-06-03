@@ -201,6 +201,11 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 		*out = new(ShieldedInstanceConfig)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.ConfidentialInstanceType != nil {
+		in, out := &in.ConfidentialInstanceType, &out.ConfidentialInstanceType
+		*out = new(string)
+		**out = **in
+	}
 	if in.NetworkConfig != nil {
 		in, out := &in.NetworkConfig, &out.NetworkConfig
 		*out = new(NetworkConfig)

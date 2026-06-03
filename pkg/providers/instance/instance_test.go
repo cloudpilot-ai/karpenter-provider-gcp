@@ -1768,3 +1768,77 @@ func TestSetupServiceAccounts_ErrorWhenNoSAAvailable(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no service account available")
 }
+
+// makeNonGPUIT returns a minimal on-demand instance type with no GPU requirements,
+// suitable for testing Confidential VM wiring without triggering the GPU TERMINATE override.
+func makeNonGPUIT() *cloudprovider.InstanceType {
+	return &cloudprovider.InstanceType{
+		Name: "n2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+}
+
+// buildConfidentialInstance is a test helper that calls buildInstance with a
+// minimal on-demand, non-GPU setup, so only the Confidential block is exercised.
+func buildConfidentialInstance(t *testing.T, nc *v1alpha1.GCENodeClass) *compute.Instance {
+	t.Helper()
+	p := makeProvider()
+	instance, err := p.buildInstance(
+		context.Background(),
+		onDemandNodeClaim(),
+		nc,
+		makeNonGPUIT(),
+		makeGPUTemplate("max-pods-per-node=110"),
+		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+		"default-pool", "us-central1-a", "karpenter-confidential-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+	require.NoError(t, err)
+	return instance
+}
+
+func TestConfidentialInstanceType(t *testing.T) {
+	t.Parallel()
+
+	sev, sevSNP := "SEV", "SEV_SNP"
+	cases := []struct {
+		name string
+		typ  *string
+	}{
+		{name: "unset"},
+		{name: "SEV", typ: &sev},
+		{name: "SEV_SNP", typ: &sevSNP},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.ConfidentialInstanceType = tc.typ
+
+			instance := buildConfidentialInstance(t, nc)
+
+			if tc.typ == nil {
+				require.Nil(t, instance.ConfidentialInstanceConfig)
+				// On-demand scheduling leaves OnHostMaintenance at its zero value
+				// (empty string); the Confidential override must not have fired.
+				require.NotEqual(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
+				return
+			}
+
+			require.NotNil(t, instance.ConfidentialInstanceConfig)
+			require.True(t, instance.ConfidentialInstanceConfig.EnableConfidentialCompute)
+			require.Equal(t, *tc.typ, instance.ConfidentialInstanceConfig.ConfidentialInstanceType)
+			require.Equal(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
+		})
+	}
+}
