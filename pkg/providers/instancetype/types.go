@@ -67,17 +67,24 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 		"ephemeralEviction", ephemeralEviction,
 		"ephemeralSystem", ephemeralSystem)
 
+	kc := nodeClass.Spec.KubeletConfiguration
+
+	computedKubeReserved := corev1.ResourceList{
+		corev1.ResourceCPU:              *resource.NewMilliQuantity(reservedCPU, resource.DecimalSI),
+		corev1.ResourceMemory:           *resource.NewQuantity(reservedMemory*1024*1024, resource.BinarySI),
+		corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralSystem*1024*1024*1024, resource.BinarySI),
+	}
+	computedEviction := corev1.ResourceList{
+		corev1.ResourceMemory:           *resource.NewQuantity(evictionMemory*1024*1024, resource.BinarySI),
+		corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralEviction*1024*1024*1024, resource.BinarySI),
+	}
+	memoryQuantity := memory(ctx, mt)
+	storageQuantity := resource.NewQuantity(totalStorageBytes, resource.BinarySI)
+
 	overhead := cloudprovider.InstanceTypeOverhead{
-		KubeReserved: corev1.ResourceList{
-			corev1.ResourceCPU:              *resource.NewMilliQuantity(reservedCPU, resource.DecimalSI),
-			corev1.ResourceMemory:           *resource.NewQuantity(reservedMemory*1024*1024, resource.BinarySI),
-			corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralSystem*1024*1024*1024, resource.BinarySI),
-		},
-		EvictionThreshold: corev1.ResourceList{
-			corev1.ResourceMemory:           *resource.NewQuantity(evictionMemory*1024*1024, resource.BinarySI),
-			corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralEviction*1024*1024*1024, resource.BinarySI),
-		},
-		SystemReserved: corev1.ResourceList{},
+		KubeReserved:      mergeKubeReserved(computedKubeReserved, kc),
+		SystemReserved:    kcSystemReserved(kc),
+		EvictionThreshold: evictionThreshold(memoryQuantity, storageQuantity, computedEviction, kc),
 	}
 
 	it := &cloudprovider.InstanceType{
@@ -201,10 +208,11 @@ func machineTypeArch(mt *computepb.MachineType) string {
 }
 
 func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass, totalStorageBytes int64) corev1.ResourceList {
+	maxPods := kcMaxPods(nodeClass.GetMaxPods(), nodeClass.Spec.KubeletConfiguration, int64(mt.GetGuestCpus()))
 	resourceList := corev1.ResourceList{
 		corev1.ResourceCPU:              *cpu(mt),
 		corev1.ResourceMemory:           *memory(ctx, mt),
-		corev1.ResourcePods:             *resource.NewQuantity(int64(nodeClass.GetMaxPods()), resource.DecimalSI),
+		corev1.ResourcePods:             *resource.NewQuantity(maxPods, resource.DecimalSI),
 		corev1.ResourceEphemeralStorage: *resource.NewQuantity(totalStorageBytes, resource.BinarySI),
 		v1alpha1.ResourceNVIDIAGPU:      *resource.NewQuantity(int64(len(mt.GetAccelerators())), resource.DecimalSI),
 	}

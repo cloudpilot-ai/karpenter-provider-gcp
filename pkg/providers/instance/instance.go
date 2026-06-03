@@ -836,7 +836,7 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMet
 		return fmt.Errorf("failed to set max pods per node in metadata: %w", err)
 	}
 
-	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, instanceType, capacityType); err != nil {
+	if err := metadata.RenderKubeletConfigMetadata(instanceMetadata, nodeClass, instanceType, capacityType); err != nil {
 		return fmt.Errorf("failed to render kubelet config metadata: %w", err)
 	}
 
