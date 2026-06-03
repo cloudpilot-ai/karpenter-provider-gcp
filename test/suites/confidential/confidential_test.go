@@ -79,7 +79,8 @@ var _ = Describe("Confidential", func() {
 })
 
 func runConfidentialTest(ctx context.Context, tc confidentialCase) {
-	prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "confidential", strings.ToLower(tc.confidentialType))
+	typeLabel := strings.ToLower(strings.ReplaceAll(tc.confidentialType, "_", "-"))
+	prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "confidential", typeLabel)
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 
