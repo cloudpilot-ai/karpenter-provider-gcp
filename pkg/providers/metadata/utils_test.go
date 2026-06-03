@@ -328,3 +328,54 @@ func TestSetGPUAcceleratorLabel_IdempotentOnRepeat(t *testing.T) {
 	ke := kubeEnvValue(meta)
 	require.Equal(t, 1, strings.Count(ke, "gke-accelerator="), "kube-env: accelerator label must appear exactly once")
 }
+
+// metadataValue returns the value of the metadata item with the given key, or "" if absent.
+func metadataValue(meta *compute.Metadata, key string) string {
+	for _, item := range meta.Items {
+		if item.Key == key {
+			return lo.FromPtr(item.Value)
+		}
+	}
+	return ""
+}
+
+func TestApplyCustomMetadata_OverridesExistingKey(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "serial-port-logging-enable", Value: lo.ToPtr("true")},
+		},
+	}
+
+	ApplyCustomMetadata(meta, map[string]string{"serial-port-logging-enable": "false"})
+
+	require.Len(t, meta.Items, 1, "override must not add a duplicate item for an existing key")
+	require.Equal(t, "false", metadataValue(meta, "serial-port-logging-enable"),
+		"existing value must be overridden, not concatenated")
+}
+
+func TestApplyCustomMetadata_AddsNewKey(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "existing", Value: lo.ToPtr("keep")},
+		},
+	}
+
+	ApplyCustomMetadata(meta, map[string]string{"new-key": "new-value"})
+
+	require.Equal(t, "keep", metadataValue(meta, "existing"), "unrelated keys must be left intact")
+	require.Equal(t, "new-value", metadataValue(meta, "new-key"), "new key must be appended")
+}
+
+func TestApplyCustomMetadata_SkipsEmptyValue(t *testing.T) {
+	meta := &compute.Metadata{
+		Items: []*compute.MetadataItems{
+			{Key: "serial-port-logging-enable", Value: lo.ToPtr("true")},
+		},
+	}
+
+	ApplyCustomMetadata(meta, map[string]string{"serial-port-logging-enable": ""})
+
+	require.Len(t, meta.Items, 1, "empty value must not remove the existing key")
+	require.Equal(t, "true", metadataValue(meta, "serial-port-logging-enable"),
+		"empty value is ignored: it cannot clear a value inherited from the base template")
+}

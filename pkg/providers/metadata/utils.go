@@ -512,9 +512,9 @@ func removeKubeEnvLine(kubeEnv, key string) string {
 }
 
 // ApplyCustomMetadata applies custom metadata from GCENodeClass to the instance metadata.
-// If a metadata key already exists, it appends the value with comma separator.
-// Otherwise, it creates a new metadata item.
-// Limitation: only add comma separated values to existing metadata keys. Need to improve this in the future.
+// User-supplied keys override any value inherited from the base instance template;
+// keys not already present are appended. Empty values are ignored, so a key cannot
+// be used to clear a value inherited from the base template.
 func ApplyCustomMetadata(metadata *compute.Metadata, customMetadata map[string]string) {
 	if len(customMetadata) == 0 {
 		return
@@ -530,8 +530,8 @@ func ApplyCustomMetadata(metadata *compute.Metadata, customMetadata map[string]s
 		})
 
 		if ok && index != -1 {
-			// Key exists, append the value with comma separator
-			targetEntry.Value = lo.ToPtr(*targetEntry.Value + "," + value)
+			// Key exists, override the value
+			targetEntry.Value = lo.ToPtr(value)
 			metadata.Items[index] = targetEntry
 			continue
 		}
