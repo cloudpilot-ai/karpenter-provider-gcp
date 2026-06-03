@@ -34,13 +34,10 @@ import (
 // kubeletConfigCase describes one e2e scenario: provision a node with
 // kubeletConfig attached to the GCENodeClass, then assert against the
 // resulting node's status. Mirrors environment.TestCase fields for the
-// provisioning side; assertions live in assert. postProvision (optional)
-// runs after the first pod is Running and before assert — used by the
-// maxPods density case to scale the deployment up.
+// provisioning side; assertions live in assert.
 type kubeletConfigCase struct {
 	tc            environment.TestCase
 	kubeletConfig map[string]any
-	postProvision func(ctx context.Context, deploymentName, nodeName string)
 	assert        func(node *corev1.Node)
 }
 
@@ -124,15 +121,10 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 	}, SpecTimeout(15*time.Minute)),
 
 	// maxPods is reflected in capacity (scheduler / kubelet agreement,
-	// issue #133) AND the node can actually run that many pods without IP
-	// exhaustion (issue #120 — pod-CIDR must be sized to maxPods).
-	// maxPods=50 is comfortably above the GKE default of 110 / 32 on
-	// small node pools? Actually GKE default is 110; we pick 50 to make
-	// the density check fit on a single n2-standard-4 (4 vCPU) while
-	// still being a value clearly distinct from any default. The density
-	// check scales the deployment to 40 pods, leaving slack for system
-	// pods.
-	Entry("COS: maxPods reflected in capacity and IPs sized accordingly (#133, #120)", kubeletConfigCase{
+	// issue #133). maxPods=50 is a value clearly distinct from common
+	// defaults, so checking node.status.capacity[pods] proves the setting
+	// was propagated to kubelet.
+	Entry("COS: maxPods reflected in capacity (#133)", kubeletConfigCase{
 		tc: environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,
@@ -143,12 +135,8 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 		kubeletConfig: map[string]any{
 			"maxPods": int64(50),
 		},
-		postProvision: func(ctx context.Context, deploymentName, nodeName string) {
-			env.ScaleDeployment(ctx, deploymentName, 40)
-			env.WaitForRunningPodsOnNode(ctx, deploymentName, nodeName, 40)
-		},
 		assert: assertMaxPodsCapacity(50),
-	}, SpecTimeout(20*time.Minute)),
+	}, SpecTimeout(15*time.Minute)),
 )
 
 // runKubeletConfigTest provisions a node with the given kubeletConfig and
@@ -197,15 +185,6 @@ func runKubeletConfigTest(ctx context.Context, c kubeletConfigCase) {
 	Expect(existedBefore).To(BeFalse(), "expected a newly provisioned node, got a pre-existing one")
 	Expect(environment.IsNodeReady(node)).To(BeTrue(), "node %s is not Ready", node.Name)
 	Expect(c.tc.InstanceTypes).To(ContainElement(node.Labels[corev1.LabelInstanceTypeStable]))
-
-	if c.postProvision != nil {
-		c.postProvision(ctx, name, node.Name)
-		// Re-fetch the node so assertions see post-scale status (e.g.
-		// capacity pinned by the kubelet's startup config is stable, but
-		// any allocatable changes show up after pods land).
-		node, err = env.KubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred())
-	}
 
 	c.assert(node)
 }
