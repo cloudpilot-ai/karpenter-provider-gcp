@@ -441,7 +441,7 @@ func SetDiskTypeLabels(metadata *compute.Metadata, labels map[string]string) err
 		switch item.Key {
 		case "kube-labels":
 			kubeLabelsFound = true
-			item.Value = lo.ToPtr(replaceDiskTypeLabelsInCSV(lo.FromPtr(item.Value), labels))
+			item.Value = lo.ToPtr(replaceDiskTypeLabelsInNodeLabels(lo.FromPtr(item.Value), labels))
 		case "kube-env":
 			kubeEnvFound = true
 			updated, err := replaceDiskTypeLabelsInKubeEnv(lo.FromPtr(item.Value), labels)
@@ -467,11 +467,11 @@ func replaceDiskTypeLabelsInKubeEnv(kubeEnv string, labels map[string]string) (s
 	stripped := diskTypeLabelEntryRegex.ReplaceAllString(kubeEnv, "")
 	stripped = strings.ReplaceAll(stripped, "--node-labels=,", "--node-labels=")
 	return regexp.MustCompile(`--node-labels=\S*`).ReplaceAllStringFunc(stripped, func(match string) string {
-		return "--node-labels=" + replaceDiskTypeLabelsInCSV(strings.TrimPrefix(match, "--node-labels="), labels)
+		return "--node-labels=" + replaceDiskTypeLabelsInNodeLabels(strings.TrimPrefix(match, "--node-labels="), labels)
 	}), nil
 }
 
-func replaceDiskTypeLabelsInCSV(current string, labels map[string]string) string {
+func replaceDiskTypeLabelsInNodeLabels(current string, labels map[string]string) string {
 	parts := strings.Split(current, ",")
 	filtered := parts[:0]
 	for _, part := range parts {
