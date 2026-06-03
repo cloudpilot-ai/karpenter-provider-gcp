@@ -44,7 +44,7 @@ func kcSystemReserved(kc *v1alpha1.KubeletConfiguration) corev1.ResourceList {
 		return out
 	}
 	for k, v := range kc.SystemReserved {
-		out[corev1.ResourceName(k)] = resource.MustParse(v)
+		out[corev1.ResourceName(k)] = resource.MustParse(string(v))
 	}
 	return out
 }
@@ -58,7 +58,7 @@ func mergeKubeReserved(computed corev1.ResourceList, kc *v1alpha1.KubeletConfigu
 		return out
 	}
 	for k, v := range kc.KubeReserved {
-		out[corev1.ResourceName(k)] = resource.MustParse(v)
+		out[corev1.ResourceName(k)] = resource.MustParse(string(v))
 	}
 	return out
 }
@@ -78,10 +78,10 @@ func evictionThreshold(memory, storage *resource.Quantity, computed corev1.Resou
 		return out
 	}
 	if v, ok := kc.EvictionHard[signalMemoryAvailable]; ok {
-		out[corev1.ResourceMemory] = computeEvictionSignal(*memory, v)
+		out[corev1.ResourceMemory] = computeEvictionSignal(*memory, string(v))
 	}
 	if v, ok := kc.EvictionHard[signalNodeFSAvailable]; ok {
-		out[corev1.ResourceEphemeralStorage] = computeEvictionSignal(*storage, v)
+		out[corev1.ResourceEphemeralStorage] = computeEvictionSignal(*storage, string(v))
 	}
 	return out
 }

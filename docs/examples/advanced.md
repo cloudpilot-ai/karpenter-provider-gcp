@@ -18,21 +18,82 @@ See [`examples/nodeclass/secondary-disk-gcenodeclass.yaml`](https://github.com/c
 
 ## Custom kubelet settings
 
-Override pod density and resource reservations:
+Configure kubelet behavior on provisioned nodes using `spec.kubeletConfiguration`. These settings apply at boot time and inform Karpenter's scheduler for bin-packing calculations.
+
+### Resource reservations
+
+Reserve resources for system daemons and Kubernetes components:
+
+```yaml
+kubeletConfiguration:
+  systemReserved:
+    cpu: "1"
+    memory: 1Gi
+  kubeReserved:
+    cpu: 500m
+    memory: 200Mi
+```
+
+- `systemReserved` — resources reserved for OS system daemons and kernel memory
+- `kubeReserved` — resources reserved for Kubernetes components (kubelet, container runtime)
+
+Both settings reduce node allocatable capacity. The scheduler accounts for these when bin-packing workloads.
+
+When you set a partial `kubeReserved` (for example, only `cpu`), Karpenter preserves provider-computed defaults for unspecified keys like `ephemeral-storage` based on boot disk size.
+
+### Eviction thresholds
+
+Configure kubelet eviction behavior:
+
+```yaml
+kubeletConfiguration:
+  evictionHard:
+    memory.available: 200Mi
+    nodefs.available: 10%
+  evictionSoft:
+    memory.available: 500Mi
+    nodefs.available: 15%
+  evictionSoftGracePeriod:
+    memory.available: 30s
+    nodefs.available: 1m
+  evictionMaxPodGracePeriod: 60
+```
+
+For scheduler bin-packing, only `evictionHard` for `memory.available` and `nodefs.available` reduce calculated allocatable capacity. This matches the AWS Karpenter provider and the [Kubernetes node-pressure-eviction documentation](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/).
+
+`evictionSoft` thresholds are enforced by the kubelet at runtime but do not affect allocatable calculations.
+
+### Pod density
+
+Control the maximum number of pods per node:
 
 ```yaml
 kubeletConfiguration:
   maxPods: 50
-  systemReserved:
-    cpu: 100m
-    memory: 100Mi
-  kubeReserved:
-    cpu: 100m
-    memory: 200Mi
-  evictionHard:
-    memory.available: 200Mi
-    nodefs.available: 10%
+  podsPerCore: 8
 ```
+
+- `maxPods` — absolute cap on pods per node
+- `podsPerCore` — caps pods at `podsPerCore × cpu_cores`; cannot exceed `maxPods`
+
+Both values are reflected in `node.status.capacity.pods` and used by the scheduler.
+
+### Other settings
+
+Additional kubelet configuration options:
+
+```yaml
+kubeletConfiguration:
+  clusterDNS:
+    - 10.0.1.100
+  cpuCFSQuota: false
+  imageGCHighThresholdPercent: 85
+  imageGCLowThresholdPercent: 80
+```
+
+- `clusterDNS` — override cluster DNS server addresses
+- `cpuCFSQuota` — enable or disable CPU CFS quota enforcement for containers with CPU limits
+- `imageGCHighThresholdPercent` / `imageGCLowThresholdPercent` — control when kubelet garbage-collects unused container images
 
 ## Shielded VM
 

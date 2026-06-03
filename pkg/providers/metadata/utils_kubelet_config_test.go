@@ -114,7 +114,7 @@ func TestMergeUserKubeletConfig_DeepMergesKubeReserved(t *testing.T) {
 	}
 	// User only sets cpu — memory and ephemeral-storage must survive.
 	kc := &v1alpha1.KubeletConfiguration{
-		KubeReserved: map[string]string{"cpu": "500m"},
+		KubeReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "500m"},
 	}
 	require.NoError(t, mergeUserKubeletConfig(config, kc))
 	got, ok := config["kubeReserved"].(map[string]interface{})
@@ -159,7 +159,7 @@ func TestRenderKubeletConfigMetadata_SystemReserved(t *testing.T) {
 	got := renderedKubeletConfig(
 		t,
 		nodeClassWith(&v1alpha1.KubeletConfiguration{
-			SystemReserved: map[string]string{"cpu": "1", "memory": "1Gi"},
+			SystemReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "1", "memory": "1Gi"},
 		}),
 		instanceTypeWithKubeReserved(80, 100, "15Gi"),
 		karpv1.CapacityTypeOnDemand,
@@ -171,7 +171,7 @@ func TestRenderKubeletConfigMetadata_KubeReservedUserWinsAndComputedSurvives(t *
 	got := renderedKubeletConfig(
 		t,
 		nodeClassWith(&v1alpha1.KubeletConfiguration{
-			KubeReserved: map[string]string{"cpu": "500m"},
+			KubeReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "500m"},
 		}),
 		instanceTypeWithKubeReserved(80, 100, "15Gi"),
 		karpv1.CapacityTypeOnDemand,
@@ -192,7 +192,7 @@ func TestRenderKubeletConfigMetadata_KubeReservedSmallBootDiskIssue220Regression
 	got := renderedKubeletConfig(
 		t,
 		nodeClassWith(&v1alpha1.KubeletConfiguration{
-			KubeReserved: map[string]string{"cpu": "200m"},
+			KubeReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "200m"},
 		}),
 		instanceTypeWithKubeReserved(60, 80, "7Gi"), // small disk → 7Gi computed reservation
 		karpv1.CapacityTypeOnDemand,
@@ -206,7 +206,7 @@ func TestRenderKubeletConfigMetadata_EvictionHard(t *testing.T) {
 	got := renderedKubeletConfig(
 		t,
 		nodeClassWith(&v1alpha1.KubeletConfiguration{
-			EvictionHard: map[string]string{"memory.available": "5%"},
+			EvictionHard: map[string]v1alpha1.KubeletQuantity{"memory.available": "5%"},
 		}),
 		instanceTypeWithKubeReserved(80, 100, "15Gi"),
 		karpv1.CapacityTypeOnDemand,
@@ -283,7 +283,7 @@ func TestRenderKubeletConfigMetadata_SpotAppliesAfterUserMerge(t *testing.T) {
 	got := renderedKubeletConfig(
 		t,
 		nodeClassWith(&v1alpha1.KubeletConfiguration{
-			SystemReserved: map[string]string{"cpu": "1"},
+			SystemReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "1"},
 		}),
 		instanceTypeWithKubeReserved(80, 100, "15Gi"),
 		karpv1.CapacityTypeSpot,
