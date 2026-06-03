@@ -29,6 +29,72 @@ import (
 )
 
 var _ = Describe("PDCSI Disk Type Labels", func() {
+	It("should schedule a pod that requires a supported disk type label before the node exists", func(ctx SpecContext) {
+		prefix := "amd64-od-disk-label-sched"
+		suffix := environment.UniqueSuffix()
+		name := prefix + "-" + suffix
+
+		initialNodes := env.AllNodeNames(ctx)
+		var provisionedNodeName string
+		DeferCleanup(func(ctx context.Context) {
+			env.DeleteDeployment(ctx, name)
+			env.DeleteNodePool(ctx, name)
+			env.DeleteNodeClass(ctx, name)
+			if provisionedNodeName != "" {
+				Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
+			}
+		})
+
+		env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+		env.WaitForNodeClassReady(ctx, name)
+		env.CreateNodePool(ctx, name, name, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"e2"},
+			InstanceTypes: []string{"e2-standard-4"},
+		})
+		env.WaitForNodePoolReady(ctx, name)
+		createDeploymentWithNodeSelector(ctx, name, name, name, map[string]string{
+			"disk-type.gke.io/pd-balanced": "true",
+		})
+
+		env.WaitForNodeClaimLaunched(ctx, name)
+		pod := env.WaitForRunningPod(ctx, name)
+		Expect(pod.Spec.NodeName).NotTo(BeEmpty())
+		provisionedNodeName = pod.Spec.NodeName
+
+		_, existedBefore := initialNodes[provisionedNodeName]
+		Expect(existedBefore).To(BeFalse(), "expected a newly provisioned node, got a pre-existing one")
+		expectDiskTypeLabelsAndTopology(ctx, provisionedNodeName, []string{"disk-type.gke.io/pd-balanced"})
+	}, SpecTimeout(15*time.Minute))
+
+	It("should not schedule a pod that requires an unsupported disk type label", func(ctx SpecContext) {
+		prefix := "amd64-od-disk-label-no-sched"
+		suffix := environment.UniqueSuffix()
+		name := prefix + "-" + suffix
+
+		DeferCleanup(func(ctx context.Context) {
+			env.DeleteDeployment(ctx, name)
+			env.DeleteNodePool(ctx, name)
+			env.DeleteNodeClass(ctx, name)
+		})
+
+		env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+		env.WaitForNodeClassReady(ctx, name)
+		env.CreateNodePool(ctx, name, name, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"e2"},
+			InstanceTypes: []string{"e2-standard-4"},
+		})
+		env.WaitForNodePoolReady(ctx, name)
+		createDeploymentWithNodeSelector(ctx, name, name, name, map[string]string{
+			"disk-type.gke.io/hyperdisk-throughput": "true",
+		})
+
+		expectNoNodeClaimForNodePool(ctx, name, 2*time.Minute)
+	}, SpecTimeout(5*time.Minute))
+
 	It("should register disk type labels and topology for the selected machine family", func(ctx SpecContext) {
 		prefix := "amd64-od-disk-labels"
 		suffix := environment.UniqueSuffix()

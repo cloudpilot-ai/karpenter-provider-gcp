@@ -18,11 +18,20 @@ package storage_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"time"
 
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
 func expectDiskTypeLabelsAndTopology(ctx context.Context, nodeName string, expected []string) {
@@ -38,6 +47,69 @@ func expectDiskTypeLabelsAndTopology(ctx context.Context, nodeName string, expec
 		g.Expect(err).NotTo(HaveOccurred())
 		return topologyKeysForDriver(csiNode, "pd.csi.storage.gke.io")
 	}, "2m", "5s").Should(ContainElements(expected), "expected PDCSI topology keys for Node %s", nodeName)
+}
+
+func createDeploymentWithNodeSelector(ctx context.Context, name, appLabel, nodePoolName string, extraNodeSelector map[string]string) {
+	replicas := int32(1)
+	zero := int64(0)
+	nodeSelector := map[string]string{karpv1.NodePoolLabelKey: nodePoolName}
+	for key, value := range extraNodeSelector {
+		nodeSelector[key] = value
+	}
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: environment.TestNamespace},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": appLabel}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": appLabel}},
+				Spec: corev1.PodSpec{
+					NodeSelector:                  nodeSelector,
+					TerminationGracePeriodSeconds: &zero,
+					Tolerations: []corev1.Toleration{{
+						Key:      "karpenter-e2e/nodepool",
+						Value:    nodePoolName,
+						Effect:   corev1.TaintEffectNoSchedule,
+						Operator: corev1.TolerationOpEqual,
+					}},
+					Containers: []corev1.Container{{
+						Name:  "inflate",
+						Image: environment.PauseImage,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("128Mi"),
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	_ = env.KubeClient.AppsV1().Deployments(environment.TestNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+	Eventually(func(g Gomega) {
+		_, err := env.KubeClient.AppsV1().Deployments(environment.TestNamespace).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(errors.IsNotFound(err)).To(BeTrue(), "waiting for stale Deployment %s to be deleted", name)
+	}).WithTimeout(environment.NodeCleanupTimeout).WithPolling(environment.DefaultPollInterval).Should(Succeed())
+
+	_, err := env.KubeClient.AppsV1().Deployments(environment.TestNamespace).Create(ctx, dep, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating Deployment %s", name)
+}
+
+func expectNoNodeClaimForNodePool(ctx context.Context, nodePoolName string, duration time.Duration) {
+	Consistently(func(g Gomega) int {
+		claims, err := env.ListNodeClaims(ctx)
+		g.Expect(err).NotTo(HaveOccurred(), "listing NodeClaims")
+		count := 0
+		for _, claim := range claims {
+			if claim.GetLabels()[karpv1.NodePoolLabelKey] == nodePoolName {
+				count++
+			}
+		}
+		return count
+	}, duration, environment.DefaultPollInterval).Should(Equal(0), fmt.Sprintf("expected no NodeClaims for NodePool %s", nodePoolName))
 }
 
 func topologyKeysForDriver(csiNode *storagev1.CSINode, driverName string) []string {
