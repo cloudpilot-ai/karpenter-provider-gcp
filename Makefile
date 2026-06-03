@@ -21,6 +21,9 @@ REGION ?= us-central1
 # Common Directories
 MOD_DIRS = $(shell find . -path "./website" -prune -o -name go.mod -type f -print | xargs dirname)
 KARPENTER_CORE_DIR = $(shell go list -m -f '{{ .Dir }}' sigs.k8s.io/karpenter)
+PDCSI_MODULE = sigs.k8s.io/gcp-compute-persistent-disk-csi-driver
+PDCSI_DATA_DIR = hack/pdcsi-data
+PDCSI_NODE_LABELER_CONFIGMAP = deploy/kubernetes/overlays/node-labeler/configmap.yaml
 
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
@@ -44,6 +47,7 @@ run: ## Run Karpenter controller binary against your local cluster
 		go run ./cmd/controller/main.go
 
 update: tidy download ## Update go files header, CRD and generated code
+	$(MAKE) update-pdcsi-compatibility
 	hack/boilerplate.sh
 	hack/update-generated.sh
 	hack/docs-generate.sh
@@ -185,6 +189,12 @@ tidy: ## Run "go mod tidy"
 download: ## Run "go mod download"
 	go mod download
 
+update-pdcsi-compatibility: ## Update vendored PDCSI disk compatibility data from the pinned Go module
+	@cd $(PDCSI_DATA_DIR) && go mod download $(PDCSI_MODULE)
+	@src="$$(cd $(PDCSI_DATA_DIR) && go list -mod=mod -m -f '{{ .Dir }}' $(PDCSI_MODULE))/$(PDCSI_NODE_LABELER_CONFIGMAP)"; \
+		test -f "$$src" || (echo "PDCSI node-labeler ConfigMap not found at $$src" >&2; exit 1); \
+		cp "$$src" pkg/providers/disktype/pdcsi/node-labeler-configmap.yaml
+
 update-pricing:
 	@tmpdir=$$(mktemp -d); \
 	trap "rm -rf $$tmpdir" EXIT; \
@@ -198,7 +208,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

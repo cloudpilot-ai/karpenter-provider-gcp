@@ -57,3 +57,12 @@ updates:
       crd-tools:
         patterns:
           - "*"
+
+  - package-ecosystem: "gomod"
+    directory: "/hack/pdcsi-data"
+    schedule:
+      interval: "weekly"
+    groups:
+      pdcsi-data:
+        patterns:
+          - "sigs.k8s.io/gcp-compute-persistent-disk-csi-driver"
