@@ -121,6 +121,42 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily str
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithKubeletConfig creates a GCENodeClass identical to
+// CreateNodeClass but with the given spec.kubeletConfiguration attached.
+// kubeletConfig is a map[string]any whose keys must match the JSON field
+// names on v1alpha1.KubeletConfiguration (systemReserved, kubeReserved,
+// evictionHard, podsPerCore, etc.). Used by e2e tests verifying issue
+// #398 (kubelet honors user reservations).
+func (e *Environment) CreateNodeClassWithKubeletConfig(
+	ctx context.Context,
+	name, imageFamily string,
+	kubeletConfig map[string]any,
+) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": imageFamily + "@latest"},
+			},
+			"disks": []any{
+				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName":      e.PodsRangeName,
+			"kubeletConfiguration": kubeletConfig,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithFamilyChannel creates a GCENodeClass using the new
 // family+channel image selector (e.g. family=ContainerOptimizedOS, channel=stable).
 func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name, family, channel string) {
@@ -458,6 +494,30 @@ func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, node
 
 	_, err := e.KubeClient.AppsV1().Deployments(TestNamespace).Create(ctx, dep, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating Deployment %s", name)
+}
+
+// WaitForRunningPodsOnNode polls until at least `n` pods with the given app
+// label are Running and Ready on the given node. Fails the test if
+// ProvisioningTimeout is exceeded. Used to verify the node can actually
+// schedule the configured number of pods (issue #120 guard: maxPods must
+// not exceed the node's pod-CIDR-derived IP capacity).
+func (e *Environment) WaitForRunningPodsOnNode(ctx context.Context, appLabel, nodeName string, n int) {
+	Eventually(func(g Gomega) {
+		pods, err := e.KubeClient.CoreV1().Pods(TestNamespace).List(ctx,
+			metav1.ListOptions{LabelSelector: fmt.Sprintf("app=%s", appLabel)})
+		g.Expect(err).NotTo(HaveOccurred())
+		running := 0
+		for i := range pods.Items {
+			if pods.Items[i].Spec.NodeName == nodeName && isRunningAndReady(&pods.Items[i]) {
+				running++
+			}
+		}
+		if running < n {
+			e.logWaitStatus(ctx, appLabel, pods.Items)
+		}
+		g.Expect(running).To(BeNumerically(">=", n),
+			"only %d/%d pods with label app=%s are Running on node %s", running, n, appLabel, nodeName)
+	}).WithTimeout(ProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 }
 
 // WaitForRunningPod polls until a pod with the given app label is Running and

@@ -192,6 +192,19 @@ type ImageSelectorTerm struct {
 	Version string `json:"version,omitempty"`
 }
 
+/*
+Maintainers: JSON tags on every field below MUST match the upstream kubelet
+`kubelet/config/v1beta1.KubeletConfiguration` schema. The entire struct is
+JSON-marshaled and merged into the kubelet-config bootstrap metadata YAML
+at provisioning time (see pkg/providers/metadata/utils.go), so any field
+added here with a matching upstream JSON tag automatically takes effect at
+kubelet runtime without further plumbing. A consequence is that adding a new
+field also requires deciding whether scheduler bin-packing must agree with
+the field's runtime effect — only resource-reservation-like fields
+(systemReserved, kubeReserved, eviction*, podsPerCore) need additional
+scheduler overhead/capacity plumbing in pkg/providers/instancetype.
+*/
+
 // KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
 // They are a vswitch of the upstream types, recognizing not all options may be supported.
 // Wherever possible, the types and names should reflect the upstream kubelet types.
@@ -216,22 +229,26 @@ type KubeletConfiguration struct {
 	// SystemReserved contains resources reserved for OS system daemons and kernel memory.
 	// +kubebuilder:validation:XValidation:message="valid keys for systemReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="systemReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
+	// +kubebuilder:validation:XValidation:message="systemReserved values must be a resource.Quantity",rule="self.all(x, self[x].matches('^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$'))"
 	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	SystemReserved map[string]string `json:"systemReserved,omitempty"`
 	// KubeReserved contains resources reserved for Kubernetes system components.
 	// +kubebuilder:validation:XValidation:message="valid keys for kubeReserved are ['cpu','memory','ephemeral-storage','pid']",rule="self.all(x, x=='cpu' || x=='memory' || x=='ephemeral-storage' || x=='pid')"
 	// +kubebuilder:validation:XValidation:message="kubeReserved value cannot be a negative resource quantity",rule="self.all(x, !self[x].startsWith('-'))"
+	// +kubebuilder:validation:XValidation:message="kubeReserved values must be a resource.Quantity",rule="self.all(x, self[x].matches('^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$'))"
 	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	KubeReserved map[string]string `json:"kubeReserved,omitempty"`
 	// EvictionHard is the map of signal names to quantities that define hard eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionHard are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:XValidation:message="evictionHard values must be a percentage or a resource.Quantity",rule="self.all(x, self[x].matches('^((\\d{1,2}(\\.\\d{1,2})?|100(\\.0{1,2})?)%|(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?)$'))"
 	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionHard map[string]string `json:"evictionHard,omitempty"`
 	// EvictionSoft is the map of signal names to quantities that define soft eviction thresholds
 	// +kubebuilder:validation:XValidation:message="valid keys for evictionSoft are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']",rule="self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])"
+	// +kubebuilder:validation:XValidation:message="evictionSoft values must be a percentage or a resource.Quantity",rule="self.all(x, self[x].matches('^((\\d{1,2}(\\.\\d{1,2})?|100(\\.0{1,2})?)%|(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?)$'))"
 	// +kubebuilder:validation:MaxProperties=10
 	// +optional
 	EvictionSoft map[string]string `json:"evictionSoft,omitempty"`
