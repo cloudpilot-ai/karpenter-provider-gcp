@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/samber/lo"
@@ -39,7 +40,10 @@ var (
 	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
 	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
 	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
-	registerWithTaintsRegex = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
+	diskTypeLabelRegex            = regexp.MustCompile(`^disk-type\.gke\.io/`)
+	diskTypeLabelEntryRegex       = regexp.MustCompile(`,?disk-type\.gke\.io/[^=,\s]+=[^,\s]*`)
+	kubeEnvNodeLabelsEmptyOKRegex = regexp.MustCompile(`--node-labels=\S*`)
+	registerWithTaintsRegex       = regexp.MustCompile(`(--register-with-taints=)(\S+)`)
 	// kubeEnvNodeLabelsRegex matches the entire --node-labels=<value> flag in kube-env.
 	// The value is comma-separated Kubernetes labels with no whitespace.
 	kubeEnvNodeLabelsRegex    = regexp.MustCompile(`--node-labels=\S+`)
@@ -425,6 +429,73 @@ func appendNodeLabelToKubeEnv(metadata *compute.Metadata, labelKey, labelValue s
 		return nil
 	}
 	return fmt.Errorf("kube-env metadata key not found in instance template")
+}
+
+func SetDiskTypeLabels(metadata *compute.Metadata, labels map[string]string) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata must be non-nil")
+	}
+
+	kubeLabelsFound := false
+	kubeEnvFound := false
+	for _, item := range metadata.Items {
+		switch item.Key {
+		case "kube-labels":
+			kubeLabelsFound = true
+			item.Value = lo.ToPtr(replaceDiskTypeLabelsInNodeLabels(lo.FromPtr(item.Value), labels))
+		case "kube-env":
+			kubeEnvFound = true
+			updated, err := replaceDiskTypeLabelsInKubeEnv(lo.FromPtr(item.Value), labels)
+			if err != nil {
+				return err
+			}
+			item.Value = lo.ToPtr(updated)
+		}
+	}
+	if !kubeLabelsFound {
+		return fmt.Errorf("kube-labels metadata key not found in instance template")
+	}
+	if !kubeEnvFound {
+		return fmt.Errorf("kube-env metadata key not found in instance template")
+	}
+	return nil
+}
+
+func replaceDiskTypeLabelsInKubeEnv(kubeEnv string, labels map[string]string) (string, error) {
+	if !strings.Contains(kubeEnv, "--node-labels=") {
+		return "", fmt.Errorf("--node-labels flag not found in kube-env KUBELET_ARGS")
+	}
+	stripped := diskTypeLabelEntryRegex.ReplaceAllString(kubeEnv, "")
+	stripped = strings.ReplaceAll(stripped, "--node-labels=,", "--node-labels=")
+	return kubeEnvNodeLabelsEmptyOKRegex.ReplaceAllStringFunc(stripped, func(match string) string {
+		return "--node-labels=" + replaceDiskTypeLabelsInNodeLabels(strings.TrimPrefix(match, "--node-labels="), labels)
+	}), nil
+}
+
+func replaceDiskTypeLabelsInNodeLabels(current string, labels map[string]string) string {
+	parts := strings.Split(current, ",")
+	filtered := parts[:0]
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, _, _ := strings.Cut(part, "=")
+		if diskTypeLabelRegex.MatchString(key) {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		filtered = append(filtered, fmt.Sprintf("%s=%s", key, labels[key]))
+	}
+	return strings.Join(filtered, ",")
 }
 
 // SetGPUAcceleratorLabel sets cloud.google.com/gke-accelerator=<gpuName> in kube-labels and

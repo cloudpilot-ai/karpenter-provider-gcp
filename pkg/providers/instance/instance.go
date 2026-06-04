@@ -43,6 +43,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
@@ -862,10 +863,17 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMet
 
 	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
 
-	// GPU labels are injected last so that spec.gpuDriverVersion is always authoritative,
-	// overriding both the base template value and any spec.metadata entry.
+	// GPU labels override both the base template value and any spec.metadata entry.
 	if err := setupGPUMetadata(instanceMetadata, nodeClass, instanceType, isGPUInstance); err != nil {
 		return fmt.Errorf("failed to inject GPU metadata labels: %w", err)
+	}
+
+	diskLabels, ok := disktype.LabelsForInstanceType(instanceType.Name)
+	if !ok {
+		log.FromContext(ctx).V(1).Info("no PD disk compatibility labels found for instance type", "instanceType", instanceType.Name)
+	}
+	if err := metadata.SetDiskTypeLabels(instanceMetadata, diskLabels); err != nil {
+		return fmt.Errorf("failed to set disk type labels in metadata: %w", err)
 	}
 
 	return nil

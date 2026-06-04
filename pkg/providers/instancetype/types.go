@@ -32,6 +32,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
@@ -141,6 +142,15 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUMemory, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelGKEAccelerator, corev1.NodeSelectorOpDoesNotExist),
 	)
+	for _, label := range disktype.AllLabels() {
+		requirements.Add(scheduling.NewRequirement(label, corev1.NodeSelectorOpDoesNotExist))
+	}
+	if diskLabels, ok := disktype.LabelsForInstanceType(lo.FromPtr(mt.Name)); ok {
+		for label := range diskLabels {
+			requirements.Get(label).Insert("true")
+		}
+	}
+
 	// Only add zone-id label when available in offerings. It may not be available if a user has upgraded from a
 	// previous version of Karpenter w/o zone-id support and the nodeclass vswitch status has not yet updated.
 	if zoneIDs := lo.FilterMap(offerings.Available(), func(o *cloudprovider.Offering, _ int) (string, bool) {

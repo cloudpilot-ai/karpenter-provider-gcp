@@ -1,0 +1,2 @@
+sigs.k8s.io/gcp-compute-persistent-disk-csi-driver v1.25.2 h1:TvsPGjmUdAEmGisDQx82BTJMkeMeT/HCpp5/eQokb7o=
+sigs.k8s.io/gcp-compute-persistent-disk-csi-driver v1.25.2/go.mod h1:ne7PPW/+GTl7u4j26lcCyR6gLyUx8qXXQxOzKB0kI8U=
