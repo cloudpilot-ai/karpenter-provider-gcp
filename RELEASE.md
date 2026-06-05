@@ -95,12 +95,19 @@ gh release edit vX.Y.0 --repo cloudpilot-ai/karpenter-provider-gcp --draft=false
 ### 5. Verify published artefacts
 
 ```bash
+RELEASE_VERSION=X.Y.0
+
 # Docker image (ECR Public)
-curl -s "https://public.ecr.aws/v2/cloudpilotai/gcp/karpenter/tags/list"
+TOKEN=$(curl -s "https://public.ecr.aws/token/?scope=repository:cloudpilotai/gcp/karpenter:pull" | jq -r '.token')
+curl -fsS \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Accept: application/vnd.oci.image.index.v1+json" \
+  "https://public.ecr.aws/v2/cloudpilotai/gcp/karpenter/manifests/v${RELEASE_VERSION}" \
+  | jq -r '.mediaType'
 
 # Helm charts (GitHub Pages)
 curl -s "https://cloudpilot-ai.github.io/karpenter-provider-gcp/index.yaml" \
-  | grep -A3 "version: X.Y.0"
+  | grep -A3 "version: ${RELEASE_VERSION}"
 ```
 
 Also confirm the new version appears on [ArtifactHub](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter).
