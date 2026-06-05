@@ -6,6 +6,7 @@
 ## Unreleased
 
 ---
+
 ## v0.4.0
 
 ### `kubeletConfiguration` fields now take effect
