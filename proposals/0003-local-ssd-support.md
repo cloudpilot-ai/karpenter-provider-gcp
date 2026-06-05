@@ -43,7 +43,7 @@ A secondary bug: z3 SKUs have non-uniform `OnHostMaintenance` requirements (`TER
 - One NodeClass + NodePool can serve pods with different SSD counts and the no-SSD case.
 - Scheduling by `requests.ephemeral-storage` works in `Ephemeral` mode without per-pod count math.
 - z3 SKUs schedule and bootstrap with the correct `OnHostMaintenance`.
-- The deprecated `disks[].category: local-ssd` shape continues to exist in the CRD for one release and logs a warning. Since GCE currently rejects every attempt to use it, no working deployment depends on it.
+- The `disks[].category: local-ssd` shape is removed from the CRD enum, so `kubectl apply` rejects it at admission rather than failing later at instance creation. Since GCE currently rejects every attempt to use it, no working deployment depends on it; a migration note covers the transition.
 
 ### Non-Goals
 
@@ -82,7 +82,7 @@ After:
 
 The key is registered in `v1alpha1.WellKnownLabels` so Karpenter's scheduler treats it as a managed label.
 
-**`GCENodeClass.spec.disks[].category = "local-ssd"`** — deprecated. The CRD continues to accept it; the controller logs a warning at the first reconcile that observes it. On a bundled-SSD machine type the controller now refuses to schedule the SKU with a clear error: bundled SSDs are already present, declaring more via `disks[]` would over-allocate. Behavior on configurable families is preserved by treating the legacy count as a fallback in the resolver's precedence chain (see Design Details).
+**`GCENodeClass.spec.disks[].category = "local-ssd"`** — removed. The value is dropped from the `Disk.Category` CRD enum, so the apiserver rejects any NodeClass that sets it at admission time rather than failing later at instance creation. This shape never produced a working node — GCE rejects the persistent-disk attach outright — so no functioning deployment depends on it. The migration note below covers any stored object that still carries the value.
 
 ### Design Details
 
@@ -102,8 +102,9 @@ In `Ephemeral` mode, each non-zero variant's `ResourceEphemeralStorage` is set t
 
 1. `MachineType.BundledLocalSsds.PartitionCount`: authoritative for bundled SKUs. Wins unconditionally. If the cache doesn't have the MachineType for a name that looks bundled, the resolver returns a retryable error so the Create loop falls through rather than booting a node with the wrong physical SSD count.
 2. The NodeClaim's `karpenter.k8s.gcp/instance-local-ssd-count` requirement (originating from `pod.spec.nodeSelector`, `pod.spec.affinity.nodeAffinity`, or `NodePool.spec.template.spec.requirements`; all three are normalized by Karpenter into the same `scheduling.Requirement` before reaching the resolver). Operator must be `In` with a single value. `NotIn` / `Gt` / `Lt` / multi-value `In` are surfaced as `CreateError` (scope cut: supporting them requires per-machine-type allowed-count metadata we don't carry).
-3. Legacy `disks[].category=local-ssd` count, retained as transitional fallback.
-4. Zero.
+3. Zero.
+
+There is no legacy `disks[].category=local-ssd` fallback: the value is removed from the CRD enum (see API Changes), so the resolver never observes it.
 
 #### Disk attach
 
@@ -145,7 +146,7 @@ The thresholds are derived from `MachineType.BundledLocalSsds.PartitionCount` ×
 | `pkg/apis/v1alpha1/gcenodeclass.go`                  | New `LocalSsdMode` field + `LocalSSDMode` enum. Hash version bump to `v4`.                                  |
 | `pkg/apis/v1alpha1/labels.go`                        | New `LabelInstanceLocalSsdCount`; registered in well-known labels.                                          |
 | `pkg/utils/localssd/localssd.go`                     | New. `AllowedLocalSSDCounts`, `FamilySupportsConfigurableLocalSSDs`, `TotalGiB`.                            |
-| `pkg/providers/instance/localssd.go`                 | New. Bundled-SKU detection + legacy-disk conflict check.                                                    |
+| `pkg/providers/instance/localssd.go`                 | New. Bundled-SKU detection.                                                                                 |
 | `pkg/providers/instance/instance.go`                 | `resolveLocalSSDCount`, SCRATCH disk attach, z3-aware `onHostMaintenancePolicy`.                            |
 | `pkg/providers/instancetype/{types,instancetype}.go` | Per-variant SSD-count requirement and ephemeral-storage capacity.                                           |
 | `pkg/providers/metadata/`                            | New `localssd.go` (`PatchLocalSSDMetadata`) hooked into the existing metadata-patch pipeline in `utils.go`. |
@@ -159,7 +160,7 @@ The thresholds are derived from `MachineType.BundledLocalSsds.PartitionCount` ×
 | Bundled-SKU MachineType cache miss → resolver can't read `BundledLocalSsds.PartitionCount`     | Low        | Would attach 0 SCRATCH disks but boot a node that thinks it has bundled SSDs                        | Resolver returns a retryable error; Create loop falls through to next candidate instead of booting.                                                                                                        |
 | Operator uses an unsupported requirement operator (`NotIn`, `Gt`, etc.) on the SSD-count label | Medium     | Provisioning fails                                                                                  | Resolver surfaces a `CreateError` with a clear message naming the unsupported operator.                                                                                                                    |
 | GKE changes the kube-env / kube-label keys used by the bootstrap script                        | Low        | Local-SSDs wouldn't be formatted/mounted on Ephemeral; raw devices still appear on RawBlock         | Keys are the same ones GKE-native pools set; verified against live `kube-env` dumps. Same risk profile as the existing `PatchKubeEnvForInstanceType`.                                                      |
-| Existing deployments rely on `disks[].category=local-ssd`                                      | Low        | Warning logged; legacy fallback resolver path still attaches SCRATCH disks on configurable families | GCE currently rejects this shape outright, so no working deployment can depend on it. On bundled SKUs the controller now refuses to schedule (clear error) instead of producing a node with too many SSDs. |
+| Existing deployments rely on `disks[].category=local-ssd`                                      | Low        | A NodeClass that sets it is rejected at `kubectl apply` once the enum value is removed               | GCE rejects this shape outright today, so no working deployment can depend on it. Migration note instructs operators to drop the entry and adopt `spec.localSsdMode` + the count label.                     |
 | z3 capacity is regionally scarce                                                               | High       | e2e tests may flake on uncapped runs                                                                | z3-touching specs gated behind `E2E_Z3_TESTS=true`, mirroring the existing `E2E_GPU_TESTS` pattern.                                                                                                        |
 
 ---
@@ -168,8 +169,8 @@ The thresholds are derived from `MachineType.BundledLocalSsds.PartitionCount` ×
 
 ### Unit Tests
 
-- `pkg/providers/instance/resolve_localssd_count_test.go` — resolver precedence: bundled value wins; multi-value `In` and non-`In` operators return `CreateError`; legacy `disks[]` fallback; cache-miss retryable error.
-- `pkg/providers/instance/localssd_test.go` — `hasBundledLocalSSDs` for API-signal + name-fallback paths, including `-nolssd` siblings; `evaluateLocalSSDConflict` for legacy-disk + bundled-SKU.
+- `pkg/providers/instance/resolve_localssd_count_test.go` — resolver precedence: bundled value wins; multi-value `In` and non-`In` operators return `CreateError`; cache-miss retryable error.
+- `pkg/providers/instance/localssd_test.go` — `hasBundledLocalSSDs` for API-signal + name-fallback paths, including `-nolssd` siblings.
 - `pkg/providers/metadata/localssd_test.go` — `PatchLocalSSDMetadata`: RawBlock and Ephemeral upserts; mode flip removes opposite-mode keys; missing `kube-env` / `kube-labels` → error.
 - `pkg/providers/instancetype/types_test.go` — variant emission: bundled SKU produces one pinned variant; configurable family produces `{0} ∪ allowed` variants; ephemeral-storage capacity includes SSD bytes in Ephemeral mode.
 
@@ -195,17 +196,17 @@ The feature is complete when:
 - [ ] `karpenter.k8s.gcp/instance-local-ssd-count` is a well-known label, emitted as an InstanceType requirement per the variant rules above and as a Node label at provisioning.
 - [ ] Nodes provisioned on a bundled-SSD SKU mount the bundled SSDs in the requested mode; nodes provisioned on a configurable family attach the pod-requested count.
 - [ ] z3 non-metal ≤ 18 TiB SKUs provision with `MIGRATE`; bare-metal and z3 non-metal > 18 TiB SKUs provision with `TERMINATE`.
-- [ ] `disks[].category: local-ssd` logs a warning; the controller refuses to schedule a bundled-SSD SKU when the legacy shape is present.
+- [ ] `disks[].category: local-ssd` is removed from the CRD enum; a NodeClass that sets it is rejected at `kubectl apply`.
 - [ ] Unit tests above pass; e2e suite passes on the project's e2e cluster (z3 gate optional).
 
 ---
 
 ## Migration
 
-Existing deployments cannot have a working `disks[].category: local-ssd` configuration today — GCE rejects every such attempt. The migration path is therefore additive:
+Existing deployments cannot have a working `disks[].category: local-ssd` configuration today — GCE rejects every such attempt, so this shape never produced a running node. Removing the enum value is therefore safe in practice:
 
 1. Add `spec.localSsdMode: RawBlock` (or `Ephemeral`) to the NodeClass.
-2. Remove any `disks[].category: local-ssd` entries — they are no longer needed and produce a deprecation warning.
+2. Remove any `disks[].category: local-ssd` entries. Once the enum value is dropped, the apiserver rejects a NodeClass that still sets it, so this step is required before upgrading. A stored NodeClass that carries the value keeps working as-is until its next write, but cannot be re-applied until the entry is removed.
 3. Set the count via pod `nodeSelector` (`karpenter.k8s.gcp/instance-local-ssd-count: "<N>"`) on configurable families, or via the machine-type instance-type label on bundled SKUs.
 
 No NodeClass-hash invalidation handling is required beyond the existing `GCENodeClassHashVersion` bump to `v4`.
@@ -228,9 +229,3 @@ A NodePool-side requirement is supported (it's how the resolver reads pool-level
 
 - **Per-pod `localSsdMode`**: currently the mode is a NodeClass-level setting. A pod-side override (similar to the count label) would let a single pool serve both Ephemeral and RawBlock workloads, which doubles the InstanceType variant count.
 - **Honor pod `requests.ephemeral-storage` on RawBlock**: today only Ephemeral mode reports SSD bytes as `ephemeral-storage`. RawBlock workloads have to use the explicit count label. Reporting raw block bytes via a different resource (e.g. an extended resource) would let RawBlock workloads schedule by capacity too.
-
----
-
-## Open Questions
-
-1. **Should the legacy `disks[].category: local-ssd` shape stay deprecated-with-warning, or be hard-removed?** Hard-removing would simplify the resolver precedence chain (drop step 3). The argument for keeping it one release is operator notice via the warning, but since the shape is a 100% GCE failure today, no operator has it set on a working cluster.
