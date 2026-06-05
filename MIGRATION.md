@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+---
+## v0.4.0
+
 ### `kubeletConfiguration` fields now take effect
 
 `spec.kubeletConfiguration` fields on `GCENodeClass` that were previously accepted by the CRD but silently dropped at provisioning time are now applied to the kubelet on every Karpenter-provisioned node and to Karpenter's scheduler bin-packing. The previously honoured fields (`maxPods`) are unchanged.
@@ -19,6 +22,7 @@ Newly honoured fields:
 
 The CRD value schema for `systemReserved`, `kubeReserved`, `evictionHard`, and `evictionSoft` is now validated against the `resource.Quantity` regex (and percentage syntax for the eviction fields). Existing values that already parsed as `resource.Quantity` are unaffected.
 
+---
 ### GPU node provisioning (`gpuDriverVersion`)
 
 Karpenter now automatically sets the two node labels required by the GKE GPU software stack
@@ -295,6 +299,8 @@ The service account resolution order is now:
 
 The fallback to the template's service account list has been removed. If your NodeClass and operator flag are both unset, provisioned nodes will use the Compute Engine default SA. This matches GKE's own default, but GKE recommends using a dedicated SA with minimal permissions ([`roles/container.nodeServiceAccount`](https://cloud.google.com/kubernetes-engine/docs/how-to/hardening-your-cluster#use_least_privilege_sa)) for production clusters. Set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` or `spec.serviceAccount` accordingly.
 
+---
+
 ## v0.3.0
 
 ### CRDs moved to a separate Helm chart (`karpenter-crd`)
@@ -408,8 +414,6 @@ The upgrade itself requires no action. The steps below are **optional** and only
 if you want to clean up orphaned instances that may have accumulated before this release
 (see #242). Future orphaned instances on new-style nodes are handled automatically.
 
----
-
 #### Step 1 (optional) — rotate live nodes
 
 Trigger a rolling replacement of your NodePools so that every replacement instance is
@@ -422,8 +426,6 @@ kubectl annotate nodepool <NODEPOOL_NAME> "karpenter.k8s.gcp/force-rollout=$(dat
 ```
 
 Repeat for each NodePool. Wait for all nodes to finish replacing before proceeding.
-
----
 
 #### Step 2 (optional) — find and delete orphaned instances
 
