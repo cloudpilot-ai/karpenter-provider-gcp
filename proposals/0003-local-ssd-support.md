@@ -96,19 +96,20 @@ The key is registered in `v1alpha1.WellKnownLabels` so Karpenter's scheduler tre
 
 In `Ephemeral` mode, each non-zero variant's `ResourceEphemeralStorage` is set to the total local-SSD capacity (`partitionCount × 375 GiB` for standard families, `× 3000 GiB` for z3, with per-SKU overrides for machines where the API reports a wrong partition count). The boot-disk bytes are not added — GKE's bootstrap script mounts the SSD-backed RAID-0 volume as the kubelet's ephemeral-storage filesystem, so the boot disk is excluded from the advertised capacity. In `RawBlock` mode (and the zero-SSD variant) `ResourceEphemeralStorage` falls back to the boot-disk size; local SSDs are exposed as raw NVMe devices the workload manages itself. This is what makes scheduling by `requests.ephemeral-storage` work in Ephemeral mode without an explicit count: Karpenter picks the smallest variant whose ephemeral-storage capacity satisfies the request.
 
-#### Variant pricing & scheduler preference
+#### Variant selection & scheduler preference
 
-Emitting a zero-SSD variant plus one variant per allowed count raises a correctness question: if a pod requests no local SSD, every variant satisfies it, so what stops Karpenter from picking the 24-SSD variant and attaching (and billing for) SSDs nothing uses? Karpenter's scheduler minimizes offering price, so the variants must not share a price.
+Emitting a zero-SSD variant plus one variant per allowed count raises a correctness question: if a pod requests no local SSD, every variant satisfies it, so what stops Karpenter from picking the 24-SSD variant and attaching (and billing for) SSDs nothing uses?
 
-Each variant's offering price is therefore `baseMachinePrice + ssdCount × localSsdPrice`. Local-SSD pricing varies by region, but Karpenter uses this value only to rank variants of the same machine type against each other, never for billing, so a fixed per-device price constant is sufficient: it preserves the ordering (more SSDs is strictly more expensive) without the provider carrying regional local-SSD rate tables. Price injection only applies to configurable families, which all use 375 GiB partitions, so no partition-size scaling is needed. Consequences:
+The intuitive fix is to price each variant by its SSD count so the zero-SSD variant is the cheapest. This does not work. Once variants of one machine type carry different prices, Karpenter's consolidation controller reads a correctly-provisioned SSD node as over-priced relative to the zero-SSD variant and churns it, replacing running nodes in a loop. (We tried per-variant pricing and observed exactly this in mixed-pool e2e.)
 
-- The zero-SSD variant is strictly the cheapest variant of a configurable family, so it wins whenever nothing requests SSDs.
-- A variant with SSDs is selected only when a pod's `requests.ephemeral-storage` (Ephemeral mode) or `karpenter.k8s.gcp/instance-local-ssd-count` requirement (RawBlock / explicit pinning) rules out the cheaper variants.
-- Bundled-SSD SKUs emit a single variant whose SSD cost is already part of the SKU's machine price from the GCE pricing API, so no term is added.
+Instead, all variants of a machine type keep a uniform price, and `orderInstanceTypesByPrice` (`pkg/providers/instance/instance.go`) breaks ties deterministically by ascending SSD count, after price and instance-type name. Consequences:
 
-This makes the count label an escape hatch rather than the primary scheduling signal: in the default Ephemeral mode, capacity-based scheduling plus price-ranking already steers pods to the right variant without any pod-side label.
+- A pod that requests no SSD count lands on the zero-SSD variant (smallest count wins the tie), so no SSDs are attached unless asked for.
+- An Ephemeral capacity request picks the smallest-count variant whose `ResourceEphemeralStorage` satisfies the request, so SSDs are not over-provisioned.
+- Uniform pricing means consolidation never sees an SSD node as more expensive than its zero-SSD sibling, so there is no replace loop.
+- Bundled-SSD SKUs emit a single variant, so the tie-break is a no-op for them.
 
-Implementation: `createOfferings` / `NewInstanceType` (`pkg/providers/instancetype/`) take the variant's `ssdCount` and add `ssdCount × localSsdPrice` per offering, where `localSsdPrice` is a fixed per-device constant.
+This makes the count label an escape hatch rather than the primary scheduling signal: in the default Ephemeral mode, capacity-based scheduling plus the deterministic tie-break already steer pods to the right variant without any pod-side label.
 
 #### Count resolution at provisioning
 
