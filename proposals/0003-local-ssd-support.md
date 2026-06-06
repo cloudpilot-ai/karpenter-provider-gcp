@@ -96,6 +96,20 @@ The key is registered in `v1alpha1.WellKnownLabels` so Karpenter's scheduler tre
 
 In `Ephemeral` mode, each non-zero variant's `ResourceEphemeralStorage` is set to the total local-SSD capacity (`partitionCount × 375 GiB` for standard families, `× 3000 GiB` for z3, with per-SKU overrides for machines where the API reports a wrong partition count). The boot-disk bytes are not added — GKE's bootstrap script mounts the SSD-backed RAID-0 volume as the kubelet's ephemeral-storage filesystem, so the boot disk is excluded from the advertised capacity. In `RawBlock` mode (and the zero-SSD variant) `ResourceEphemeralStorage` falls back to the boot-disk size; local SSDs are exposed as raw NVMe devices the workload manages itself. This is what makes scheduling by `requests.ephemeral-storage` work in Ephemeral mode without an explicit count: Karpenter picks the smallest variant whose ephemeral-storage capacity satisfies the request.
 
+#### Variant pricing & scheduler preference
+
+Emitting a zero-SSD variant plus one variant per allowed count raises a correctness question: if a pod requests no local SSD, every variant satisfies it, so what stops Karpenter from picking the 24-SSD variant and attaching (and billing for) SSDs nothing uses? Karpenter's scheduler minimizes offering price, so the variants must not share a price.
+
+Each variant's offering price is therefore `baseMachinePrice + ssdCount × localSsdPrice`. Local-SSD pricing varies by region, but Karpenter uses this value only to rank variants of the same machine type against each other, never for billing, so a fixed per-device price constant is sufficient: it preserves the ordering (more SSDs is strictly more expensive) without the provider carrying regional local-SSD rate tables. Price injection only applies to configurable families, which all use 375 GiB partitions, so no partition-size scaling is needed. Consequences:
+
+- The zero-SSD variant is strictly the cheapest variant of a configurable family, so it wins whenever nothing requests SSDs.
+- A variant with SSDs is selected only when a pod's `requests.ephemeral-storage` (Ephemeral mode) or `karpenter.k8s.gcp/instance-local-ssd-count` requirement (RawBlock / explicit pinning) rules out the cheaper variants.
+- Bundled-SSD SKUs emit a single variant whose SSD cost is already part of the SKU's machine price from the GCE pricing API, so no term is added.
+
+This makes the count label an escape hatch rather than the primary scheduling signal: in the default Ephemeral mode, capacity-based scheduling plus price-ranking already steers pods to the right variant without any pod-side label.
+
+Implementation: `createOfferings` / `NewInstanceType` (`pkg/providers/instancetype/`) take the variant's `ssdCount` and add `ssdCount × localSsdPrice` per offering, where `localSsdPrice` is a fixed per-device constant.
+
 #### Count resolution at provisioning
 
 `resolveLocalSSDCount` (`pkg/providers/instance/instance.go`) picks the count to send to the GKE bootstrapper. Precedence:
@@ -173,7 +187,7 @@ The thresholds are derived from `MachineType.BundledLocalSsds.PartitionCount` ×
 - `pkg/providers/instance/instance_test.go` — `renderDiskProperties` appends SCRATCH NVMe entries for a configurable count and **none** for a bundled SKU (regression guard for the gcloud-matching body).
 - `pkg/providers/instance/localssd_test.go` — `hasBundledLocalSSDs` for API-signal + name-fallback paths, including `-nolssd` siblings.
 - `pkg/providers/metadata/localssd_test.go` — `PatchLocalSSDMetadata`: RawBlock and Ephemeral upserts; mode flip removes opposite-mode keys; missing `kube-env` / `kube-labels` → error.
-- `pkg/providers/instancetype/types_test.go` — variant emission: bundled SKU produces one pinned variant; configurable family produces `{0} ∪ allowed` variants; ephemeral-storage capacity includes SSD bytes in Ephemeral mode.
+- `pkg/providers/instancetype/types_test.go` — variant emission: bundled SKU produces one pinned variant; configurable family produces a zero-SSD variant plus one per allowed count; ephemeral-storage capacity includes SSD bytes in Ephemeral mode.
 
 ### E2E
 
