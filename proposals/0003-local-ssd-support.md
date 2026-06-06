@@ -11,7 +11,7 @@
 
 Karpenter cannot currently provision GCE nodes with local SSDs. The existing `disks[].category: local-ssd` shape on `GCENodeClass` produces an API-level GCE rejection (`Cannot create local SSD as persistent disk`). It also does not distinguish GKE's two local-SSD exposure modes (Ephemeral vs RawBlock), and forces a 1:1 split of NodeClass/NodePool per SSD count when an operator wants mixed counts in a single pool.
 
-This proposal replaces that shape with a per-pod count label (`karpenter.k8s.gcp/instance-local-ssd-count`) plus a NodeClass-level mode (`spec.localSsdMode: RawBlock | Ephemeral`). Local SSDs are attached as SCRATCH NVMe at instance create, and `kube-env` is patched with the same keys GKE-native node pools set, so the in-tree GKE bootstrap scripts handle format / RAID / mount unchanged.
+This proposal replaces that shape with a per-pod count label (`karpenter.k8s.gcp/instance-local-ssd-count`) plus a NodeClass-level mode (`spec.localSsdMode: Ephemeral | RawBlock`, default `Ephemeral`). Local SSDs are attached as SCRATCH NVMe at instance create, and `kube-env` is patched with the same keys GKE-native node pools set, so the in-tree GKE bootstrap scripts handle format / RAID / mount unchanged.
 
 Configurable families (`n1`, `n2`, `n2d`, `c2`, `c2d`) emit one InstanceType variant per allowed SSD count. Bundled-SSD SKUs (`c4*-lssd`, `c4a-*-lssd`, `c4d-*-lssd`, `h4d-*-lssd`, `z3-*-{standard,high}lssd`, `a2-ultragpu-*`, `a3-*`, `a4*-*`) pin the count from the machine type.
 
@@ -63,7 +63,7 @@ Before:
     → GCE: "Cannot create local SSD as persistent disk"
 
 After:
-  GCENodeClass.spec.localSsdMode: RawBlock | Ephemeral
+  GCENodeClass.spec.localSsdMode: Ephemeral | RawBlock   (default Ephemeral)
   pod.spec.nodeSelector:
     karpenter.k8s.gcp/instance-local-ssd-count: "<N>"   (configurable families)
     node.kubernetes.io/instance-type: <bundled-sku>      (bundled-SSD SKUs)
@@ -72,7 +72,7 @@ After:
 
 ### API Changes
 
-**`GCENodeClass.spec.localSsdMode`** — new optional field, enum `RawBlock | Ephemeral`, default `RawBlock`. Set once per NodeClass. Controls only the mode; counts come from the scheduler.
+**`GCENodeClass.spec.localSsdMode`** — new optional field, enum `Ephemeral | RawBlock`, default `Ephemeral`. Set once per NodeClass. Controls only the mode; counts come from the scheduler. `Ephemeral` is the default to match GKE's recommended local-SSD path (the `emptyDir`/ephemeral-storage usage GKE docs lead with) and so pods can schedule by `requests.ephemeral-storage` with no extra configuration. GKE itself forces an explicit choice (`--ephemeral-storage-local-ssd` vs `--local-nvme-ssd-block`); we pick the more common one as the default. `RawBlock` is opt-in for workloads that format and mount the raw NVMe devices themselves.
 
 **`karpenter.k8s.gcp/instance-local-ssd-count`** — new well-known label key. Three roles:
 
@@ -206,7 +206,7 @@ The feature is complete when:
 
 Existing deployments cannot have a working `disks[].category: local-ssd` configuration today — GCE rejects every such attempt, so this shape never produced a running node. Removing the enum value is therefore safe in practice:
 
-1. Add `spec.localSsdMode: RawBlock` (or `Ephemeral`) to the NodeClass.
+1. Add `spec.localSsdMode: Ephemeral` (or `RawBlock`) to the NodeClass.
 2. Remove any `disks[].category: local-ssd` entries. Once the enum value is dropped, the apiserver rejects a NodeClass that still sets it, so this step is required before upgrading. A stored NodeClass that carries the value keeps working as-is until its next write, but cannot be re-applied until the entry is removed.
 3. Set the count via pod `nodeSelector` (`karpenter.k8s.gcp/instance-local-ssd-count: "<N>"`) on configurable families, or via the machine-type instance-type label on bundled SKUs.
 
