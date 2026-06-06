@@ -111,6 +111,23 @@ Instead, all variants of a machine type keep a uniform price, and `orderInstance
 
 This makes the count label an escape hatch rather than the primary scheduling signal: in the default Ephemeral mode, capacity-based scheduling plus the deterministic tie-break already steer pods to the right variant without any pod-side label.
 
+#### Unavailable-offering granularity
+
+The `UnavailableOfferings` cache records offerings GCE recently rejected for capacity (`ZONE_RESOURCE_POOL_EXHAUSTED` etc.) so the scheduler skips them for a TTL (30 min). Its key is `(capacityType, machineType, zone)`. Count-variants share a machine-type name, so by default a capacity failure on any one variant marks every count of that machine type unavailable in that zone. That coarse key has a benign failure mode and a costly one:
+
+- **Benign:** a no-SSD pod can never be pushed onto an SSD variant. The variants go unavailable together, and the pod always targets the smallest count first, so it can only ever fall through to a different machine type, never to a higher count of the same one.
+- **Costly:** a count-specific failure (e.g. GCE cannot attach 24 local SSDs in a zone) blocks the 0/1/2-count variants too, for the full TTL, even though they would have succeeded.
+
+The obvious fix — keying the cache by count — reintroduces the benign case as a real bug. A plain machine-type stockout is reported against whatever count was attempted, and GCE masks count-specific local-SSD exhaustion as the same generic `ZONE_RESOURCE_POOL_EXHAUSTED`, so a per-count key cannot tell the two apart. With independent per-count entries, a stockout recorded against the count=0 variant would leave the count=1 variant looking available, and a no-SSD pod would be provisioned onto it.
+
+Instead the cache stores, per `(capacityType, machineType, zone)`, the **minimum failed SSD count**, and `IsUnavailable(machineType, zone, capacityType, variantCount)` returns true when an entry exists and `variantCount >= storedMin`. Suppression is monotone upward: a failure at count 24 suppresses 24 and above but leaves 0/1/2 available; a failure at count 0 suppresses everything. This is safe without distinguishing stockout from SSD-attach failure: a no-SSD pod attempts count 0 first, and for it to reach count 1 the count-0 offering would have to be unavailable while count 1 is available, which cannot happen because count-0 unavailability forces `storedMin = 0` and suppresses all counts. The costly case is fixed (low counts stay schedulable) while the benign guarantee is preserved structurally.
+
+Implementation notes:
+
+- The attempted count is threaded to both `MarkUnavailable` call sites in `pkg/providers/instance/instance.go` (the synchronous `Instances.Insert` failure and the async operation-error path through `waitOperationDone` / `handleZoneOperationError`).
+- The minimum-count update is a read-modify-write, so it is guarded by a mutex on the `UnavailableOfferings` type to avoid a race that could leave `storedMin` above the true minimum (which would cost a redundant retry, not correctness).
+- Spot-interruption marks, if reintroduced, record count 0 (a preempted instance is a machine-type-level signal, so it suppresses all counts).
+
 #### Count resolution at provisioning
 
 `resolveLocalSSDCount` (`pkg/providers/instance/instance.go`) picks the count to send to the GKE bootstrapper. Precedence:
@@ -189,6 +206,8 @@ The thresholds are derived from `MachineType.BundledLocalSsds.PartitionCount` ×
 - `pkg/providers/instance/localssd_test.go` — `hasBundledLocalSSDs` for API-signal + name-fallback paths, including `-nolssd` siblings.
 - `pkg/providers/metadata/localssd_test.go` — `PatchLocalSSDMetadata`: RawBlock and Ephemeral upserts; mode flip removes opposite-mode keys; missing `kube-env` / `kube-labels` → error.
 - `pkg/providers/instancetype/types_test.go` — variant emission: bundled SKU produces one pinned variant; configurable family produces a zero-SSD variant plus one per allowed count; ephemeral-storage capacity includes SSD bytes in Ephemeral mode.
+- `pkg/providers/instance/instance_test.go` — `orderInstanceTypesByPrice`: equal-price, equal-name variants sort by ascending SSD count (zero-SSD first) so a no-count pod lands on the zero-SSD variant; cross-family price order is preserved.
+- `pkg/cache/unavailableofferings_test.go` — monotone suppression: a failure at count `N` marks counts `>= N` unavailable and leaves lower counts schedulable; a count-0 failure suppresses all counts; the minimum-count update is race-free under concurrent marks.
 
 ### E2E
 
