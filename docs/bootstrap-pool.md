@@ -52,6 +52,20 @@ Karpenter patches the source pool's kube-env metadata when provisioning nodes wi
 
 This allows a single source pool to bootstrap nodes of any OS and architecture combination.
 
+## What metadata is inherited
+
+Karpenter reads the bootstrap pool's instance template for network configuration, service account, and kubelet settings. Node labels and taints are rebuilt from NodePool and GCENodeClass definitions, not inherited from the bootstrap pool.
+
+| Metadata | Source |
+|----------|--------|
+| Subnetwork, private-node setting | Inherited from bootstrap pool |
+| Service account, scopes | Inherited from bootstrap pool |
+| Kubelet configuration (max-pods, etc.) | Inherited, then patched by GCENodeClass settings |
+| Node labels | Rebuilt from NodePool and GCENodeClass (not inherited) |
+| Node taints | Rebuilt from NodePool and GCENodeClass (not inherited) |
+
+Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls.
+
 ## Upgrading from template pools
 
 Previous Karpenter versions created up to four template pools (`karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, `karpenter-ubuntu-arm64`) at startup. These are no longer needed.
@@ -96,7 +110,7 @@ If fallback creation fails due to org policy violations, the error message ident
 
 **Nodes fail to join the cluster after switching bootstrap pools**
 
-If the new source pool has materially different metadata (service account, scopes, labels), existing Karpenter nodes may have stale configuration. Trigger a rolling replacement:
+If the new source pool has a different service account or scopes, existing Karpenter nodes may have stale configuration. Trigger a rolling replacement:
 
 ```bash
 kubectl annotate nodepool NODEPOOL_NAME "karpenter.k8s.gcp/force-rollout=$(date +%s)" --overwrite
