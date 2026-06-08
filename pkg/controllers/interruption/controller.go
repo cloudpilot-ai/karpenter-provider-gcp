@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	computev1 "cloud.google.com/go/compute/apiv1"
-	"cloud.google.com/go/compute/metadata"
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	corev1 "k8s.io/api/core/v1"
@@ -35,10 +33,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/utils/node"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -56,30 +52,14 @@ type Controller struct {
 	kubeClient client.Client
 	recorder   events.Recorder
 
-	instanceProvider instance.Provider
-
 	unavailableOfferingsCache *cache.UnavailableOfferings
-	metadataClient            *metadata.Client
-	zoneOperationClient       *computev1.ZoneOperationsClient
-	credential                auth.Credential
 }
 
-func NewController(kubeClient client.Client,
-	recorder events.Recorder, unavailableOfferingsCache *cache.UnavailableOfferings,
-	metadataClient *metadata.Client,
-	zoneOperationClient *computev1.ZoneOperationsClient,
-	credential auth.Credential,
-	instanceProvider instance.Provider,
-) *Controller {
+func NewController(kubeClient client.Client, recorder events.Recorder, unavailableOfferingsCache *cache.UnavailableOfferings) *Controller {
 	return &Controller{
-		kubeClient: kubeClient,
-		recorder:   recorder,
-
+		kubeClient:                kubeClient,
+		recorder:                  recorder,
 		unavailableOfferingsCache: unavailableOfferingsCache,
-		metadataClient:            metadataClient,
-		zoneOperationClient:       zoneOperationClient,
-		credential:                credential,
-		instanceProvider:          instanceProvider,
 	}
 }
 

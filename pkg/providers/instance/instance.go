@@ -174,9 +174,7 @@ func waitForNextTick(ctx context.Context, ticker *time.Ticker) error {
 }
 
 func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *compute.Operation, instanceType, zone, capacityType string) error {
-	capacityError, found := lo.Find(op.Error.Errors, func(e *compute.OperationErrorErrors) bool {
-		return isInsufficientCapacityError(e)
-	})
+	capacityError, found := lo.Find(op.Error.Errors, isInsufficientCapacityError)
 	if found {
 		reason := capacityError.Message
 		if reason == "" {
@@ -354,7 +352,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	}
 
 	joined := errors.Join(errs...)
-	if lo.SomeBy(errs, func(err error) bool { return cloudprovider.IsInsufficientCapacityError(err) }) {
+	if lo.SomeBy(errs, cloudprovider.IsInsufficientCapacityError) {
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("failed to create instance after trying all instance types: %w", joined))
 	}
 

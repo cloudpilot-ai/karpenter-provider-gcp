@@ -7,7 +7,9 @@ linters:
     - bidichk
     - copyloopvar
     - errorlint
+    - gocritic
     - gocyclo
+    - ineffassign
     - goheader
     - gosec
     - misspell
@@ -18,6 +20,7 @@ linters:
     - unconvert
     - unparam
     - unused
+    - wastedassign
   disable:
     - prealloc
   settings:
@@ -37,6 +40,9 @@ linters:
       dot-import-whitelist:
         - github.com/onsi/ginkgo/v2
         - github.com/onsi/gomega
+    unused:
+      field-writes-are-uses: false
+      exported-fields-are-used: false
   exclusions:
     generated: lax
     presets:

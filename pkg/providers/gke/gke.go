@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	containerapiv1 "cloud.google.com/go/container/apiv1"
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
@@ -49,7 +48,6 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
-	gkeClient        *containerapiv1.ClusterManagerClient
 	computeService   *compute.Service
 	containerService *containerv1.Service
 
@@ -62,10 +60,8 @@ type DefaultProvider struct {
 	serverConfigCache *cache.Cache
 }
 
-func NewDefaultProvider(gkeClient *containerapiv1.ClusterManagerClient, computeService *compute.Service,
-	containerService *containerv1.Service, projectID, nodeLocation, clusterName string) Provider {
+func NewDefaultProvider(computeService *compute.Service, containerService *containerv1.Service, projectID, nodeLocation, clusterName string) Provider {
 	return &DefaultProvider{
-		gkeClient:         gkeClient,
 		computeService:    computeService,
 		containerService:  containerService,
 		projectID:         projectID,
