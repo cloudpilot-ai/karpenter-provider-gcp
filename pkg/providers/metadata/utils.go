@@ -35,11 +35,11 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex     = regexp.MustCompile(`max-pods-per-node=\d+`)
-	maxPodsRegex            = regexp.MustCompile(`max-pods=\d+`)
-	gkeProvisioningRegex    = regexp.MustCompile(`gke-provisioning=\w+`)
-	kubeEnvArchRegex        = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
-	kubeEnvFamilyRegex      = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	maxPodsPerNodeRegex           = regexp.MustCompile(`max-pods-per-node=\d+`)
+	maxPodsRegex                  = regexp.MustCompile(`max-pods=\d+`)
+	gkeProvisioningRegex          = regexp.MustCompile(`gke-provisioning=\w+`)
+	kubeEnvArchRegex              = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
+	kubeEnvFamilyRegex            = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
 	diskTypeLabelRegex            = regexp.MustCompile(`^disk-type\.gke\.io/`)
 	diskTypeLabelEntryRegex       = regexp.MustCompile(`,?disk-type\.gke\.io/[^=,\s]+=[^,\s]*`)
 	kubeEnvNodeLabelsEmptyOKRegex = regexp.MustCompile(`--node-labels=\S*`)
