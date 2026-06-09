@@ -24,6 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
@@ -119,6 +122,42 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 	require.Contains(t, got, "cloud.google.com/machine-family=e2")
 	require.Contains(t, got, "arch=amd64")
 	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
+}
+
+func TestPatchKubeEnvForInstanceType_SetsGKECPUScalingLevel(t *testing.T) {
+	meta := gpuTestMeta(
+		"cloud.google.com/machine-family=n2,cloud.google.com/gke-cpu-scaling-level=2",
+		"cloud.google.com/machine-family=n2,cloud.google.com/gke-cpu-scaling-level=2",
+	)
+	it := &cloudprovider.InstanceType{
+		Name: "g2-standard-4",
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, "g2"),
+		),
+		Capacity: corev1.ResourceList{
+			corev1.ResourceCPU: *resource.NewQuantity(4, resource.DecimalSI),
+		},
+	}
+
+	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
+
+	for _, got := range []string{kubeLabelsValue(meta), kubeEnvValue(meta)} {
+		require.Contains(t, got, "cloud.google.com/machine-family=g2")
+		require.Contains(t, got, v1alpha1.LabelGKECPUScalingLevel+"=4")
+		require.NotContains(t, got, v1alpha1.LabelGKECPUScalingLevel+"=2")
+	}
+}
+
+func TestBaselineKubeEnvLabelsIncludesGKEReadinessLabels(t *testing.T) {
+	labels := BaselineKubeEnvLabels(&karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+		karpv1.NodePoolLabelKey: "default",
+	}}}, &v1alpha1.GCENodeClass{})
+
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessMetadataServerEnabled])
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessKubeProxyReady])
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessNetdReady])
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessNodeLocalDNSReady])
 }
 
 func TestAppendGPUTaint_MergesIntoExistingFlag(t *testing.T) {
