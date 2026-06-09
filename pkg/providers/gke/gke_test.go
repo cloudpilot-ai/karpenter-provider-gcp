@@ -26,8 +26,11 @@ import (
 
 	"github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/require"
+	computev1 "google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
-	"google.golang.org/api/option"
+	googleapioption "google.golang.org/api/option"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 )
 
 func TestGetServerConfig_CacheHit(t *testing.T) {
@@ -46,8 +49,8 @@ func TestGetServerConfig_CacheHit(t *testing.T) {
 	defer srv.Close()
 
 	svc, err := containerv1.NewService(context.Background(),
-		option.WithoutAuthentication(),
-		option.WithEndpoint(srv.URL+"/"),
+		googleapioption.WithoutAuthentication(),
+		googleapioption.WithEndpoint(srv.URL+"/"),
 	)
 	require.NoError(t, err)
 
@@ -69,6 +72,85 @@ func TestGetServerConfig_CacheHit(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load(), "second call must hit cache")
 }
 
+func TestResolveClusterZones_UsesClusterLocations(t *testing.T) {
+	var calls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		resp := &containerv1.Cluster{
+			Name:      "test-cluster",
+			Location:  "europe-west4-a",
+			Locations: []string{"europe-west4-c", "europe-west4-a"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := newTestProvider(t, srv.URL, "europe-west4-a")
+
+	zones, err := p.ResolveClusterZones(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"europe-west4-a", "europe-west4-c"}, zones)
+	require.Equal(t, int32(1), calls.Load())
+
+	zones, err = p.ResolveClusterZones(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"europe-west4-a", "europe-west4-c"}, zones)
+	require.Equal(t, int32(1), calls.Load(), "second call must hit cache")
+}
+
+func TestResolveClusterZones_FallsBackToRegionZonesWhenClusterLocationsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/projects/p/locations/europe-west4-a/clusters/test-cluster":
+			_ = json.NewEncoder(w).Encode(&containerv1.Cluster{Name: "test-cluster", Location: "europe-west4-a"})
+		case "/projects/p/zones":
+			_ = json.NewEncoder(w).Encode(&computev1.ZoneList{Items: []*computev1.Zone{
+				{Name: "europe-west4-c"},
+				{Name: "europe-west4-a"},
+				{Name: "us-central1-a"},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestProvider(t, srv.URL, "europe-west4-a")
+	ctx := options.ToContext(context.Background(), &options.Options{ProjectID: "p", ClusterLocation: "europe-west4-a"})
+
+	zones, err := p.ResolveClusterZones(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"europe-west4-a", "europe-west4-c"}, zones)
+}
+
+func newTestProvider(t *testing.T, endpoint, nodeLocation string) *DefaultProvider {
+	t.Helper()
+	containerService, err := containerv1.NewService(context.Background(),
+		googleapioption.WithoutAuthentication(),
+		googleapioption.WithEndpoint(endpoint+"/"),
+	)
+	require.NoError(t, err)
+
+	computeService, err := computev1.NewService(context.Background(),
+		googleapioption.WithoutAuthentication(),
+		googleapioption.WithEndpoint(endpoint+"/"),
+	)
+	require.NoError(t, err)
+
+	return &DefaultProvider{
+		computeService:   computeService,
+		containerService: containerService,
+		projectID:        "p",
+		nodeLocation:     nodeLocation,
+		clusterName:      "test-cluster",
+		clusterCache:     cache.New(clusterCacheTTL, clusterCacheTTL),
+		zoneCache:        cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
+	}
+}
+
 func TestGetClusterConfig_CacheHit(t *testing.T) {
 	var calls atomic.Int32
 
@@ -88,8 +170,8 @@ func TestGetClusterConfig_CacheHit(t *testing.T) {
 	defer srv.Close()
 
 	svc, err := containerv1.NewService(context.Background(),
-		option.WithoutAuthentication(),
-		option.WithEndpoint(srv.URL+"/"),
+		googleapioption.WithoutAuthentication(),
+		googleapioption.WithEndpoint(srv.URL+"/"),
 	)
 	require.NoError(t, err)
 

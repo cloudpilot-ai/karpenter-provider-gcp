@@ -199,3 +199,29 @@ To increase provisioning success:
   ```
 
 - Allow both spot and on-demand to let Karpenter fall back automatically.
+
+---
+
+## Zone mismatch errors
+
+Karpenter provisions nodes only in zones configured for your GKE cluster. If a NodePool's `topology.kubernetes.io/zone` requirement specifies zones outside the cluster's configured locations, provisioning fails with an error like:
+
+```
+no zones match topology requirement "topology.kubernetes.io/zone"; requested zones europe-west4-b, configured GKE cluster locations europe-west4-a,europe-west4-c
+```
+
+Common cause:
+
+- The NodePool requirement lists zones not in the cluster's node locations. Zonal clusters can use multiple node locations, but the requested zones must be configured on the cluster.
+
+To resolve:
+
+1. Check your cluster's configured node locations:
+
+   ```sh
+   gcloud container clusters describe CLUSTER_NAME \
+     --location=CLUSTER_LOCATION \
+     --format="value(locations)"
+   ```
+
+2. Update the NodePool `topology.kubernetes.io/zone` requirement to match available zones, or remove the requirement to let Karpenter use any configured cluster zone.
