@@ -1,0 +1,17 @@
+{
+  "instructions": "Use the provider package comments as the source of truth for package ownership boundaries. Flag changes that move GCE VM lifecycle, GKE cluster API reads, source node-pool selection, or bootstrap metadata mutation into the wrong provider package.",
+  "rules": [
+    {
+      "id": "provider-boundaries",
+      "rule": "Provider changes should respect package ownership: instance owns GCE VM lifecycle and instance labels/tags; nodepooltemplate owns bootstrap source pool/template discovery; gke owns shared GKE cluster facts; metadata owns pure GKE bootstrap metadata transformations.",
+      "scope": ["pkg/providers/**"],
+      "severity": "medium"
+    },
+    {
+      "id": "metadata-purity",
+      "rule": "Bootstrap metadata helpers should remain pure transformations and should not make GCP API calls or mutate shared Compute metadata templates in place.",
+      "scope": ["pkg/providers/metadata/**"],
+      "severity": "high"
+    }
+  ]
+}
