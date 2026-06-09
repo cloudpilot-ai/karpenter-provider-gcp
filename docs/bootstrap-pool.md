@@ -1,6 +1,6 @@
 # Bootstrap Pool Selection
 
-Karpenter requires a GKE node pool to read bootstrap metadata (instance templates, network configuration, kubelet settings). Rather than creating dedicated template pools, Karpenter discovers and reuses an existing cluster pool automatically.
+Karpenter requires a GKE node pool to read bootstrap metadata (instance templates and kubelet settings). Rather than creating dedicated template pools, Karpenter discovers and reuses an existing cluster pool automatically.
 
 ## How it works
 
@@ -52,6 +52,22 @@ Karpenter patches the source pool's kube-env metadata when provisioning nodes wi
 
 This allows a single source pool to bootstrap nodes of any OS and architecture combination.
 
+## Metadata sources
+
+Karpenter reads kubelet bootstrap metadata from the bootstrap pool's instance template. Other instance settings are derived from GCENodeClass, cluster config, or Karpenter/provider defaults.
+
+| Metadata                               | Source                                                                                                                 |
+|----------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| Kubelet configuration (max-pods, etc.) | Bootstrap pool template, then patched by GCENodeClass settings                                                         |
+| Subnetwork                             | GCENodeClass `spec.networkConfig.subnetwork`; defaults to cluster subnetwork from GKE cluster config                   |
+| Private-node setting                   | GCENodeClass `spec.networkConfig.enablePrivateNodes`; defaults to cluster private-node setting from GKE cluster config |
+| Service account                        | GCENodeClass `spec.serviceAccount`, `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`, or Compute Engine default service account      |
+| Service account scopes                 | Karpenter sets `cloud-platform`                                                                                        |
+| Node labels                            | Rebuilt from Karpenter/provider target state                                                                           |
+| Node taints                            | Rebuilt from Karpenter/provider target state                                                                           |
+
+Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls.
+
 ## Upgrading from template pools
 
 Previous Karpenter versions created up to four template pools (`karpenter-default`, `karpenter-ubuntu`, `karpenter-cos-arm64`, `karpenter-ubuntu-arm64`) at startup. These are no longer needed.
@@ -96,7 +112,7 @@ If fallback creation fails due to org policy violations, the error message ident
 
 **Nodes fail to join the cluster after switching bootstrap pools**
 
-If the new source pool has materially different metadata (service account, scopes, labels), existing Karpenter nodes may have stale configuration. Trigger a rolling replacement:
+If the new source pool has materially different kubelet bootstrap metadata, existing Karpenter nodes may have stale configuration. Trigger a rolling replacement:
 
 ```bash
 kubectl annotate nodepool NODEPOOL_NAME "karpenter.k8s.gcp/force-rollout=$(date +%s)" --overwrite
