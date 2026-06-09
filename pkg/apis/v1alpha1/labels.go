@@ -53,6 +53,7 @@ func init() {
 		LabelGKEReadinessNetdReady,
 		LabelGKEReadinessNodeLocalDNSReady,
 		LabelGKEAccelerator,
+		LabelGKECPUScalingLevel,
 	)
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(disktype.AllLabels()...)
 }
