@@ -10,12 +10,13 @@ Karpenter can provision GPU-equipped GKE nodes for workloads that request `nvidi
 
 ## GKE GPU software stack labels
 
-GKE's GPU software stack requires two labels for GPU nodes to function:
+GKE's GPU software stack requires several labels for GPU nodes to function:
 
 - `cloud.google.com/gke-accelerator=<type>` — used by the NVIDIA device plugin DaemonSet to target GPU nodes via node affinity.
 - `cloud.google.com/gke-gpu-driver-version=<value>` — used by the GKE GPU driver installer to select the NVIDIA driver version.
+- `cloud.google.com/gke-cpu-scaling-level=<cpu>` — used by GKE's NVIDIA device plugin DaemonSets to select the appropriate plugin variant (small/medium/large) for GPU nodes.
 
-Karpenter automatically applies both labels at node boot time. The accelerator type is derived from the instance type. The driver version is controlled by `spec.gpuDriverVersion`.
+Karpenter applies these labels automatically at node boot time. The accelerator type and CPU scaling level are derived from the instance type; the driver version is controlled by `spec.gpuDriverVersion`.
 
 ## GPU driver version
 
