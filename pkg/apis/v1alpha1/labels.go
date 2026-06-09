@@ -115,6 +115,9 @@ var (
 	// LabelGKEGPUDriverVersion is the kube-labels key read by GKE's GPU driver installer DaemonSet
 	// to decide which NVIDIA driver version to install. Corresponds to GCENodeClass.spec.gpuDriverVersion.
 	LabelGKEGPUDriverVersion = "cloud.google.com/gke-gpu-driver-version"
+	// LabelGKECPUScalingLevel is used by GKE's NVIDIA device-plugin DaemonSets to
+	// select the small/medium/large plugin variant for GPU nodes.
+	LabelGKECPUScalingLevel = "cloud.google.com/gke-cpu-scaling-level"
 
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
