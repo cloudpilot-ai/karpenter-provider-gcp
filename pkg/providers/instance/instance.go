@@ -19,6 +19,8 @@ package instance
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base32"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -391,7 +393,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, "", nil, &retryableError{err}
 	}
 
-	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, clusterConfig, sourcePoolName, zone, capacityType)
+	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, template, clusterConfig, zone, capacityType)
 	if err != nil {
 		if retryable {
 			return nil, "", nil, &retryableError{err}
@@ -402,7 +404,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 	return instance, zone, template, nil
 }
 
-func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, clusterConfig *container.Cluster, nodePoolName, zone, capacityType string) (*compute.Instance, bool, error) {
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, clusterConfig *container.Cluster, zone, capacityType string) (*compute.Instance, bool, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
 	instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
 	if err != nil {
@@ -414,7 +416,7 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		return instance, false, nil
 	}
 
-	instance, err = p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, template, clusterConfig, nodePoolName, zone, instanceName, capacityType)
+	instance, err = p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, template, clusterConfig, zone, instanceName, capacityType)
 	if err != nil {
 		return nil, false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
@@ -497,17 +499,27 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 }
 
 func filterZonesByRequirement(zones []string, reqs scheduling.Requirements) []string {
-	zoneReq := reqs.Get(corev1.LabelTopologyZone)
-	if zoneReq == nil || len(zoneReq.Values()) == 0 {
+	requested := requestedZones(reqs)
+	if len(requested) == 0 {
 		return zones
 	}
 	allowed := sets.NewString()
 	for _, z := range zones {
-		if lo.Contains(zoneReq.Values(), z) {
+		if lo.Contains(requested, z) {
 			allowed.Insert(z)
 		}
 	}
 	return allowed.List()
+}
+
+func requestedZones(reqs scheduling.Requirements) []string {
+	zoneReq := reqs.Get(corev1.LabelTopologyZone)
+	if zoneReq == nil || len(zoneReq.Values()) == 0 {
+		return nil
+	}
+	zones := append([]string(nil), zoneReq.Values()...)
+	sort.Strings(zones)
+	return zones
 }
 
 func randomZone(zones []string) string {
@@ -543,12 +555,14 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 		return "", err
 	}
 
+	configuredZones := append([]string(nil), zones...)
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	zones = filterZonesByRequirement(zones, reqs)
 
 	// If no zones remain after applying requirements, fail fast.
 	if len(zones) == 0 {
-		return "", fmt.Errorf("no zones match topology requirement %q", corev1.LabelTopologyZone)
+		return "", fmt.Errorf("no zones match topology requirement %q; requested zones %s, configured GKE cluster locations %s",
+			corev1.LabelTopologyZone, strings.Join(requestedZones(reqs), ","), strings.Join(configuredZones, ","))
 	}
 
 	// Skip zones with known ICE for this instance type and capacity type.
@@ -667,7 +681,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, clusterConfig *container.Cluster, nodePoolName, zone, instanceName, capacityType string) (*compute.Instance, error) {
+func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, template *compute.InstanceTemplate, clusterConfig *container.Cluster, zone, instanceName, capacityType string) (*compute.Instance, error) {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
@@ -676,7 +690,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	isGPUInstance := len(template.Properties.GuestAccelerators) > 0 || instanceTypeHasGPU(instanceType)
 
 	// Setup metadata
-	if err := p.setupInstanceMetadata(ctx, template.Properties.Metadata, nodeClass, instanceType, nodeClaim, nodePoolName, capacityType, isGPUInstance); err != nil {
+	if err := p.setupInstanceMetadata(ctx, template.Properties.Metadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance); err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
 
@@ -692,7 +706,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		NetworkInterfaces: p.setupNetworkInterfaces(clusterConfig, nodeClass),
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          template.Properties.Metadata,
-		Labels:            p.initializeInstanceLabels(nodeClass),
+		Labels:            initializeInstanceLabels(nodeClass),
 		Scheduling:        setupScheduling(capacityType),
 		Tags:              buildInstanceTags(p.clusterName, clusterConfig.Id, nodeClass.Spec.NetworkTags),
 	}
@@ -726,7 +740,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	p.configureConfidentialInstance(instance, nodeClass)
 
 	// Setup karpenter built-in labels
-	p.setupInstanceLabels(instance, nodeClaim, nodeClass, instanceType)
+	p.setupInstanceLabels(instance, nodeClaim, nodeClass, clusterConfig.Id)
 
 	return instance, nil
 }
@@ -828,11 +842,9 @@ func podCIDRRange(maxPods int32) int32 {
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance.
-// sourcePoolName is the pool whose template was used as the bootstrap source; it is
-// stripped from GKE built-in labels so the provisioned node is not associated with it.
-func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, sourcePoolName string, capacityType string, isGPUInstance bool) error {
-	if err := metadata.RemoveGKEBuiltinLabels(instanceMetadata, sourcePoolName); err != nil {
-		return fmt.Errorf("failed to remove GKE builtin labels from metadata: %w", err)
+func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool) error {
+	if err := metadata.SetNodeLabels(instanceMetadata, metadata.BaselineKubeLabels(nodeClaim, nodeClass), metadata.BaselineKubeEnvLabels(nodeClaim, nodeClass)); err != nil {
+		return fmt.Errorf("failed to set baseline node labels in metadata: %w", err)
 	}
 
 	if err := metadata.SetMaxPodsPerNode(instanceMetadata, nodeClass); err != nil {
@@ -843,25 +855,23 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMet
 		return fmt.Errorf("failed to render kubelet config metadata: %w", err)
 	}
 
-	if err := metadata.PatchUnregisteredTaints(instanceMetadata); err != nil {
-		return fmt.Errorf("failed to append unregistered taint to kube-env: %w", err)
+	if err := metadata.SetRegisterWithTaints(instanceMetadata, []string{strings.TrimPrefix(metadata.UnregisteredTaintArg, "--register-with-taints=")}); err != nil {
+		return fmt.Errorf("failed to set register-with-taints in metadata: %w", err)
 	}
 
-	if err := p.patchKubeEnv(ctx, instanceMetadata, nodeClass, instanceType); err != nil {
+	if err := p.patchTargetKubeEnv(ctx, instanceMetadata, nodeClass, instanceType, zone, capacityType); err != nil {
 		return err
 	}
 
-	if capacityType == karpv1.CapacityTypeSpot {
-		if err := metadata.SetProvisioningModel(instanceMetadata, capacityType); err != nil {
-			return fmt.Errorf("failed to set provisioning model in metadata: %w", err)
-		}
-	}
-
-	metadata.AppendNodeClaimLabel(nodeClaim, nodeClass, instanceMetadata)
-	metadata.AppendRegisteredLabel(instanceMetadata)
 	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, instanceMetadata)
 
 	metadata.ApplyCustomMetadata(instanceMetadata, nodeClass.Spec.Metadata)
+
+	// Custom metadata may replace kube-labels or kube-env; re-apply target-derived
+	// instance-type labels so Kubernetes scheduling labels remain accurate.
+	if err := metadata.PatchKubeEnvForInstanceType(instanceMetadata, instanceType); err != nil {
+		return fmt.Errorf("failed to patch kube-env metadata for instance type: %w", err)
+	}
 
 	// GPU labels override both the base template value and any spec.metadata entry.
 	if err := setupGPUMetadata(instanceMetadata, nodeClass, instanceType, isGPUInstance); err != nil {
@@ -876,6 +886,30 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, instanceMet
 		return fmt.Errorf("failed to set disk type labels in metadata: %w", err)
 	}
 
+	return nil
+}
+
+func (p *DefaultProvider) patchTargetKubeEnv(ctx context.Context, instanceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, zone, capacityType string) error {
+	if err := p.patchKubeEnv(ctx, instanceMetadata, nodeClass, instanceType); err != nil {
+		return err
+	}
+	if err := metadata.SetKubeEnvZone(instanceMetadata, zone); err != nil {
+		return fmt.Errorf("failed to set kube-env zone in metadata: %w", err)
+	}
+	if err := setProvisioningModel(instanceMetadata, capacityType); err != nil {
+		return err
+	}
+	return nil
+}
+
+func setProvisioningModel(instanceMetadata *compute.Metadata, capacityType string) error {
+	model := "standard"
+	if capacityType == karpv1.CapacityTypeSpot {
+		model = capacityType
+	}
+	if err := metadata.SetProvisioningModel(instanceMetadata, model); err != nil {
+		return fmt.Errorf("failed to set provisioning model in metadata: %w", err)
+	}
 	return nil
 }
 
@@ -1005,8 +1039,10 @@ func setupScheduling(capacityType string) *compute.Scheduling {
 	return sched
 }
 
-// initializeInstanceLabels initializes the instance labels map
-func (p *DefaultProvider) initializeInstanceLabels(nodeClass *v1alpha1.GCENodeClass) map[string]string {
+// initializeInstanceLabels initializes the instance labels map from target-owned
+// labels only. Template labels come from the bootstrap source pool and must not
+// be inherited by the provisioned instance.
+func initializeInstanceLabels(nodeClass *v1alpha1.GCENodeClass) map[string]string {
 	labels := make(map[string]string)
 	for k, v := range nodeClass.Spec.Labels {
 		labels[k] = v
@@ -1019,8 +1055,13 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 	if instance.Scheduling == nil {
 		instance.Scheduling = &compute.Scheduling{}
 	}
+	if instance.Labels == nil {
+		instance.Labels = map[string]string{}
+	}
+	instance.Labels["goog-gke-node-pool-provisioning-model"] = "on-demand"
 
 	if capacityType == karpv1.CapacityTypeSpot {
+		instance.Labels["goog-gke-node-pool-provisioning-model"] = "spot"
 		instance.Scheduling.ProvisioningModel = "SPOT"
 		instance.Scheduling.Preemptible = true
 		instance.Scheduling.AutomaticRestart = ptr.To(false)
@@ -1045,25 +1086,32 @@ func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instan
 	instance.Scheduling.OnHostMaintenance = "TERMINATE"
 }
 
-// setupInstanceLabels writes all GCE labels for a new instance. Cluster-identity labels
-// (goog-k8s-cluster-name and goog-k8s-cluster-location) are always written last so that
-// user-supplied NodePool requirement labels with the same key cannot overwrite them.
-func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) {
+// setupInstanceLabels writes controller-owned GCE labels for a new instance.
+// Kubernetes node labels are rebuilt separately in bootstrap metadata and must
+// not be copied to GCE instance labels.
+func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, clusterID string) {
+	if id, ok := clusterIDBase32(clusterID); ok {
+		instance.Labels["goog-gke-cluster-id-base32"] = id
+	}
+	instance.Labels["goog-gke-cost-management"] = ""
+	instance.Labels["goog-gke-node"] = ""
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
 
-	for key, req := range instanceType.Requirements {
-		if req.Operator() == corev1.NodeSelectorOpIn && req.Len() == 1 {
-			// GCP label keys only allow [a-z0-9_-]; Kubernetes label keys may contain '/' and '.'.
-			instance.Labels[utils.SanitizeGCELabelValue(key)] = utils.SanitizeGCELabelValue(req.Any())
-		}
-	}
-
-	// Stamp both cluster-identity labels last so NodePool labels cannot overwrite them.
+	// Do not set goog-k8s-node-pool-name. That is GKE-managed node pool identity;
+	// Karpenter ownership is tracked with karpenter.sh/nodepool instead.
 	// LabelClusterNameKey is used by the syncInstances API filter; LabelClusterLocationKey
 	// is checked by belongsToCluster to distinguish same-named clusters in different locations.
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
+}
+
+func clusterIDBase32(clusterID string) (string, bool) {
+	decoded, err := hex.DecodeString(clusterID)
+	if err != nil || len(decoded) == 0 {
+		return "", false
+	}
+	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(decoded)), true
 }
 
 // belongsToCluster reports whether inst should be tracked in this controller's instance

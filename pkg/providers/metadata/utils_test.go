@@ -24,6 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
@@ -121,6 +124,42 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 	require.NotContains(t, got, "cloud.google.com/machine-family=c4a")
 }
 
+func TestPatchKubeEnvForInstanceType_SetsGKECPUScalingLevel(t *testing.T) {
+	meta := gpuTestMeta(
+		"cloud.google.com/machine-family=n2,cloud.google.com/gke-cpu-scaling-level=2",
+		"cloud.google.com/machine-family=n2,cloud.google.com/gke-cpu-scaling-level=2",
+	)
+	it := &cloudprovider.InstanceType{
+		Name: "g2-standard-4",
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, "g2"),
+		),
+		Capacity: corev1.ResourceList{
+			corev1.ResourceCPU: *resource.NewQuantity(4, resource.DecimalSI),
+		},
+	}
+
+	require.NoError(t, PatchKubeEnvForInstanceType(meta, it))
+
+	for _, got := range []string{kubeLabelsValue(meta), kubeEnvValue(meta)} {
+		require.Contains(t, got, "cloud.google.com/machine-family=g2")
+		require.Contains(t, got, v1alpha1.LabelGKECPUScalingLevel+"=4")
+		require.NotContains(t, got, v1alpha1.LabelGKECPUScalingLevel+"=2")
+	}
+}
+
+func TestBaselineKubeEnvLabelsIncludesGKEReadinessLabels(t *testing.T) {
+	labels := BaselineKubeEnvLabels(&karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+		karpv1.NodePoolLabelKey: "default",
+	}}}, &v1alpha1.GCENodeClass{})
+
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessMetadataServerEnabled])
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessKubeProxyReady])
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessNetdReady])
+	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessNodeLocalDNSReady])
+}
+
 func TestAppendGPUTaint_MergesIntoExistingFlag(t *testing.T) {
 	// The common case: PatchUnregisteredTaints has already added --register-with-taints.
 	// AppendGPUTaint must merge into that value, not add a second flag.
@@ -181,6 +220,45 @@ func TestAppendGPUTaint_ErrorWhenNoKubeletArgs(t *testing.T) {
 	require.Error(t, AppendGPUTaint(meta))
 }
 
+func TestSetRegisterWithTaints_ReplacesSourceTaints(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{{
+		Key:   "kube-env",
+		Value: lo.ToPtr("KUBELET_ARGS: --v=2 --register-with-taints=dedicated=karpenter:NoSchedule,old=true:NoExecute\n"),
+	}}}
+
+	require.NoError(t, SetRegisterWithTaints(meta, []string{"karpenter.sh/unregistered=true:NoExecute"}))
+
+	got := kubeEnvValue(meta)
+	require.NotContains(t, got, "dedicated=karpenter:NoSchedule")
+	require.NotContains(t, got, "old=true:NoExecute")
+	require.Contains(t, got, "--register-with-taints=karpenter.sh/unregistered=true:NoExecute")
+	require.Equal(t, 1, strings.Count(got, "--register-with-taints="))
+}
+
+func TestSetRegisterWithTaints_AddsFlagWhenMissing(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{{
+		Key:   "kube-env",
+		Value: lo.ToPtr("KUBELET_ARGS: --v=2\n"),
+	}}}
+
+	require.NoError(t, SetRegisterWithTaints(meta, []string{"karpenter.sh/unregistered=true:NoExecute"}))
+
+	require.Contains(t, kubeEnvValue(meta), "--register-with-taints=karpenter.sh/unregistered=true:NoExecute")
+}
+
+func TestSetRegisterWithTaints_RemovesFlagWhenEmpty(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{{
+		Key:   "kube-env",
+		Value: lo.ToPtr("KUBELET_ARGS: --v=2 --register-with-taints=dedicated=karpenter:NoSchedule\n"),
+	}}}
+
+	require.NoError(t, SetRegisterWithTaints(meta, nil))
+
+	got := kubeEnvValue(meta)
+	require.NotContains(t, got, "--register-with-taints=")
+	require.Contains(t, got, "KUBELET_ARGS: --v=2")
+}
+
 // gpuTestMeta returns a compute.Metadata that mirrors a real GKE template:
 // kube-labels holds comma-separated node labels, and kube-env's KUBELET_ARGS carries
 // those same labels in a --node-labels= flag (the canonical kubelet label source).
@@ -212,6 +290,49 @@ func kubeEnvValue(meta *compute.Metadata) string {
 		}
 	}
 	return ""
+}
+
+func TestSetNodeLabels_ReplacesSourceLabelsInKubeLabelsAndKubeEnv(t *testing.T) {
+	meta := gpuTestMeta(
+		"cloud.google.com/gke-nodepool=bootstrap,workload=karpenter,max-pods-per-node=110",
+		"cloud.google.com/gke-nodepool=bootstrap,workload=karpenter,max-pods-per-node=110",
+	)
+	kubeLabels := map[string]string{
+		"max-pods-per-node":              "32",
+		"karpenter.sh/nodepool":          "default",
+		"karpenter.k8s.gcp/gcenodeclass": "default",
+		"karpenter.sh/registered":        "true",
+	}
+	kubeEnvLabels := map[string]string{
+		"max-pods-per-node":              "32",
+		"karpenter.sh/nodepool":          "default",
+		"karpenter.k8s.gcp/gcenodeclass": "default",
+	}
+
+	require.NoError(t, SetNodeLabels(meta, kubeLabels, kubeEnvLabels))
+
+	for _, got := range []string{kubeLabelsValue(meta), kubeEnvValue(meta)} {
+		require.NotContains(t, got, "cloud.google.com/gke-nodepool=bootstrap")
+		require.NotContains(t, got, "workload=karpenter")
+		require.Contains(t, got, "max-pods-per-node=32")
+		require.Contains(t, got, "karpenter.sh/nodepool=default")
+		require.Contains(t, got, "karpenter.k8s.gcp/gcenodeclass=default")
+	}
+	require.Contains(t, kubeLabelsValue(meta), "karpenter.sh/registered=true")
+	require.NotContains(t, kubeEnvValue(meta), "karpenter.sh/registered=true")
+	require.Equal(t, 1, strings.Count(kubeEnvValue(meta), "--node-labels="))
+}
+
+func TestSetNodeLabels_HandlesMissingNodeLabelsFlag(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: lo.ToPtr("workload=karpenter")},
+		{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
+	}}
+
+	require.NoError(t, SetNodeLabels(meta, map[string]string{"karpenter.sh/nodepool": "default"}, map[string]string{"karpenter.sh/nodepool": "default"}))
+
+	require.Equal(t, "karpenter.sh/nodepool=default", kubeLabelsValue(meta))
+	require.Contains(t, kubeEnvValue(meta), "--node-labels=karpenter.sh/nodepool=default")
 }
 
 func TestSetDiskTypeLabelsReplacesInheritedLabels(t *testing.T) {
@@ -429,4 +550,54 @@ func TestApplyCustomMetadata_SkipsEmptyValue(t *testing.T) {
 	require.Len(t, meta.Items, 1, "empty value must not remove the existing key")
 	require.Equal(t, "true", metadataValue(meta, "serial-port-logging-enable"),
 		"empty value is ignored: it cannot clear a value inherited from the base template")
+}
+
+func TestSetProvisioningModel_AddsSpotAfterLabelRebuild(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: lo.ToPtr("workload=karpenter")},
+		{Key: "kube-env", Value: lo.ToPtr("AUTOSCALER_ENV_VARS: gke-provisioning=standard\nKUBELET_ARGS: --v=2 --node-labels=workload=karpenter\n")},
+	}}
+
+	require.NoError(t, SetNodeLabels(meta, map[string]string{"karpenter.sh/nodepool": "default"}, map[string]string{"karpenter.sh/nodepool": "default"}))
+	require.NoError(t, SetProvisioningModel(meta, "spot"))
+
+	require.Contains(t, kubeLabelsValue(meta), "gke-provisioning=spot")
+	require.Contains(t, kubeEnvValue(meta), "gke-provisioning=spot")
+	require.NotContains(t, kubeEnvValue(meta), "gke-provisioning=standard")
+	require.Contains(t, kubeEnvValue(meta), "--node-labels=karpenter.sh/nodepool=default,gke-provisioning=spot")
+	require.NotContains(t, kubeLabelsValue(meta), "workload=karpenter")
+	require.NotContains(t, kubeEnvValue(meta), "workload=karpenter")
+}
+
+func TestSetNodeLabels_ComposesWithGPUAndDiskLabelHelpers(t *testing.T) {
+	meta := gpuTestMeta("workload=karpenter", "workload=karpenter")
+
+	require.NoError(t, SetNodeLabels(meta, map[string]string{"karpenter.sh/nodepool": "default"}, map[string]string{"karpenter.sh/nodepool": "default"}))
+	require.NoError(t, SetGPUAcceleratorLabel(meta, "nvidia-l4"))
+	require.NoError(t, SetGPUDriverVersionLabel(meta, "latest"))
+	require.NoError(t, SetDiskTypeLabels(meta, map[string]string{"disk-type.gke.io/pd-balanced": "true"}))
+
+	for _, got := range []string{kubeLabelsValue(meta), kubeEnvValue(meta)} {
+		require.NotContains(t, got, "workload=karpenter")
+		require.Contains(t, got, "karpenter.sh/nodepool=default")
+		require.Contains(t, got, "cloud.google.com/gke-accelerator=nvidia-l4")
+		require.Contains(t, got, "cloud.google.com/gke-gpu-driver-version=latest")
+		require.Contains(t, got, "disk-type.gke.io/pd-balanced=true")
+	}
+}
+
+func TestSetRegisterWithTaints_ComposesWithAppendGPUTaint(t *testing.T) {
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{{
+		Key:   "kube-env",
+		Value: lo.ToPtr("KUBELET_ARGS: --v=2 --register-with-taints=dedicated=karpenter:NoSchedule\n"),
+	}}}
+
+	require.NoError(t, SetRegisterWithTaints(meta, []string{"karpenter.sh/unregistered=true:NoExecute"}))
+	require.NoError(t, AppendGPUTaint(meta))
+
+	got := kubeEnvValue(meta)
+	require.NotContains(t, got, "dedicated=karpenter:NoSchedule")
+	require.Contains(t, got, "karpenter.sh/unregistered=true:NoExecute")
+	require.Contains(t, got, GPUTaintArg)
+	require.Equal(t, 1, strings.Count(got, "--register-with-taints="))
 }

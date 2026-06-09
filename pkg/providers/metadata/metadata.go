@@ -16,12 +16,6 @@ limitations under the License.
 
 package metadata
 
-import (
-	"fmt"
-
-	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-)
-
 const (
 	ClusterNameLabel     = "cluster-name"
 	GKENodePoolLabel     = "cloud.google.com/gke-nodepool"
@@ -31,8 +25,4 @@ const (
 	GPUTaintArg                     = "nvidia.com/gpu=present:NoSchedule"
 	KubeletConfigLabel              = "kubelet-config"
 	GKESecondaryBootDiskLabelPrefix = "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk-"
-)
-
-var (
-	RegisteredLabel = fmt.Sprintf("%s=%s", karpv1.NodeRegisteredLabelKey, "true")
 )
