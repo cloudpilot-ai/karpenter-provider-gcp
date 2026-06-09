@@ -163,19 +163,6 @@ func mergeUserKubeletConfig(config map[string]interface{}, kc *v1alpha1.KubeletC
 	return nil
 }
 
-func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) error {
-	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, nodePoolName)
-	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
-	for _, item := range metadata.Items {
-		if item.Key != "kube-labels" && item.Key != "kube-env" {
-			continue
-		}
-
-		item.Value = lo.ToPtr(strings.ReplaceAll(lo.FromPtr(item.Value), nodePoolLabelEntry, ""))
-	}
-	return nil
-}
-
 // SetNodeLabels replaces all Kubernetes node-label bootstrap surfaces with the
 // target node labels Karpenter/provider owns. It intentionally discards labels
 // inherited from the GKE bootstrap source pool. kubeLabels and kubeEnvLabels are
@@ -411,24 +398,29 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 
 	arch, family := kubeEnvPatchTargets(instanceType)
 	for _, item := range metadata.Items {
-		if item.Key != "kube-env" {
-			continue
-		}
-		kubeEnv := lo.FromPtr(item.Value)
-		if kubeEnv == "" {
-			return fmt.Errorf("kube-env metadata is empty")
-		}
+		switch item.Key {
+		case "kube-labels":
+			if family != "" {
+				item.Value = lo.ToPtr(upsertLabelString(lo.FromPtr(item.Value), "cloud.google.com/machine-family", family))
+			}
+		case "kube-env":
+			kubeEnv := lo.FromPtr(item.Value)
+			if kubeEnv == "" {
+				return fmt.Errorf("kube-env metadata is empty")
+			}
 
-		// Note: SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH are left untouched.
-		// They are set correctly per-architecture by GKE in the node pool template.
-		// Patching the URL without the corresponding hash causes bootstrap failures.
-		updated := patchKubeEnvKeyValue(kubeEnv, kubeEnvArchRegex, "arch="+arch)
-		if family != "" {
-			updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
-		}
+			// Note: SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH are left untouched.
+			// They are set correctly per-architecture by GKE in the node pool template.
+			// Patching the URL without the corresponding hash causes bootstrap failures.
+			updated := patchKubeEnvKeyValue(kubeEnv, kubeEnvArchRegex, "arch="+arch)
+			if family != "" {
+				updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
+				updated = upsertNodeLabelInKubeEnv(updated, "cloud.google.com/machine-family", family)
+			}
 
-		if updated != kubeEnv {
-			item.Value = lo.ToPtr(updated)
+			if updated != kubeEnv {
+				item.Value = lo.ToPtr(updated)
+			}
 		}
 	}
 

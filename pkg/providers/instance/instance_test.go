@@ -173,7 +173,7 @@ func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	require.NoError(t, p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "bootstrap", "europe-west4-c", karpv1.CapacityTypeOnDemand, false))
+	require.NoError(t, p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false))
 
 	kubeLabels := metadataValue(meta, "kube-labels")
 	kubeEnv := metadataValue(meta, "kube-env")
@@ -1138,7 +1138,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		onDemandOnlyIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-test",
+		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
 	)
 	require.NoError(t, err)
@@ -1222,7 +1222,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 		gpuIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1280,7 +1280,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 		gpuIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1342,7 +1342,7 @@ func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
 		nonGPUIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1461,12 +1461,13 @@ func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 		instanceType,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-disk-label-test",
+		"us-central1-a", "karpenter-disk-label-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
 	require.NoError(t, err)
 	for _, value := range []string{kubeLabelsFrom(t, instance), kubeEnvFrom(t, instance)} {
+		require.Contains(t, value, "cloud.google.com/machine-family=e2")
 		require.Contains(t, value, "disk-type.gke.io/pd-balanced=true")
 		require.Contains(t, value, "disk-type.gke.io/pd-extreme=true")
 		require.Contains(t, value, "disk-type.gke.io/pd-ssd=true")
@@ -1495,7 +1496,7 @@ func TestBuildInstance_RebuildsGCELabelsWithoutTemplateIdentityLabelInheritance(
 		context.Background(),
 		spotOrOnDemandNodeClaim(), nodeClass, makeGPUIT(), template,
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-identity-test",
+		"us-central1-a", "karpenter-identity-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1537,7 +1538,7 @@ func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
 				context.Background(),
 				spotOrOnDemandNodeClaim(), nc, makeGPUIT(), makeGPUTemplate("max-pods-per-node=110"),
 				makeCluster("net", "subnet", "pods", false),
-				"default-pool", "us-central1-a", "karpenter-gpu-test",
+				"us-central1-a", "karpenter-gpu-test",
 				karpv1.CapacityTypeOnDemand,
 			)
 			require.NoError(t, err)
@@ -1575,7 +1576,7 @@ func TestBuildInstance_GPUDriverVersionNotInjectedForNonGPU(t *testing.T) {
 		context.Background(),
 		spotOrOnDemandNodeClaim(), nc, nonGPUIT, makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-test",
+		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)
@@ -1596,7 +1597,7 @@ func TestBuildInstance_GPUDriverVersionOverridesTemplate(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nc, makeGPUIT(),
 		makeGPUTemplate("max-pods-per-node=110,cloud.google.com/gke-gpu-driver-version=default"),
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)
@@ -1632,7 +1633,7 @@ func TestBuildInstance_NodePoolLabelDoesNotOverrideGPUDriverAtBootTime(t *testin
 		context.Background(),
 		nodeClaim, nc, makeGPUIT(), makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)
@@ -1689,7 +1690,7 @@ func TestBuildInstance_DoesNotCopyKubernetesSchedulingLabelsToGCELabels(t *testi
 		context.Background(),
 		spotOrOnDemandNodeClaim(), nodeClass, instanceType, makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-f", "karpenter-no-label-leak",
+		"us-central1-f", "karpenter-no-label-leak",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1976,7 +1977,7 @@ func buildConfidentialInstance(t *testing.T, nc *v1alpha1.GCENodeClass) *compute
 		makeNonGPUIT(),
 		makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-confidential-test",
+		"us-central1-a", "karpenter-confidential-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)
