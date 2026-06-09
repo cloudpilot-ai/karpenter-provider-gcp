@@ -142,6 +142,71 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func metadataValue(meta *compute.Metadata, key string) string {
+	for _, item := range meta.Items {
+		if item.Key == key {
+			return ptr.Deref(item.Value, "")
+		}
+	}
+	return ""
+}
+
+func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
+	p := &DefaultProvider{}
+	meta := &compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: "kube-labels", Value: ptr.To("cloud.google.com/gke-nodepool=bootstrap,workload=karpenter,max-pods-per-node=110")},
+		{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --v=2 --max-pods=110 --node-labels=cloud.google.com/gke-nodepool=bootstrap,workload=karpenter,max-pods-per-node=110 --register-with-taints=dedicated=karpenter:NoSchedule\n")},
+		{Key: "kubelet-config", Value: ptr.To("maxPods: 110\n")},
+	}}
+	maxPods := int32(32)
+	nodeClass := &v1alpha1.GCENodeClass{}
+	nodeClass.Name = "default"
+	nodeClass.Spec.KubeletConfiguration = &v1alpha1.KubeletConfiguration{MaxPods: &maxPods}
+	nodeClaim := &karpv1.NodeClaim{}
+	nodeClaim.Labels = map[string]string{karpv1.NodePoolLabelKey: "default"}
+	instanceType := &cloudprovider.InstanceType{
+		Name: "e2-standard-2",
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, "e2"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+
+	require.NoError(t, p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false))
+
+	kubeLabels := metadataValue(meta, "kube-labels")
+	kubeEnv := metadataValue(meta, "kube-env")
+	require.NotContains(t, kubeLabels, "workload=karpenter")
+	require.NotContains(t, kubeEnv, "workload=karpenter")
+	require.NotContains(t, kubeEnv, "dedicated=karpenter:NoSchedule")
+	require.NotContains(t, kubeLabels, "cloud.google.com/gke-nodepool=bootstrap")
+	require.NotContains(t, kubeEnv, "cloud.google.com/gke-nodepool=bootstrap")
+	require.Contains(t, kubeLabels, "max-pods-per-node=32")
+	require.Contains(t, kubeEnv, "max-pods-per-node=32")
+	require.Contains(t, kubeEnv, "max-pods=32")
+	require.Contains(t, kubeLabels, "cloud.google.com/gke-os-distribution=cos")
+	require.Contains(t, kubeEnv, "cloud.google.com/gke-os-distribution=cos")
+	require.Contains(t, kubeLabels, karpv1.NodePoolLabelKey+"=default")
+	require.Contains(t, kubeLabels, v1alpha1.LabelNodeClass+"=default")
+	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessNetdReady+"=true")
+	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessNodeLocalDNSReady+"=true")
+	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessMetadataServerEnabled+"=true")
+	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessNetdReady+"=true")
+	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessNodeLocalDNSReady+"=true")
+	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessMetadataServerEnabled+"=true")
+	require.NotContains(t, kubeLabels, v1alpha1.LabelGKEReadinessKubeProxyReady+"=true")
+	require.NotContains(t, kubeEnv, v1alpha1.LabelGKEReadinessKubeProxyReady+"=true")
+	require.Contains(t, kubeLabels, karpv1.NodeRegisteredLabelKey+"=true")
+	require.NotContains(t, kubeEnv, karpv1.NodeRegisteredLabelKey+"=true")
+	require.Contains(t, kubeLabels, "gke-provisioning=standard")
+	require.Contains(t, kubeEnv, "gke-provisioning=standard")
+	require.Contains(t, kubeEnv, "ZONE: europe-west4-c")
+	require.NotContains(t, kubeEnv, "ZONE: europe-west4-a")
+	require.Contains(t, kubeEnv, "karpenter.sh/unregistered=true:NoExecute")
+	require.Equal(t, 1, strings.Count(kubeEnv, "--register-with-taints="))
+}
+
 func TestDelete_ReturnsNotFoundWhenInstanceMissing(t *testing.T) {
 	t.Parallel()
 
@@ -1073,7 +1138,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		onDemandOnlyIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-test",
+		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
 	)
 	require.NoError(t, err)
@@ -1157,7 +1222,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 		gpuIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1215,7 +1280,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 		gpuIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1277,7 +1342,7 @@ func TestBuildInstance_GPUTaintInjected_AttachedGPU(t *testing.T) {
 		nonGPUIT,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
@@ -1396,18 +1461,60 @@ func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 		instanceType,
 		template,
 		cluster,
-		"default-pool", "us-central1-a", "karpenter-disk-label-test",
+		"us-central1-a", "karpenter-disk-label-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 
 	require.NoError(t, err)
 	for _, value := range []string{kubeLabelsFrom(t, instance), kubeEnvFrom(t, instance)} {
+		require.Contains(t, value, "cloud.google.com/machine-family=e2")
 		require.Contains(t, value, "disk-type.gke.io/pd-balanced=true")
 		require.Contains(t, value, "disk-type.gke.io/pd-extreme=true")
 		require.Contains(t, value, "disk-type.gke.io/pd-ssd=true")
 		require.Contains(t, value, "disk-type.gke.io/pd-standard=true")
 		require.NotContains(t, value, "disk-type.gke.io/hyperdisk-throughput=true")
 	}
+}
+
+func TestBuildInstance_RebuildsGCELabelsWithoutTemplateIdentityLabelInheritance(t *testing.T) {
+	t.Parallel()
+
+	p := makeProvider()
+	template := makeGPUTemplate("max-pods-per-node=110")
+	template.Properties.Labels = map[string]string{
+		"goog-gke-cluster-id-base32":            "source-cluster-id",
+		"goog-gke-cost-management":              "source-cost-management",
+		"goog-gke-node":                         "source-node-marker",
+		"goog-gke-node-pool-provisioning-model": "source-provisioning-model",
+		"goog-k8s-node-pool-name":               "source-bootstrap-pool",
+		"workload-label-from-bootstrap-pool":    "must-not-leak",
+		"goog-k8s-cluster-name":                 "source-cluster-name",
+		"goog-k8s-cluster-location":             "source-cluster-location",
+	}
+	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{Labels: map[string]string{"user-label": "value"}}}
+	instance, err := p.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), nodeClass, makeGPUIT(), template,
+		makeCluster("net", "subnet", "pods", false),
+		"us-central1-a", "karpenter-identity-test",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "value", instance.Labels["user-label"])
+	require.Equal(t, "aerukz4jvpg66ajdivtytk6n54asgrlhrgv433ybencwpcnlzxxq", instance.Labels["goog-gke-cluster-id-base32"])
+	require.Contains(t, instance.Labels, "goog-gke-cost-management")
+	require.Equal(t, "", instance.Labels["goog-gke-cost-management"])
+	require.Contains(t, instance.Labels, "goog-gke-node")
+	require.Equal(t, "", instance.Labels["goog-gke-node"])
+	require.Equal(t, "on-demand", instance.Labels["goog-gke-node-pool-provisioning-model"])
+	require.Equal(t, spotOrOnDemandNodeClaim().Labels[karpv1.NodePoolLabelKey], instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)])
+	require.Equal(t, nodeClass.Name, instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)])
+	require.Equal(t, p.clusterName, instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)])
+	require.Equal(t, p.clusterLocation, instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)])
+	require.NotEqual(t, "source-cluster-id", instance.Labels["goog-gke-cluster-id-base32"])
+	require.NotContains(t, instance.Labels, "goog-k8s-node-pool-name")
+	require.NotContains(t, instance.Labels, "workload-label-from-bootstrap-pool")
 }
 
 func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
@@ -1431,7 +1538,7 @@ func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
 				context.Background(),
 				spotOrOnDemandNodeClaim(), nc, makeGPUIT(), makeGPUTemplate("max-pods-per-node=110"),
 				makeCluster("net", "subnet", "pods", false),
-				"default-pool", "us-central1-a", "karpenter-gpu-test",
+				"us-central1-a", "karpenter-gpu-test",
 				karpv1.CapacityTypeOnDemand,
 			)
 			require.NoError(t, err)
@@ -1469,7 +1576,7 @@ func TestBuildInstance_GPUDriverVersionNotInjectedForNonGPU(t *testing.T) {
 		context.Background(),
 		spotOrOnDemandNodeClaim(), nc, nonGPUIT, makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-test",
+		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)
@@ -1490,7 +1597,7 @@ func TestBuildInstance_GPUDriverVersionOverridesTemplate(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nc, makeGPUIT(),
 		makeGPUTemplate("max-pods-per-node=110,cloud.google.com/gke-gpu-driver-version=default"),
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)
@@ -1526,7 +1633,7 @@ func TestBuildInstance_NodePoolLabelDoesNotOverrideGPUDriverAtBootTime(t *testin
 		context.Background(),
 		nodeClaim, nc, makeGPUIT(), makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-gpu-test",
+		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)
@@ -1555,11 +1662,48 @@ func TestSetupInstanceLabels_StampsClusterLocation(t *testing.T) {
 	p := &DefaultProvider{clusterName: "my-cluster", clusterLocation: "us-central1-f"}
 	inst, nodeClaim, nodeClass := instanceLabelsFixture()
 
-	p.setupInstanceLabels(inst, nodeClaim, nodeClass, amd64InstanceType())
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 
 	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
 	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
 		"cluster location must be stamped on the instance label %q", locationKey)
+}
+
+func TestBuildInstance_DoesNotCopyKubernetesSchedulingLabelsToGCELabels(t *testing.T) {
+	t.Parallel()
+
+	p := makeProvider()
+	nodeClass := &v1alpha1.GCENodeClass{}
+	nodeClass.Name = "default"
+	instanceType := &cloudprovider.InstanceType{
+		Name: "n2-standard-2",
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, "linux"),
+			scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "n2-standard-2"),
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-f"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, "n2"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
+	instance, err := p.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), nodeClass, instanceType, makeGPUTemplate("max-pods-per-node=110"),
+		makeCluster("net", "subnet", "pods", false),
+		"us-central1-f", "karpenter-no-label-leak",
+		karpv1.CapacityTypeOnDemand,
+	)
+
+	require.NoError(t, err)
+	for _, key := range []string{
+		corev1.LabelArchStable,
+		corev1.LabelOSStable,
+		corev1.LabelInstanceTypeStable,
+		corev1.LabelTopologyZone,
+		v1alpha1.LabelInstanceFamily,
+	} {
+		require.NotContains(t, instance.Labels, utils.SanitizeGCELabelValue(key), "Kubernetes node label %q must not be copied to GCE instance labels", key)
+	}
 }
 
 func TestSetupInstanceLabels_ClusterNameNotOverwrittenByRequirements(t *testing.T) {
@@ -1567,14 +1711,7 @@ func TestSetupInstanceLabels_ClusterNameNotOverwrittenByRequirements(t *testing.
 
 	p := &DefaultProvider{clusterName: "real-cluster", clusterLocation: "us-central1-f"}
 	inst, nodeClaim, nodeClass := instanceLabelsFixture()
-	it := &cloudprovider.InstanceType{
-		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-			scheduling.NewRequirement(utils.LabelClusterNameKey, corev1.NodeSelectorOpIn, "attacker-cluster"),
-		),
-	}
-
-	p.setupInstanceLabels(inst, nodeClaim, nodeClass, it)
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 
 	nameKey := utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)
 	require.Equal(t, "real-cluster", inst.Labels[nameKey],
@@ -1586,14 +1723,7 @@ func TestSetupInstanceLabels_ClusterLocationNotOverwrittenByRequirements(t *test
 
 	p := &DefaultProvider{clusterName: "my-cluster", clusterLocation: "us-central1-f"}
 	inst, nodeClaim, nodeClass := instanceLabelsFixture()
-	it := &cloudprovider.InstanceType{
-		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-			scheduling.NewRequirement(utils.LabelClusterLocationKey, corev1.NodeSelectorOpIn, "attacker-region"),
-		),
-	}
-
-	p.setupInstanceLabels(inst, nodeClaim, nodeClass, it)
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 
 	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
 	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
@@ -1847,7 +1977,7 @@ func buildConfidentialInstance(t *testing.T, nc *v1alpha1.GCENodeClass) *compute
 		makeNonGPUIT(),
 		makeGPUTemplate("max-pods-per-node=110"),
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
-		"default-pool", "us-central1-a", "karpenter-confidential-test",
+		"us-central1-a", "karpenter-confidential-test",
 		karpv1.CapacityTypeOnDemand,
 	)
 	require.NoError(t, err)

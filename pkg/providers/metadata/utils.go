@@ -35,7 +35,6 @@ import (
 )
 
 var (
-	maxPodsPerNodeRegex           = regexp.MustCompile(`max-pods-per-node=\d+`)
 	maxPodsRegex                  = regexp.MustCompile(`max-pods=\d+`)
 	gkeProvisioningRegex          = regexp.MustCompile(`gke-provisioning=\w+`)
 	kubeEnvArchRegex              = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
@@ -164,85 +163,199 @@ func mergeUserKubeletConfig(config map[string]interface{}, kc *v1alpha1.KubeletC
 	return nil
 }
 
-func RemoveGKEBuiltinLabels(metadata *compute.Metadata, nodePoolName string) error {
-	nodePoolLabelEntry := fmt.Sprintf("%s=%s", GKENodePoolLabel, nodePoolName)
-	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
-	for _, item := range metadata.Items {
-		if item.Key != "kube-labels" && item.Key != "kube-env" {
-			continue
-		}
+// SetNodeLabels replaces all Kubernetes node-label bootstrap surfaces with the
+// target node labels Karpenter/provider owns. It intentionally discards labels
+// inherited from the GKE bootstrap source pool. kubeLabels and kubeEnvLabels are
+// separate because lifecycle labels such as karpenter.sh/registered must not be
+// present at kubelet registration time.
+func SetNodeLabels(metadata *compute.Metadata, kubeLabels, kubeEnvLabels map[string]string) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata must be non-nil")
+	}
+	kubeLabelString := formatLabels(kubeLabels)
+	kubeEnvLabelString := formatLabels(kubeEnvLabels)
+	kubeLabelsFound := false
+	kubeEnvFound := false
 
-		item.Value = lo.ToPtr(strings.ReplaceAll(lo.FromPtr(item.Value), nodePoolLabelEntry, ""))
+	for _, item := range metadata.Items {
+		switch item.Key {
+		case "kube-labels":
+			kubeLabelsFound = true
+			item.Value = lo.ToPtr(kubeLabelString)
+		case "kube-env":
+			kubeEnvFound = true
+			item.Value = lo.ToPtr(setNodeLabelsInKubeEnv(lo.FromPtr(item.Value), kubeEnvLabelString))
+		}
+	}
+	if !kubeLabelsFound {
+		return fmt.Errorf("kube-labels metadata key not found in instance template")
+	}
+	if !kubeEnvFound {
+		return fmt.Errorf("kube-env metadata key not found in instance template")
 	}
 	return nil
+}
+
+func formatLabels(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for key, value := range labels {
+		if key != "" && value != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, labels[key]))
+	}
+	return strings.Join(parts, ",")
+}
+
+func setNodeLabelsInKubeEnv(kubeEnv, labels string) string {
+	flag := "--node-labels=" + labels
+	if kubeEnvNodeLabelsEmptyOKRegex.MatchString(kubeEnv) {
+		return kubeEnvNodeLabelsEmptyOKRegex.ReplaceAllString(kubeEnv, flag)
+	}
+	return appendKubeletArg(kubeEnv, flag)
+}
+
+func upsertLabelString(labels, key, value string) string {
+	parts := strings.Split(labels, ",")
+	updated := make([]string, 0, len(parts)+1)
+	prefix := key + "="
+	inserted := false
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.HasPrefix(part, prefix) {
+			if !inserted {
+				updated = append(updated, prefix+value)
+				inserted = true
+			}
+			continue
+		}
+		updated = append(updated, part)
+	}
+	if !inserted {
+		updated = append(updated, prefix+value)
+	}
+	return strings.Join(updated, ",")
+}
+
+func upsertNodeLabelInKubeEnv(kubeEnv, key, value string) string {
+	if kubeEnvNodeLabelsEmptyOKRegex.MatchString(kubeEnv) {
+		return kubeEnvNodeLabelsEmptyOKRegex.ReplaceAllStringFunc(kubeEnv, func(match string) string {
+			labels := strings.TrimPrefix(match, "--node-labels=")
+			return "--node-labels=" + upsertLabelString(labels, key, value)
+		})
+	}
+	return appendKubeletArg(kubeEnv, "--node-labels="+key+"="+value)
+}
+
+// SetRegisterWithTaints replaces the kubelet register-with-taints flag with the
+// target node taints Karpenter/provider owns. It intentionally discards taints
+// inherited from the GKE bootstrap source pool.
+func SetRegisterWithTaints(metadata *compute.Metadata, taints []string) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata must be non-nil")
+	}
+	kubeEnvFound := false
+	for _, item := range metadata.Items {
+		if item.Key != "kube-env" {
+			continue
+		}
+		kubeEnvFound = true
+		item.Value = lo.ToPtr(setRegisterWithTaintsInKubeEnv(lo.FromPtr(item.Value), taints))
+	}
+	if !kubeEnvFound {
+		return fmt.Errorf("kube-env metadata key not found in instance template")
+	}
+	return nil
+}
+
+func setRegisterWithTaintsInKubeEnv(kubeEnv string, taints []string) string {
+	cleaned := compactStrings(taints)
+	if len(cleaned) == 0 {
+		return registerWithTaintsRegex.ReplaceAllString(kubeEnv, "")
+	}
+	flag := "--register-with-taints=" + strings.Join(cleaned, ",")
+	if registerWithTaintsRegex.MatchString(kubeEnv) {
+		return registerWithTaintsRegex.ReplaceAllString(kubeEnv, flag)
+	}
+	return appendKubeletArg(kubeEnv, flag)
+}
+
+func compactStrings(values []string) []string {
+	ret := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		ret = append(ret, value)
+	}
+	return ret
+}
+
+func appendKubeletArg(kubeEnv, arg string) string {
+	lines := strings.Split(kubeEnv, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "KUBELET_ARGS:") {
+			lines[i] = line + " " + arg
+			return strings.Join(lines, "\n")
+		}
+	}
+	if strings.HasSuffix(kubeEnv, "\n") {
+		return kubeEnv + "KUBELET_ARGS: " + arg + "\n"
+	}
+	if kubeEnv == "" {
+		return "KUBELET_ARGS: " + arg + "\n"
+	}
+	return kubeEnv + "\nKUBELET_ARGS: " + arg + "\n"
 }
 
 func SetMaxPodsPerNode(metadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass) error {
 	maxPods := nodeClass.GetMaxPods()
-	keys := []string{"kube-labels", "kube-env"}
-	maxPodsPerNode := fmt.Sprintf("max-pods-per-node=%d", maxPods)
 	maxPodsStr := fmt.Sprintf("max-pods=%d", maxPods)
 
-	for _, key := range keys {
-		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
-			return item.Key == key
-		})
-		if !ok || index == -1 {
-			return fmt.Errorf("%s metadata not found", key)
-		}
-		targetEntry.Value = lo.ToPtr(maxPodsPerNodeRegex.ReplaceAllString(*targetEntry.Value, maxPodsPerNode))
-		targetEntry.Value = lo.ToPtr(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPodsStr))
-
-		metadata.Items[index] = targetEntry
+	targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
+		return item.Key == "kube-env"
+	})
+	if !ok || index == -1 {
+		return fmt.Errorf("kube-env metadata not found")
 	}
+	targetEntry.Value = lo.ToPtr(maxPodsRegex.ReplaceAllString(*targetEntry.Value, maxPodsStr))
+	metadata.Items[index] = targetEntry
 	return nil
 }
 
 func SetProvisioningModel(metadata *compute.Metadata, model string) error {
-	keys := []string{"kube-labels", "kube-env"}
-	gkeProvisioning := fmt.Sprintf("gke-provisioning=%s", model)
-
-	for _, key := range keys {
-		targetEntry, index, ok := lo.FindIndexOf(metadata.Items, func(item *compute.MetadataItems) bool {
-			return item.Key == key
-		})
-		if !ok || index == -1 {
-			return fmt.Errorf("%s metadata not found", key)
-		}
-		targetEntry.Value = lo.ToPtr(gkeProvisioningRegex.ReplaceAllString(*targetEntry.Value, gkeProvisioning))
-
-		metadata.Items[index] = targetEntry
-	}
-	return nil
-}
-
-func PatchUnregisteredTaints(metadata *compute.Metadata) error {
-	patchedDone := false
-
-	// Remove nodePoolLabelEntry from kube-labels and kube-env
+	kubeLabelsFound := false
+	kubeEnvFound := false
 	for _, item := range metadata.Items {
-		if item.Key == "kube-env" {
-			kubeEnv := lo.FromPtr(item.Value)
-
-			lines := strings.Split(kubeEnv, "\n")
-			for i, line := range lines {
-				if strings.HasPrefix(line, "KUBELET_ARGS:") {
-					if !strings.Contains(line, UnregisteredTaintArg) {
-						// Append the taint argument to the existing KUBELET_ARGS line
-						lines[i] = line + " " + UnregisteredTaintArg
-						patchedDone = true
-					}
-				}
-			}
-			// Rejoin the updated lines into a single string
-			item.Value = lo.ToPtr(strings.Join(lines, "\n"))
+		switch item.Key {
+		case "kube-labels":
+			kubeLabelsFound = true
+			item.Value = lo.ToPtr(upsertLabelString(lo.FromPtr(item.Value), "gke-provisioning", model))
+		case "kube-env":
+			kubeEnvFound = true
+			updated := gkeProvisioningRegex.ReplaceAllString(lo.FromPtr(item.Value), "gke-provisioning="+model)
+			item.Value = lo.ToPtr(upsertNodeLabelInKubeEnv(updated, "gke-provisioning", model))
 		}
 	}
-
-	if !patchedDone {
-		return fmt.Errorf("failed to patch unregistered taints")
+	if !kubeLabelsFound {
+		return fmt.Errorf("kube-labels metadata not found")
 	}
-
+	if !kubeEnvFound {
+		return fmt.Errorf("kube-env metadata not found")
+	}
 	return nil
 }
 
@@ -285,24 +398,29 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 
 	arch, family := kubeEnvPatchTargets(instanceType)
 	for _, item := range metadata.Items {
-		if item.Key != "kube-env" {
-			continue
-		}
-		kubeEnv := lo.FromPtr(item.Value)
-		if kubeEnv == "" {
-			return fmt.Errorf("kube-env metadata is empty")
-		}
+		switch item.Key {
+		case "kube-labels":
+			if family != "" {
+				item.Value = lo.ToPtr(upsertLabelString(lo.FromPtr(item.Value), "cloud.google.com/machine-family", family))
+			}
+		case "kube-env":
+			kubeEnv := lo.FromPtr(item.Value)
+			if kubeEnv == "" {
+				return fmt.Errorf("kube-env metadata is empty")
+			}
 
-		// Note: SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH are left untouched.
-		// They are set correctly per-architecture by GKE in the node pool template.
-		// Patching the URL without the corresponding hash causes bootstrap failures.
-		updated := patchKubeEnvKeyValue(kubeEnv, kubeEnvArchRegex, "arch="+arch)
-		if family != "" {
-			updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
-		}
+			// Note: SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH are left untouched.
+			// They are set correctly per-architecture by GKE in the node pool template.
+			// Patching the URL without the corresponding hash causes bootstrap failures.
+			updated := patchKubeEnvKeyValue(kubeEnv, kubeEnvArchRegex, "arch="+arch)
+			if family != "" {
+				updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
+				updated = upsertNodeLabelInKubeEnv(updated, "cloud.google.com/machine-family", family)
+			}
 
-		if updated != kubeEnv {
-			item.Value = lo.ToPtr(updated)
+			if updated != kubeEnv {
+				item.Value = lo.ToPtr(updated)
+			}
 		}
 	}
 
@@ -325,36 +443,52 @@ func patchKubeEnvKeyValue(kubeEnv string, re *regexp.Regexp, replacement string)
 	return re.ReplaceAllString(kubeEnv, replacement)
 }
 
-func AppendNodeClaimLabel(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
-	// Remove nodePoolLabelEntry from `kube-labels` and `kube-env`
+func SetKubeEnvZone(metadata *compute.Metadata, zone string) error {
+	if metadata == nil || zone == "" {
+		return fmt.Errorf("metadata and zone must be non-empty")
+	}
 	for _, item := range metadata.Items {
-		if item.Key == "kube-labels" {
-			labels := getNodeLabels(nodeClass, nodeClaim)
-			labelString := make([]string, 0, len(labels))
-			for k, v := range labels {
-				// Append the nodeclaim label to kube-labels
-				labelString = append(labelString, fmt.Sprintf("%s=%s", k, v))
-			}
-			item.Value = lo.ToPtr(*item.Value + "," + strings.Join(labelString, ","))
+		if item.Key != "kube-env" {
+			continue
 		}
+		kubeEnv := lo.FromPtr(item.Value)
+		if kubeEnv == "" {
+			return fmt.Errorf("kube-env metadata is empty")
+		}
+		zoneLine := "ZONE: " + zone
+		if regexp.MustCompile(`(?m)^ZONE: [^\n]+`).MatchString(kubeEnv) {
+			item.Value = lo.ToPtr(patchKubeEnvKeyValue(kubeEnv, regexp.MustCompile(`(?m)^ZONE: [^\n]+`), zoneLine))
+		} else {
+			item.Value = lo.ToPtr(kubeEnv + "\n" + zoneLine + "\n")
+		}
+		return nil
+	}
+	return fmt.Errorf("kube-env metadata key not found in instance template")
+}
+
+func BaselineKubeLabels(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) map[string]string {
+	labels := BaselineKubeEnvLabels(nodeClaim, nodeClass)
+	labels[karpv1.NodeRegisteredLabelKey] = "true"
+	return labels
+}
+
+func BaselineKubeEnvLabels(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) map[string]string {
+	return map[string]string{
+		"max-pods-per-node":                             fmt.Sprintf("%d", nodeClass.GetMaxPods()),
+		"cloud.google.com/gke-os-distribution":          gkeOSDistribution(nodeClass),
+		karpv1.NodePoolLabelKey:                         nodeClaim.Labels[karpv1.NodePoolLabelKey],
+		v1alpha1.LabelNodeClass:                         nodeClass.Name,
+		v1alpha1.LabelGKEReadinessMetadataServerEnabled: "true",
+		v1alpha1.LabelGKEReadinessNetdReady:             "true",
+		v1alpha1.LabelGKEReadinessNodeLocalDNSReady:     "true",
 	}
 }
 
-func AppendRegisteredLabel(metadata *compute.Metadata) {
-	// Add registered label in metadata
-	for _, item := range metadata.Items {
-		if item.Key == "kube-labels" {
-			item.Value = lo.ToPtr(*item.Value + "," + RegisteredLabel)
-		}
+func gkeOSDistribution(nodeClass *v1alpha1.GCENodeClass) string {
+	if nodeClass.ImageFamily() == v1alpha1.ImageFamilyUbuntu {
+		return "ubuntu"
 	}
-}
-
-func getNodeLabels(nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim) map[string]string {
-	staticTags := map[string]string{
-		karpv1.NodePoolLabelKey: nodeClaim.Labels[karpv1.NodePoolLabelKey],
-		v1alpha1.LabelNodeClass: nodeClass.Name,
-	}
-	return staticTags
+	return "cos"
 }
 
 func AppendSecondaryBootDisks(projectID string, nodeClass *v1alpha1.GCENodeClass, metadata *compute.Metadata) {
