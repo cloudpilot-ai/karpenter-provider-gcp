@@ -210,10 +210,9 @@ Karpenter provisions nodes only in zones configured for your GKE cluster. If a N
 no zones match topology requirement "topology.kubernetes.io/zone"; requested zones europe-west4-b, configured GKE cluster locations europe-west4-a,europe-west4-c
 ```
 
-Common causes:
+Common cause:
 
-- The NodePool requirement lists zones not in the cluster's node locations
-- The cluster is zonal (single zone) but the NodePool requests multiple zones
+- The NodePool requirement lists zones not in the cluster's node locations. Zonal clusters can use multiple node locations, but the requested zones must be configured on the cluster.
 
 To resolve:
 
