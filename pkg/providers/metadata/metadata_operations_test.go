@@ -78,7 +78,7 @@ func TestAppendSecondaryBootDisksCanonicalizesLabelsAndPreservesKubeEnvAppend(t 
 		SecondaryBootMode:  "CONTAINER_IMAGE_CACHE",
 	}}}}
 
-	mutateMetadata(meta, func(values InstanceMetadata) { AppendSecondaryBootDisks("project-a", nodeClass, values) })
+	mutateMetadata(meta, func(values MetadataValues) { AppendSecondaryBootDisks("project-a", nodeClass, values) })
 
 	require.Equal(t, "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk--cache-image=CONTAINER_IMAGE_CACHE.project-a,z=last", kubeLabelsValue(meta))
 	require.Equal(t, "KUBELET_ARGS: --v=2\n\nSECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/gke-cache-image-disk", metadataValue(meta, KubeEnvKey))
@@ -91,7 +91,7 @@ func TestAppendSecondaryBootDisksNoOpsKubeLabelsWhenMissing(t *testing.T) {
 		SecondaryBootMode:  "CONTAINER_IMAGE_CACHE",
 	}}}}
 
-	mutateMetadata(meta, func(values InstanceMetadata) { AppendSecondaryBootDisks("project-a", nodeClass, values) })
+	mutateMetadata(meta, func(values MetadataValues) { AppendSecondaryBootDisks("project-a", nodeClass, values) })
 
 	require.Equal(t, "KUBELET_ARGS: --v=2\nSECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/gke-cache-image-disk", metadataValue(meta, KubeEnvKey))
 }
@@ -111,7 +111,7 @@ func TestNoPatchKubeEnv(t *testing.T) {
 		),
 	}
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvForInstanceType(values, it) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvForInstanceType(values, it) }))
 
 	got := lo.FromPtr(meta.Items[0].Value)
 	require.NotContains(t, got, "kubernetes-server-linux-arm64.tar.gz")
@@ -145,7 +145,7 @@ KUBELET_ARGS: cloud.google.com/machine-family=e2, arch=amd64; --v=2
 		),
 	}
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvForInstanceType(values, it) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvForInstanceType(values, it) }))
 
 	got := lo.FromPtr(meta.Items[0].Value)
 	// SERVER_BINARY_TAR_URL is left unchanged; the arch-native node pool template carries the correct URL and hash.
@@ -177,7 +177,7 @@ KUBELET_ARGS: cloud.google.com/machine-family=c4a, arch=arm64;
 		),
 	}
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvForInstanceType(values, it) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvForInstanceType(values, it) }))
 
 	got := lo.FromPtr(meta.Items[0].Value)
 	// SERVER_BINARY_TAR_URL is left unchanged; the arch-native node pool template carries the correct URL and hash.
@@ -205,7 +205,7 @@ func TestPatchKubeEnvTaintsMergesExistingFlagsAndRequestedTaints(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvTaints(values, []string{"requested=true:NoSchedule", "existing-1=true:NoSchedule", "requested=true:NoSchedule"})
 	}))
 	got := FromAPI(meta)[KubeEnvKey]
@@ -218,14 +218,14 @@ func TestPatchKubeEnvTaintsMergesExistingFlagsAndRequestedTaints(t *testing.T) {
 
 func TestPatchKubeEnvTaintsNoopsForEmptyTaints(t *testing.T) {
 	meta := &compute.Metadata{}
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvTaints(values, nil) }))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvTaints(values, []string{"", "  "}) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvTaints(values, nil) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvTaints(values, []string{"", "  "}) }))
 	require.Empty(t, meta.Items)
 }
 
 func TestPatchKubeEnvTaintsErrorsWhenKubeEnvMissing(t *testing.T) {
 	meta := &compute.Metadata{Items: []*compute.MetadataItems{{Key: "other", Value: lo.ToPtr("value")}}}
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvTaints(values, []string{"requested=true:NoSchedule"})
 	})
 	require.Error(t, err)
@@ -234,7 +234,7 @@ func TestPatchKubeEnvTaintsErrorsWhenKubeEnvMissing(t *testing.T) {
 
 func TestPatchKubeEnvTaintsErrorsWhenKubeletArgsMissing(t *testing.T) {
 	meta := &compute.Metadata{Items: []*compute.MetadataItems{{Key: KubeEnvKey, Value: lo.ToPtr("OTHER: value\n")}}}
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvTaints(values, []string{"requested=true:NoSchedule"})
 	})
 	require.Error(t, err)
@@ -330,7 +330,7 @@ func TestSetMaxPodsUpdatesKubeLabelsKubeletNodeLabelsAndKubeletMaxPods(t *testin
 	meta.Items[1].Value = lo.ToPtr("KUBELET_ARGS: --v=2 --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110,other=label\n")
 	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{KubeletConfiguration: &v1alpha1.KubeletConfiguration{MaxPods: lo.ToPtr(int32(32))}}}
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return SetMaxPods(values, nodeClass.GetMaxPods()) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return SetMaxPods(values, nodeClass.GetMaxPods()) }))
 
 	kl := kubeLabelsValue(meta)
 	ke := kubeEnvValue(meta)
@@ -360,7 +360,7 @@ func TestSetMaxPodsPreservesNonKubeletArgsReplacements(t *testing.T) {
 	}}
 
 	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{KubeletConfiguration: &v1alpha1.KubeletConfiguration{MaxPods: lo.ToPtr(int32(32))}}}
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return SetMaxPods(values, nodeClass.GetMaxPods()) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return SetMaxPods(values, nodeClass.GetMaxPods()) }))
 
 	ke := kubeEnvValue(meta)
 	require.Contains(t, ke, "OTHER: max-pods-per-node=32,max-pods=32")
@@ -373,7 +373,7 @@ func TestSetMaxPodsErrorsWhenKubeletArgsMissingNodeLabels(t *testing.T) {
 		{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
 	}}
 
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetMaxPods(values, (&v1alpha1.GCENodeClass{}).GetMaxPods())
 	})
 	require.Error(t, err)
@@ -383,7 +383,7 @@ func TestSetMaxPodsErrorsWhenKubeletArgsMissingNodeLabels(t *testing.T) {
 func TestSetProvisioningModelUpdatesKubeLabelsAndKubeletNodeLabels(t *testing.T) {
 	meta := gpuTestMeta("gke-provisioning=standard,max-pods=110", "gke-provisioning=standard,max-pods=110")
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return SetProvisioningModel(values, karpv1.CapacityTypeSpot) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return SetProvisioningModel(values, karpv1.CapacityTypeSpot) }))
 
 	kl := kubeLabelsValue(meta)
 	ke := kubeEnvValue(meta)
@@ -401,7 +401,7 @@ func TestSetProvisioningModelPreservesNonKubeletArgsReplacements(t *testing.T) {
 		{Key: "kube-env", Value: lo.ToPtr("OTHER: gke-provisioning=on-demand\nKUBELET_ARGS: --v=2 --node-labels=gke-provisioning=on-demand\n")},
 	}}
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return SetProvisioningModel(values, karpv1.CapacityTypeSpot) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return SetProvisioningModel(values, karpv1.CapacityTypeSpot) }))
 
 	ke := kubeEnvValue(meta)
 	require.Contains(t, ke, "OTHER: gke-provisioning=spot")
@@ -415,7 +415,7 @@ func TestSetProvisioningModelErrorsWhenKubeletArgsMissingNodeLabels(t *testing.T
 		{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
 	}}
 
-	err := applyMetadata(meta, func(values InstanceMetadata) error { return SetProvisioningModel(values, karpv1.CapacityTypeSpot) })
+	err := applyMetadata(meta, func(values MetadataValues) error { return SetProvisioningModel(values, karpv1.CapacityTypeSpot) })
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "--node-labels flag not found")
 }
@@ -426,7 +426,7 @@ func TestReplaceDiskTypeNodeLabelsReplacesInheritedLabels(t *testing.T) {
 		"cloud.google.com/machine-family=n2,disk-type.gke.io/pd-standard=true,karpenter.sh/nodepool=np",
 	)
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return ReplaceNodeLabels(values, map[string]string{
 			"disk-type.gke.io/hyperdisk-balanced": "true",
 			"disk-type.gke.io/pd-ssd":             "true",
@@ -450,7 +450,7 @@ func TestReplaceDiskTypeNodeLabelsHandlesMultilineKubeletArgs(t *testing.T) {
 `)},
 	}}
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return ReplaceNodeLabels(values, map[string]string{
 			"disk-type.gke.io/pd-balanced": "true",
 		}, func(key string) bool { return strings.HasPrefix(key, diskTypeLabelPrefix) })
@@ -468,7 +468,7 @@ func TestReplaceDiskTypeNodeLabelsErrorsWhenKubeletArgsMissingNodeLabels(t *test
 		{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
 	}}
 
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return ReplaceNodeLabels(values, map[string]string{"disk-type.gke.io/pd-balanced": "true"}, func(key string) bool { return strings.HasPrefix(key, diskTypeLabelPrefix) })
 	})
 	require.Error(t, err)
@@ -481,7 +481,7 @@ func TestReplaceDiskTypeNodeLabelsAllowsEmptySet(t *testing.T) {
 		"disk-type.gke.io/pd-standard=true,karpenter.sh/nodepool=np",
 	)
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return ReplaceNodeLabels(values, nil, func(key string) bool { return strings.HasPrefix(key, diskTypeLabelPrefix) })
 	}))
 
@@ -492,7 +492,7 @@ func TestReplaceDiskTypeNodeLabelsAllowsEmptySet(t *testing.T) {
 
 func TestSetGPUDriverVersionNodeLabel_InjectsLabel(t *testing.T) {
 	meta := gpuTestMeta("max-pods-per-node=110", "max-pods-per-node=110")
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "latest"})
 	}))
 	require.Contains(t, kubeLabelsValue(meta), "cloud.google.com/gke-gpu-driver-version=latest")
@@ -504,7 +504,7 @@ func TestSetGPUDriverVersionNodeLabel_ReplacesWhenLabelIsFirst(t *testing.T) {
 	// preceding comma, leaving "--node-labels=,next" without the fix.
 	baseLabels := "cloud.google.com/gke-gpu-driver-version=default,max-pods-per-node=110"
 	meta := gpuTestMeta(baseLabels, baseLabels)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "latest"})
 	}))
 	ke := kubeEnvValue(meta)
@@ -516,7 +516,7 @@ func TestSetGPUDriverVersionNodeLabel_ReplacesWhenLabelIsFirst(t *testing.T) {
 func TestSetGPUDriverVersionNodeLabel_ReplacesExistingValue(t *testing.T) {
 	baseLabels := "max-pods-per-node=110,cloud.google.com/gke-gpu-driver-version=default"
 	meta := gpuTestMeta(baseLabels, baseLabels)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "latest"})
 	}))
 	kl := kubeLabelsValue(meta)
@@ -532,10 +532,10 @@ func TestSetGPUDriverVersionNodeLabel_ReplacesExistingValue(t *testing.T) {
 
 func TestSetGPUDriverVersionNodeLabel_IdempotentOnRepeat(t *testing.T) {
 	meta := gpuTestMeta("max-pods-per-node=110", "max-pods-per-node=110")
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "default"})
 	}))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "default"})
 	}))
 	ke := kubeEnvValue(meta)
@@ -548,7 +548,7 @@ func TestSetGPUDriverVersionNodeLabel_ErrorWhenKubeletArgsMissingNodeLabels(t *t
 		{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
 	}}
 
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "default"})
 	})
 	require.Error(t, err)
@@ -561,7 +561,7 @@ func TestSetGPUDriverVersionNodeLabel_ErrorWhenNoKubeLabels(t *testing.T) {
 			{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2 --node-labels=foo=bar\n")},
 		},
 	}
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "default"})
 	})
 	require.Error(t, err)
@@ -574,7 +574,7 @@ func TestSetGPUDriverVersionNodeLabel_ErrorWhenNoKubeEnv(t *testing.T) {
 			{Key: "kube-labels", Value: lo.ToPtr("max-pods-per-node=110")},
 		},
 	}
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "default"})
 	})
 	require.Error(t, err)
@@ -583,7 +583,7 @@ func TestSetGPUDriverVersionNodeLabel_ErrorWhenNoKubeEnv(t *testing.T) {
 
 func TestSetGPUAcceleratorNodeLabel_InjectsLabel(t *testing.T) {
 	meta := gpuTestMeta("max-pods-per-node=110", "max-pods-per-node=110")
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-tesla-t4"})
 	}))
 	require.Contains(t, kubeLabelsValue(meta), "cloud.google.com/gke-accelerator=nvidia-tesla-t4")
@@ -596,7 +596,7 @@ func TestSetGPUAcceleratorNodeLabel_ErrorWhenNoKubeLabels(t *testing.T) {
 			{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2 --node-labels=foo=bar\n")},
 		},
 	}
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-tesla-a100"})
 	})
 	require.Error(t, err)
@@ -609,7 +609,7 @@ func TestSetGPUAcceleratorNodeLabel_ErrorWhenKubeletArgsMissingNodeLabels(t *tes
 		{Key: "kube-env", Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
 	}}
 
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-tesla-a100"})
 	})
 	require.Error(t, err)
@@ -622,7 +622,7 @@ func TestSetGPUAcceleratorNodeLabel_ErrorWhenNoKubeEnv(t *testing.T) {
 			{Key: "kube-labels", Value: lo.ToPtr("max-pods-per-node=110")},
 		},
 	}
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-l4"})
 	})
 	require.Error(t, err)
@@ -632,7 +632,7 @@ func TestSetGPUAcceleratorNodeLabel_ErrorWhenNoKubeEnv(t *testing.T) {
 func TestSetGPUAcceleratorNodeLabel_ReplacesExistingValue(t *testing.T) {
 	baseLabels := "max-pods-per-node=110,cloud.google.com/gke-accelerator=nvidia-tesla-t4"
 	meta := gpuTestMeta(baseLabels, baseLabels)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-l4"})
 	}))
 	kl := kubeLabelsValue(meta)
@@ -647,10 +647,10 @@ func TestSetGPUAcceleratorNodeLabel_ReplacesExistingValue(t *testing.T) {
 
 func TestSetGPUAcceleratorNodeLabel_IdempotentOnRepeat(t *testing.T) {
 	meta := gpuTestMeta("max-pods-per-node=110", "max-pods-per-node=110")
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-tesla-t4"})
 	}))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-tesla-t4"})
 	}))
 	ke := kubeEnvValue(meta)
@@ -665,16 +665,16 @@ func TestSetGPULabelsNoCommaArtifacts(t *testing.T) {
 	}, ",")
 	meta := gpuTestMeta(baseLabels, baseLabels)
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-l4"})
 	}))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "latest"})
 	}))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEAccelerator: "nvidia-l4"})
 	}))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{v1alpha1.LabelGKEGPUDriverVersion: "latest"})
 	}))
 
@@ -704,7 +704,7 @@ func TestApplyCustomMetadata_OverridesExistingKey(t *testing.T) {
 		},
 	}
 
-	mutateMetadata(meta, func(values InstanceMetadata) {
+	mutateMetadata(meta, func(values MetadataValues) {
 		ApplyCustomMetadata(values, map[string]string{"serial-port-logging-enable": "false"})
 	})
 
@@ -722,7 +722,7 @@ func TestApplyCustomMetadata_AddsNewKeyAndSorts(t *testing.T) {
 		},
 	}
 
-	mutateMetadata(meta, func(values InstanceMetadata) { ApplyCustomMetadata(values, map[string]string{"new-key": "new-value"}) })
+	mutateMetadata(meta, func(values MetadataValues) { ApplyCustomMetadata(values, map[string]string{"new-key": "new-value"}) })
 
 	require.Equal(t, "existing-fingerprint", meta.Fingerprint, "non-Items fields must be preserved")
 	require.Equal(t, []string{"a", "new-key", "z"}, []string{meta.Items[0].Key, meta.Items[1].Key, meta.Items[2].Key})
@@ -738,7 +738,7 @@ func TestApplyCustomMetadata_SkipsEmptyValue(t *testing.T) {
 		},
 	}
 
-	mutateMetadata(meta, func(values InstanceMetadata) {
+	mutateMetadata(meta, func(values MetadataValues) {
 		ApplyCustomMetadata(values, map[string]string{"serial-port-logging-enable": ""})
 	})
 
@@ -756,7 +756,7 @@ func TestApplyCustomMetadata_EmptyCustomMapNoop(t *testing.T) {
 		},
 	}
 
-	mutateMetadata(meta, func(values InstanceMetadata) { ApplyCustomMetadata(values, nil) })
+	mutateMetadata(meta, func(values MetadataValues) { ApplyCustomMetadata(values, nil) })
 
 	require.Equal(t, []string{"z", "a"}, []string{meta.Items[0].Key, meta.Items[1].Key})
 }

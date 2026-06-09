@@ -40,7 +40,7 @@ type Provider interface {
 	// EnsureFallbackPool creates the karpenter-fallback pool if it does not already exist.
 	EnsureFallbackPool(ctx context.Context) error
 	// GetSourceTemplateMetadata returns metadata from the currently selected source template.
-	GetSourceTemplateMetadata(ctx context.Context) (metadata.InstanceMetadata, error)
+	GetSourceTemplateMetadata(ctx context.Context) (*compute.Metadata, error)
 }
 
 type DefaultProvider struct {
@@ -213,7 +213,7 @@ func (p *DefaultProvider) getSourcePoolName(_ context.Context) (string, error) {
 	return name, nil
 }
 
-func (p *DefaultProvider) GetSourceTemplateMetadata(ctx context.Context) (metadata.InstanceMetadata, error) {
+func (p *DefaultProvider) GetSourceTemplateMetadata(ctx context.Context) (*compute.Metadata, error) {
 	sourcePoolName, err := p.getSourcePoolName(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting source pool name: %w", err)
@@ -228,17 +228,47 @@ func (p *DefaultProvider) GetSourceTemplateMetadata(ctx context.Context) (metada
 		if template.Properties == nil || template.Properties.Labels == nil || template.Properties.Metadata == nil {
 			continue
 		}
-		values := metadata.FromAPI(template.Properties.Metadata)
-		if values[metadata.ClusterNameLabel] != p.ClusterInfo.Name {
+		if metadataValue(template.Properties.Metadata, metadata.ClusterNameLabel) != p.ClusterInfo.Name {
 			continue
 		}
 		if val, ok := template.Properties.Labels["goog-k8s-node-pool-name"]; ok && val == sourcePoolName {
 			log.FromContext(ctx).Info("Found instance template", "templateName", template.Name, "clusterName", p.ClusterInfo.Name)
-			return values, nil
+			return cloneMetadata(template.Properties.Metadata), nil
 		}
 	}
 
 	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s", sourcePoolName)
+}
+
+func metadataValue(meta *compute.Metadata, key string) string {
+	if meta == nil {
+		return ""
+	}
+	for _, item := range meta.Items {
+		if item != nil && item.Key == key && item.Value != nil {
+			return *item.Value
+		}
+	}
+	return ""
+}
+
+func cloneMetadata(meta *compute.Metadata) *compute.Metadata {
+	if meta == nil {
+		return &compute.Metadata{}
+	}
+	items := make([]*compute.MetadataItems, 0, len(meta.Items))
+	for _, item := range meta.Items {
+		if item == nil {
+			continue
+		}
+		clone := &compute.MetadataItems{Key: item.Key}
+		if item.Value != nil {
+			value := *item.Value
+			clone.Value = &value
+		}
+		items = append(items, clone)
+	}
+	return &compute.Metadata{Items: items}
 }
 
 // ensureKarpenterNodePoolTemplate creates the fallback pool if it does not already exist.

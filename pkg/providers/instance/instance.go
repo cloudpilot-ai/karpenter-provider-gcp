@@ -397,7 +397,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 	return instance, zone, nil
 }
 
-func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata metadata.InstanceMetadata, clusterConfig *container.Cluster, zone, capacityType string) (*compute.Instance, bool, error) {
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string) (*compute.Instance, bool, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
 	instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
 	if err != nil {
@@ -639,7 +639,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata metadata.InstanceMetadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string) (*compute.Instance, error) {
+func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string) (*compute.Instance, error) {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
@@ -652,6 +652,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
+	instanceMetadata.SetInstanceLabels(initializeInstanceLabels(nodeClass))
 
 	serviceAccounts, err := p.setupServiceAccounts(nodeClass)
 	if err != nil {
@@ -664,8 +665,8 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		Disks:             attachedDisks,
 		NetworkInterfaces: p.setupNetworkInterfaces(clusterConfig, nodeClass),
 		ServiceAccounts:   serviceAccounts,
-		Metadata:          instanceMetadata,
-		Labels:            initializeInstanceLabels(nodeClass),
+		Metadata:          instanceMetadata.ToComputeMetadata(),
+		Labels:            instanceMetadata.ToComputeLabels(),
 		Scheduling:        setupScheduling(capacityType),
 		Tags:              buildInstanceTags(p.clusterName, clusterConfig.Id, nodeClass.Spec.NetworkTags),
 	}
@@ -801,69 +802,62 @@ func podCIDRRange(maxPods int32) int32 {
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance.
-func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool) (*compute.Metadata, error) {
-	values := metadata.InstanceMetadata{}
-	for key, value := range sourceMetadata {
-		values[key] = value
-	}
+func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool) (*metadata.InstanceMetadata, error) {
+	instanceMetadata := metadata.NewInstanceMetadataFromSource(sourceMetadata)
 	// Metadata is applied in order:
 	// 1. Template-derived metadata adapts the GKE source template to this NodeClaim.
 	// 2. User metadata overlays spec.metadata.
 	// 3. Provider-owned metadata is applied last so required labels and taints win.
-	if err := p.applyTemplateDerivedMetadata(ctx, values, nodeClass, instanceType, nodeClaim, zone, capacityType); err != nil {
+	if err := p.applyTemplateDerivedMetadata(ctx, instanceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType); err != nil {
 		return nil, err
 	}
-	p.applyUserMetadata(values, nodeClass)
-	if err := p.applyProviderOwnedMetadata(ctx, values, nodeClass, instanceType, isGPUInstance); err != nil {
+	instanceMetadata.ApplyUserMetadata(nodeClass.Spec.Metadata)
+	if err := p.applyProviderOwnedMetadata(ctx, instanceMetadata, nodeClass, instanceType, isGPUInstance); err != nil {
 		return nil, err
 	}
 
-	return values.ToAPI(), nil
+	return instanceMetadata, nil
 }
 
-func (p *DefaultProvider) applyTemplateDerivedMetadata(ctx context.Context, values metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string) error {
-	if err := metadata.ReplaceNodeLabelsForSurfaces(values, p.bootstrapKubeLabels(nodeClass, nodeClaim), p.bootstrapKubeEnvLabels(nodeClass, nodeClaim)); err != nil {
+func (p *DefaultProvider) applyTemplateDerivedMetadata(ctx context.Context, instanceMetadata *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string) error {
+	if err := instanceMetadata.ReplaceBootstrapNodeLabels(p.bootstrapKubeLabels(nodeClass, nodeClaim), p.bootstrapKubeEnvLabels(nodeClass, nodeClaim)); err != nil {
 		return fmt.Errorf("failed to rebuild bootstrap node labels in metadata: %w", err)
 	}
-	if err := metadata.SetMaxPods(values, nodeClass.GetMaxPods()); err != nil {
+	if err := instanceMetadata.SetMaxPods(nodeClass.GetMaxPods()); err != nil {
 		return fmt.Errorf("failed to set max pods per node in metadata: %w", err)
 	}
-	if err := metadata.RenderKubeletConfigMetadata(values, nodeClass, instanceType, capacityType); err != nil {
+	if err := instanceMetadata.RenderKubeletConfig(nodeClass, instanceType, capacityType); err != nil {
 		return fmt.Errorf("failed to render kubelet config metadata: %w", err)
 	}
-	if err := p.patchKubeEnv(ctx, values, nodeClass, instanceType); err != nil {
+	if err := p.patchKubeEnv(ctx, instanceMetadata, nodeClass, instanceType); err != nil {
 		return err
 	}
-	if err := metadata.SetKubeEnvZone(values, zone); err != nil {
+	if err := instanceMetadata.SetKubeEnvZone(zone); err != nil {
 		return fmt.Errorf("failed to set kube-env zone in metadata: %w", err)
 	}
 	model := "standard"
 	if capacityType == karpv1.CapacityTypeSpot {
 		model = capacityType
 	}
-	if err := metadata.SetProvisioningModel(values, model); err != nil {
+	if err := instanceMetadata.SetProvisioningModel(model); err != nil {
 		return fmt.Errorf("failed to set provisioning model in metadata: %w", err)
 	}
-	metadata.AppendSecondaryBootDisks(p.projectID, nodeClass, values)
+	instanceMetadata.AppendSecondaryBootDisks(p.projectID, nodeClass)
 	return nil
 }
 
-func (p *DefaultProvider) applyUserMetadata(values metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass) {
-	metadata.ApplyCustomMetadata(values, nodeClass.Spec.Metadata)
-}
-
-func (p *DefaultProvider) applyProviderOwnedMetadata(ctx context.Context, values metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, isGPUInstance bool) error {
-	if err := metadata.PatchKubeEnvForInstanceType(values, instanceType); err != nil {
+func (p *DefaultProvider) applyProviderOwnedMetadata(ctx context.Context, instanceMetadata *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, isGPUInstance bool) error {
+	if err := instanceMetadata.PatchKubeEnvForInstanceType(instanceType); err != nil {
 		return fmt.Errorf("failed to patch kube-env metadata for instance type: %w", err)
 	}
-	if err := metadata.SetKubeEnvTaints(values, []string{metadata.UnregisteredTaintValue}); err != nil {
+	if err := instanceMetadata.SetKubeEnvTaints([]string{metadata.UnregisteredTaintValue}); err != nil {
 		return fmt.Errorf("failed to patch kube-env taints: %w", err)
 	}
-	gpuLabels, gpuTaints := gpuBootstrapMetadata(nodeClass, instanceType, isGPUInstance)
-	if err := metadata.SetNodeLabels(values, gpuLabels); err != nil {
+	gpuLabels, gpuTaints := gpuInstanceMetadata(nodeClass, instanceType, isGPUInstance)
+	if err := instanceMetadata.SetProviderNodeLabels(gpuLabels); err != nil {
 		return fmt.Errorf("failed to inject GPU metadata: %w", err)
 	}
-	if err := metadata.PatchKubeEnvTaints(values, gpuTaints); err != nil {
+	if err := instanceMetadata.PatchKubeEnvTaints(gpuTaints); err != nil {
 		return fmt.Errorf("failed to inject GPU metadata: %w", err)
 	}
 
@@ -871,7 +865,7 @@ func (p *DefaultProvider) applyProviderOwnedMetadata(ctx context.Context, values
 	if !ok {
 		log.FromContext(ctx).V(1).Info("no PD disk compatibility labels found for instance type", "instanceType", instanceType.Name)
 	}
-	if err := metadata.ReplaceNodeLabels(values, diskLabels, func(key string) bool { return strings.HasPrefix(key, "disk-type.gke.io/") }); err != nil {
+	if err := instanceMetadata.ReplaceProviderNodeLabels(diskLabels, func(key string) bool { return strings.HasPrefix(key, "disk-type.gke.io/") }); err != nil {
 		return fmt.Errorf("failed to set disk type labels in metadata: %w", err)
 	}
 	return nil
@@ -887,14 +881,14 @@ func instanceTypeHasGPU(instanceType *cloudprovider.InstanceType) bool {
 }
 
 // patchKubeEnv applies all kube-env patches: instance type (arch/family), OS type, and arch binary URLs.
-func (p *DefaultProvider) patchKubeEnv(ctx context.Context, values metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) error {
-	if err := metadata.PatchKubeEnvForInstanceType(values, instanceType); err != nil {
+func (p *DefaultProvider) patchKubeEnv(ctx context.Context, instanceMetadata *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) error {
+	if err := instanceMetadata.PatchKubeEnvForInstanceType(instanceType); err != nil {
 		return fmt.Errorf("failed to patch kube-env for instance type: %w", err)
 	}
-	if err := metadata.PatchKubeEnvForOSType(values, nodeClass.ImageFamily()); err != nil {
+	if err := instanceMetadata.PatchKubeEnvForOSType(nodeClass.ImageFamily()); err != nil {
 		return fmt.Errorf("failed to patch kube-env for OS type: %w", err)
 	}
-	if err := p.patchKubeEnvForArch(ctx, values, instanceType); err != nil {
+	if err := p.patchKubeEnvForArch(ctx, instanceMetadata, instanceType); err != nil {
 		return err
 	}
 	return nil
@@ -904,13 +898,13 @@ func (p *DefaultProvider) patchKubeEnv(ctx context.Context, values metadata.Inst
 // target arch differs from the source pool's arch. The GKE release version is read
 // from the Kubernetes API server (Group 2 via GKE API) rather than parsed from the
 // pool template's kube-env URL, making the patch independent of the URL format.
-func (p *DefaultProvider) patchKubeEnvForArch(ctx context.Context, values metadata.InstanceMetadata, instanceType *cloudprovider.InstanceType) error {
+func (p *DefaultProvider) patchKubeEnvForArch(ctx context.Context, instanceMetadata *metadata.InstanceMetadata, instanceType *cloudprovider.InstanceType) error {
 	arch := instanceType.Requirements.Get(corev1.LabelArchStable).Any()
 	if arch == "" {
 		arch = imagefamily.OSArchAMD64Requirement
 	}
 	gkeVersion := p.resolveGKEVersion(ctx)
-	if err := metadata.PatchKubeEnvForArch(ctx, values, arch, gkeVersion, http.DefaultClient); err != nil {
+	if err := instanceMetadata.PatchKubeEnvForArch(ctx, arch, gkeVersion, http.DefaultClient); err != nil {
 		return fmt.Errorf("failed to patch kube-env for arch %s: %w", arch, err)
 	}
 	return nil
@@ -955,7 +949,7 @@ func gkeOSDistribution(nodeClass *v1alpha1.GCENodeClass) string {
 	return "cos"
 }
 
-func gpuBootstrapMetadata(nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, isGPU bool) (map[string]string, []string) {
+func gpuInstanceMetadata(nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, isGPU bool) (map[string]string, []string) {
 	if !isGPU {
 		return nil, nil
 	}

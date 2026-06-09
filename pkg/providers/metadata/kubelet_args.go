@@ -111,7 +111,7 @@ func isKubeletArgsContinuationLine(line string) bool {
 	return len(line) > 0 && strings.TrimLeft(line, " \t") != line && strings.HasPrefix(strings.TrimSpace(line), "--")
 }
 
-func PatchKubeEnvTaints(values InstanceMetadata, taints []string) error {
+func PatchKubeEnvTaints(values MetadataValues, taints []string) error {
 	requested := lo.FilterMap(taints, func(taint string, _ int) (string, bool) {
 		taint = strings.TrimSpace(taint)
 		return taint, taint != ""
@@ -125,7 +125,7 @@ func PatchKubeEnvTaints(values InstanceMetadata, taints []string) error {
 	})
 }
 
-func SetKubeEnvTaints(values InstanceMetadata, taints []string) error {
+func SetKubeEnvTaints(values MetadataValues, taints []string) error {
 	requested := lo.FilterMap(taints, func(taint string, _ int) (string, bool) {
 		taint = strings.TrimSpace(taint)
 		return taint, taint != ""
@@ -136,6 +136,6 @@ func SetKubeEnvTaints(values InstanceMetadata, taints []string) error {
 	})
 }
 
-func AppendGPUTaint(values InstanceMetadata) error {
+func AppendGPUTaint(values MetadataValues) error {
 	return PatchKubeEnvTaints(values, []string{GPUTaintArg})
 }

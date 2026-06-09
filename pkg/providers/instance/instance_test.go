@@ -175,11 +175,11 @@ func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	patched, err := p.setupInstanceMetadata(context.Background(), metadata.FromAPI(meta), nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false)
+	patched, err := p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false)
 	require.NoError(t, err)
 
-	kubeLabels := metadataValue(patched, "kube-labels")
-	kubeEnv := metadataValue(patched, "kube-env")
+	kubeLabels := metadataValue(patched.ToComputeMetadata(), "kube-labels")
+	kubeEnv := metadataValue(patched.ToComputeMetadata(), "kube-env")
 	require.NotContains(t, kubeLabels, "workload=karpenter")
 	require.NotContains(t, kubeEnv, "workload=karpenter")
 	require.NotContains(t, kubeEnv, "dedicated=karpenter:NoSchedule")
@@ -1122,11 +1122,11 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	sourceMetadata := metadata.InstanceMetadata{
+	sourceMetadata := metadata.MetadataValues{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
 		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\narch=amd64\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
-	}
+	}.ToAPI()
 
 	cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
 	instance, err := p.buildInstance(
@@ -1197,11 +1197,11 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	sourceMetadata := metadata.InstanceMetadata{
+	sourceMetadata := metadata.MetadataValues{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
 		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
-	}
+	}.ToAPI()
 
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: true}}
 	cluster := makeCluster("net", "subnet", "pods", false)
@@ -1251,11 +1251,11 @@ func TestBuildInstance_GPUTaintInjectedAfterCustomKubeEnv(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	sourceMetadata := metadata.InstanceMetadata{
+	sourceMetadata := metadata.MetadataValues{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
 		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
-	}
+	}.ToAPI()
 
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
 		AutoGPUTaint: true,
@@ -1305,11 +1305,11 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	sourceMetadata := metadata.InstanceMetadata{
+	sourceMetadata := metadata.MetadataValues{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
 		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
-	}
+	}.ToAPI()
 
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{AutoGPUTaint: false}}
 	cluster := makeCluster("net", "subnet", "pods", false)
@@ -1372,12 +1372,12 @@ func makeGPUIT() *cloudprovider.InstanceType {
 	}
 }
 
-func makeSourceMetadata(kubeLabels string) metadata.InstanceMetadata {
-	return metadata.InstanceMetadata{
+func makeSourceMetadata(kubeLabels string) *compute.Metadata {
+	return metadata.MetadataValues{
 		metadata.KubeLabelsKey:    kubeLabels,
 		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=" + kubeLabels + "\ngke-provisioning=standard\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
-	}
+	}.ToAPI()
 }
 
 func kubeLabelsFrom(t *testing.T, instance *compute.Instance) string {
@@ -1414,8 +1414,10 @@ func TestBuildInstance_SortsMetadataAfterAllPatches(t *testing.T) {
 	t.Parallel()
 
 	sourceMetadata := makeSourceMetadata("z-label=last,max-pods-per-node=110,max-pods=110")
-	sourceMetadata["zz-template"] = "last"
-	sourceMetadata["aa-template"] = "first"
+	sourceMetadata.Items = append(sourceMetadata.Items,
+		&compute.MetadataItems{Key: "zz-template", Value: ptr.To("last")},
+		&compute.MetadataItems{Key: "aa-template", Value: ptr.To("first")},
+	)
 	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{Metadata: map[string]string{
 		"yy-custom": "last-custom",
 		"bb-custom": "first-custom",

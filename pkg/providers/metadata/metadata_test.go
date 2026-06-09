@@ -38,26 +38,26 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
-func applyMetadata(meta *compute.Metadata, patch func(InstanceMetadata) error) error {
+func applyMetadata(meta *compute.Metadata, patch func(MetadataValues) error) error {
 	values := FromAPI(meta)
-	original := cloneInstanceMetadata(values)
+	original := cloneMetadataValues(values)
 	if err := patch(values); err != nil {
 		return err
 	}
-	if !testInstanceMetadataEqual(original, values) {
+	if !testMetadataValuesEqual(original, values) {
 		ReplaceAPI(meta, values)
 	}
 	return nil
 }
 
-func mutateMetadata(meta *compute.Metadata, patch func(InstanceMetadata)) {
-	_ = applyMetadata(meta, func(values InstanceMetadata) error {
+func mutateMetadata(meta *compute.Metadata, patch func(MetadataValues)) {
+	_ = applyMetadata(meta, func(values MetadataValues) error {
 		patch(values)
 		return nil
 	})
 }
 
-func testInstanceMetadataEqual(a, b InstanceMetadata) bool {
+func testMetadataValuesEqual(a, b MetadataValues) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -75,7 +75,7 @@ func TestSetNodeLabelsDoesNotPartiallyApplyOnKubeEnvError(t *testing.T) {
 		{Key: KubeEnvKey, Value: lo.ToPtr("KUBELET_ARGS: --v=2\n")},
 	}}
 
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return SetNodeLabels(values, map[string]string{"new-label": "true"})
 	})
 	require.Error(t, err)
@@ -88,7 +88,7 @@ func TestSetNodeLabelsDoesNotPartiallyApplyOnKubeEnvError(t *testing.T) {
 func TestSetNodeLabelsOnlySyncsOwnedLabels(t *testing.T) {
 	meta := gpuTestMeta("template-only=true,owned=old", "kubelet-only=true,owned=old")
 
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return SetNodeLabels(values, map[string]string{"owned": "new"}) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return SetNodeLabels(values, map[string]string{"owned": "new"}) }))
 
 	require.Equal(t, "owned=new,template-only=true", kubeLabelsValue(meta))
 	require.Contains(t, kubeEnvValue(meta), "--node-labels=kubelet-only=true,owned=new")
@@ -96,7 +96,7 @@ func TestSetNodeLabelsOnlySyncsOwnedLabels(t *testing.T) {
 	require.NotContains(t, kubeEnvValue(meta), "template-only=true")
 }
 
-func TestInstanceMetadataFromAPIToAPISortsKeys(t *testing.T) {
+func TestMetadataValuesFromAPIToAPISortsKeys(t *testing.T) {
 	api := &compute.Metadata{Items: []*compute.MetadataItems{
 		{Key: "z", Value: lo.ToPtr("last")},
 		{Key: "a", Value: nil},
@@ -114,7 +114,7 @@ func TestInstanceMetadataFromAPIToAPISortsKeys(t *testing.T) {
 	require.Equal(t, "", lo.FromPtr(out.Items[0].Value))
 }
 
-func TestInstanceMetadataFromAPIDuplicateLastWins(t *testing.T) {
+func TestMetadataValuesFromAPIDuplicateLastWins(t *testing.T) {
 	api := &compute.Metadata{Items: []*compute.MetadataItems{
 		{Key: "k", Value: lo.ToPtr("old")},
 		{Key: "k", Value: lo.ToPtr("new")},
@@ -123,7 +123,7 @@ func TestInstanceMetadataFromAPIDuplicateLastWins(t *testing.T) {
 	require.Equal(t, "new", FromAPI(api)["k"])
 }
 
-func TestInstanceMetadataFromAPIIgnoresNilAndEmptyKeyItems(t *testing.T) {
+func TestMetadataValuesFromAPIIgnoresNilAndEmptyKeyItems(t *testing.T) {
 	api := &compute.Metadata{Items: []*compute.MetadataItems{
 		nil,
 		{Key: "", Value: lo.ToPtr("ignored")},
@@ -131,11 +131,11 @@ func TestInstanceMetadataFromAPIIgnoresNilAndEmptyKeyItems(t *testing.T) {
 	}}
 
 	require.Empty(t, FromAPI(nil))
-	require.Equal(t, InstanceMetadata{"k": "value"}, FromAPI(api))
+	require.Equal(t, MetadataValues{"k": "value"}, FromAPI(api))
 }
 
-func TestInstanceMetadataMergeUserSkipsEmptyAndReserved(t *testing.T) {
-	m := InstanceMetadata{"existing": "template", KubeEnvKey: "system"}
+func TestMetadataValuesMergeUserSkipsEmptyAndReserved(t *testing.T) {
+	m := MetadataValues{"existing": "template", KubeEnvKey: "system"}
 	m.MergeUser(map[string]string{
 		"existing": "user",
 		"empty":    "",
@@ -149,8 +149,8 @@ func TestInstanceMetadataMergeUserSkipsEmptyAndReserved(t *testing.T) {
 	require.NotContains(t, m, "empty")
 }
 
-func TestInstanceMetadataMergeUserNilReceiverNoPanic(t *testing.T) {
-	var m InstanceMetadata
+func TestMetadataValuesMergeUserNilReceiverNoPanic(t *testing.T) {
+	var m MetadataValues
 	require.NotPanics(t, func() {
 		m.MergeUser(map[string]string{"new": "value"}, nil)
 	})
@@ -165,7 +165,7 @@ func TestReplaceAPIPreservesFieldsAndReplacesSortedItems(t *testing.T) {
 		},
 	}
 
-	ReplaceAPI(target, InstanceMetadata{
+	ReplaceAPI(target, MetadataValues{
 		"z": "last",
 		"a": "first",
 	})
@@ -246,7 +246,7 @@ var amd64KubeEnv = "SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-re
 func TestPatchKubeEnvForArch_SameArch_NoHTTP(t *testing.T) {
 	meta := kubeEnvMeta(amd64KubeEnv)
 	// Passing a nil client would panic if a request were made.
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "amd64", "", nil)
 	}))
 	require.Contains(t, lo.FromPtr(meta.Items[0].Value), "linux-amd64.tar.gz")
@@ -262,7 +262,7 @@ func TestPatchKubeEnvForArch_AMD64ToARM64(t *testing.T) {
 	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
 
 	meta := kubeEnvMeta(amd64KubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "", client)
 	}))
 
@@ -274,7 +274,7 @@ func TestPatchKubeEnvForArch_AMD64ToARM64(t *testing.T) {
 
 func TestPatchKubeEnvForArch_NoServerBinaryURL_NoOp(t *testing.T) {
 	meta := kubeEnvMeta("KUBELET_ARGS: --v=2\n")
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "", nil)
 	}))
 	require.Equal(t, "KUBELET_ARGS: --v=2\n", lo.FromPtr(meta.Items[0].Value))
@@ -290,7 +290,7 @@ func TestPatchKubeEnvForArch_VersionFallbackToGKEVersion(t *testing.T) {
 	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
 
 	meta := kubeEnvMeta(kubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "v1.34.3-gke.9999999", client)
 	}))
 	require.Contains(t, lo.FromPtr(meta.Items[0].Value), "linux-arm64.tar.gz")
@@ -304,7 +304,7 @@ func TestPatchKubeEnvForArch_ARM64ToAMD64(t *testing.T) {
 	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
 
 	meta := kubeEnvMeta(arm64KubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "amd64", "", client)
 	}))
 
@@ -317,7 +317,7 @@ func TestPatchKubeEnvForArch_ARM64ToAMD64(t *testing.T) {
 func TestPatchKubeEnvForArch_NoVersionAnywhere_Error(t *testing.T) {
 	kubeEnv := "SERVER_BINARY_TAR_URL: https://example.com/kubernetes-server-linux-amd64.tar.gz\n"
 	meta := kubeEnvMeta(kubeEnv)
-	err := applyMetadata(meta, func(values InstanceMetadata) error {
+	err := applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "", nil)
 	})
 	require.ErrorContains(t, err, "could not extract GKE release version")
@@ -331,7 +331,7 @@ func TestPatchKubeEnvForArch_HashFetchFails_Error(t *testing.T) {
 
 	// Use a distinct version so this test doesn't hit the cache populated by other tests.
 	kubeEnv := "SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.99.0-gke.0000001/kubernetes-server-linux-amd64.tar.gz\n"
-	err := applyMetadata(kubeEnvMeta(kubeEnv), func(values InstanceMetadata) error {
+	err := applyMetadata(kubeEnvMeta(kubeEnv), func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "", client)
 	})
 	require.Error(t, err)
@@ -342,7 +342,7 @@ func TestPatchKubeEnvForArch_HashFetchFails_Error(t *testing.T) {
 func TestPatchKubeEnvForOSType_COSToUbuntu(t *testing.T) {
 	kubeEnv := "gke-os-distribution=cos\nENABLE_NODE_BFQ_IO_SCHEDULER: \"true\"\nNODE_BFQ_IO_SCHEDULER_IO_WEIGHT: \"1200\"\nKUBELET_ARGS: --v=2\n"
 	meta := kubeEnvMeta(kubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyUbuntu) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyUbuntu) }))
 
 	got := lo.FromPtr(meta.Items[0].Value)
 	require.Contains(t, got, "gke-os-distribution=ubuntu")
@@ -354,7 +354,7 @@ func TestPatchKubeEnvForOSType_COSToUbuntu(t *testing.T) {
 func TestPatchKubeEnvForOSType_UbuntuToCOS(t *testing.T) {
 	kubeEnv := "gke-os-distribution=ubuntu\nKUBELET_ARGS: --v=2\n"
 	meta := kubeEnvMeta(kubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyContainerOptimizedOS)
 	}))
 
@@ -368,10 +368,10 @@ func TestPatchKubeEnvForOSType_UbuntuToCOS(t *testing.T) {
 func TestPatchKubeEnvForOSType_COS_Idempotent(t *testing.T) {
 	kubeEnv := "gke-os-distribution=ubuntu\nENABLE_NODE_BFQ_IO_SCHEDULER: \"true\"\nNODE_BFQ_IO_SCHEDULER_IO_WEIGHT: \"1200\"\nKUBELET_ARGS: --v=2\n"
 	meta := kubeEnvMeta(kubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyContainerOptimizedOS)
 	}))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyContainerOptimizedOS)
 	}))
 
@@ -383,7 +383,7 @@ func TestPatchKubeEnvForOSType_COS_Idempotent(t *testing.T) {
 func TestPatchKubeEnvForOSType_UnknownFamily_NoOp(t *testing.T) {
 	kubeEnv := "gke-os-distribution=cos\nKUBELET_ARGS: --v=2\n"
 	meta := kubeEnvMeta(kubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvForOSType(values, "CustomOS") }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvForOSType(values, "CustomOS") }))
 	require.Equal(t, kubeEnv, lo.FromPtr(meta.Items[0].Value))
 }
 
@@ -396,7 +396,7 @@ func TestPatchKubeEnvForArch_MissingHashLine_Error(t *testing.T) {
 	client := srv.Client()
 	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
 
-	err := applyMetadata(kubeEnvMeta(kubeEnv), func(values InstanceMetadata) error {
+	err := applyMetadata(kubeEnvMeta(kubeEnv), func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "", client)
 	})
 	require.ErrorContains(t, err, "SERVER_BINARY_TAR_HASH not found")
@@ -418,8 +418,8 @@ func TestPatchKubeEnv_CrossOSAndArch(t *testing.T) {
 	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
 
 	meta := kubeEnvMeta(cosAMD64KubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error { return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyUbuntu) }))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error { return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyUbuntu) }))
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "", client)
 	}))
 
@@ -445,10 +445,10 @@ func TestPatchKubeEnv_CrossOSAndArch_UbuntuToCoSARM64(t *testing.T) {
 	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
 
 	meta := kubeEnvMeta(ubuntuAMD64KubeEnv)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForOSType(values, v1alpha1.ImageFamilyContainerOptimizedOS)
 	}))
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return PatchKubeEnvForArch(context.Background(), values, "arm64", "", client)
 	}))
 
@@ -575,7 +575,7 @@ func instanceTypeWithKubeReserved(cpuMilli, memMiB int64, ephemeralStorage strin
 func renderedKubeletConfig(t *testing.T, nodeClass *v1alpha1.GCENodeClass, it *cloudprovider.InstanceType, capacityType string) map[string]interface{} {
 	t.Helper()
 	meta := kubeletConfigMeta(baseKubeletConfigYAML)
-	require.NoError(t, applyMetadata(meta, func(values InstanceMetadata) error {
+	require.NoError(t, applyMetadata(meta, func(values MetadataValues) error {
 		return RenderKubeletConfigMetadata(values, nodeClass, it, capacityType)
 	}))
 	var got map[string]interface{}

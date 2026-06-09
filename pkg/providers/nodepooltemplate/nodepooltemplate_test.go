@@ -209,7 +209,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 		p := sourceTemplateProvider(t, srv)
 		source, err := p.GetSourceTemplateMetadata(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, "cluster", source[metadata.ClusterNameLabel])
+		require.Equal(t, "cluster", metadata.FromAPI(source)[metadata.ClusterNameLabel])
 	})
 
 	t.Run("ignores templates from other clusters", func(t *testing.T) {
@@ -221,7 +221,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 
 		source, err := sourceTemplateProvider(t, srv).GetSourceTemplateMetadata(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, "cluster", source[metadata.ClusterNameLabel])
+		require.Equal(t, "cluster", metadata.FromAPI(source)[metadata.ClusterNameLabel])
 	})
 
 	t.Run("missing matching template returns error", func(t *testing.T) {
@@ -239,7 +239,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 
 		source, err := sourceTemplateProvider(t, srv).GetSourceTemplateMetadata(context.Background())
 		require.NoError(t, err)
-		source["new"] = "value"
+		source.Items = append(source.Items, &compute.MetadataItems{Key: "new", Value: lo.ToPtr("value")})
 
 		require.NotContains(t, metadata.FromAPI(template.Properties.Metadata), "new")
 	})

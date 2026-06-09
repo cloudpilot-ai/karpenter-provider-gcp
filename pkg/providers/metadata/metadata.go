@@ -53,7 +53,7 @@ var (
 // User-supplied keys override any value inherited from the base instance template;
 // keys not already present are appended. Empty values are ignored, so a key cannot
 // be used to clear a value inherited from the base template.
-func ApplyCustomMetadata(values InstanceMetadata, customMetadata map[string]string) {
+func ApplyCustomMetadata(values MetadataValues, customMetadata map[string]string) {
 	if len(customMetadata) == 0 {
 		return
 	}
@@ -61,7 +61,7 @@ func ApplyCustomMetadata(values InstanceMetadata, customMetadata map[string]stri
 	values.MergeUser(customMetadata, nil)
 }
 
-func AppendSecondaryBootDisks(projectID string, nodeClass *v1alpha1.GCENodeClass, values InstanceMetadata) {
+func AppendSecondaryBootDisks(projectID string, nodeClass *v1alpha1.GCENodeClass, values MetadataValues) {
 	for _, disk := range nodeClass.Spec.Disks {
 		if disk.Boot || disk.SecondaryBootImage == "" || disk.SecondaryBootMode == "MODE_UNSPECIFIED" {
 			continue

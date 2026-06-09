@@ -91,8 +91,8 @@ const diskTypeLabelPrefix = "disk-type.gke.io/"
 // --node-labels for kubelet registration. It intentionally does not mirror the
 // full label sets between the two surfaces or promote post-registration labels
 // into bootstrap metadata.
-func SetNodeLabels(values InstanceMetadata, labels map[string]string) error {
-	original := cloneInstanceMetadata(values)
+func SetNodeLabels(values MetadataValues, labels map[string]string) error {
+	original := cloneMetadataValues(values)
 	if err := editKubeLabels(values, func(existing KubeLabels) {
 		existing.Merge(labels)
 	}); err != nil {
@@ -112,7 +112,7 @@ func SetNodeLabels(values InstanceMetadata, labels map[string]string) error {
 	return nil
 }
 
-func editKubeLabels(values InstanceMetadata, patch func(labels KubeLabels)) error {
+func editKubeLabels(values MetadataValues, patch func(labels KubeLabels)) error {
 	if values == nil {
 		return fmt.Errorf("%s metadata key not found in instance template", KubeLabelsKey)
 	}
@@ -126,7 +126,7 @@ func editKubeLabels(values InstanceMetadata, patch func(labels KubeLabels)) erro
 	return nil
 }
 
-func editKubeEnv(values InstanceMetadata, patch func(string) (string, error)) error {
+func editKubeEnv(values MetadataValues, patch func(string) (string, error)) error {
 	if values == nil {
 		return fmt.Errorf("%s metadata not found", KubeEnvKey)
 	}
@@ -142,23 +142,23 @@ func editKubeEnv(values InstanceMetadata, patch func(string) (string, error)) er
 	return nil
 }
 
-func editKubeletArgs(values InstanceMetadata, patch func(args *KubeletArgs)) error {
+func editKubeletArgs(values MetadataValues, patch func(args *KubeletArgs)) error {
 	return editKubeEnv(values, func(kubeEnv string) (string, error) {
 		return PatchKubeletArgsLine(kubeEnv, patch)
 	})
 }
 
-func editKubeEnvNodeLabels(values InstanceMetadata, patch func(labels KubeLabels)) error {
+func editKubeEnvNodeLabels(values MetadataValues, patch func(labels KubeLabels)) error {
 	return editKubeEnv(values, func(kubeEnv string) (string, error) {
 		return patchExistingKubeEnvNodeLabels(kubeEnv, patch)
 	})
 }
 
-func cloneInstanceMetadata(values InstanceMetadata) InstanceMetadata {
+func cloneMetadataValues(values MetadataValues) MetadataValues {
 	if values == nil {
 		return nil
 	}
-	out := make(InstanceMetadata, len(values))
+	out := make(MetadataValues, len(values))
 	for k, v := range values {
 		out[k] = v
 	}
@@ -198,7 +198,7 @@ func kubeEnvHasNodeLabelsFlag(kubeEnv string) (bool, bool) {
 	return false, false
 }
 
-func ReplaceNodeLabels(values InstanceMetadata, labels map[string]string, shouldReplace func(string) bool) error {
+func ReplaceNodeLabels(values MetadataValues, labels map[string]string, shouldReplace func(string) bool) error {
 	return SetNodeLabelsWithMutation(values, func(nodeLabels KubeLabels) {
 		for key := range nodeLabels {
 			if shouldReplace(key) {
@@ -209,8 +209,8 @@ func ReplaceNodeLabels(values InstanceMetadata, labels map[string]string, should
 	})
 }
 
-func SetNodeLabelsWithMutation(values InstanceMetadata, patch func(KubeLabels)) error {
-	original := cloneInstanceMetadata(values)
+func SetNodeLabelsWithMutation(values MetadataValues, patch func(KubeLabels)) error {
+	original := cloneMetadataValues(values)
 	if err := editKubeLabels(values, patch); err != nil {
 		return err
 	}
@@ -226,34 +226,34 @@ func SetNodeLabelsWithMutation(values InstanceMetadata, patch func(KubeLabels)) 
 	return nil
 }
 
-func ReplaceNodeLabelsForSurfaces(values InstanceMetadata, kubeLabels, kubeEnvLabels map[string]string) error {
-	original := cloneInstanceMetadata(values)
-	if err := editKubeLabels(values, func(existing KubeLabels) {
-		for key := range existing {
-			existing.Delete(key)
-		}
-		existing.Merge(kubeLabels)
-	}); err != nil {
-		return err
+func ReplaceNodeLabelsForSurfaces(values MetadataValues, kubeLabels, kubeEnvLabels map[string]string) error {
+	if values == nil {
+		return fmt.Errorf("metadata must be non-nil")
 	}
+	if _, ok := values[KubeLabelsKey]; !ok {
+		return fmt.Errorf("%s metadata key not found in instance template", KubeLabelsKey)
+	}
+	if _, ok := values[KubeEnvKey]; !ok {
+		return fmt.Errorf("%s metadata not found", KubeEnvKey)
+	}
+
+	originalKubeLabels := values[KubeLabelsKey]
+	originalKubeEnv := values[KubeEnvKey]
+	values[KubeLabelsKey] = KubeLabels(kubeLabels).String()
 	if err := editKubeEnvNodeLabels(values, func(existing KubeLabels) {
 		for key := range existing {
-			existing.Delete(key)
+			delete(existing, key)
 		}
 		existing.Merge(kubeEnvLabels)
 	}); err != nil {
-		for k := range values {
-			delete(values, k)
-		}
-		for k, v := range original {
-			values[k] = v
-		}
+		values[KubeLabelsKey] = originalKubeLabels
+		values[KubeEnvKey] = originalKubeEnv
 		return err
 	}
 	return nil
 }
 
-func RemoveGKEBuiltinLabels(values InstanceMetadata) error {
+func RemoveGKEBuiltinLabels(values MetadataValues) error {
 	if _, ok := values[KubeLabelsKey]; ok {
 		if err := editKubeLabels(values, func(labels KubeLabels) {
 			labels.Delete(GKENodePoolLabel)
@@ -288,7 +288,7 @@ func removeLabelAssignment(raw, key string) string {
 // SetMaxPods updates every GKE metadata surface that carries max-pods.
 // kube-labels and KUBELET_ARGS --node-labels keep template readers consistent;
 // KUBELET_ARGS --max-pods is the kubelet input that controls node capacity.
-func SetMaxPods(values InstanceMetadata, maxPods int32) error {
+func SetMaxPods(values MetadataValues, maxPods int32) error {
 	maxPodsValue := fmt.Sprintf("%d", maxPods)
 	labels := map[string]string{
 		MaxPodsPerNodeLabel: maxPodsValue,
@@ -307,7 +307,7 @@ func SetMaxPods(values InstanceMetadata, maxPods int32) error {
 	})
 }
 
-func SetProvisioningModel(values InstanceMetadata, model string) error {
+func SetProvisioningModel(values MetadataValues, model string) error {
 	labels := map[string]string{GKEProvisioningLabel: model}
 	if err := SetNodeLabels(values, labels); err != nil {
 		return err
@@ -317,7 +317,7 @@ func SetProvisioningModel(values InstanceMetadata, model string) error {
 	})
 }
 
-func PatchKubeEnvForInstanceType(values InstanceMetadata, instanceType *cloudprovider.InstanceType) error {
+func PatchKubeEnvForInstanceType(values MetadataValues, instanceType *cloudprovider.InstanceType) error {
 	if values == nil || instanceType == nil {
 		return fmt.Errorf("metadata and instanceType must be non-nil")
 	}

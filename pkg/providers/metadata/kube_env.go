@@ -88,7 +88,7 @@ func isAssignmentDelimiter(b byte) bool {
 //   - gke-os-distribution=ubuntu → gke-os-distribution=cos
 //   - ENABLE_NODE_BFQ_IO_SCHEDULER: "true" added (if absent)
 //   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT: "1200" added (if absent)
-func PatchKubeEnvForOSType(values InstanceMetadata, imageFamily string) error {
+func PatchKubeEnvForOSType(values MetadataValues, imageFamily string) error {
 	kubeEnv, ok := values[KubeEnvKey]
 	if !ok {
 		return nil
@@ -141,7 +141,7 @@ func removeKubeEnvLine(kubeEnv, key string) string {
 }
 
 // SetKubeEnvZone patches or appends the ZONE field in kube-env metadata.
-func SetKubeEnvZone(values InstanceMetadata, zone string) error {
+func SetKubeEnvZone(values MetadataValues, zone string) error {
 	if values == nil || zone == "" {
 		return fmt.Errorf("metadata and zone must be non-empty")
 	}
@@ -185,7 +185,7 @@ const archHashHTTPTimeout = 30 * time.Second
 //
 // gkeVersion is used only as a fallback when the version cannot be parsed from the URL.
 // Pass an empty string to rely solely on the URL-parsing behavior (useful for tests).
-func PatchKubeEnvForArch(ctx context.Context, values InstanceMetadata, targetArch, gkeVersion string, httpClient *http.Client) error {
+func PatchKubeEnvForArch(ctx context.Context, values MetadataValues, targetArch, gkeVersion string, httpClient *http.Client) error {
 	kubeEnv, ok := values[KubeEnvKey]
 	if !ok {
 		return nil

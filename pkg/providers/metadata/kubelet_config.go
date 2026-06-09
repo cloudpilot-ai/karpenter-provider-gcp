@@ -28,7 +28,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
-func RenderKubeletConfigMetadata(values InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, capacityType string) error {
+func RenderKubeletConfigMetadata(values MetadataValues, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, capacityType string) error {
 	configStr, ok := values[KubeletConfigLabel]
 	if !ok {
 		return errors.New("kubelet-config metadata not found")
