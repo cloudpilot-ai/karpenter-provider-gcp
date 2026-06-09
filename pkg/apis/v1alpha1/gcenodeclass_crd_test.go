@@ -48,6 +48,7 @@ func TestGCENodeClassCRDRejectsReservedMetadataKeys(t *testing.T) {
 		"install-ssh-psm1",
 		"k8s-node-setup-psm1",
 		"kube-env",
+		"kube-labels",
 		"startup-script",
 		"user-data",
 		"user-profile-psm1",

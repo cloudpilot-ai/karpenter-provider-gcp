@@ -27,6 +27,7 @@ The following GKE bootstrap metadata keys are reserved and cannot be set in `spe
 - `install-ssh-psm1`
 - `k8s-node-setup-psm1`
 - `kube-env`
+- `kube-labels`
 - `kubeconfig`
 - `kubelet-config`
 - `startup-script`

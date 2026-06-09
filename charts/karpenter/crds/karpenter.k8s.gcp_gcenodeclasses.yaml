@@ -463,10 +463,11 @@ spec:
                     in self) && !(''gci-metrics-enabled'' in self) && !(''gci-update-strategy''
                     in self) && !(''instance-template'' in self) && !(''install-ssh-psm1''
                     in self) && !(''k8s-node-setup-psm1'' in self) && !(''kube-env''
-                    in self) && !(''startup-script'' in self) && !(''user-data'' in
-                    self) && !(''user-profile-psm1'' in self) && !(''windows-startup-script-ps1''
-                    in self) && !(''common-psm1'' in self) && !(''kubeconfig'' in
-                    self) && !(''kubelet-config'' in self)'
+                    in self) && !(''kube-labels'' in self) && !(''startup-script''
+                    in self) && !(''user-data'' in self) && !(''user-profile-psm1''
+                    in self) && !(''windows-startup-script-ps1'' in self) && !(''common-psm1''
+                    in self) && !(''kubeconfig'' in self) && !(''kubelet-config''
+                    in self)'
               networkConfig:
                 description: NetworkConfig allows overriding per-interface network
                   settings for provisioned nodes.
