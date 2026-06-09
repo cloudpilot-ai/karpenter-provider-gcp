@@ -29,7 +29,7 @@ import (
 	"google.golang.org/api/googleapi"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 )
 
 // Provider is the interface for managing the bootstrap source pool and its instance template.

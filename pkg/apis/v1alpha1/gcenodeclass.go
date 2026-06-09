@@ -198,7 +198,7 @@ type ImageSelectorTerm struct {
 Maintainers: JSON tags on every field below MUST match the upstream kubelet
 `kubelet/config/v1beta1.KubeletConfiguration` schema. The entire struct is
 JSON-marshaled and merged into the kubelet-config bootstrap metadata YAML
-at provisioning time (see pkg/metadata/utils.go), so any field
+at provisioning time (see pkg/providers/metadata/utils.go), so any field
 added here with a matching upstream JSON tag automatically takes effect at
 kubelet runtime without further plumbing. A consequence is that adding a new
 field also requires deciding whether scheduler bin-packing must agree with

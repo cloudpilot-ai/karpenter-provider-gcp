@@ -30,7 +30,7 @@ import (
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 )
 
 func buildContainerService(t *testing.T, srv *httptest.Server) *container.Service {
