@@ -371,6 +371,9 @@ func TestSelectZone_FailsWhenNoZonesMatchRequirement(t *testing.T) {
 
 	_, err := p.selectZone(ctx, nodeClaim, instanceType, karpv1.CapacityTypeOnDemand)
 	require.Error(t, err)
+	require.Contains(t, err.Error(), `no zones match topology requirement "topology.kubernetes.io/zone"`)
+	require.Contains(t, err.Error(), "requested zones europe-west4-b")
+	require.Contains(t, err.Error(), "configured GKE cluster locations europe-west4-a,europe-west4-c")
 }
 
 func TestAdoptExistingInstance_PopulatesFieldsFromGCEInstance(t *testing.T) {

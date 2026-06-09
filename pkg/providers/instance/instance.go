@@ -499,17 +499,27 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 }
 
 func filterZonesByRequirement(zones []string, reqs scheduling.Requirements) []string {
-	zoneReq := reqs.Get(corev1.LabelTopologyZone)
-	if zoneReq == nil || len(zoneReq.Values()) == 0 {
+	requested := requestedZones(reqs)
+	if len(requested) == 0 {
 		return zones
 	}
 	allowed := sets.NewString()
 	for _, z := range zones {
-		if lo.Contains(zoneReq.Values(), z) {
+		if lo.Contains(requested, z) {
 			allowed.Insert(z)
 		}
 	}
 	return allowed.List()
+}
+
+func requestedZones(reqs scheduling.Requirements) []string {
+	zoneReq := reqs.Get(corev1.LabelTopologyZone)
+	if zoneReq == nil || len(zoneReq.Values()) == 0 {
+		return nil
+	}
+	zones := append([]string(nil), zoneReq.Values()...)
+	sort.Strings(zones)
+	return zones
 }
 
 func randomZone(zones []string) string {
@@ -545,12 +555,14 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 		return "", err
 	}
 
+	configuredZones := append([]string(nil), zones...)
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	zones = filterZonesByRequirement(zones, reqs)
 
 	// If no zones remain after applying requirements, fail fast.
 	if len(zones) == 0 {
-		return "", fmt.Errorf("no zones match topology requirement %q", corev1.LabelTopologyZone)
+		return "", fmt.Errorf("no zones match topology requirement %q; requested zones %s, configured GKE cluster locations %s",
+			corev1.LabelTopologyZone, strings.Join(requestedZones(reqs), ","), strings.Join(configuredZones, ","))
 	}
 
 	// Skip zones with known ICE for this instance type and capacity type.
