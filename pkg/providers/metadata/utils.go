@@ -39,6 +39,7 @@ var (
 	gkeProvisioningRegex          = regexp.MustCompile(`gke-provisioning=\w+`)
 	kubeEnvArchRegex              = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
 	kubeEnvFamilyRegex            = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	kubeEnvZoneRegex              = regexp.MustCompile(`(?m)^ZONE: [^\n]+`)
 	diskTypeLabelRegex            = regexp.MustCompile(`^disk-type\.gke\.io/`)
 	diskTypeLabelEntryRegex       = regexp.MustCompile(`,?disk-type\.gke\.io/[^=,\s]+=[^,\s]*`)
 	kubeEnvNodeLabelsEmptyOKRegex = regexp.MustCompile(`--node-labels=\S*`)
@@ -456,8 +457,8 @@ func SetKubeEnvZone(metadata *compute.Metadata, zone string) error {
 			return fmt.Errorf("kube-env metadata is empty")
 		}
 		zoneLine := "ZONE: " + zone
-		if regexp.MustCompile(`(?m)^ZONE: [^\n]+`).MatchString(kubeEnv) {
-			item.Value = lo.ToPtr(patchKubeEnvKeyValue(kubeEnv, regexp.MustCompile(`(?m)^ZONE: [^\n]+`), zoneLine))
+		if kubeEnvZoneRegex.MatchString(kubeEnv) {
+			item.Value = lo.ToPtr(patchKubeEnvKeyValue(kubeEnv, kubeEnvZoneRegex, zoneLine))
 		} else {
 			item.Value = lo.ToPtr(kubeEnv + "\n" + zoneLine + "\n")
 		}
