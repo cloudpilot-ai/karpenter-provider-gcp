@@ -450,9 +450,23 @@ spec:
               metadata:
                 additionalProperties:
                   type: string
-                description: Metadata contains key/value pairs to set as instance
-                  metadata
+                description: |-
+                  Metadata contains custom key/value pairs to set as instance metadata.
+                  Keys reserved by GKE bootstrap metadata are rejected because the provider owns them.
                 type: object
+                x-kubernetes-validations:
+                - message: spec.metadata contains a reserved GKE metadata key
+                  rule: '!(''cluster-location'' in self) && !(''cluster-name'' in
+                    self) && !(''cluster-uid'' in self) && !(''configure-sh'' in self)
+                    && !(''containerd-configure-sh'' in self) && !(''disable-address-manager''
+                    in self) && !(''enable-os-login'' in self) && !(''gci-ensure-gke-docker''
+                    in self) && !(''gci-metrics-enabled'' in self) && !(''gci-update-strategy''
+                    in self) && !(''instance-template'' in self) && !(''install-ssh-psm1''
+                    in self) && !(''k8s-node-setup-psm1'' in self) && !(''kube-env''
+                    in self) && !(''startup-script'' in self) && !(''user-data'' in
+                    self) && !(''user-profile-psm1'' in self) && !(''windows-startup-script-ps1''
+                    in self) && !(''common-psm1'' in self) && !(''kubeconfig'' in
+                    self) && !(''kubelet-config'' in self)'
               networkConfig:
                 description: NetworkConfig allows overriding per-interface network
                   settings for provisioned nodes.
