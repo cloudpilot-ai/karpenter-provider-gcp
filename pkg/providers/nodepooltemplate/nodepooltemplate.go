@@ -24,9 +24,12 @@ import (
 	"sort"
 	"sync"
 
+	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 )
 
 // Provider is the interface for managing the bootstrap source pool and its instance template.
@@ -36,8 +39,8 @@ type Provider interface {
 	Sync(ctx context.Context) error
 	// EnsureFallbackPool creates the karpenter-fallback pool if it does not already exist.
 	EnsureFallbackPool(ctx context.Context) error
-	// GetSourcePoolName returns the name of the currently selected bootstrap source pool.
-	GetSourcePoolName(ctx context.Context) (string, error)
+	// GetSourceTemplateMetadata returns metadata from the currently selected source template.
+	GetSourceTemplateMetadata(ctx context.Context) (metadata.InstanceMetadata, error)
 }
 
 type DefaultProvider struct {
@@ -45,6 +48,7 @@ type DefaultProvider struct {
 	// sourcePoolName is the currently selected bootstrap source pool.
 	sourcePoolName string
 
+	computeService        *compute.Service
 	containerService      *container.Service
 	ClusterInfo           ClusterInfo
 	defaultServiceAccount string
@@ -68,11 +72,12 @@ const (
 	KarpenterFallbackNodePoolTemplateImageType = "COS_CONTAINERD"
 )
 
-func NewDefaultProvider(_ context.Context, containerService *container.Service,
+func NewDefaultProvider(_ context.Context, computeService *compute.Service, containerService *container.Service,
 	clusterName, region, projectID, serviceAccount, clusterLocation, nodeLocation string,
 	preferredPoolName string) *DefaultProvider {
 
 	return &DefaultProvider{
+		computeService:        computeService,
 		containerService:      containerService,
 		defaultServiceAccount: serviceAccount,
 		preferredPoolName:     preferredPoolName,
@@ -196,9 +201,9 @@ func eligiblePoolsSorted(pools []*container.NodePool, excludeName string) []stri
 	return candidates
 }
 
-// GetSourcePoolName returns the name of the currently selected bootstrap source pool.
+// getSourcePoolName returns the name of the currently selected bootstrap source pool.
 // Returns an error if pool discovery has not completed yet.
-func (p *DefaultProvider) GetSourcePoolName(_ context.Context) (string, error) {
+func (p *DefaultProvider) getSourcePoolName(_ context.Context) (string, error) {
 	p.mu.RLock()
 	name := p.sourcePoolName
 	p.mu.RUnlock()
@@ -206,6 +211,34 @@ func (p *DefaultProvider) GetSourcePoolName(_ context.Context) (string, error) {
 		return "", fmt.Errorf("bootstrap source pool not yet discovered")
 	}
 	return name, nil
+}
+
+func (p *DefaultProvider) GetSourceTemplateMetadata(ctx context.Context) (metadata.InstanceMetadata, error) {
+	sourcePoolName, err := p.getSourcePoolName(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting source pool name: %w", err)
+	}
+
+	instanceTemplates, err := p.computeService.RegionInstanceTemplates.List(p.ClusterInfo.ProjectID, p.ClusterInfo.Region).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("cannot list all instance templates for node pool name %q: %w", sourcePoolName, err)
+	}
+
+	for _, template := range instanceTemplates.Items {
+		if template.Properties == nil || template.Properties.Labels == nil || template.Properties.Metadata == nil {
+			continue
+		}
+		values := metadata.FromAPI(template.Properties.Metadata)
+		if values[metadata.ClusterNameLabel] != p.ClusterInfo.Name {
+			continue
+		}
+		if val, ok := template.Properties.Labels["goog-k8s-node-pool-name"]; ok && val == sourcePoolName {
+			log.FromContext(ctx).Info("Found instance template", "templateName", template.Name, "clusterName", p.ClusterInfo.Name)
+			return values, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no instance template found with label goog-k8s-node-pool-name=%s", sourcePoolName)
 }
 
 // ensureKarpenterNodePoolTemplate creates the fallback pool if it does not already exist.
