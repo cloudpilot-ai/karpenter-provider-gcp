@@ -22,13 +22,10 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 	"sync"
 
-	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -48,9 +45,7 @@ type DefaultProvider struct {
 	// sourcePoolName is the currently selected bootstrap source pool.
 	sourcePoolName string
 
-	computeService        *compute.Service
 	containerService      *container.Service
-	kubeClient            client.Client
 	ClusterInfo           ClusterInfo
 	defaultServiceAccount string
 	// preferredPoolName is the operator-pinned pool name (DEFAULT_NODEPOOL_TEMPLATE_NAME).
@@ -64,7 +59,6 @@ type ClusterInfo struct {
 	NodeLocation    string
 	Region          string
 	Name            string
-	Zones           []string
 }
 
 const (
@@ -74,20 +68,11 @@ const (
 	KarpenterFallbackNodePoolTemplateImageType = "COS_CONTAINERD"
 )
 
-func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeService *compute.Service,
-	containerService *container.Service,
+func NewDefaultProvider(_ context.Context, containerService *container.Service,
 	clusterName, region, projectID, serviceAccount, clusterLocation, nodeLocation string,
 	preferredPoolName string) *DefaultProvider {
 
-	zones, err := resolveZones(ctx, computeService, projectID, region)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
-		return nil
-	}
-
 	return &DefaultProvider{
-		kubeClient:            kubeClient,
-		computeService:        computeService,
 		containerService:      containerService,
 		defaultServiceAccount: serviceAccount,
 		preferredPoolName:     preferredPoolName,
@@ -97,37 +82,8 @@ func NewDefaultProvider(ctx context.Context, kubeClient client.Client, computeSe
 			NodeLocation:    nodeLocation,
 			Region:          region,
 			Name:            clusterName,
-			Zones:           zones,
 		},
 	}
-}
-
-func resolveZones(ctx context.Context, computeService *compute.Service, projectID, region string) ([]string, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("resolving zones", "ProjectID", projectID, "Region", region)
-
-	var zones []string
-	prefix := region + "-"
-	err := computeService.Zones.List(projectID).Pages(ctx, func(page *compute.ZoneList) error {
-		for _, zone := range page.Items {
-			if strings.HasPrefix(zone.Name, prefix) {
-				zones = append(zones, zone.Name)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Error(err, "error listing zones from GCP")
-		return nil, err
-	}
-
-	if len(zones) == 0 {
-		logger.Info("no zones found matching region prefix", "region", region)
-		return nil, fmt.Errorf("no zones found for region: %s", region)
-	}
-
-	logger.Info("resolved zones", "zones", zones)
-	return zones, nil
 }
 
 // Sync discovers the eligible bootstrap source pool and caches its name.

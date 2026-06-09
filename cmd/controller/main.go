@@ -61,13 +61,9 @@ func main() {
 			op.KubernetesInterface,
 			op.EventRecorder,
 			op.UnavailableOfferingsCache,
-			op.MetadataClient,
-			op.ZoneOperationClient,
-			op.Credential,
 			op.ImagesProvider,
 			op.NodePoolTemplateProvider,
 			op.InstanceTypeProvider,
-			op.InstanceProvider,
 			gcpCloudProvider,
 			op.PricingProvider,
 		)...).
