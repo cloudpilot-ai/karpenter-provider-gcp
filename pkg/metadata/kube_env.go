@@ -26,9 +26,141 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
-	"google.golang.org/api/compute/v1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
+
+var (
+	osDistributionCOSRegex    = regexp.MustCompile(`\bgke-os-distribution=cos\b`)
+	osDistributionUbuntuRegex = regexp.MustCompile(`\bgke-os-distribution=ubuntu\b`)
+)
+
+func replaceKubeEnvLabelAssignments(kubeEnv string, labelValues map[string]string) string {
+	updated := kubeEnv
+	for key, value := range labelValues {
+		updated = replaceDelimitedAssignment(updated, key, value)
+	}
+	return updated
+}
+
+func replaceDelimitedAssignment(raw, key, value string) string {
+	if key == "" {
+		return raw
+	}
+	needle := key + "="
+	var out strings.Builder
+	for i := 0; i < len(raw); {
+		idx := strings.Index(raw[i:], needle)
+		if idx == -1 {
+			out.WriteString(raw[i:])
+			break
+		}
+		idx += i
+		if idx > 0 && !isAssignmentDelimiter(raw[idx-1]) {
+			out.WriteString(raw[i : idx+len(needle)])
+			i = idx + len(needle)
+			continue
+		}
+		end := idx + len(needle)
+		for end < len(raw) && !isAssignmentDelimiter(raw[end]) {
+			end++
+		}
+		out.WriteString(raw[i:idx])
+		out.WriteString(needle)
+		out.WriteString(value)
+		i = end
+	}
+	return out.String()
+}
+
+func isAssignmentDelimiter(b byte) bool {
+	return b == ',' || b == ';' || b == ' ' || b == '\t' || b == '\n'
+}
+
+// PatchKubeEnvForOSType patches the kube-env metadata item so a single bootstrap source pool can serve nodes of either OS family.
+// Patching is bidirectional: Ubuntu→COS and COS→Ubuntu.
+//
+// Fields modified for Ubuntu target (source is COS):
+//   - gke-os-distribution=cos → gke-os-distribution=ubuntu
+//   - ENABLE_NODE_BFQ_IO_SCHEDULER line removed
+//   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT line removed
+//
+// Fields modified for ContainerOptimizedOS target (source is Ubuntu):
+//   - gke-os-distribution=ubuntu → gke-os-distribution=cos
+//   - ENABLE_NODE_BFQ_IO_SCHEDULER: "true" added (if absent)
+//   - NODE_BFQ_IO_SCHEDULER_IO_WEIGHT: "1200" added (if absent)
+func PatchKubeEnvForOSType(values InstanceMetadata, imageFamily string) error {
+	kubeEnv, ok := values[KubeEnvKey]
+	if !ok {
+		return nil
+	}
+	if kubeEnv == "" {
+		return fmt.Errorf("kube-env metadata is empty")
+	}
+
+	var updated string
+	switch imageFamily {
+	case v1alpha1.ImageFamilyUbuntu:
+		updated = osDistributionCOSRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=ubuntu")
+		updated = removeKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER")
+		updated = removeKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT")
+	case v1alpha1.ImageFamilyContainerOptimizedOS:
+		updated = osDistributionUbuntuRegex.ReplaceAllString(kubeEnv, "gke-os-distribution=cos")
+		updated = ensureKubeEnvLine(updated, "ENABLE_NODE_BFQ_IO_SCHEDULER", `"true"`)
+		updated = ensureKubeEnvLine(updated, "NODE_BFQ_IO_SCHEDULER_IO_WEIGHT", `"1200"`)
+	default:
+		return nil
+	}
+	values[KubeEnvKey] = updated
+	return nil
+}
+
+// ensureKubeEnvLine adds "key: value" to the kube-env string if no line with that key
+// already exists. This is used when patching from an Ubuntu source template to a COS node.
+func ensureKubeEnvLine(kubeEnv, key, value string) string {
+	for _, line := range strings.Split(kubeEnv, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), key+":") {
+			return kubeEnv
+		}
+	}
+	return kubeEnv + "\n" + key + ": " + value
+}
+
+// removeKubeEnvLine removes any line whose key (text before the first colon) matches
+// the given key. This handles the kube-env YAML-style "KEY: value" line format.
+func removeKubeEnvLine(kubeEnv, key string) string {
+	lines := strings.Split(kubeEnv, "\n")
+	filtered := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, key+":") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.Join(filtered, "\n")
+}
+
+// SetKubeEnvZone patches or appends the ZONE field in kube-env metadata.
+func SetKubeEnvZone(values InstanceMetadata, zone string) error {
+	if values == nil || zone == "" {
+		return fmt.Errorf("metadata and zone must be non-empty")
+	}
+	kubeEnv, ok := values[KubeEnvKey]
+	if !ok {
+		return fmt.Errorf("kube-env metadata key not found in instance template")
+	}
+	if kubeEnv == "" {
+		return fmt.Errorf("kube-env metadata is empty")
+	}
+	zoneLine := "ZONE: " + zone
+	zoneRegex := regexp.MustCompile(`(?m)^ZONE: [^\n]+`)
+	if zoneRegex.MatchString(kubeEnv) {
+		values[KubeEnvKey] = zoneRegex.ReplaceAllString(kubeEnv, zoneLine)
+		return nil
+	}
+	values[KubeEnvKey] = strings.TrimRight(kubeEnv, "\n") + "\n" + zoneLine + "\n"
+	return nil
+}
 
 var (
 	// serverBinaryArchRegex matches the architecture portion of a GKE binary URL.
@@ -53,21 +185,19 @@ const archHashHTTPTimeout = 30 * time.Second
 //
 // gkeVersion is used only as a fallback when the version cannot be parsed from the URL.
 // Pass an empty string to rely solely on the URL-parsing behavior (useful for tests).
-func PatchKubeEnvForArch(ctx context.Context, metaData *compute.Metadata, targetArch, gkeVersion string, httpClient *http.Client) error {
-	for _, item := range metaData.Items {
-		if item.Key != "kube-env" {
-			continue
-		}
-		kubeEnv := lo.FromPtr(item.Value)
-		if kubeEnv == "" {
-			return fmt.Errorf("kube-env metadata is empty")
-		}
-		updated, err := patchServerBinaryForArch(ctx, kubeEnv, targetArch, gkeVersion, httpClient)
-		if err != nil {
-			return err
-		}
-		item.Value = lo.ToPtr(updated)
+func PatchKubeEnvForArch(ctx context.Context, values InstanceMetadata, targetArch, gkeVersion string, httpClient *http.Client) error {
+	kubeEnv, ok := values[KubeEnvKey]
+	if !ok {
+		return nil
 	}
+	if kubeEnv == "" {
+		return fmt.Errorf("kube-env metadata is empty")
+	}
+	updated, err := patchServerBinaryForArch(ctx, kubeEnv, targetArch, gkeVersion, httpClient)
+	if err != nil {
+		return err
+	}
+	values[KubeEnvKey] = updated
 	return nil
 }
 
