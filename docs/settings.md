@@ -32,6 +32,7 @@ These options configure the controller's runtime behavior.
 | `--log-level`                 | `LOG_LEVEL`                 | `logLevel`                              | `info`  | Controller log level (`debug`, `info`, `warn`, `error`).                                                                                          |
 | `--batch-max-duration`        | `BATCH_MAX_DURATION`        | `controller.settings.batchMaxDuration`  | `10s`   | Maximum time Karpenter batches incoming pods before provisioning.                                                                                 |
 | `--batch-idle-duration`       | `BATCH_IDLE_DURATION`       | `controller.settings.batchIdleDuration` | `1s`    | Idle time after the last pod event before Karpenter triggers provisioning.                                                                        |
+| `--ignore-dra-requests`       | `IGNORE_DRA_REQUESTS`       | `controller.settings.ignoreDRARequests` | `true`  | When `true`, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.                                          |
 
 ## GCP-specific Settings
 
@@ -114,6 +115,10 @@ securityContext: {}
 ## NodePool Features
 
 These fields are set on `NodePool` objects, not on the controller. They are part of the karpenter-core API and are available in this provider.
+
+### Karpenter core v1.13
+
+Karpenter core v1.13 adds Dynamic Resource Allocation device allocation tracking and treats Kubernetes Node Readiness Controller taints (`readiness.k8s.io/*`) as ephemeral during scheduling. DRA scheduling remains disabled by default through `controller.settings.ignoreDRARequests: true`.
 
 ### Node count limit (v1.11)
 
