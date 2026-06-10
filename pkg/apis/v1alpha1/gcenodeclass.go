@@ -76,7 +76,9 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching karpenter.k8s.gcp/gcenodeclass",rule="self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')"
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
-	// Metadata contains key/value pairs to set as instance metadata
+	// Metadata contains custom key/value pairs to set as instance metadata.
+	// Keys reserved by GKE bootstrap metadata are rejected because the provider owns them.
+	// +kubebuilder:validation:XValidation:message="spec.metadata contains a reserved GKE metadata key",rule="!('cluster-location' in self) && !('cluster-name' in self) && !('cluster-uid' in self) && !('configure-sh' in self) && !('containerd-configure-sh' in self) && !('disable-address-manager' in self) && !('enable-os-login' in self) && !('gci-ensure-gke-docker' in self) && !('gci-metrics-enabled' in self) && !('gci-update-strategy' in self) && !('instance-template' in self) && !('install-ssh-psm1' in self) && !('k8s-node-setup-psm1' in self) && !('kube-env' in self) && !('kube-labels' in self) && !('startup-script' in self) && !('user-data' in self) && !('user-profile-psm1' in self) && !('windows-startup-script-ps1' in self) && !('common-psm1' in self) && !('kubeconfig' in self) && !('kubelet-config' in self)"
 	// +optional
 	Metadata map[string]string `json:"metadata,omitempty"`
 	// NetworkTags is a list of network tags to apply to the node.

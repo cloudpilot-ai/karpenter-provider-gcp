@@ -39,6 +39,7 @@ var (
 	gkeProvisioningRegex          = regexp.MustCompile(`gke-provisioning=\w+`)
 	kubeEnvArchRegex              = regexp.MustCompile(`\barch=(amd64|arm64)\b`)
 	kubeEnvFamilyRegex            = regexp.MustCompile(`cloud\.google\.com/machine-family=[^,;\s]+`)
+	kubeEnvZoneRegex              = regexp.MustCompile(`(?m)^ZONE: [^\n]+`)
 	diskTypeLabelRegex            = regexp.MustCompile(`^disk-type\.gke\.io/`)
 	diskTypeLabelEntryRegex       = regexp.MustCompile(`,?disk-type\.gke\.io/[^=,\s]+=[^,\s]*`)
 	kubeEnvNodeLabelsEmptyOKRegex = regexp.MustCompile(`--node-labels=\S*`)
@@ -397,34 +398,50 @@ func PatchKubeEnvForInstanceType(metadata *compute.Metadata, instanceType *cloud
 	}
 
 	arch, family := kubeEnvPatchTargets(instanceType)
+	cpuScalingLevel := instanceTypeCPUScalingLevel(instanceType)
 	for _, item := range metadata.Items {
 		switch item.Key {
 		case "kube-labels":
-			if family != "" {
-				item.Value = lo.ToPtr(upsertLabelString(lo.FromPtr(item.Value), "cloud.google.com/machine-family", family))
-			}
+			item.Value = lo.ToPtr(patchKubeLabelsForInstanceType(lo.FromPtr(item.Value), family, cpuScalingLevel))
 		case "kube-env":
-			kubeEnv := lo.FromPtr(item.Value)
-			if kubeEnv == "" {
-				return fmt.Errorf("kube-env metadata is empty")
+			updated, err := patchKubeEnvForInstanceType(lo.FromPtr(item.Value), arch, family, cpuScalingLevel)
+			if err != nil {
+				return err
 			}
-
-			// Note: SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH are left untouched.
-			// They are set correctly per-architecture by GKE in the node pool template.
-			// Patching the URL without the corresponding hash causes bootstrap failures.
-			updated := patchKubeEnvKeyValue(kubeEnv, kubeEnvArchRegex, "arch="+arch)
-			if family != "" {
-				updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
-				updated = upsertNodeLabelInKubeEnv(updated, "cloud.google.com/machine-family", family)
-			}
-
-			if updated != kubeEnv {
-				item.Value = lo.ToPtr(updated)
-			}
+			item.Value = lo.ToPtr(updated)
 		}
 	}
 
 	return nil
+}
+
+func patchKubeLabelsForInstanceType(labels, family, cpuScalingLevel string) string {
+	if family != "" {
+		labels = upsertLabelString(labels, "cloud.google.com/machine-family", family)
+	}
+	if cpuScalingLevel != "" {
+		labels = upsertLabelString(labels, v1alpha1.LabelGKECPUScalingLevel, cpuScalingLevel)
+	}
+	return labels
+}
+
+func patchKubeEnvForInstanceType(kubeEnv, arch, family, cpuScalingLevel string) (string, error) {
+	if kubeEnv == "" {
+		return "", fmt.Errorf("kube-env metadata is empty")
+	}
+
+	// Note: SERVER_BINARY_TAR_URL and SERVER_BINARY_TAR_HASH are left untouched.
+	// They are set correctly per-architecture by GKE in the node pool template.
+	// Patching the URL without the corresponding hash causes bootstrap failures.
+	updated := patchKubeEnvKeyValue(kubeEnv, kubeEnvArchRegex, "arch="+arch)
+	if family != "" {
+		updated = patchKubeEnvKeyValue(updated, kubeEnvFamilyRegex, "cloud.google.com/machine-family="+family)
+		updated = upsertNodeLabelInKubeEnv(updated, "cloud.google.com/machine-family", family)
+	}
+	if cpuScalingLevel != "" {
+		updated = upsertNodeLabelInKubeEnv(updated, v1alpha1.LabelGKECPUScalingLevel, cpuScalingLevel)
+	}
+	return updated, nil
 }
 
 func kubeEnvPatchTargets(instanceType *cloudprovider.InstanceType) (arch string, family string) {
@@ -434,6 +451,17 @@ func kubeEnvPatchTargets(instanceType *cloudprovider.InstanceType) (arch string,
 	}
 	family = instanceType.Requirements.Get(v1alpha1.LabelInstanceFamily).Any()
 	return arch, family
+}
+
+func instanceTypeCPUScalingLevel(instanceType *cloudprovider.InstanceType) string {
+	if instanceType == nil {
+		return ""
+	}
+	cpu, ok := instanceType.Capacity[corev1.ResourceCPU]
+	if !ok || cpu.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf("%d", cpu.Value())
 }
 
 func patchKubeEnvKeyValue(kubeEnv string, re *regexp.Regexp, replacement string) string {
@@ -456,8 +484,8 @@ func SetKubeEnvZone(metadata *compute.Metadata, zone string) error {
 			return fmt.Errorf("kube-env metadata is empty")
 		}
 		zoneLine := "ZONE: " + zone
-		if regexp.MustCompile(`(?m)^ZONE: [^\n]+`).MatchString(kubeEnv) {
-			item.Value = lo.ToPtr(patchKubeEnvKeyValue(kubeEnv, regexp.MustCompile(`(?m)^ZONE: [^\n]+`), zoneLine))
+		if kubeEnvZoneRegex.MatchString(kubeEnv) {
+			item.Value = lo.ToPtr(patchKubeEnvKeyValue(kubeEnv, kubeEnvZoneRegex, zoneLine))
 		} else {
 			item.Value = lo.ToPtr(kubeEnv + "\n" + zoneLine + "\n")
 		}
@@ -479,6 +507,7 @@ func BaselineKubeEnvLabels(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCEN
 		karpv1.NodePoolLabelKey:                         nodeClaim.Labels[karpv1.NodePoolLabelKey],
 		v1alpha1.LabelNodeClass:                         nodeClass.Name,
 		v1alpha1.LabelGKEReadinessMetadataServerEnabled: "true",
+		v1alpha1.LabelGKEReadinessKubeProxyReady:        "true",
 		v1alpha1.LabelGKEReadinessNetdReady:             "true",
 		v1alpha1.LabelGKEReadinessNodeLocalDNSReady:     "true",
 	}

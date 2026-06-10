@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Reserved `GCENodeClass.spec.metadata` keys are rejected
+
+`GCENodeClass.spec.metadata` remains available for custom Compute Engine instance metadata, but it now rejects keys reserved by GKE bootstrap metadata, including `kube-env`, `cluster-name`, `cluster-location`, `instance-template`, `startup-script`, `user-data`, `kubeconfig`, and `kubelet-config`.
+
+**Action required:** audit existing `GCENodeClass` objects that set bootstrap-owned metadata keys and remove those entries before upgrading the CRD. Non-reserved custom metadata keys continue to work.
+
 ---
 
 ## v0.4.0
