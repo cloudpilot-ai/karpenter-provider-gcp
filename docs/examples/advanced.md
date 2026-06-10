@@ -8,6 +8,35 @@ See [`examples/nodeclass/gcenodeclass-metadata.yaml`](https://github.com/cloudpi
 
 For example, if the base GKE node-pool template sets `serial-port-logging-enable=true`, specifying `serial-port-logging-enable: "false"` in `spec.metadata` results in the provisioned instance having `serial-port-logging-enable=false`.
 
+### Reserved metadata keys
+
+The following GKE bootstrap metadata keys are reserved and cannot be set in `spec.metadata`:
+
+- `cluster-location`
+- `cluster-name`
+- `cluster-uid`
+- `common-psm1`
+- `configure-sh`
+- `containerd-configure-sh`
+- `disable-address-manager`
+- `enable-os-login`
+- `gci-ensure-gke-docker`
+- `gci-metrics-enabled`
+- `gci-update-strategy`
+- `instance-template`
+- `install-ssh-psm1`
+- `k8s-node-setup-psm1`
+- `kube-env`
+- `kube-labels`
+- `kubeconfig`
+- `kubelet-config`
+- `startup-script`
+- `user-data`
+- `user-profile-psm1`
+- `windows-startup-script-ps1`
+
+Using any of these keys causes a CRD validation error at admission time. Custom metadata keys not in this list work normally.
+
 > **Note:** For GPU driver version control, use `spec.gpuDriverVersion` instead of setting `cloud.google.com/gke-gpu-driver-version` via metadata. See [GPU Nodes](../gpu-nodes.md) for details.
 
 ## Secondary boot disk (container image pre-loading)
