@@ -93,9 +93,14 @@ func (p *DefaultProvider) Reset() error {
 		return fmt.Errorf("no initial prices found for region %s", p.region)
 	}
 
+	spotPrices := make(pricesStorage, len(regionPrices.OnDemand))
+	for instanceType, price := range regionPrices.OnDemand {
+		spotPrices[instanceType] = price
+	}
+
 	p.mu.Lock()
 	p.onDemandPrices = regionPrices.OnDemand
-	p.spotPrices = make(pricesStorage)
+	p.spotPrices = spotPrices
 	p.mu.Unlock()
 	return nil
 }
@@ -123,19 +128,14 @@ func (p *DefaultProvider) OnDemandPrice(instanceType string) (float64, bool) {
 	return price, ok
 }
 
-// SpotPrice ignores zone (GCP prices are regional).
-// Falls back to 40% of on-demand when no spot price is known.
+// SpotPrice ignores zone (GCP prices are regional). Before the first live
+// pricing update, spot uses on-demand prices as a conservative default.
 func (p *DefaultProvider) SpotPrice(instanceType string, _ string) (float64, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if price, ok := p.spotPrices[instanceType]; ok {
-		return price, true
-	}
-	if odPrice, ok := p.onDemandPrices[instanceType]; ok {
-		return odPrice * 0.4, true
-	}
-	return 0, false
+	price, ok := p.spotPrices[instanceType]
+	return price, ok
 }
 
 func (p *DefaultProvider) UpdatePrices(ctx context.Context) error {
