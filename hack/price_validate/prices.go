@@ -35,6 +35,14 @@ type RegionPrices map[string]RegionEntry
 
 type RegionAvailability map[string]map[string]bool
 
+// ScratchDiskSizes maps machine type name to total bundled local SSD capacity in GiB.
+// Entries are global (same across all regions) and only present for types with local SSD.
+type ScratchDiskSizes map[string]int64
+
+// SSDSpotRates maps region → family_lower → spot $/GiB-hour.
+// The special key "all" is the generic rate for families not listed individually.
+type SSDSpotRates map[string]map[string]float64
+
 type priceFile struct {
 	SavedAt *time.Time   `json:"saved_at,omitempty"`
 	Prices  RegionPrices `json:"prices"`
@@ -62,6 +70,14 @@ func writePriceFile(path string, prices RegionPrices, savedAt *time.Time) error 
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+func withoutSpotPrices(prices RegionPrices) RegionPrices {
+	out := make(RegionPrices, len(prices))
+	for region, entry := range prices {
+		out[region] = RegionEntry{OnDemand: entry.OnDemand}
+	}
+	return out
 }
 
 func loadOrFetch(path string, noCache bool, ttl time.Duration, fetch func() (RegionPrices, error)) (RegionPrices, error) {

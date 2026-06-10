@@ -198,9 +198,11 @@ update-pdcsi-compatibility: ## Update vendored PDCSI disk compatibility data fro
 update-pricing:
 	@tmpdir=$$(mktemp -d); \
 	trap "rm -rf $$tmpdir" EXIT; \
-	go run ./hack/price_validate --work-dir=$$tmpdir && \
+	go run ./hack/price_validate --work-dir=$$tmpdir; \
+	rc=$$?; \
 	cp $$tmpdir/computed.json pkg/providers/pricing/initial-prices.json && \
-	echo "Updated pkg/providers/pricing/initial-prices.json"
+	echo "Updated pkg/providers/pricing/initial-prices.json"; \
+	exit $$rc
 
 codegen: ## Auto generate files based on GCP APIs
 	./hack/codegen.sh
