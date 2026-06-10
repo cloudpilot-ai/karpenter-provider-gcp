@@ -1,0 +1,24 @@
+{
+  "files": [
+    {
+      "path": "pkg/providers/instance/doc.go",
+      "description": "GCE VM lifecycle provider ownership",
+      "scope": ["pkg/providers/**"]
+    },
+    {
+      "path": "pkg/providers/nodepooltemplate/doc.go",
+      "description": "GKE bootstrap source pool and instance-template ownership",
+      "scope": ["pkg/providers/**"]
+    },
+    {
+      "path": "pkg/providers/gke/doc.go",
+      "description": "Shared GKE cluster facts provider ownership",
+      "scope": ["pkg/providers/**"]
+    },
+    {
+      "path": "pkg/providers/metadata/doc.go",
+      "description": "Pure bootstrap metadata transformation ownership",
+      "scope": ["pkg/providers/**"]
+    }
+  ]
+}
