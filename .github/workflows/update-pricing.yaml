@@ -31,6 +31,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: write
 
 jobs:
   update-pricing:
@@ -53,17 +54,56 @@ jobs:
       - name: Set GCP project
         run: echo "GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PRICING_PROJECT }}" >> $GITHUB_ENV
 
+      - name: Run price_validate
+        id: validate
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/price-data
+          go run ./hack/price_validate \
+            --work-dir=/tmp/price-data \
+            --no-cache \
+            > /tmp/findings.txt 2>&1
+
+      - name: Check for price changes
+        id: check-changes
+        run: |
+          # computed.json is written without saved_at or spot prices, matching the
+          # committed seed file format — a plain diff is sufficient.
+          if diff -q pkg/providers/pricing/initial-prices.json \
+              /tmp/price-data/computed.json > /dev/null 2>&1; then
+            echo "No price changes. Nothing to do."
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Price data changed — will open a PR."
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Update initial-prices.json
-        run: make update-pricing
+        if: steps.check-changes.outputs.changed == 'true'
+        run: cp /tmp/price-data/computed.json pkg/providers/pricing/initial-prices.json
 
       - name: Prepare PR body
+        if: steps.check-changes.outputs.changed == 'true' && !inputs.dry_run
         run: |
           {
             echo 'Automated refresh of `pkg/providers/pricing/initial-prices.json`'
+            echo ''
+            echo '## Pricing findings'
+            echo ''
+            if [ "${{ steps.validate.outcome }}" = "success" ]; then
+              echo 'All prices within tolerance — no actionable findings.'
+            else
+              echo '> ⚠️ **Actionable findings detected.** Review before merging.'
+              echo ''
+              echo '```'
+              cat /tmp/findings.txt
+              echo '```'
+            fi
           } > /tmp/pr-body.md
 
       - name: Create PR if pricing changed
-        if: ${{ !inputs.dry_run }}
+        id: create-pr
+        if: steps.check-changes.outputs.changed == 'true' && !inputs.dry_run
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           commit-message: "chore(pricing): update initial-prices.json"
@@ -74,3 +114,29 @@ jobs:
           sign-commits: true
           delete-branch: true
           labels: pricing,automated
+
+      - name: Post findings check run on PR
+        if: ${{ !inputs.dry_run && steps.create-pr.outputs.pull-request-number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          HEAD_SHA="${{ steps.create-pr.outputs.pull-request-head-sha }}"
+
+          if [ "${{ steps.validate.outcome }}" = "success" ]; then
+            CONCLUSION="success"
+            TITLE="No pricing findings"
+            SUMMARY="All prices are within tolerance."
+          else
+            CONCLUSION="failure"
+            TITLE="Pricing findings detected"
+            SUMMARY="Mismatches, missing, or unknown machines found. See PR body for details."
+          fi
+
+          jq -n \
+            --arg name "pricing-findings" \
+            --arg sha "$HEAD_SHA" \
+            --arg conclusion "$CONCLUSION" \
+            --arg title "$TITLE" \
+            --arg summary "$SUMMARY" \
+            '{name:$name,head_sha:$sha,status:"completed",conclusion:$conclusion,output:{title:$title,summary:$summary}}' | \
+          gh api repos/${{ github.repository }}/check-runs --method POST --input -
