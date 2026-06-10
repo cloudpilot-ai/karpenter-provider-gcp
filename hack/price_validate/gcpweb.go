@@ -23,6 +23,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -73,10 +74,12 @@ var gcpWebPages = []struct {
 }
 
 var (
-	gcpRegionBlockRe = regexp.MustCompile(`.+\([\w]+-[\w\d-]+\)$`)
-	gcpRegionCodeRe  = regexp.MustCompile(`\(([\w][\w\d-]+)\)`)
-	gcpHourlyPriceRe = regexp.MustCompile(`\$([\d.]+)\s*/\s*1 hour`)
-	gcpHTMLTagRe     = regexp.MustCompile(`<[^>]+>`)
+	gcpRegionBlockRe    = regexp.MustCompile(`.+\([\w]+-[\w\d-]+\)$`)
+	gcpRegionCodeRe     = regexp.MustCompile(`\(([\w][\w\d-]+)\)`)
+	gcpHourlyPriceRe    = regexp.MustCompile(`\$([\d.]+)\s*/\s*1 hour`)
+	gcpGibibytePriceRe  = regexp.MustCompile(`\$([\d.]+)\s*/\s*1 gibibyte hour`)
+	gcpHTMLTagRe        = regexp.MustCompile(`<[^>]+>`)
+	platformQualifierRe = regexp.MustCompile(`(?i)\s+(?:\w+\s+)+platform\s+only$`)
 )
 
 // jsonNode wraps an untyped JSON value to provide named accessors for the known
@@ -105,19 +108,53 @@ func (n jsonNode) cellText() string {
 	return n.at(idxCellContentWrapper).at(idxCellInnerWrapper).at(idxCellText).asString()
 }
 
-func getGCPWebPrices(ctx context.Context, workDir string, noCache bool, cacheTTL time.Duration) (RegionPrices, error) {
-	return loadOrFetch(filepath.Join(workDir, "gcpweb.json"), noCache, cacheTTL, func() (RegionPrices, error) {
-		return fetchGCPWebPrices(ctx)
-	})
+// gcpWebFile is the cache format for GCP web prices + local SSD spot rates.
+// It extends the basic priceFile format with SSD rates so both are cached atomically.
+type gcpWebFile struct {
+	SavedAt  *time.Time   `json:"saved_at,omitempty"`
+	Prices   RegionPrices `json:"prices"`
+	SSDRates SSDSpotRates `json:"ssd_rates,omitempty"`
 }
 
-func fetchGCPWebPrices(ctx context.Context) (RegionPrices, error) {
+func getGCPWebPrices(ctx context.Context, workDir string, noCache bool, cacheTTL time.Duration) (RegionPrices, SSDSpotRates, error) {
+	path := filepath.Join(workDir, "gcpweb.json")
+	name := "gcpweb.json:"
+
+	if !noCache {
+		if f, err := os.Open(path); err == nil {
+			var cached gcpWebFile
+			if json.NewDecoder(f).Decode(&cached) == nil && cached.SavedAt != nil {
+				if age := time.Since(*cached.SavedAt); age < cacheTTL {
+					f.Close()
+					fmt.Printf("  %-14s using cache (%.1fh old)\n", name, age.Hours())
+					return cached.Prices, cached.SSDRates, nil
+				}
+			}
+			f.Close()
+		}
+	}
+
+	prices, ssdRates, err := fetchGCPWebPrices(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	now := time.Now().UTC()
+	data, _ := json.Marshal(&gcpWebFile{SavedAt: &now, Prices: prices, SSDRates: ssdRates})
+	_ = os.WriteFile(path, data, 0644)
+
+	fmt.Printf("  %-14s %d regions\n", name, len(prices))
+	return prices, ssdRates, nil
+}
+
+func fetchGCPWebPrices(ctx context.Context) (RegionPrices, SSDSpotRates, error) {
 	fmt.Printf("  gcp web:   scraping %d pricing pages in parallel...\n", len(gcpWebPages))
 
 	type pageResult struct {
-		prices RegionPrices
-		url    string
-		err    error
+		prices   RegionPrices
+		ssdRates SSDSpotRates
+		url      string
+		err      error
 	}
 
 	results := make([]pageResult, len(gcpWebPages))
@@ -126,16 +163,17 @@ func fetchGCPWebPrices(ctx context.Context) (RegionPrices, error) {
 		wg.Add(1)
 		go func(idx int, url string, isSpot bool) {
 			defer wg.Done()
-			prices, err := fetchGCPWebPage(ctx, url, isSpot)
-			results[idx] = pageResult{prices: prices, url: url, err: err}
+			prices, ssdRates, err := fetchGCPWebPage(ctx, url, isSpot)
+			results[idx] = pageResult{prices: prices, ssdRates: ssdRates, url: url, err: err}
 		}(i, page.url, page.spot)
 	}
 	wg.Wait()
 
 	out := make(RegionPrices)
+	var outSSD SSDSpotRates
 	for _, res := range results {
 		if res.err != nil {
-			return nil, fmt.Errorf("%s: %w", res.url, res.err)
+			return nil, nil, fmt.Errorf("%s: %w", res.url, res.err)
 		}
 		for region, entry := range res.prices {
 			outEntry := out[region]
@@ -147,21 +185,135 @@ func fetchGCPWebPrices(ctx context.Context) (RegionPrices, error) {
 			maps.Copy(outEntry.Spot, entry.Spot)
 			out[region] = outEntry
 		}
+		if res.ssdRates != nil {
+			outSSD = res.ssdRates
+		}
 	}
-	return out, nil
+
+	// Fill spot prices for -metal machine types from the base type.
+	// The spot pricing page lists only the base name; metal variants are priced identically.
+	for region := range out {
+		entry := out[region]
+		for name := range entry.OnDemand {
+			if !strings.HasSuffix(name, "-metal") {
+				continue
+			}
+			if entry.Spot[name] > 0 {
+				continue
+			}
+			base := strings.TrimSuffix(name, "-metal")
+			if baseSpot := entry.Spot[base]; baseSpot > 0 {
+				entry.Spot[name] = baseSpot
+			}
+		}
+		out[region] = entry
+	}
+
+	return out, outSSD, nil
 }
 
 // fetchGCPWebPage pipeline: fetch HTML → extract embedded JSON → discover region blocks → parse prices.
-func fetchGCPWebPage(ctx context.Context, url string, isSpot bool) (RegionPrices, error) {
+// For the spot VMs page, also discovers and returns local SSD spot rate blocks.
+func fetchGCPWebPage(ctx context.Context, url string, isSpot bool) (RegionPrices, SSDSpotRates, error) {
 	html, err := httpGet(ctx, url)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	root, err := extractInitDataJSON(html)
 	if err != nil {
-		return nil, fmt.Errorf("extracting embedded JSON: %w", err)
+		return nil, nil, fmt.Errorf("extracting embedded JSON: %w", err)
 	}
-	return parsePricingTables(walkForBlocks(root, 0), isSpot), nil
+	prices := parsePricingTables(walkForBlocks(root, 0), isSpot)
+	var ssdRates SSDSpotRates
+	if isSpot {
+		ssdRates = parseSSDRateTables(walkForSSDBlocks(root, 0))
+	}
+	return prices, ssdRates, nil
+}
+
+// hasSSDRows returns true when any data row cell contains "gibibyte", identifying local SSD pricing blocks.
+func hasSSDRows(rows []any) bool {
+	for _, rowWrap := range rows[:min(5, len(rows))] {
+		entry := jsonNode{rowWrap}.at(0)
+		for col := 1; col < min(entry.len(), 5); col++ {
+			if nodeContainsText(entry.at(col), "gibibyte") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isSSDBlock returns true when a node looks like a regional local SSD pricing block:
+// same region-label structure as machine type blocks, but with gibibyte-priced rows.
+func isSSDBlock(n jsonNode) bool {
+	if n.len() < 3 {
+		return false
+	}
+	if !gcpRegionBlockRe.MatchString(n.regionLabel()) {
+		return false
+	}
+	rows := n.dataRows().asArray()
+	return len(rows) > 0 && hasSSDRows(rows)
+}
+
+func walkForSSDBlocks(n jsonNode, depth int) []jsonNode {
+	if depth > maxSearchDepth {
+		return nil
+	}
+	arr := n.asArray()
+	if len(arr) == 0 {
+		return nil
+	}
+	if isSSDBlock(n) {
+		return []jsonNode{n}
+	}
+	var found []jsonNode
+	for _, child := range arr {
+		found = append(found, walkForSSDBlocks(jsonNode{child}, depth+1)...)
+	}
+	return found
+}
+
+// parseSSDRateTables extracts local SSD spot $/GiB-hour rates per region and VM family.
+// The table rows have a VM family name ("All", "C4", "C4A", "C4D") and a gibibyte price.
+// "all" covers any family not listed individually.
+func parseSSDRateTables(blocks []jsonNode) SSDSpotRates {
+	result := make(SSDSpotRates)
+	for _, block := range blocks {
+		region := extractRegionCode(block)
+		if region == "" {
+			continue
+		}
+		rates := make(map[string]float64)
+		for _, rowWrap := range block.dataRows().asArray() {
+			entry := jsonNode{rowWrap}.at(0)
+			if entry.len() < 2 {
+				continue
+			}
+			familyRaw := strings.TrimSpace(stripHTML(entry.at(0).cellText()))
+			if familyRaw == "" {
+				continue
+			}
+			family := strings.ToLower(familyRaw)
+			for col := 1; col < entry.len(); col++ {
+				match := gcpGibibytePriceRe.FindStringSubmatch(entry.at(col).cellText())
+				if match == nil {
+					continue
+				}
+				val, err := strconv.ParseFloat(match[1], 64)
+				if err != nil || val == 0 {
+					continue
+				}
+				rates[family] = val
+				break
+			}
+		}
+		if len(rates) > 0 {
+			result[region] = rates
+		}
+	}
+	return result
 }
 
 func httpGet(ctx context.Context, url string) (string, error) {
@@ -268,18 +420,29 @@ func nodeContainsText(n jsonNode, subs ...string) bool {
 	return false
 }
 
+// normalizeMachineTypeName strips platform qualifier suffixes from pricing page
+// machine type names. For example, "n1-standard-96 Skylake Platform only" →
+// "n1-standard-96". Returns the unchanged name if no qualifier is found.
+//
+// Some pricing tables use U+00A0 (non-breaking space) between the machine type
+// and qualifier; normalize it to a plain space before applying the suffix regex.
+func normalizeMachineTypeName(name string) string {
+	name = strings.ReplaceAll(name, " ", " ")
+	return platformQualifierRe.ReplaceAllString(name, "")
+}
+
 // isNonMachineTypeEntry returns true for reference entries that are not standard
 // Compute Engine machine types and should be excluded from comparison:
 //   - Sole-tenant node types (e.g. "c4-node-192-384") — not standard VMs
 //   - Standalone GPU add-on prices (e.g. "NVIDIA T4") — per-GPU prices, not machine types
 //   - Custom machine type per-unit prices (e.g. "Custom vCPUs") — per-unit prices
-//   - Platform-specific variants (e.g. "n1-highcpu-96 Skylake Platform only") — not in Compute API
+//
+// Call normalizeMachineTypeName before this to strip platform qualifier suffixes
+// (e.g. "Skylake Platform only") so they don't incorrectly trigger exclusion.
 func isNonMachineTypeEntry(name string) bool {
 	return strings.Contains(name, "-node-") ||
 		strings.HasPrefix(name, "NVIDIA ") ||
-		strings.HasPrefix(name, "Custom ") ||
-		strings.Contains(name, " Skylake") ||
-		strings.Contains(name, " Platform")
+		strings.HasPrefix(name, "Custom ")
 }
 
 func parsePricingTables(blocks []jsonNode, isSpot bool) RegionPrices {
@@ -347,7 +510,7 @@ func parseDataRows(block jsonNode, priceCol int, isSpot bool) RegionEntry {
 		if strings.Contains(nameRaw, "<b>") {
 			continue
 		}
-		name := stripHTML(nameRaw)
+		name := normalizeMachineTypeName(stripHTML(nameRaw))
 		if name == "" || isNonMachineTypeEntry(name) {
 			continue
 		}
