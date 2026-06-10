@@ -87,17 +87,16 @@ func TestDefaultProvider_InitialPrices(t *testing.T) {
 		}
 	}
 
-	// Test getting spot prices for various instance types
-	// Initial state does not contain spot prices, so provider should return fallback (40% of on-demand).
+	// Initial spot prices use on-demand prices as a conservative default until live prices are fetched.
 	for _, instanceType := range testInstanceTypes {
 		onDemandPrice, _ := provider.OnDemandPrice(instanceType)
 		spotPrice, found := provider.SpotPrice(instanceType, "europe-west4-a")
 		if !found {
-			t.Errorf("Expected to find fallback spot price for %s instance type", instanceType)
+			t.Errorf("Expected to find default spot price for %s instance type", instanceType)
 			continue
 		}
-		if spotPrice != onDemandPrice*0.4 {
-			t.Errorf("Expected fallback spot price %f for %s, got %f", onDemandPrice*0.4, instanceType, spotPrice)
+		if spotPrice != onDemandPrice {
+			t.Errorf("Expected default spot price %f for %s, got %f", onDemandPrice, instanceType, spotPrice)
 		}
 	}
 
