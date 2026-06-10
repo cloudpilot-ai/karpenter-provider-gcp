@@ -16,11 +16,7 @@ limitations under the License.
 
 package metadata
 
-import (
-	"google.golang.org/api/compute/v1"
-
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-)
+import kubeletconfig "k8s.io/kubelet/config/v1beta1"
 
 const (
 	KubeEnvKey       = "kube-env"
@@ -38,7 +34,7 @@ const (
 type InstanceMetadata struct {
 	KubeEnv       KubeEnv
 	KubeLabels    KubeLabels
-	KubeletConfig KubeletConfig
+	KubeletConfig kubeletconfig.KubeletConfiguration
 
 	// CustomMetadata contains explicit user-provided spec.metadata keys. These
 	// are user-owned values, not an implicit passthrough of unknown source
@@ -49,15 +45,6 @@ type InstanceMetadata struct {
 	// metadata items, but they are assembled with the same ownership rules and
 	// serialized at the instance boundary.
 	InstanceLabels InstanceLabels
-}
-
-// SourceTemplateMetadata is the explicitly supported subset copied from a GKE
-// source instance template. It is separate from InstanceMetadata so constructor
-// code can make source inheritance visible and narrow.
-type SourceTemplateMetadata struct {
-	KubeEnv       KubeEnv
-	KubeLabels    KubeLabels
-	KubeletConfig KubeletConfig
 }
 
 // KubeEnv models the GKE kube-env metadata item. Unknown kube-env entries may be
@@ -92,23 +79,8 @@ type Taint struct {
 	Effect string
 }
 
-// KubeletConfig models kubelet-config metadata. The provider API type is used
-// for fields already exposed through GCENodeClass; Raw preserves explicitly
-// copied source keys until the provider models or drops them.
-type KubeletConfig struct {
-	Config v1alpha1.KubeletConfiguration
-	Raw    map[string]any
-}
-
 // CustomMetadata models user-provided GCENodeClass spec.metadata values.
 type CustomMetadata map[string]string
 
 // InstanceLabels models GCE instance labels.
 type InstanceLabels map[string]string
-
-// FromSourceTemplate will parse only the explicitly supported fields from a GKE
-// source template. Implementation is intentionally deferred until the structure
-// definitions and ownership boundaries are reviewed.
-func FromSourceTemplate(_ *compute.Metadata) (*SourceTemplateMetadata, error) {
-	return nil, nil
-}

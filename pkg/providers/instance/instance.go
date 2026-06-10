@@ -937,6 +937,7 @@ func (p *DefaultProvider) bootstrapKubeEnvLabels(nodeClass *v1alpha1.GCENodeClas
 		karpv1.NodePoolLabelKey:                         nodeClaim.Labels[karpv1.NodePoolLabelKey],
 		v1alpha1.LabelNodeClass:                         nodeClass.Name,
 		v1alpha1.LabelGKEReadinessMetadataServerEnabled: "true",
+		v1alpha1.LabelGKEReadinessKubeProxyReady:        "true",
 		v1alpha1.LabelGKEReadinessNetdReady:             "true",
 		v1alpha1.LabelGKEReadinessNodeLocalDNSReady:     "true",
 	}
