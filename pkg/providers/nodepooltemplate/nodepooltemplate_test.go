@@ -24,14 +24,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 )
 
 func buildContainerService(t *testing.T, srv *httptest.Server) *container.Service {
 	t.Helper()
 	svc, err := container.NewService(context.Background(),
+		option.WithEndpoint(srv.URL+"/"),
+		option.WithoutAuthentication(),
+	)
+	require.NoError(t, err)
+	return svc
+}
+
+func buildComputeService(t *testing.T, srv *httptest.Server) *compute.Service {
+	t.Helper()
+	svc, err := compute.NewService(context.Background(),
 		option.WithEndpoint(srv.URL+"/"),
 		option.WithoutAuthentication(),
 	)
@@ -174,16 +188,96 @@ func TestIsPoolEligible(t *testing.T) {
 	}
 }
 
-func TestGetSourcePoolName(t *testing.T) {
+func TestGetSourcePoolNameInternal(t *testing.T) {
 	t.Run("before discovery", func(t *testing.T) {
-		_, err := (&DefaultProvider{}).GetSourcePoolName(context.Background())
+		_, err := (&DefaultProvider{}).getSourcePoolName(context.Background())
 		require.ErrorContains(t, err, "not yet discovered")
 	})
 	t.Run("after discovery", func(t *testing.T) {
-		name, err := (&DefaultProvider{sourcePoolName: "default-pool"}).GetSourcePoolName(context.Background())
+		name, err := (&DefaultProvider{sourcePoolName: "default-pool"}).getSourcePoolName(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, "default-pool", name)
 	})
+}
+
+func TestGetSourceTemplateMetadata(t *testing.T) {
+	t.Run("returns metadata from matching source pool template", func(t *testing.T) {
+		template := instanceTemplate("template", "cluster", "default-pool")
+		srv := sourceTemplateServer(t, []*compute.InstanceTemplate{template})
+		defer srv.Close()
+
+		p := sourceTemplateProvider(t, srv)
+		source, err := p.GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "cluster", metadata.FromAPI(source)[metadata.ClusterNameLabel])
+	})
+
+	t.Run("ignores templates from other clusters", func(t *testing.T) {
+		srv := sourceTemplateServer(t, []*compute.InstanceTemplate{
+			instanceTemplate("other-cluster", "other", "default-pool"),
+			instanceTemplate("target", "cluster", "default-pool"),
+		})
+		defer srv.Close()
+
+		source, err := sourceTemplateProvider(t, srv).GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "cluster", metadata.FromAPI(source)[metadata.ClusterNameLabel])
+	})
+
+	t.Run("missing matching template returns error", func(t *testing.T) {
+		srv := sourceTemplateServer(t, []*compute.InstanceTemplate{instanceTemplate("template", "cluster", "other-pool")})
+		defer srv.Close()
+
+		_, err := sourceTemplateProvider(t, srv).GetSourceTemplateMetadata(context.Background())
+		require.ErrorContains(t, err, "no instance template found")
+	})
+
+	t.Run("returned metadata items are copied", func(t *testing.T) {
+		template := instanceTemplate("template", "cluster", "default-pool")
+		srv := sourceTemplateServer(t, []*compute.InstanceTemplate{template})
+		defer srv.Close()
+
+		source, err := sourceTemplateProvider(t, srv).GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		source.Items = append(source.Items, &compute.MetadataItems{Key: "new", Value: lo.ToPtr("value")})
+
+		require.NotContains(t, metadata.FromAPI(template.Properties.Metadata), "new")
+	})
+}
+
+func sourceTemplateProvider(t *testing.T, srv *httptest.Server) *DefaultProvider {
+	t.Helper()
+	return &DefaultProvider{
+		computeService: buildComputeService(t, srv),
+		sourcePoolName: "default-pool",
+		ClusterInfo: ClusterInfo{
+			ProjectID: "proj",
+			Region:    "us-central1",
+			Name:      "cluster",
+		},
+	}
+}
+
+func sourceTemplateServer(t *testing.T, templates []*compute.InstanceTemplate) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/regions/us-central1/instanceTemplates") {
+			_ = json.NewEncoder(w).Encode(&compute.InstanceTemplateList{Items: templates})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+}
+
+func instanceTemplate(name, clusterName, nodePoolName string) *compute.InstanceTemplate {
+	return &compute.InstanceTemplate{
+		Name: name,
+		Properties: &compute.InstanceProperties{
+			Labels:   map[string]string{"goog-k8s-node-pool-name": nodePoolName},
+			Metadata: &compute.Metadata{Items: []*compute.MetadataItems{{Key: "cluster-name", Value: lo.ToPtr(clusterName)}}},
+		},
+	}
 }
 
 // --- ensureKarpenterNodePoolTemplate ---
