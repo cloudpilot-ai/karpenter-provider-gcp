@@ -23,9 +23,4 @@ limitations under the License.
 // template metadata and provider-owned target values; this package parses only
 // the explicitly supported source fields, applies typed updates, and serializes
 // the result back to Compute Engine shapes.
-//
-// Source-template metadata is not treated as an arbitrary passthrough bag. New
-// source fields may be retained only by adding typed fields or explicitly named
-// copy rules here. This keeps reviews focused on which metadata surfaces are
-// inherited from GKE and which are fully owned by the instance provider.
 package metadata
