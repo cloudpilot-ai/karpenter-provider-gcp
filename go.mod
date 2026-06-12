@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/compute v1.64.0
 	github.com/awslabs/operatorpkg v0.0.0-20251222193911-34e9a1898737
 	github.com/mitchellh/hashstructure/v2 v2.0.2
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.30.0
 	github.com/onsi/gomega v1.41.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.23.2
