@@ -19,4 +19,4 @@ package pdcsi_data
 // Keep the PDCSI source module visible to go mod tidy and Dependabot. The
 // copied node-labeler ConfigMap is data, not a Go package, so this module needs
 // a lightweight package import as its dependency anchor.
-import _ "sigs.k8s.io/gcp-compute-persistent-disk-csi-driver/pkg/resizefs"
+import _ "sigs.k8s.io/gcp-compute-persistent-disk-csi-driver/pkg/gce-cloud-provider/metadata"
