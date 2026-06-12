@@ -51,17 +51,21 @@ updates:
     directory: "/hack/crd-tools"
     schedule:
       interval: "weekly"
+    # kubectl-validate v0.0.4 is not compatible with newer transitive
+    # k8s.io/* releases, so only let Dependabot bump the tool itself.
     allow:
-      - dependency-type: "all"
-    groups:
-      crd-tools:
-        patterns:
-          - "*"
+      - dependency-name: "sigs.k8s.io/kubectl-validate"
+        dependency-type: "all"
 
   - package-ecosystem: "gomod"
     directory: "/hack/pdcsi-data"
     schedule:
       interval: "weekly"
+    # This module pins the PDCSI repository as a data source for copied
+    # node-labeler compatibility data; don't update its transitives alone.
+    allow:
+      - dependency-name: "sigs.k8s.io/gcp-compute-persistent-disk-csi-driver"
+        dependency-type: "all"
     groups:
       pdcsi-data:
         patterns:
