@@ -33,6 +33,8 @@ type GCENodeClassStatus struct {
 	Images []Image `json:"images,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
+	// +listType=map
+	// +listMapKey=type
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
@@ -46,10 +48,10 @@ type Image struct {
 	Requirements []corev1.NodeSelectorRequirement `json:"requirements"`
 }
 
-func (in *GCENodeClass) StatusConditions() status.ConditionSet {
+func (in *GCENodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	return status.NewReadyConditions(
 		ConditionTypeImagesReady,
-	).For(in)
+	).For(in, opts...)
 }
 
 func (in *GCENodeClass) GetConditions() []status.Condition {

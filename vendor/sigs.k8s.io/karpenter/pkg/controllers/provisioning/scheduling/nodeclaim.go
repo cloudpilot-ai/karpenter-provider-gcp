@@ -98,7 +98,7 @@ func NewNodeClaim(
 	template.Spec.Resources.Requests = daemonResources
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
-		hostPortUsage:        hostPortUsage,
+		hostPortUsage:        hostPortUsage.DeepCopy(), // Deep copy so each NodeClaim can independently track port usage
 		topology:             topology,
 		daemonResources:      daemonResources,
 		hostname:             hostname,
@@ -186,7 +186,7 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
 		for key, minValues := range unsatisfiableKeys {
-			nodeClaimRequirements.Get(key).MinValues = lo.ToPtr(minValues)
+			nodeClaimRequirements.Get(key).MinValues = new(minValues)
 		}
 	}
 	if err != nil {

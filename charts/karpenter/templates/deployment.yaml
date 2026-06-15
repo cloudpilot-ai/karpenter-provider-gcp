@@ -103,6 +103,8 @@ spec:
             - name: BATCH_IDLE_DURATION
               value: "{{ . }}"
             {{- end }}
+            - name: IGNORE_DRA_REQUESTS
+              value: "{{ .Values.controller.settings.ignoreDRARequests }}"
             {{- with .Values.controller.settings.vmMemoryOverheadPercent }}
             - name: VM_MEMORY_OVERHEAD_PERCENT
               value: "{{ . }}"
