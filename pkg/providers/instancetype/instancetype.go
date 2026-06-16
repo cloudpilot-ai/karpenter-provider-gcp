@@ -85,7 +85,9 @@ type DefaultProvider struct {
 
 	unavailableOfferings *pkgcache.UnavailableOfferings
 	// FIXME: use cache to speed up query.
-	instanceTypesCache *cache.Cache
+	instanceTypesCache         *cache.Cache
+	muInstanceTypesCache       sync.Mutex
+	instanceTypesCacheRevision string
 }
 
 func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, pricingProvider pricing.Provider,
@@ -120,6 +122,7 @@ func (p *DefaultProvider) validateState() error {
 	return nil
 }
 
+//nolint:gocyclo // List keeps cache invalidation and instance type construction together to avoid stale cache writes.
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
 	p.muInstanceTypesInfo.RLock()
 	defer p.muInstanceTypesInfo.RUnlock()
@@ -136,9 +139,19 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	zonesHash, _ := hashstructure.Hash(zones, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	kcHash, _ := hashstructure.Hash(nodeClass.Spec.KubeletConfiguration, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	disksHash, _ := hashstructure.Hash(nodeClass.Spec.Disks, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
-	listKey := fmt.Sprintf("%d-%d-%d-%d-%d", p.instanceTypesSeqNum, p.unavailableOfferings.SeqNum, zonesHash, kcHash, disksHash)
-	item, ok := p.instanceTypesCache.Get(listKey)
-	if ok && len(item.([]*cloudprovider.InstanceType)) > 0 {
+
+	instanceTypesSeqNum := atomic.LoadUint64(&p.instanceTypesSeqNum)
+	unavailableOfferingsSeqNum := atomic.LoadUint64(&p.unavailableOfferings.SeqNum)
+	cacheRevision := fmt.Sprintf("%d-%d", instanceTypesSeqNum, unavailableOfferingsSeqNum)
+	listKey := fmt.Sprintf("%s-%d-%d-%d", cacheRevision, zonesHash, kcHash, disksHash)
+
+	p.muInstanceTypesCache.Lock()
+	defer p.muInstanceTypesCache.Unlock()
+	if p.instanceTypesCacheRevision != cacheRevision {
+		p.instanceTypesCache.Flush()
+		p.instanceTypesCacheRevision = cacheRevision
+	}
+	if item, ok := p.instanceTypesCache.Get(listKey); ok && len(item.([]*cloudprovider.InstanceType)) > 0 {
 		return item.([]*cloudprovider.InstanceType), nil
 	}
 

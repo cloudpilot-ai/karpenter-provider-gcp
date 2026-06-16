@@ -78,6 +78,34 @@ func TestListEphemeralStorageCacheIsolation(t *testing.T) {
 		"each distinct disk config must produce a separate cache entry")
 }
 
+func TestListUnavailableOfferingsCacheRevisionEvictsStaleEntries(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+
+	nodeClass := &v1alpha1.GCENodeClass{}
+	first, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, first)
+	assert.True(t, spotOfferingAvailable(first[0].Offerings))
+
+	p.unavailableOfferings.MarkUnavailable(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot)
+	second, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, second)
+	assert.False(t, spotOfferingAvailable(second[0].Offerings))
+	assert.Equal(t, 1, p.instanceTypesCache.ItemCount(),
+		"unavailable offering changes must evict stale instance type cache entries")
+}
+
+func spotOfferingAvailable(offerings cloudprovider.Offerings) bool {
+	for _, offering := range offerings {
+		if offering.Requirements.Get(karpv1.CapacityTypeLabelKey).Any() == karpv1.CapacityTypeSpot {
+			return offering.Available
+		}
+	}
+	return false
+}
+
 func TestCalculateDiskConfiguration(t *testing.T) {
 	tests := []struct {
 		name             string
