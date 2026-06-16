@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/events"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/csr"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption"
@@ -43,6 +42,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	providerinstancetype "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	providernodepooltemplate "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 )
 
@@ -52,7 +52,7 @@ func NewController(
 	kubeClient client.Client,
 	kubernetesInterface kubernetes.Interface,
 	recorder events.Recorder,
-	unavailableOfferings *cache.UnavailableOfferings,
+	unavailableOfferings *unavailableofferings.UnavailableOfferings,
 	imageProvider imagefamily.Provider,
 	nodePoolTemplateProvider providernodepooltemplate.Provider,
 	instanceTypeProvider providerinstancetype.Provider,

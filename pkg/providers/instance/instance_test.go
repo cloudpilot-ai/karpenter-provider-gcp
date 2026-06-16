@@ -41,8 +41,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -115,7 +115,7 @@ func TestInsufficientCapacityBackoffTTLForOtherReasons(t *testing.T) {
 
 	ttl := insufficientCapacityBackoffTTL("ZONE_RESOURCE_POOL_EXHAUSTED")
 
-	require.Equal(t, pkgcache.UnavailableOfferingsTTL, ttl)
+	require.Equal(t, unavailableofferings.DefaultTTL, ttl)
 }
 
 // newFakeComputeProvider builds a DefaultProvider whose computeService targets a fake
@@ -303,7 +303,7 @@ func TestSelectZone_OnDemandHonorsTopologyRequirement(t *testing.T) {
 		gkeProvider: &fakeGKEProvider{
 			zones: []string{"europe-west4-a", "europe-west4-b", "europe-west4-c"},
 		},
-		unavailableOfferings: pkgcache.NewUnavailableOfferings(),
+		unavailableOfferings: unavailableofferings.NewUnavailableOfferings(),
 	}
 
 	nodeClaim := &karpv1.NodeClaim{
@@ -343,7 +343,7 @@ func TestSelectZone_FailsWhenNoZonesMatchRequirement(t *testing.T) {
 		gkeProvider: &fakeGKEProvider{
 			zones: []string{"europe-west4-a", "europe-west4-c"},
 		},
-		unavailableOfferings: pkgcache.NewUnavailableOfferings(),
+		unavailableOfferings: unavailableofferings.NewUnavailableOfferings(),
 	}
 
 	nodeClaim := &karpv1.NodeClaim{
@@ -453,7 +453,7 @@ func TestSelectZone_SpotChoosesCheapestWithinTopologyRequirement(t *testing.T) {
 		gkeProvider: &fakeGKEProvider{
 			zones: []string{"europe-west4-a", "europe-west4-b"},
 		},
-		unavailableOfferings: pkgcache.NewUnavailableOfferings(),
+		unavailableOfferings: unavailableofferings.NewUnavailableOfferings(),
 	}
 
 	nodeClaim := &karpv1.NodeClaim{
@@ -496,7 +496,7 @@ func TestSelectZone_OnDemandSkipsUnavailableZones(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	uo := pkgcache.NewUnavailableOfferings()
+	uo := unavailableofferings.NewUnavailableOfferings()
 	uo.MarkUnavailable(ctx, "ICE", "n2-standard-4", "europe-west4-a", karpv1.CapacityTypeOnDemand)
 	uo.MarkUnavailable(ctx, "ICE", "n2-standard-4", "europe-west4-c", karpv1.CapacityTypeOnDemand)
 
@@ -524,7 +524,7 @@ func TestSelectZone_OnDemandReturnsICEWhenAllZonesUnavailable(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	uo := pkgcache.NewUnavailableOfferings()
+	uo := unavailableofferings.NewUnavailableOfferings()
 	for _, z := range []string{"europe-west4-a", "europe-west4-b", "europe-west4-c"} {
 		uo.MarkUnavailable(ctx, "ICE", "n2-standard-4", z, karpv1.CapacityTypeOnDemand)
 	}
@@ -547,7 +547,7 @@ func TestSelectZone_SpotSkipsUnavailableZones(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	uo := pkgcache.NewUnavailableOfferings()
+	uo := unavailableofferings.NewUnavailableOfferings()
 	uo.MarkUnavailable(ctx, "ICE", "n2-standard-4", "europe-west4-a", karpv1.CapacityTypeSpot)
 
 	p := &DefaultProvider{
@@ -577,7 +577,7 @@ func TestSelectZone_SpotReturnsICEWhenAllZonesUnavailable(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	uo := pkgcache.NewUnavailableOfferings()
+	uo := unavailableofferings.NewUnavailableOfferings()
 	for _, z := range []string{"europe-west4-a", "europe-west4-b"} {
 		uo.MarkUnavailable(ctx, "ICE", "n2-standard-4", z, karpv1.CapacityTypeSpot)
 	}

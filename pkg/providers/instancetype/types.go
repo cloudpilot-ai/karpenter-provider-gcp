@@ -43,6 +43,16 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 		return nil
 	}
 
+	it := NewStaticInstanceType(ctx, mt, nodeClass)
+	if it == nil {
+		return nil
+	}
+	it.Requirements = computeRequirements(mt, offerings, region)
+	it.Offerings = offerings
+	return it
+}
+
+func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass) *cloudprovider.InstanceType {
 	// Calculate disk configuration from GCENodeClass
 	bootDiskGiB, totalSSDGiB, localSSDCount := calculateDiskConfigGiB(nodeClass, mt)
 	totalStorageGiB := totalSSDGiB
@@ -90,8 +100,7 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 
 	it := &cloudprovider.InstanceType{
 		Name:         lo.FromPtr(mt.Name),
-		Requirements: computeRequirements(mt, offerings, region),
-		Offerings:    offerings,
+		Requirements: scheduling.NewRequirements(),
 		Capacity:     computeCapacity(ctx, mt, nodeClass, totalStorageBytes),
 		Overhead:     &overhead,
 	}

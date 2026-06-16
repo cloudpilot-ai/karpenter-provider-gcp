@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cache
+package unavailableofferings
 
 import (
 	"context"
@@ -48,6 +48,23 @@ func TestUnavailableOfferings(t *testing.T) {
 	// test that the offering is no longer marked as unavailable
 	if u.IsUnavailable("NV16as_v4", "westus", "spot") {
 		t.Error("Offering should not be marked as unavailable after cache entry has expired")
+	}
+}
+
+func TestUnavailableOfferingsSeqNum(t *testing.T) {
+	u := NewUnavailableOfferingsWithCache(cache.New(time.Second, time.Second))
+	if got := u.SeqNum(); got != 0 {
+		t.Fatalf("expected initial seq num 0, got %d", got)
+	}
+
+	u.MarkUnavailableWithTTL(context.TODO(), "test reason", "NV16as_v4", "westus", "spot", time.Second)
+	if got := u.SeqNum(); got != 1 {
+		t.Fatalf("expected mark unavailable to increment seq num to 1, got %d", got)
+	}
+
+	u.Flush()
+	if got := u.SeqNum(); got != 2 {
+		t.Fatalf("expected flush to increment seq num to 2, got %d", got)
 	}
 }
 

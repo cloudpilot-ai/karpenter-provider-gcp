@@ -19,6 +19,7 @@ package instancetype
 import (
 	"context"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/samber/lo"
@@ -74,8 +75,98 @@ func TestListEphemeralStorageCacheIsolation(t *testing.T) {
 		"200 GiB disk should produce 76 Gi kubeReserved ephemeral-storage")
 	assert.Equal(t, int64(15)*1024*1024*1024, ephemeral30.Value(),
 		"30 GiB disk should produce 15 Gi kubeReserved ephemeral-storage, not the cached 76 Gi")
-	assert.Equal(t, 2, p.instanceTypesCache.ItemCount(),
+	assert.Equal(t, 2, p.staticInstanceTypesCache.ItemCount(),
 		"each distinct disk config must produce a separate cache entry")
+}
+
+func TestListUnavailableOfferingsDoNotGrowStaticCache(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+	nodeClass := &v1alpha1.GCENodeClass{}
+
+	first, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, first)
+	assert.True(t, spotOfferingAvailable(first[0].Offerings))
+
+	p.unavailableOfferings.MarkUnavailable(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot)
+
+	second, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, second)
+	assert.False(t, spotOfferingAvailable(second[0].Offerings))
+	assert.Equal(t, 1, p.staticInstanceTypesCache.ItemCount(),
+		"unavailable offering changes must not create new static instance type cache entries")
+}
+
+func TestListRebuildsRequirementsWithInjectedOfferings(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+	nodeClass := &v1alpha1.GCENodeClass{}
+
+	first, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, first)
+	assert.Contains(t, first[0].Requirements.Get(karpv1.CapacityTypeLabelKey).Values(), karpv1.CapacityTypeSpot)
+
+	p.unavailableOfferings.MarkUnavailable(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot)
+
+	second, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, second)
+	assert.NotContains(t, second[0].Requirements.Get(karpv1.CapacityTypeLabelKey).Values(), karpv1.CapacityTypeSpot)
+	assert.Contains(t, second[0].Requirements.Get(karpv1.CapacityTypeLabelKey).Values(), karpv1.CapacityTypeOnDemand)
+}
+
+func TestListUnavailableOfferingExpiryDoesNotGrowStaticCache(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+	nodeClass := &v1alpha1.GCENodeClass{}
+
+	p.unavailableOfferings.MarkUnavailableWithTTL(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot, time.Millisecond)
+
+	unavailable, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, unavailable)
+	assert.False(t, spotOfferingAvailable(unavailable[0].Offerings))
+
+	time.Sleep(2 * time.Millisecond)
+
+	available, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, available)
+	assert.True(t, spotOfferingAvailable(available[0].Offerings))
+	assert.Equal(t, 1, p.staticInstanceTypesCache.ItemCount(),
+		"unavailable offering expiry must not create new static instance type cache entries")
+}
+
+func TestListDoesNotMutatePreviousResults(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+	nodeClass := &v1alpha1.GCENodeClass{}
+
+	first, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, first)
+	assert.True(t, spotOfferingAvailable(first[0].Offerings))
+
+	p.unavailableOfferings.MarkUnavailable(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot)
+
+	second, err := p.List(ctx, nodeClass)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, second)
+	assert.False(t, spotOfferingAvailable(second[0].Offerings))
+	assert.True(t, spotOfferingAvailable(first[0].Offerings),
+		"later List calls must not mutate previously returned instance types")
+}
+
+func spotOfferingAvailable(offerings cloudprovider.Offerings) bool {
+	for _, offering := range offerings {
+		if offering.Requirements.Get(karpv1.CapacityTypeLabelKey).Any() == karpv1.CapacityTypeSpot {
+			return offering.Available
+		}
+	}
+	return false
 }
 
 func TestCalculateDiskConfiguration(t *testing.T) {

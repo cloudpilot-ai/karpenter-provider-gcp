@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
-	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 )
 
 // fakeGKEProvider returns a fixed zone list without making GCP API calls.
@@ -77,8 +77,8 @@ func newTestProvider() *DefaultProvider {
 		instanceTypesOfferings: map[string]sets.Set[string]{
 			"n2-standard-4": sets.New("us-central1-a"),
 		},
-		unavailableOfferings: pkgcache.NewUnavailableOfferings(),
-		instanceTypesCache:   cache.New(InstanceTypesCacheTTL, pkgcache.DefaultCleanupInterval),
-		cm:                   pretty.NewChangeMonitor(),
+		unavailableOfferings:     unavailableofferings.NewUnavailableOfferings(),
+		staticInstanceTypesCache: cache.New(StaticInstanceTypesCacheTTL, staticInstanceTypesCacheCleanup),
+		cm:                       pretty.NewChangeMonitor(),
 	}
 }
