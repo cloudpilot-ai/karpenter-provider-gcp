@@ -62,6 +62,16 @@
       "additionalProperties": { "type": "string" },
       "description": "Labels added to the controller pod."
     },
+    "podSecurityContext": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Security context applied at the pod level."
+    },
+    "securityContext": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Security context applied to the karpenter container."
+    },
     "podDisruptionBudget": {
       "type": "object",
       "additionalProperties": false,

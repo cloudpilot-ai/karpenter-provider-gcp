@@ -27,6 +27,23 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 
+# -- Security context applied at the pod level.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Security context applied to the karpenter container.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
 imagePullSecrets: []
 #  - name: my-registry-secret
 
