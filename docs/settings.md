@@ -66,6 +66,51 @@ controller:
       value: "my-node-sa@my-project.iam.gserviceaccount.com"
 ```
 
+## Security Contexts
+
+By default, the Helm chart applies least-privilege security contexts to the controller pod and the `karpenter` container. These follow the Kubernetes Pod Security Standards and let the controller run under the `restricted` profile. Each context is rendered only when its value is non-empty, so you can override individual fields or disable a context entirely by setting it to `{}`.
+
+| Helm value          | Scope     | Default                                                                                                                            | Description                                          |
+|---------------------|-----------|------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------|
+| `podSecurityContext` | Pod       | `runAsNonRoot: true`, `seccompProfile.type: RuntimeDefault`                                                                          | Security context applied at the pod level.           |
+| `securityContext`    | Container | `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `runAsNonRoot: true`, `capabilities.drop: [ALL]`, `seccompProfile.type: RuntimeDefault` | Security context applied to the `karpenter` container. |
+
+These are the chart defaults:
+
+```yaml
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+```
+
+To override a field, set it under the corresponding key. For example, to pin the user the controller runs as:
+
+```yaml
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault
+```
+
+To disable a context, set it to an empty object so no `securityContext` block is rendered:
+
+```yaml
+podSecurityContext: {}
+securityContext: {}
+```
+
 ## NodePool Features
 
 These fields are set on `NodePool` objects, not on the controller. They are part of the karpenter-core API and are available in this provider.
