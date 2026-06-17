@@ -63,12 +63,12 @@
       "description": "Labels added to the controller pod."
     },
     "podSecurityContext": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": true,
       "description": "Security context applied at the pod level."
     },
     "securityContext": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": true,
       "description": "Security context applied to the karpenter container."
     },
