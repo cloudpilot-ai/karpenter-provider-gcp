@@ -138,6 +138,8 @@ serviceMonitor:
 | podAnnotations | object | `{}` |  |
 | podDisruptionBudget.minAvailable | int | `1` |  |
 | podLabels | object | `{}` |  |
+| podSecurityContext | object | `{"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Security context applied at the pod level. |
+| securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Security context applied to the karpenter container. |
 | serviceAccount.annotations | object | `{}` |  |
 | serviceAccount.automount | bool | `true` |  |
 | serviceAccount.create | bool | `true` |  |
