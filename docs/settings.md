@@ -70,9 +70,9 @@ controller:
 
 By default, the Helm chart applies least-privilege security contexts to the controller pod and the `karpenter` container. These follow the Kubernetes Pod Security Standards and let the controller run under the `restricted` profile. Each context is rendered only when its value is non-empty, so you can override individual fields or disable a context entirely by setting it to `{}`.
 
-| Helm value          | Scope     | Default                                                                                                                            | Description                                          |
-|---------------------|-----------|------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------|
-| `podSecurityContext` | Pod       | `runAsNonRoot: true`, `seccompProfile.type: RuntimeDefault`                                                                          | Security context applied at the pod level.           |
+| Helm value           | Scope     | Default                                                                                                                                                    | Description                                            |
+|----------------------|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------|
+| `podSecurityContext` | Pod       | `runAsNonRoot: true`, `seccompProfile.type: RuntimeDefault`                                                                                                | Security context applied at the pod level.             |
 | `securityContext`    | Container | `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `runAsNonRoot: true`, `capabilities.drop: [ALL]`, `seccompProfile.type: RuntimeDefault` | Security context applied to the `karpenter` container. |
 
 These are the chart defaults:
