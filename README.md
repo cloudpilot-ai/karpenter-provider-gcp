@@ -66,6 +66,11 @@ We want your contributions and suggestions! One of the easiest ways to contribut
 
 * [Slack channel](https://kubernetes.slack.com/archives/C0B20K4KWP8)
 
+## Sponsors
+
+End-to-end testing infrastructure for this project is generously provided by [PlanetScale](https://planetscale.com), the fastest Postgres and MySQL.&nbsp;
+<a href="https://planetscale.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://planetscale.com/brand/planetscale-logo-mark-white.svg"><img src="https://planetscale.com/brand/planetscale-logo-mark-black.svg" height="20" alt="PlanetScale"></picture></a>
+
 ## Attribution Notice
 
 This project includes code derived from karpenter-provider-aws, used under the Apache License, Version 2.0 terms. We acknowledge the contributions of the original authors and thank them for making their work available. For more details, see the [karpenter-provider-aws](https://github.com/aws/karpenter-provider-aws).
