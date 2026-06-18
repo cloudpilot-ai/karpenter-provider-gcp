@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
@@ -32,7 +33,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
@@ -51,6 +51,11 @@ func IsImageResolutionError(err error) bool {
 	var e *imageResolutionError
 	return errors.As(err, &e)
 }
+
+const (
+	imageCacheTTL             = 5 * time.Minute
+	imageCacheCleanupInterval = time.Minute
+)
 
 type Provider interface {
 	List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, error)
@@ -73,7 +78,7 @@ func NewDefaultProvider(computeService *compute.Service, versionProvider version
 	ubuntu2404 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2404"}
 	ubuntu2204 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2204"}
 	return &DefaultProvider{
-		cache:           cache.New(pkgcache.ImageCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
+		cache:           cache.New(imageCacheTTL, imageCacheCleanupInterval),
 		computeService:  computeService,
 		gkeProvider:     gkeProvider,
 		versionProvider: versionProvider,

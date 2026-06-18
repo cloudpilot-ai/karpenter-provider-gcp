@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cache
+package unavailableofferings
 
 import (
 	"context"
@@ -26,29 +26,39 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const (
+	// DefaultTTL is the time before offerings that were marked as unavailable
+	// are removed from the cache and become available for launch again.
+	DefaultTTL = 30 * time.Minute
+	// CleanupInterval triggers background cache cleanup. Expired entries are treated
+	// as missing on lookup, so this only controls physical eviction and SeqNum bumps.
+	CleanupInterval = time.Minute
+)
+
 // UnavailableOfferings stores any offerings that return ICE (insufficient capacity errors) when
 // attempting to launch the capacity. These offerings are ignored as long as they are in the cache on
 // GetInstanceTypes responses
 type UnavailableOfferings struct {
 	// key: <capacityType>:<instanceType>:<zone>, value: struct{}{}
 	cache  *cache.Cache
-	SeqNum uint64
+	seqNum uint64
 }
 
 func NewUnavailableOfferingsWithCache(c *cache.Cache) *UnavailableOfferings {
-	uo := &UnavailableOfferings{
-		cache:  c,
-		SeqNum: 0,
-	}
+	uo := &UnavailableOfferings{cache: c}
 	uo.cache.OnEvicted(func(_ string, _ interface{}) {
-		atomic.AddUint64(&uo.SeqNum, 1)
+		atomic.AddUint64(&uo.seqNum, 1)
 	})
 	return uo
 }
 
 func NewUnavailableOfferings() *UnavailableOfferings {
-	return NewUnavailableOfferingsWithCache(
-		cache.New(UnavailableOfferingsTTL, UnavailableOfferingsCleanupInterval))
+	return NewUnavailableOfferingsWithCache(cache.New(DefaultTTL, CleanupInterval))
+}
+
+// SeqNum returns the current unavailable-offerings cache revision.
+func (u *UnavailableOfferings) SeqNum() uint64 {
+	return atomic.LoadUint64(&u.seqNum)
 }
 
 // IsUnavailable returns true if the offering appears in the cache
@@ -69,17 +79,17 @@ func (u *UnavailableOfferings) MarkUnavailableWithTTL(ctx context.Context, unava
 		"ttl", ttl,
 	)
 	u.cache.Set(cacheKey, struct{}{}, ttl)
-	atomic.AddUint64(&u.SeqNum, 1)
+	atomic.AddUint64(&u.seqNum, 1)
 }
 
 // MarkUnavailable communicates recently observed temporary capacity shortages in the provided offerings
 func (u *UnavailableOfferings) MarkUnavailable(ctx context.Context, unavailableReason, instanceType, zone, capacityType string) {
-	u.MarkUnavailableWithTTL(ctx, unavailableReason, instanceType, zone, capacityType, UnavailableOfferingsTTL)
+	u.MarkUnavailableWithTTL(ctx, unavailableReason, instanceType, zone, capacityType, DefaultTTL)
 }
 
 func (u *UnavailableOfferings) Flush() {
 	u.cache.Flush()
-	atomic.AddUint64(&u.SeqNum, 1)
+	atomic.AddUint64(&u.seqNum, 1)
 }
 
 // key returns the cache key for all offerings in the cache

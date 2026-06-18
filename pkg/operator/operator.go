@@ -32,13 +32,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
-	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
@@ -51,7 +51,7 @@ func init() {
 type Operator struct {
 	*operator.Operator
 
-	UnavailableOfferingsCache *pkgcache.UnavailableOfferings
+	UnavailableOfferingsCache *unavailableofferings.UnavailableOfferings
 	ImagesProvider            imagefamily.Provider
 	NodePoolTemplateProvider  nodepooltemplate.Provider
 	PricingProvider           pricing.Provider
@@ -111,7 +111,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 
-	unavailableOfferingsCache := pkgcache.NewUnavailableOfferings()
+	unavailableOfferingsCache := unavailableofferings.NewUnavailableOfferings()
 	gkeProvider := gke.NewDefaultProvider(computeService, containerService,
 		options.FromContext(ctx).ProjectID,
 		options.FromContext(ctx).NodeLocation,

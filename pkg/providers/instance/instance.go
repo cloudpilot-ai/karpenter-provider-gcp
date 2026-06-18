@@ -44,12 +44,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
@@ -84,7 +84,7 @@ type DefaultProvider struct {
 	gkeProvider              gke.Provider
 	nodePoolTemplateProvider nodepooltemplate.Provider
 	versionProvider          version.Provider
-	unavailableOfferings     *pkgcache.UnavailableOfferings
+	unavailableOfferings     *unavailableofferings.UnavailableOfferings
 
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
@@ -103,7 +103,7 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 	gkeProvider gke.Provider,
 	nodePoolTemplateProvider nodepooltemplate.Provider,
 	versionProvider version.Provider,
-	unavailableOfferings *pkgcache.UnavailableOfferings,
+	unavailableOfferings *unavailableofferings.UnavailableOfferings,
 ) Provider {
 	return &DefaultProvider{
 		gkeProvider:              gkeProvider,
@@ -231,7 +231,7 @@ func insufficientCapacityBackoffTTL(reasonCode string) time.Duration {
 		return ipSpaceInsufficientCapacityTTL
 	}
 
-	return pkgcache.UnavailableOfferingsTTL
+	return unavailableofferings.DefaultTTL
 }
 
 func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {

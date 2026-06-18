@@ -33,8 +33,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/utils/node"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -52,10 +52,10 @@ type Controller struct {
 	kubeClient client.Client
 	recorder   events.Recorder
 
-	unavailableOfferingsCache *cache.UnavailableOfferings
+	unavailableOfferingsCache *unavailableofferings.UnavailableOfferings
 }
 
-func NewController(kubeClient client.Client, recorder events.Recorder, unavailableOfferingsCache *cache.UnavailableOfferings) *Controller {
+func NewController(kubeClient client.Client, recorder events.Recorder, unavailableOfferingsCache *unavailableofferings.UnavailableOfferings) *Controller {
 	return &Controller{
 		kubeClient:                kubeClient,
 		recorder:                  recorder,
