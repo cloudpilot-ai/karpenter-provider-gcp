@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	compute "google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
@@ -90,8 +92,14 @@ type Environment struct {
 
 	KubeClient    kubernetes.Interface
 	DynamicClient dynamic.Interface
+	MetricsClient metricsclient.Interface
 	containerSvc  *container.Service
 	computeSvc    *compute.Service
+
+	resourceSamplerCancel context.CancelFunc
+	resourceSampleMu      sync.Mutex
+	resourceSample        controllerResourceSample
+	resourceReportOnce    sync.Once
 
 	// mu guards ownedNodePools and ownedNodeClasses so Cleanup is safe when
 	// multiple Ginkgo processes share the same Environment.
@@ -118,6 +126,9 @@ func NewEnvironment() *Environment {
 	dynamicClient, err := dynamic.NewForConfig(cfg)
 	Expect(err).NotTo(HaveOccurred(), "creating dynamic client")
 
+	metricsClient, err := metricsclient.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred(), "creating metrics client")
+
 	initCtx, initCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
 	defer initCancel()
 	containerSvc, err := container.NewService(initCtx)
@@ -133,6 +144,7 @@ func NewEnvironment() *Environment {
 		PodsRangeName:    mustEnv("PODS_RANGE_NAME"),
 		KubeClient:       kubeClient,
 		DynamicClient:    dynamicClient,
+		MetricsClient:    metricsClient,
 		containerSvc:     containerSvc,
 		computeSvc:       computeSvc,
 		ownedNodePools:   make(map[string]struct{}),
@@ -154,6 +166,7 @@ func NewEnvironment() *Environment {
 
 	env.waitForControllerReady()
 	env.ensureTestNamespace()
+	env.startControllerResourceSampler()
 	return env
 }
 
@@ -183,6 +196,8 @@ func (e *Environment) trackNodeClass(name string) {
 // for their NodeClaims to drain. Scoped to owned resources so that parallel
 // suite processes do not interfere with each other.
 func (e *Environment) Cleanup() {
+	e.ReportControllerResourceUsage()
+
 	deleteCtx, deleteCancel := context.WithTimeout(context.Background(), NodeCleanupTimeout)
 	defer deleteCancel()
 
@@ -297,6 +312,156 @@ func (e *Environment) waitForControllerReady() {
 		g.Expect(running).To(BeNumerically(">=", 1),
 			"expected at least one RUNNING node pool for bootstrap source discovery")
 	}).WithTimeout(GKENodePoolReadyTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+type controllerResourceSample struct {
+	Samples      int
+	LatestCPU    int64
+	LatestMemory int64
+	MaxCPU       int64
+	MaxMemory    int64
+}
+
+func (e *Environment) startControllerResourceSampler() {
+	ctx, cancel := context.WithCancel(context.Background())
+	e.resourceSamplerCancel = cancel
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		e.recordControllerResourceSample(ctx)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				e.recordControllerResourceSample(ctx)
+			}
+		}
+	}()
+}
+
+// ReportControllerResourceUsage emits a best-effort controller CPU/memory summary into the Ginkgo log.
+// It is intentionally non-fatal so missing metrics-server data does not hide e2e test results.
+func (e *Environment) ReportControllerResourceUsage() {
+	e.resourceReportOnce.Do(func() {
+		if e.resourceSamplerCancel != nil {
+			e.resourceSamplerCancel()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		e.recordControllerResourceSample(ctx)
+
+		e.resourceSampleMu.Lock()
+		sample := e.resourceSample
+		e.resourceSampleMu.Unlock()
+
+		requests := e.controllerResourceRequests(ctx)
+		if sample.Samples == 0 {
+			ginkgo.GinkgoWriter.Printf("[resources] karpenter controller: requests cpu=%dm memory=%s; no usage samples available\n",
+				requests.CPU, formatBytes(requests.Memory))
+			return
+		}
+		ginkgo.GinkgoWriter.Printf(
+			"[resources] karpenter controller: requests cpu=%dm memory=%s; latest cpu=%dm memory=%s; peak cpu=%dm memory=%s; samples=%d\n",
+			requests.CPU,
+			formatBytes(requests.Memory),
+			sample.LatestCPU,
+			formatBytes(sample.LatestMemory),
+			sample.MaxCPU,
+			formatBytes(sample.MaxMemory),
+			sample.Samples,
+		)
+	})
+}
+
+func (e *Environment) recordControllerResourceSample(ctx context.Context) {
+	usageCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	selector, err := e.controllerPodSelector(usageCtx)
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("[resources] skipping controller resource sample: %v\n", err)
+		return
+	}
+
+	metrics, err := e.MetricsClient.MetricsV1beta1().PodMetricses(KarpenterNamespace).List(usageCtx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("[resources] skipping controller resource sample: %v\n", err)
+		return
+	}
+	if len(metrics.Items) == 0 {
+		ginkgo.GinkgoWriter.Printf("[resources] skipping controller resource sample: no pod metrics for selector %q\n", selector)
+		return
+	}
+
+	var cpuMillis, memoryBytes int64
+	for _, pod := range metrics.Items {
+		for _, container := range pod.Containers {
+			cpuMillis += container.Usage.Cpu().MilliValue()
+			memoryBytes += container.Usage.Memory().Value()
+		}
+	}
+
+	e.resourceSampleMu.Lock()
+	defer e.resourceSampleMu.Unlock()
+	e.resourceSample.Samples++
+	e.resourceSample.LatestCPU = cpuMillis
+	e.resourceSample.LatestMemory = memoryBytes
+	if cpuMillis > e.resourceSample.MaxCPU {
+		e.resourceSample.MaxCPU = cpuMillis
+	}
+	if memoryBytes > e.resourceSample.MaxMemory {
+		e.resourceSample.MaxMemory = memoryBytes
+	}
+}
+
+type resourceRequests struct {
+	CPU    int64
+	Memory int64
+}
+
+func (e *Environment) controllerResourceRequests(ctx context.Context) resourceRequests {
+	dep, err := e.KubeClient.AppsV1().Deployments(KarpenterNamespace).Get(ctx, KarpenterDeployment, metav1.GetOptions{})
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("[resources] skipping controller resource requests: %v\n", err)
+		return resourceRequests{}
+	}
+
+	var requests resourceRequests
+	for _, container := range dep.Spec.Template.Spec.Containers {
+		requests.CPU += container.Resources.Requests.Cpu().MilliValue()
+		requests.Memory += container.Resources.Requests.Memory().Value()
+	}
+	return requests
+}
+
+func (e *Environment) controllerPodSelector(ctx context.Context) (string, error) {
+	dep, err := e.KubeClient.AppsV1().Deployments(KarpenterNamespace).Get(ctx, KarpenterDeployment, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("getting karpenter Deployment: %w", err)
+	}
+	selector, err := metav1.LabelSelectorAsSelector(dep.Spec.Selector)
+	if err != nil {
+		return "", fmt.Errorf("building pod selector for karpenter Deployment: %w", err)
+	}
+	return selector.String(), nil
+}
+
+func formatBytes(v int64) string {
+	const unit = 1024
+	if v < unit {
+		return fmt.Sprintf("%dB", v)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	f := float64(v)
+	for _, suffix := range units {
+		f /= unit
+		if f < unit {
+			return fmt.Sprintf("%.1f%s", f, suffix)
+		}
+	}
+	return fmt.Sprintf("%.1fPiB", f/unit)
 }
 
 func mustEnv(key string) string {

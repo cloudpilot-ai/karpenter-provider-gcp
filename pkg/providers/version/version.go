@@ -19,18 +19,19 @@ package version
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/patrickmn/go-cache"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
-
-	pkgcache "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cache"
 )
 
 const (
 	kubernetesVersionCacheKey = "kubernetesVersion"
+	kubernetesVersionCacheTTL = 5 * time.Minute
+	cacheCleanupInterval      = time.Minute
 	// MinK8sVersion defines the min K8s version which has tested on gke
 	MinK8sVersion = "1.28.1"
 	// MaxK8sVersion defines the max K8s version which has tested on gke
@@ -52,7 +53,7 @@ type DefaultProvider struct {
 func NewDefaultProvider(kubernetesInterface kubernetes.Interface) *DefaultProvider {
 	return &DefaultProvider{
 		cm:                  pretty.NewChangeMonitor(),
-		cache:               cache.New(pkgcache.ServerVersionCacheExpirationPeriod, pkgcache.DefaultCleanupInterval),
+		cache:               cache.New(kubernetesVersionCacheTTL, cacheCleanupInterval),
 		kubernetesInterface: kubernetesInterface,
 	}
 }
