@@ -34,6 +34,22 @@ These options configure the controller's runtime behavior.
 | `--batch-idle-duration`       | `BATCH_IDLE_DURATION`       | `controller.settings.batchIdleDuration` | `1s`    | Idle time after the last pod event before Karpenter triggers provisioning.                                                                        |
 | `--ignore-dra-requests`       | `IGNORE_DRA_REQUESTS`       | `controller.settings.ignoreDRARequests` | `true`  | When `true`, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.                                          |
 
+### Dynamic Resource Allocation (DRA)
+
+Dynamic Resource Allocation (DRA) is a Kubernetes API for requesting and sharing hardware devices — typically GPUs and other accelerators — through `ResourceClaim` objects rather than plain resource requests. Pods reference a claim, and a DRA driver allocates matching devices on nodes that can satisfy it.
+
+Karpenter ignores DRA requests during scheduling simulations by default (`controller.settings.ignoreDRARequests: true`). This preserves scheduling behavior for clusters without DRA drivers, the common case on GKE.
+
+Set `ignoreDRARequests` to `false` only when the cluster has DRA drivers installed and runs workloads that schedule against `ResourceClaim`s. When disabled, Karpenter registers the upstream device-allocation controller and accounts for DRA device availability when provisioning.
+
+```yaml
+controller:
+  settings:
+    ignoreDRARequests: false
+```
+
+DRA is a Kubernetes-level feature. Review the [Kubernetes DRA documentation](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) and your DRA driver's requirements before enabling it.
+
 ## GCP-specific Settings
 
 | Setting             | Env var                            | Helm value                                        | Required | Description                                                                                                                                                                                                                                                                                |
@@ -118,7 +134,7 @@ These fields are set on `NodePool` objects, not on the controller. They are part
 
 ### Karpenter core v1.13
 
-Karpenter core v1.13 adds Dynamic Resource Allocation device allocation tracking and treats Kubernetes Node Readiness Controller taints (`readiness.k8s.io/*`) as ephemeral during scheduling. DRA scheduling remains disabled by default through `controller.settings.ignoreDRARequests: true`.
+Karpenter core v1.13 adds Dynamic Resource Allocation device allocation tracking and treats Kubernetes Node Readiness Controller taints (`readiness.k8s.io/*`) as ephemeral during scheduling. DRA scheduling remains disabled by default through `controller.settings.ignoreDRARequests: true` — see [Dynamic Resource Allocation (DRA)](#dynamic-resource-allocation-dra).
 
 ### Node count limit (v1.11)
 
