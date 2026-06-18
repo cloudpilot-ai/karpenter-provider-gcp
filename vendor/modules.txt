@@ -30,7 +30,7 @@ cloud.google.com/go/compute/metadata
 # github.com/Masterminds/semver/v3 v3.4.0
 ## explicit; go 1.21
 github.com/Masterminds/semver/v3
-# github.com/awslabs/operatorpkg v0.0.0-20251222193911-34e9a1898737
+# github.com/awslabs/operatorpkg v0.0.0-20260501204335-c49b4ca8d58d
 ## explicit; go 1.25.0
 github.com/awslabs/operatorpkg/controller
 github.com/awslabs/operatorpkg/metrics
@@ -335,7 +335,7 @@ go.opentelemetry.io/otel/trace/noop
 # go.uber.org/multierr v1.11.0
 ## explicit; go 1.19
 go.uber.org/multierr
-# go.uber.org/zap v1.27.1
+# go.uber.org/zap v1.28.0
 ## explicit; go 1.19
 go.uber.org/zap
 go.uber.org/zap/buffer
@@ -1097,8 +1097,8 @@ sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics
 ## explicit; go 1.23
 sigs.k8s.io/json
 sigs.k8s.io/json/internal/golang/encoding/json
-# sigs.k8s.io/karpenter v1.12.1
-## explicit; go 1.26.3
+# sigs.k8s.io/karpenter v1.13.0
+## explicit; go 1.26.4
 sigs.k8s.io/karpenter/pkg/apis
 sigs.k8s.io/karpenter/pkg/apis/v1
 sigs.k8s.io/karpenter/pkg/apis/v1alpha1
@@ -1107,6 +1107,7 @@ sigs.k8s.io/karpenter/pkg/cloudprovider/metrics
 sigs.k8s.io/karpenter/pkg/controllers
 sigs.k8s.io/karpenter/pkg/controllers/disruption
 sigs.k8s.io/karpenter/pkg/controllers/disruption/events
+sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation
 sigs.k8s.io/karpenter/pkg/controllers/metrics/node
 sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool
 sigs.k8s.io/karpenter/pkg/controllers/metrics/pod
