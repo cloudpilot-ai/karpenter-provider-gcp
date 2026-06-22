@@ -66,6 +66,8 @@ func main() {
 			op.InstanceTypeProvider,
 			gcpCloudProvider,
 			op.PricingProvider,
+			op.Clock,
+			clusterState,
 		)...).
 		Start(ctx)
 }

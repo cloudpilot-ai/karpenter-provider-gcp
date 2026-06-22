@@ -22,12 +22,17 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -35,12 +40,18 @@ import (
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	clock         clock.Clock
+	cluster       *state.Cluster
+	recorder      events.Recorder
 }
 
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clk clock.Clock, cluster *state.Cluster, recorder events.Recorder) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
+		clock:         clk,
+		cluster:       cluster,
+		recorder:      recorder,
 	}
 }
 
@@ -67,7 +78,30 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		return reconcile.Result{}, nil
 	}
 
-	// TODO: it should follow the emptiness disrupt rule of the target nodepool
+	// follow the emptiness disrupt rule of the target nodepool. The upstream
+	// nodeclaim disruption controller maintains the Consolidatable status condition,
+	// which already encodes the NodePool's consolidationPolicy and consolidateAfter
+	// window (it is never set when consolidation is disabled).
+	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
+	if err != nil {
+		// NodeClaim is not yet registered (or duplicated), retry later.
+		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue() {
+		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// respect the NodePool's disruption budgets for the Empty reason, reusing the
+	// same computation as the upstream disruption controller.
+	budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, v1.DisruptionReasonEmpty)
+	if err != nil {
+		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	if budgets[node.Labels[v1.NodePoolLabelKey]] <= 0 {
+		// Empty disruption budget for this NodePool is exhausted; retry later.
+		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
 	log.FromContext(ctx).Info("deleting empty node", "node", node.Name)
 	// delete the node
 	if err := c.kubeClient.Delete(ctx, node); err != nil {

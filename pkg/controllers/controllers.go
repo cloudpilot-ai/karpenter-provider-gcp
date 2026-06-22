@@ -23,7 +23,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
@@ -58,6 +60,8 @@ func NewController(
 	instanceTypeProvider providerinstancetype.Provider,
 	cloudProvider *cloudprovider.CloudProvider,
 	pricingProvider pricing.Provider,
+	clk clock.Clock,
+	cluster *state.Cluster,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
@@ -67,7 +71,7 @@ func NewController(
 		instancetype.NewController(instanceTypeProvider),
 		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),
-		node.NewController(kubeClient, cloudProvider),
+		node.NewController(kubeClient, cloudProvider, clk, cluster, recorder),
 		nodeclaimgc.NewController(kubeClient, cloudProvider),
 	}
 
