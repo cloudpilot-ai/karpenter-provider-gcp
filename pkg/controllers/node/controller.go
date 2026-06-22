@@ -104,8 +104,17 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 
 	log.FromContext(ctx).Info("deleting empty node", "node", node.Name)
+	// Synchronously mark the node for deletion in cluster state before deleting it.
+	// This controller deletes the Node object directly, so the NodeClaim's
+	// DeletionTimestamp is not set until the GC controller runs later. Marking the
+	// node here makes BuildDisruptionBudgetMapping count this deletion immediately,
+	// so concurrent reconciliations of other empty nodes in the same NodePool
+	// correctly observe the consumed budget.
+	c.cluster.MarkForDeletion(node.Spec.ProviderID)
 	// delete the node
 	if err := c.kubeClient.Delete(ctx, node); err != nil {
+		// Revert the marking so the budget is not permanently consumed by a failed delete.
+		c.cluster.UnmarkForDeletion(node.Spec.ProviderID)
 		return reconcile.Result{Requeue: true}, err
 	}
 
