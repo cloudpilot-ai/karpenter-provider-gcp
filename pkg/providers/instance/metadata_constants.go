@@ -14,10 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package metadata provides pure transformations for GKE bootstrap metadata.
-//
-// It edits kube-env, kubelet configuration, startup script, label, and taint
-// values before callers convert them back to Compute Engine metadata items. It
-// should not perform GCP API calls or own Kubernetes object metadata, GCE
-// instance labels, or instance tags.
-package metadata
+package instance
+
+const (
+	MaxPodsLabel         = "max-pods"
+	MaxPodsPerNodeLabel  = "max-pods-per-node"
+	GKEProvisioningLabel = "gke-provisioning"
+
+	UnregisteredTaintValue = "karpenter.sh/unregistered=true:NoExecute"
+
+	GKESecondaryBootDiskLabelPrefix = "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk-"
+)
