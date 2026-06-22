@@ -84,8 +84,9 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	// window (it is never set when consolidation is disabled).
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
-		// NodeClaim is not yet registered (or duplicated), retry later.
-		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+		// NodeClaim is not yet registered (or duplicated), retry later. Genuine
+		// errors are surfaced so the request is requeued with backoff.
+		return reconcile.Result{RequeueAfter: 10 * time.Second}, nodeutils.IgnoreDuplicateNodeClaimError(nodeutils.IgnoreNodeClaimNotFoundError(err))
 	}
 	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue() {
 		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
@@ -95,7 +96,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	// same computation as the upstream disruption controller.
 	budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, v1.DisruptionReasonEmpty)
 	if err != nil {
-		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
+		return reconcile.Result{}, err
 	}
 	if budgets[node.Labels[v1.NodePoolLabelKey]] <= 0 {
 		// Empty disruption budget for this NodePool is exhausted; retry later.
