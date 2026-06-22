@@ -1,16 +1,22 @@
 {
-  "instructions": "Use the provider package comments as the source of truth for package ownership boundaries. Flag changes that move GCE VM lifecycle, GKE cluster API reads, source node-pool selection, or bootstrap metadata mutation into the wrong provider package.",
+  "instructions": "Use package comments as the source of truth for package ownership boundaries. Flag changes that move GCE VM lifecycle, GKE cluster API reads, source node-pool selection, or provider policy into the wrong package. For pkg/metadata specifically, enforce that it remains a pure typed bootstrap metadata model and render boundary with no provider policy or API calls.",
   "rules": [
     {
       "id": "provider-boundaries",
-      "rule": "Provider changes should respect package ownership: instance owns GCE VM lifecycle and instance labels/tags; nodepooltemplate owns bootstrap source pool/template discovery; gke owns shared GKE cluster facts; metadata owns pure GKE bootstrap metadata transformations.",
-      "scope": ["pkg/providers/**"],
+      "rule": "Provider changes should respect package ownership: instance owns GCE VM lifecycle, instance labels/tags, scheduling, capacity errors, zone operations, and provider-owned bootstrap policy; nodepooltemplate owns bootstrap source pool/template discovery; gke owns shared GKE cluster facts; pkg/metadata owns pure GKE bootstrap metadata modeling, parsing, typed mutation helpers, and Compute API rendering.",
+      "scope": ["pkg/providers/**", "pkg/metadata/**"],
       "severity": "medium"
     },
     {
       "id": "metadata-purity",
-      "rule": "Bootstrap metadata helpers should remain pure transformations and should not make GCP API calls or mutate shared Compute metadata templates in place.",
-      "scope": ["pkg/providers/metadata/**"],
+      "rule": "pkg/metadata must remain a pure transformation layer: no GCP API calls, no Kubernetes API calls, no source node-pool/template discovery, no GCE VM lifecycle decisions, no scheduler/capacity policy, and no in-place mutation of caller-owned Compute metadata templates.",
+      "scope": ["pkg/metadata/**"],
+      "severity": "high"
+    },
+    {
+      "id": "metadata-policy-boundary",
+      "rule": "Provider-owned bootstrap policy belongs outside pkg/metadata. Labels, taints, provisioning model, GPU behavior, disk compatibility, secondary boot disks, kubelet defaults, Spot shutdown behavior, NodeClass overlays, and source-template selection should be decided by provider packages and passed into pkg/metadata through typed helpers.",
+      "scope": ["pkg/metadata/**", "pkg/providers/instance/**", "pkg/providers/nodepooltemplate/**"],
       "severity": "high"
     }
   ]
