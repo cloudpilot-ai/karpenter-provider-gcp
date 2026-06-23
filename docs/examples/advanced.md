@@ -68,6 +68,8 @@ kubeletConfiguration:
 
 Both settings reduce node allocatable capacity. The scheduler accounts for these when bin-packing workloads.
 
+On GKE, Karpenter always reserves a baseline 100m of CPU under `systemReserved` for the kube-proxy mirror pod that GKE runs on every Karpenter-provisioned node. Values you set in `systemReserved` add to this baseline rather than replace it, so `systemReserved.cpu: "1"` yields an effective reservation of 1100m CPU in Karpenter's allocatable estimate. The baseline applies only to Karpenter's scheduling view so its estimate matches the node's real allocatable capacity; it is not written into the node's kubelet reservation configuration.
+
 When you set a partial `kubeReserved` (for example, only `cpu`), Karpenter preserves provider-computed defaults for unspecified keys like `ephemeral-storage` based on boot disk size.
 
 ### Eviction thresholds
