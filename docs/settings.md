@@ -132,10 +132,10 @@ securityContext: {}
 
 The chart creates a PodDisruptionBudget for the controller pods so voluntary disruptions — node drains during upgrades, consolidation, or maintenance — cannot evict every Karpenter replica at once. The default is `minAvailable: 1`, which keeps at least one controller pod running while the others are evicted.
 
-| Helm value                          | Default | Description                                                                                   |
-|-------------------------------------|---------|-----------------------------------------------------------------------------------------------|
-| `podDisruptionBudget.minAvailable`  | `1`     | Minimum number of controller pods that must stay available. Used when `maxUnavailable` is not set. |
-| `podDisruptionBudget.maxUnavailable`| `null`  | Maximum number of controller pods that may be unavailable. When set, takes precedence over `minAvailable`. |
+| Helm value                           | Default | Description                                                                                                |
+|--------------------------------------|---------|------------------------------------------------------------------------------------------------------------|
+| `podDisruptionBudget.minAvailable`   | `1`     | Minimum number of controller pods that must stay available. Used when `maxUnavailable` is not set.         |
+| `podDisruptionBudget.maxUnavailable` | `null`  | Maximum number of controller pods that may be unavailable. When set, takes precedence over `minAvailable`. |
 
 Set `podDisruptionBudget.maxUnavailable` to cap the number of controller pods that may be unavailable instead. When set, `maxUnavailable` takes precedence over `minAvailable`, and the rendered PodDisruptionBudget uses `maxUnavailable` alone. Leave it unset (the default) to keep the `minAvailable` behavior. Both values accept an integer or a percentage string (e.g. `"50%"`).
 
