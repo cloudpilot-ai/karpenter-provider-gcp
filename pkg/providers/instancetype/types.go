@@ -37,6 +37,11 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
+// staticKubeProxyCPUMilliCore matches the CPU request on GKE's node-owned
+// kube-proxy mirror pod observed on GKE 1.35.5 COS ARM64 Karpenter nodes.
+// Re-check this constant when GKE changes kube-proxy resource requests.
+const staticKubeProxyCPUMilliCore = 100
+
 func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass,
 	region string, offerings cloudprovider.Offerings) *cloudprovider.InstanceType {
 	if offerings == nil {
@@ -85,6 +90,16 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 		corev1.ResourceMemory:           *resource.NewQuantity(reservedMemory*1024*1024, resource.BinarySI),
 		corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralSystem*1024*1024*1024, resource.BinarySI),
 	}
+	// GKE creates a node-owned kube-proxy mirror pod on Karpenter nodes. The provider
+	// no longer injects the kube-proxy DaemonSet readiness label, so only the mirror
+	// pod runs. Mirror pods are not part of Karpenter's daemon overhead simulation,
+	// so account for the mirror pod's CPU request here as provider overhead. Using
+	// SystemReserved (rather than KubeReserved) keeps this value out of kubelet
+	// kubeReserved metadata, avoiding a double reduction of allocatable on top of the
+	// mirror pod's own scheduling request.
+	computedSystemReserved := corev1.ResourceList{
+		corev1.ResourceCPU: *resource.NewMilliQuantity(staticKubeProxyCPUMilliCore, resource.DecimalSI),
+	}
 	computedEviction := corev1.ResourceList{
 		corev1.ResourceMemory:           *resource.NewQuantity(evictionMemory*1024*1024, resource.BinarySI),
 		corev1.ResourceEphemeralStorage: *resource.NewQuantity(ephemeralEviction*1024*1024*1024, resource.BinarySI),
@@ -94,7 +109,7 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 
 	overhead := cloudprovider.InstanceTypeOverhead{
 		KubeReserved:      mergeKubeReserved(computedKubeReserved, kc),
-		SystemReserved:    kcSystemReserved(kc),
+		SystemReserved:    kcSystemReserved(computedSystemReserved, kc),
 		EvictionThreshold: evictionThreshold(memoryQuantity, storageQuantity, computedEviction, kc),
 	}
 
