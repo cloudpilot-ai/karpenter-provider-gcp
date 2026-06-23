@@ -137,7 +137,8 @@ serviceMonitor:
 | logOutputPaths | list | `["stdout"]` | Log outputPaths - defaults to stdout only |
 | nameOverride | string | `""` |  |
 | podAnnotations | object | `{}` |  |
-| podDisruptionBudget.minAvailable | int | `1` |  |
+| podDisruptionBudget.maxUnavailable | integer or string | `nil` | Maximum number of unavailable pods. When set, takes precedence over minAvailable. |
+| podDisruptionBudget.minAvailable | int | `1` | Minimum number of available pods. Used when maxUnavailable is not set. |
 | podLabels | object | `{}` |  |
 | podSecurityContext | object | `{"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Security context applied at the pod level. |
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Security context applied to the karpenter container. |
