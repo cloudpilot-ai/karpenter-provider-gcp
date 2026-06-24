@@ -149,15 +149,70 @@ func TestPatchKubeEnvForInstanceType_SetsGKECPUScalingLevel(t *testing.T) {
 	}
 }
 
-func TestBaselineKubeEnvLabelsIncludesGKEReadinessLabels(t *testing.T) {
+func TestBaselineKubeEnvLabelsOmitsGKEReadinessLabels(t *testing.T) {
+	// Readiness labels must NOT be hard-coded in the baseline; the correct set is
+	// dataplane-specific and inherited from the source template in SetNodeLabels.
 	labels := BaselineKubeEnvLabels(&karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 		karpv1.NodePoolLabelKey: "default",
 	}}}, &v1alpha1.GCENodeClass{})
 
-	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessMetadataServerEnabled])
-	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessKubeProxyReady])
-	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessNetdReady])
-	require.Equal(t, "true", labels[v1alpha1.LabelGKEReadinessNodeLocalDNSReady])
+	for _, key := range v1alpha1.GKEReadinessLabelKeys {
+		require.NotContains(t, labels, key, "baseline must not hard-code readiness label %s", key)
+	}
+}
+
+// TestSetNodeLabels_InheritsReadinessLabelsFromTemplate is the regression test for
+// pod egress breaking on Dataplane V2 clusters: the source template's GKE readiness
+// labels (here masq-agent-ds-ready, which gates ip-masq-agent and therefore SNAT)
+// must survive into the provisioned node, while bootstrap pool labels are dropped.
+func TestSetNodeLabels_InheritsReadinessLabelsFromTemplate(t *testing.T) {
+	// A Dataplane V2 source template: has masq-agent + netd readiness, no kube-proxy.
+	srcLabels := "cloud.google.com/gke-nodepool=bootstrap," +
+		"node.kubernetes.io/masq-agent-ds-ready=true," +
+		"cloud.google.com/gke-netd-ready=true," +
+		"addon.gke.io/node-local-dns-ds-ready=true," +
+		"iam.gke.io/gke-metadata-server-enabled=true"
+	meta := gpuTestMeta(srcLabels, srcLabels)
+
+	baseline := map[string]string{
+		"max-pods-per-node":              "32",
+		"karpenter.sh/nodepool":          "default",
+		"karpenter.k8s.gcp/gcenodeclass": "default",
+	}
+	require.NoError(t, SetNodeLabels(meta, baseline, baseline))
+
+	for _, got := range []string{kubeLabelsValue(meta), kubeEnvValue(meta)} {
+		// Readiness labels inherited from the template.
+		require.Contains(t, got, "node.kubernetes.io/masq-agent-ds-ready=true")
+		require.Contains(t, got, "cloud.google.com/gke-netd-ready=true")
+		require.Contains(t, got, "addon.gke.io/node-local-dns-ds-ready=true")
+		require.Contains(t, got, "iam.gke.io/gke-metadata-server-enabled=true")
+		// Karpenter-owned labels applied.
+		require.Contains(t, got, "max-pods-per-node=32")
+		require.Contains(t, got, "karpenter.sh/nodepool=default")
+		// Bootstrap pool label dropped, and no kube-proxy readiness invented.
+		require.NotContains(t, got, "cloud.google.com/gke-nodepool=bootstrap")
+		require.NotContains(t, got, "node.kubernetes.io/kube-proxy-ds-ready")
+	}
+}
+
+// TestSetNodeLabels_BaselineWinsOverInheritedReadiness verifies that when a key is
+// both a readiness label in the template and explicitly owned by Karpenter, the
+// Karpenter-owned value wins (no duplicate, no stale inherited value).
+func TestSetNodeLabels_BaselineWinsOverInheritedReadiness(t *testing.T) {
+	src := "iam.gke.io/gke-metadata-server-enabled=false,cloud.google.com/gke-nodepool=bootstrap"
+	meta := gpuTestMeta(src, src)
+
+	baseline := map[string]string{
+		"karpenter.sh/nodepool":                  "default",
+		"iam.gke.io/gke-metadata-server-enabled": "true",
+	}
+	require.NoError(t, SetNodeLabels(meta, baseline, baseline))
+
+	got := kubeLabelsValue(meta)
+	require.Contains(t, got, "iam.gke.io/gke-metadata-server-enabled=true")
+	require.NotContains(t, got, "iam.gke.io/gke-metadata-server-enabled=false")
+	require.Equal(t, 1, strings.Count(got, "iam.gke.io/gke-metadata-server-enabled="))
 }
 
 func TestAppendGPUTaint_MergesIntoExistingFlag(t *testing.T) {

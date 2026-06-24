@@ -109,6 +109,19 @@ var (
 	LabelGKEReadinessNetdReady             = "cloud.google.com/gke-netd-ready"
 	LabelGKEReadinessNodeLocalDNSReady     = "addon.gke.io/node-local-dns-ds-ready"
 
+	// GKEReadinessLabelKeys are the GKE readiness-gate label keys that Karpenter
+	// preserves from the source instance template when building a provisioned node's
+	// labels. GKE sets the cluster-appropriate subset on the template; the DaemonSets
+	// they gate (ip-masq-agent, calico, etc.) only schedule on nodes carrying them.
+	GKEReadinessLabelKeys = []string{
+		LabelGKEReadinessCalicoReady,
+		LabelGKEReadinessKubeProxyReady,
+		LabelGKEReadinessMetadataServerEnabled,
+		LabelGKEReadinessMasqAgentReady,
+		LabelGKEReadinessNetdReady,
+		LabelGKEReadinessNodeLocalDNSReady,
+	}
+
 	// LabelGKEAccelerator is the GPU accelerator type label required by the NVIDIA device plugin
 	// DaemonSet's nodeAffinity. GKE injects it on native GPU node pools; Karpenter must inject
 	// it via kube-labels so the device plugin schedules onto provisioned GPU nodes.
