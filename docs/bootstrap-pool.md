@@ -63,10 +63,27 @@ Karpenter reads kubelet bootstrap metadata from the bootstrap pool's instance te
 | Private-node setting                   | GCENodeClass `spec.networkConfig.enablePrivateNodes`; defaults to cluster private-node setting from GKE cluster config |
 | Service account                        | GCENodeClass `spec.serviceAccount`, `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`, or Compute Engine default service account      |
 | Service account scopes                 | Karpenter sets `cloud-platform`                                                                                        |
-| Node labels                            | Rebuilt from Karpenter/provider target state                                                                           |
+| Node labels                            | Rebuilt from Karpenter/provider target state, plus GKE readiness-gate labels inherited from the source pool template (see below) |
 | Node taints                            | Rebuilt from Karpenter/provider target state                                                                           |
 
-Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls.
+Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls, plus the GKE readiness-gate labels described below.
+
+### GKE readiness-gate labels
+
+GKE sets readiness-gate labels on each node to hold back system DaemonSets — such as `ip-masq-agent`, Calico, `netd`, `node-local-dns`, `kube-proxy`, and the metadata server — until the node is ready for each subsystem. The exact set is cluster-specific: it depends on the cluster's dataplane (for example, Dataplane V2) and which addons are enabled. GKE encodes the correct per-node set in the source pool's instance template.
+
+Karpenter inherits these readiness-gate labels from the source pool's template rather than rebuilding them from a fixed list, so provisioned nodes carry exactly the set their DaemonSets require. The inherited keys are:
+
+- `projectcalico.org/ds-ready`
+- `node.kubernetes.io/kube-proxy-ds-ready`
+- `iam.gke.io/gke-metadata-server-enabled`
+- `node.kubernetes.io/masq-agent-ds-ready`
+- `cloud.google.com/gke-netd-ready`
+- `addon.gke.io/node-local-dns-ds-ready`
+
+When Karpenter explicitly owns one of these keys, the Karpenter-owned value wins over the inherited one. All other source-pool labels are still discarded.
+
+Dropping a readiness-gate label prevents the DaemonSet it gates from scheduling on the node. For example, on clusters running `ip-masq-agent` (such as Dataplane V2 clusters), a missing `node.kubernetes.io/masq-agent-ds-ready` label keeps `ip-masq-agent` from scheduling, so pod traffic is not SNATed to the node IP and egress to internal endpoints times out.
 
 ## Upgrading from template pools
 
