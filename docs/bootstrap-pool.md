@@ -56,17 +56,28 @@ This allows a single source pool to bootstrap nodes of any OS and architecture c
 
 Karpenter reads kubelet bootstrap metadata from the bootstrap pool's instance template. Other instance settings are derived from GCENodeClass, cluster config, or Karpenter/provider defaults.
 
-| Metadata                               | Source                                                                                                                 |
-|----------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| Kubelet configuration (max-pods, etc.) | Bootstrap pool template, then patched by GCENodeClass settings                                                         |
-| Subnetwork                             | GCENodeClass `spec.networkConfig.subnetwork`; defaults to cluster subnetwork from GKE cluster config                   |
-| Private-node setting                   | GCENodeClass `spec.networkConfig.enablePrivateNodes`; defaults to cluster private-node setting from GKE cluster config |
-| Service account                        | GCENodeClass `spec.serviceAccount`, `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`, or Compute Engine default service account      |
-| Service account scopes                 | Karpenter sets `cloud-platform`                                                                                        |
-| Node labels                            | Rebuilt from Karpenter/provider target state                                                                           |
-| Node taints                            | Rebuilt from Karpenter/provider target state                                                                           |
+| Metadata                               | Source                                                                                                                                             |
+|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| Kubelet configuration (max-pods, etc.) | Bootstrap pool template, then patched by GCENodeClass settings                                                                                     |
+| Subnetwork                             | GCENodeClass `spec.networkConfig.subnetwork`; defaults to cluster subnetwork from GKE cluster config                                               |
+| Private-node setting                   | GCENodeClass `spec.networkConfig.enablePrivateNodes`; defaults to cluster private-node setting from GKE cluster config                             |
+| Service account                        | GCENodeClass `spec.serviceAccount`, `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`, or Compute Engine default service account                                  |
+| Service account scopes                 | Karpenter sets `cloud-platform`                                                                                                                    |
+| Node labels                            | Rebuilt from Karpenter/provider target state, plus a known set of GKE readiness-gate labels carried over from the source pool template (see below) |
+| Node taints                            | Rebuilt from Karpenter/provider target state                                                                                                       |
 
-Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls.
+Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls, plus the GKE readiness-gate labels described below.
+
+### GKE readiness-gate labels
+
+GKE gates its system DaemonSets on per-node readiness labels. As an exception to the discard rule above, Karpenter carries these labels over from the source pool's template so those DaemonSets schedule on provisioned nodes. Karpenter-owned labels still take precedence. The preserved keys are:
+
+- `projectcalico.org/ds-ready`
+- `node.kubernetes.io/kube-proxy-ds-ready`
+- `iam.gke.io/gke-metadata-server-enabled`
+- `node.kubernetes.io/masq-agent-ds-ready`
+- `cloud.google.com/gke-netd-ready`
+- `addon.gke.io/node-local-dns-ds-ready`
 
 ## Upgrading from template pools
 
