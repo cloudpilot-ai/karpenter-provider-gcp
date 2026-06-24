@@ -233,11 +233,11 @@ func parseLabelString(labels string) map[string]string {
 // nodeLabelsFromKubeEnv extracts the value of the --node-labels kubelet flag from
 // a kube-env blob, returning the raw comma-separated label string (empty if absent).
 func nodeLabelsFromKubeEnv(kubeEnv string) string {
-	match := kubeEnvNodeLabelsEmptyOKRegex.FindStringSubmatch(kubeEnv)
-	if len(match) == 0 {
+	match := kubeEnvNodeLabelsEmptyOKRegex.FindString(kubeEnv)
+	if match == "" {
 		return ""
 	}
-	return strings.TrimPrefix(match[0], "--node-labels=")
+	return strings.TrimPrefix(match, "--node-labels=")
 }
 
 func formatLabels(labels map[string]string) string {

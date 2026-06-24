@@ -209,10 +209,11 @@ func TestSetNodeLabels_BaselineWinsOverInheritedReadiness(t *testing.T) {
 	}
 	require.NoError(t, SetNodeLabels(meta, baseline, baseline))
 
-	got := kubeLabelsValue(meta)
-	require.Contains(t, got, "iam.gke.io/gke-metadata-server-enabled=true")
-	require.NotContains(t, got, "iam.gke.io/gke-metadata-server-enabled=false")
-	require.Equal(t, 1, strings.Count(got, "iam.gke.io/gke-metadata-server-enabled="))
+	for _, got := range []string{kubeLabelsValue(meta), kubeEnvValue(meta)} {
+		require.Contains(t, got, "iam.gke.io/gke-metadata-server-enabled=true")
+		require.NotContains(t, got, "iam.gke.io/gke-metadata-server-enabled=false")
+		require.Equal(t, 1, strings.Count(got, "iam.gke.io/gke-metadata-server-enabled="))
+	}
 }
 
 func TestAppendGPUTaint_MergesIntoExistingFlag(t *testing.T) {
