@@ -2753,7 +2753,7 @@
       }
     }
   },
-  "revision": "20260519",
+  "revision": "20260609",
   "rootUrl": "https://container.googleapis.com/",
   "schemas": {
     "AcceleratorConfig": {
@@ -4838,12 +4838,20 @@
           "description": "The name of the image to use for this node.",
           "type": "string"
         },
-        "imageFamily": {
-          "description": "The name of the image family to use for this node.",
-          "type": "string"
-        },
         "imageProject": {
           "description": "The project containing the image to use for this node.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "CustomImageInfo": {
+      "description": "Contains the custom image info for a node pool.",
+      "id": "CustomImageInfo",
+      "properties": {
+        "upgradeMessage": {
+          "description": "Output only. The human-readable upgrade message for the custom image.",
+          "readOnly": true,
           "type": "string"
         }
       },
@@ -7801,6 +7809,11 @@
           },
           "type": "array"
         },
+        "customImageInfo": {
+          "$ref": "CustomImageInfo",
+          "description": "Output only. Upgrade info for the node pool specific to the usage of custom images.",
+          "readOnly": true
+        },
         "endOfExtendedSupportTimestamp": {
           "description": "The node pool's current minor version's end of extended support timestamp.",
           "type": "string"
@@ -8603,13 +8616,15 @@
             "UNSPECIFIED",
             "NO_RESERVATION",
             "ANY_RESERVATION",
-            "SPECIFIC_RESERVATION"
+            "SPECIFIC_RESERVATION",
+            "ANY_RESERVATION_THEN_FAIL"
           ],
           "enumDescriptions": [
             "Default value. This should not be used.",
             "Do not consume from any reserved capacity.",
             "Consume any reservation available.",
-            "Must consume from a specific reservation. Must specify key value fields for specifying the reservations."
+            "Must consume from a specific reservation. Must specify key value fields for specifying the reservations.",
+            "Consume any reservation available. If no reservation is available, fail the node creation."
           ],
           "type": "string"
         },
@@ -9937,6 +9952,10 @@
         "machineType": {
           "description": "Optional. The desired [Google Compute Engine machine type](https://cloud.google.com/compute/docs/machine-types) for nodes in the node pool. Initiates an upgrade operation that migrates the nodes in the node pool to the specified machine type.",
           "type": "string"
+        },
+        "maintenancePolicy": {
+          "$ref": "NodePoolMaintenancePolicy",
+          "description": "Optional. Specifies the maintenance policy for the node pool, including maintenance exclusion options."
         },
         "maxRunDuration": {
           "description": "The maximum duration for the nodes to exist. If unspecified, the nodes can exist indefinitely.",
