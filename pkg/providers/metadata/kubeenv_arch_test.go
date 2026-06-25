@@ -89,6 +89,37 @@ func TestPatchKubeEnvForArch_NoServerBinaryURL_NoOp(t *testing.T) {
 	require.Equal(t, "KUBELET_ARGS: --v=2\n", lo.FromPtr(meta.Items[0].Value))
 }
 
+func TestPatchKubeEnvForArch_NormalizesArchSpecificKubeProxyImage(t *testing.T) {
+	kubeEnv := "SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.5-gke.1057002/kubernetes-server-linux-amd64.tar.gz\n" +
+		"SERVER_BINARY_TAR_HASH: " + strings.Repeat("0", 128) + "\n" +
+		"KUBE_PROXY_IMAGE: europe-west4-artifactregistry.gcr.io/gke-release/gke-release/kube-proxy-amd64:v1.35.5-gke.1057002\n"
+
+	srv := hashServer(t, fakeHash, http.StatusOK)
+	defer srv.Close()
+	client := srv.Client()
+	client.Transport = rewriteHostTransport{base: http.DefaultTransport, target: srv.URL}
+
+	meta := kubeEnvMeta(kubeEnv)
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "", client))
+
+	got := lo.FromPtr(meta.Items[0].Value)
+	require.Contains(t, got, "linux-arm64.tar.gz")
+	require.Contains(t, got, "europe-west4-artifactregistry.gcr.io/gke-release/gke-release/kube-proxy:v1.35.5-gke.1057002")
+	require.NotContains(t, got, "kube-proxy-amd64")
+}
+
+func TestPatchKubeEnvForArch_KubeProxyImageNormalizationDoesNotRequireServerBinaryURL(t *testing.T) {
+	meta := kubeEnvMeta("KUBE_PROXY_IMAGE: gke.gcr.io/kube-proxy-arm64:v1.35.5-gke.1057002\n")
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "amd64", "", nil))
+	require.Equal(t, "KUBE_PROXY_IMAGE: gke.gcr.io/kube-proxy:v1.35.5-gke.1057002\n", lo.FromPtr(meta.Items[0].Value))
+}
+
+func TestPatchKubeEnvForArch_LeavesMultiArchKubeProxyImageUnchanged(t *testing.T) {
+	meta := kubeEnvMeta("KUBE_PROXY_IMAGE: gke.gcr.io/kube-proxy:v1.35.5-gke.1057002\n")
+	require.NoError(t, PatchKubeEnvForArch(context.Background(), meta, "arm64", "", nil))
+	require.Equal(t, "KUBE_PROXY_IMAGE: gke.gcr.io/kube-proxy:v1.35.5-gke.1057002\n", lo.FromPtr(meta.Items[0].Value))
+}
+
 func TestPatchKubeEnvForArch_VersionFallbackToGKEVersion(t *testing.T) {
 	// URL has no /release/<version>/ segment; gkeVersion should be used instead.
 	// Use a distinct version to avoid hitting the cache populated by TestPatchKubeEnvForArch_AMD64ToARM64.

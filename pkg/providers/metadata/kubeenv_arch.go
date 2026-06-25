@@ -35,6 +35,9 @@ var (
 	serverBinaryArchRegex = regexp.MustCompile(`kubernetes-server-linux-(amd64|arm64)\.tar\.gz`)
 	// gkeReleaseVersionRegex extracts the GKE release version from a binary URL.
 	gkeReleaseVersionRegex = regexp.MustCompile(`/release/(v[^/]+)/`)
+	// kubeProxyArchImageRegex matches GKE kube-proxy image repositories with an
+	// architecture suffix. The suffix is stripped to use the multi-arch image tag.
+	kubeProxyArchImageRegex = regexp.MustCompile(`kube-proxy-(amd64|arm64)(:[A-Za-z0-9._+\-]+)`)
 )
 
 // archHashCache caches GCS-fetched SHA-512 hashes keyed by "arch:version".
@@ -73,6 +76,8 @@ func PatchKubeEnvForArch(ctx context.Context, metaData *compute.Metadata, target
 
 // patchServerBinaryForArch performs the actual string replacement on a kube-env string.
 func patchServerBinaryForArch(ctx context.Context, kubeEnv, targetArch, gkeVersion string, httpClient *http.Client) (string, error) {
+	kubeEnv = normalizeKubeProxyImage(kubeEnv)
+
 	urlMatch := serverBinaryArchRegex.FindStringSubmatch(kubeEnv)
 	if urlMatch == nil {
 		return kubeEnv, nil
@@ -114,6 +119,10 @@ func patchServerBinaryForArch(ctx context.Context, kubeEnv, targetArch, gkeVersi
 		return "", fmt.Errorf("SERVER_BINARY_TAR_HASH not found in kube-env after URL patch")
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func normalizeKubeProxyImage(kubeEnv string) string {
+	return kubeProxyArchImageRegex.ReplaceAllString(kubeEnv, "kube-proxy$2")
 }
 
 // getArchHash returns the SHA-512 hash for the given GKE binary tarball, fetching
