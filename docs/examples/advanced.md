@@ -279,3 +279,5 @@ spec:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 30m
 ```
+
+Karpenter-provider-gcp relies on Karpenter's upstream disruption controller for empty-node removal. Use NodePool `spec.disruption` to express empty-node timing and budgets; provider-managed system Deployments such as GKE `konnectivity-agent` are not ignored by a provider-specific deletion loop.
