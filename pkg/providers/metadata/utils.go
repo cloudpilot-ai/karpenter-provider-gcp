@@ -173,8 +173,6 @@ func SetNodeLabels(metadata *compute.Metadata, kubeLabels, kubeEnvLabels map[str
 	if metadata == nil {
 		return fmt.Errorf("metadata must be non-nil")
 	}
-	kubeLabelString := formatLabels(kubeLabels)
-	kubeEnvLabelString := formatLabels(kubeEnvLabels)
 	kubeLabelsFound := false
 	kubeEnvFound := false
 
@@ -182,10 +180,12 @@ func SetNodeLabels(metadata *compute.Metadata, kubeLabels, kubeEnvLabels map[str
 		switch item.Key {
 		case "kube-labels":
 			kubeLabelsFound = true
-			item.Value = lo.ToPtr(kubeLabelString)
+			merged := inheritReadinessLabels(lo.FromPtr(item.Value), kubeLabels)
+			item.Value = lo.ToPtr(formatLabels(merged))
 		case "kube-env":
 			kubeEnvFound = true
-			item.Value = lo.ToPtr(setNodeLabelsInKubeEnv(lo.FromPtr(item.Value), kubeEnvLabelString))
+			merged := inheritReadinessLabels(nodeLabelsFromKubeEnv(lo.FromPtr(item.Value)), kubeEnvLabels)
+			item.Value = lo.ToPtr(setNodeLabelsInKubeEnv(lo.FromPtr(item.Value), formatLabels(merged)))
 		}
 	}
 	if !kubeLabelsFound {
@@ -195,6 +195,49 @@ func SetNodeLabels(metadata *compute.Metadata, kubeLabels, kubeEnvLabels map[str
 		return fmt.Errorf("kube-env metadata key not found in instance template")
 	}
 	return nil
+}
+
+// inheritReadinessLabels returns the Karpenter-owned label set with GKE
+// readiness-gate labels (v1alpha1.GKEReadinessLabelKeys) carried over from the
+// source template's label string. Other source labels are discarded and
+// Karpenter-owned values win on conflict.
+func inheritReadinessLabels(source string, owned map[string]string) map[string]string {
+	merged := make(map[string]string, len(owned)+len(v1alpha1.GKEReadinessLabelKeys))
+	existing := parseLabelString(source)
+	for _, key := range v1alpha1.GKEReadinessLabelKeys {
+		if value, ok := existing[key]; ok {
+			merged[key] = value
+		}
+	}
+	for key, value := range owned {
+		merged[key] = value
+	}
+	return merged
+}
+
+// parseLabelString parses a comma-separated "key=value" label string into a map.
+// Empty entries and entries without "=" are ignored.
+func parseLabelString(labels string) map[string]string {
+	result := map[string]string{}
+	for _, part := range strings.Split(labels, ",") {
+		part = strings.TrimSpace(part)
+		key, value, ok := strings.Cut(part, "=")
+		if !ok || key == "" {
+			continue
+		}
+		result[key] = value
+	}
+	return result
+}
+
+// nodeLabelsFromKubeEnv extracts the value of the --node-labels kubelet flag from
+// a kube-env blob, returning the raw comma-separated label string (empty if absent).
+func nodeLabelsFromKubeEnv(kubeEnv string) string {
+	match := kubeEnvNodeLabelsEmptyOKRegex.FindString(kubeEnv)
+	if match == "" {
+		return ""
+	}
+	return strings.TrimPrefix(match, "--node-labels=")
 }
 
 func formatLabels(labels map[string]string) string {
@@ -501,15 +544,13 @@ func BaselineKubeLabels(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENode
 }
 
 func BaselineKubeEnvLabels(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) map[string]string {
+	// Readiness-gate labels are omitted here and inherited from the source template
+	// in SetNodeLabels (inheritReadinessLabels).
 	return map[string]string{
-		"max-pods-per-node":                             fmt.Sprintf("%d", nodeClass.GetMaxPods()),
-		"cloud.google.com/gke-os-distribution":          gkeOSDistribution(nodeClass),
-		karpv1.NodePoolLabelKey:                         nodeClaim.Labels[karpv1.NodePoolLabelKey],
-		v1alpha1.LabelNodeClass:                         nodeClass.Name,
-		v1alpha1.LabelGKEReadinessMetadataServerEnabled: "true",
-		v1alpha1.LabelGKEReadinessKubeProxyReady:        "true",
-		v1alpha1.LabelGKEReadinessNetdReady:             "true",
-		v1alpha1.LabelGKEReadinessNodeLocalDNSReady:     "true",
+		"max-pods-per-node":                    fmt.Sprintf("%d", nodeClass.GetMaxPods()),
+		"cloud.google.com/gke-os-distribution": gkeOSDistribution(nodeClass),
+		karpv1.NodePoolLabelKey:                nodeClaim.Labels[karpv1.NodePoolLabelKey],
+		v1alpha1.LabelNodeClass:                nodeClass.Name,
 	}
 }
 

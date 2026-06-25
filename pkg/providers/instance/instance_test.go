@@ -153,9 +153,13 @@ func metadataValue(meta *compute.Metadata, key string) string {
 
 func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 	p := &DefaultProvider{}
+	// Source template with bootstrap pool labels (dropped) and readiness gates (inherited).
+	const srcLabels = "cloud.google.com/gke-nodepool=bootstrap,workload=karpenter,max-pods-per-node=110," +
+		"node.kubernetes.io/masq-agent-ds-ready=true,cloud.google.com/gke-netd-ready=true," +
+		"addon.gke.io/node-local-dns-ds-ready=true,iam.gke.io/gke-metadata-server-enabled=true"
 	meta := &compute.Metadata{Items: []*compute.MetadataItems{
-		{Key: "kube-labels", Value: ptr.To("cloud.google.com/gke-nodepool=bootstrap,workload=karpenter,max-pods-per-node=110")},
-		{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --v=2 --max-pods=110 --node-labels=cloud.google.com/gke-nodepool=bootstrap,workload=karpenter,max-pods-per-node=110 --register-with-taints=dedicated=karpenter:NoSchedule\n")},
+		{Key: "kube-labels", Value: ptr.To(srcLabels)},
+		{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --v=2 --max-pods=110 --node-labels=" + srcLabels + " --register-with-taints=dedicated=karpenter:NoSchedule\n")},
 		{Key: "kubelet-config", Value: ptr.To("maxPods: 110\n")},
 	}}
 	maxPods := int32(32)
@@ -189,14 +193,16 @@ func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 	require.Contains(t, kubeEnv, "cloud.google.com/gke-os-distribution=cos")
 	require.Contains(t, kubeLabels, karpv1.NodePoolLabelKey+"=default")
 	require.Contains(t, kubeLabels, v1alpha1.LabelNodeClass+"=default")
+	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessMasqAgentReady+"=true")
 	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessNetdReady+"=true")
 	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessNodeLocalDNSReady+"=true")
 	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessMetadataServerEnabled+"=true")
-	require.Contains(t, kubeLabels, v1alpha1.LabelGKEReadinessKubeProxyReady+"=true")
+	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessMasqAgentReady+"=true")
 	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessNetdReady+"=true")
 	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessNodeLocalDNSReady+"=true")
 	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessMetadataServerEnabled+"=true")
-	require.Contains(t, kubeEnv, v1alpha1.LabelGKEReadinessKubeProxyReady+"=true")
+	require.NotContains(t, kubeLabels, v1alpha1.LabelGKEReadinessKubeProxyReady)
+	require.NotContains(t, kubeEnv, v1alpha1.LabelGKEReadinessKubeProxyReady)
 	require.Contains(t, kubeLabels, karpv1.NodeRegisteredLabelKey+"=true")
 	require.NotContains(t, kubeEnv, karpv1.NodeRegisteredLabelKey+"=true")
 	require.Contains(t, kubeLabels, "gke-provisioning=standard")
