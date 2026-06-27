@@ -235,7 +235,7 @@ The KWOK lane can support issue #250 by covering portable scheduling/disruption 
 | Malicious PR burns quota or mines resources | maintainer-only trigger, dedicated project, quotas/budget alerts, timeouts, bounded parallelism/retries |
 | Secret exfiltration                         | WIF short-lived credentials, least-privilege service account, no unrelated secrets in env               |
 | Wrong commit tested                         | resolve SHA at trigger time; verify deployed image and embedded commit                                  |
-| Persistent cluster leaks resources          | pre/post cleanup, labels/prefixes, diagnostics, manual maintenance runbook                              |
+| Persistent cluster leaks resources          | pre/post cleanup, ownership-label-gated cleanup, prefix diagnostics, manual maintenance runbook         |
 | GPU capacity unavailable                    | separate `gpu` mode, explicit capacity validation, infra-failure reporting                              |
 
 ---
