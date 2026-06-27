@@ -48,7 +48,10 @@ imagePullSecrets: []
 #  - name: my-registry-secret
 
 podDisruptionBudget:
+  # -- Minimum number of available pods. Used when maxUnavailable is not set.
   minAvailable: 1
+  # -- (integer or string) Maximum number of unavailable pods. When set, takes precedence over minAvailable.
+  maxUnavailable: null
 
 serviceMonitor:
   # -- Specifies whether a ServiceMonitor should be created.
