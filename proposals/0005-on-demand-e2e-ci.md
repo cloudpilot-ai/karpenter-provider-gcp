@@ -205,7 +205,7 @@ Adopt from the start:
 - per-cluster locking,
 - failure diagnostics under `if: always()`,
 - JUnit/JSON/log artifacts with 30-day retention,
-- label/prefix-based cleanup.
+- ownership-label-gated cleanup, with name prefixes used only as diagnostic hints.
 
 Defer until needed:
 
