@@ -1,0 +1,72 @@
+name: On-demand E2E
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  gate:
+    name: Comment gate
+    if: github.event.issue.pull_request && (github.event.comment.body == '/e2e' || startsWith(github.event.comment.body, '/e2e '))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      accepted: ${{ steps.command.outputs.continue }}
+      sha: ${{ steps.command.outputs.sha }}
+    steps:
+      - name: Parse /e2e command
+        id: command
+        uses: github/command@76d69a2a6b747d621fba374d707409f89114c620 # v2.0.0
+        with:
+          command: /e2e
+          allowed_contexts: pull_request
+          permissions: write,maintain,admin
+          allow_forks: true
+          allow_drafts: true
+          skip_ci: true
+          skip_reviews: true
+          skip_completing: true
+
+  e2e:
+    name: E2E run
+    needs: gate
+    if: needs.gate.outputs.accepted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: e2e-${{ github.repository }}
+      cancel-in-progress: false
+    outputs:
+      preset: ${{ steps.run.outputs.preset }}
+    steps:
+      - name: E2E run
+        id: run
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          preset="${COMMENT_BODY#/e2e}"
+          preset="${preset#${preset%%[![:space:]]*}}"
+          if [[ -z "${preset}" ]]; then
+            preset="standard"
+          fi
+          echo "preset=${preset}" >> "${GITHUB_OUTPUT}"
+
+          echo "e2e run is not implemented"
+          echo "preset: ${preset}"
+          echo "commit: ${{ needs.gate.outputs.sha }}"
+
+      - name: Update sticky comment
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          number: ${{ github.event.issue.number }}
+          header: e2e-placeholder
+          message: |
+            e2e run is not implemented.
+
+            Preset: `${{ steps.run.outputs.preset }}`
+            Commit: `${{ needs.gate.outputs.sha }}`
