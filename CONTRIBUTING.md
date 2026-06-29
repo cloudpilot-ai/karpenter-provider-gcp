@@ -206,6 +206,14 @@ make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
 
 Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`, `scheduling`, `networking`.
 
+#### On-demand PR e2e
+
+Repository approvers can request on-demand e2e from a pull request comment with `/e2e`, `/e2e standard`, `/e2e gpu`, or `/e2e full`. The requester must be listed under `approvers` in `OWNERS` and have `write`, `maintain`, or `admin` repository permission.
+
+The command must be the whole comment. The bot preserves user invocation comments and updates its previous bot-authored response for the same mode or response type.
+
+For safety, the comment-gate workflow and helper code are checked out from the repository default branch, not from the pull request branch. Future execution phases may build and deploy the pull request's Karpenter controller code after authorization, but orchestration and e2e test definitions should stay on trusted default-branch code unless a proposal explicitly changes that boundary. See [proposal 0005](proposals/0005-on-demand-e2e-ci.md) and [`hack/tools/owners-check`](hack/tools/owners-check/README.md).
+
 #### Tear down all e2e infrastructure
 
 ```bash

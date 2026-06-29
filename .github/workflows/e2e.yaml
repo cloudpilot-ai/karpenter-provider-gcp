@@ -1,0 +1,130 @@
+name: On-demand E2E
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  checks: read
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  gate:
+    name: Comment gate
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      accepted: ${{ steps.gate.outputs.accepted }}
+      mode: ${{ steps.gate.outputs.mode }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - name: Parse /e2e command
+        id: command
+        uses: github/command@76d69a2a6b747d621fba374d707409f89114c620 # v2.0.0
+        with:
+          command: /e2e
+          allowed_contexts: pull_request
+          permissions: write,maintain,admin
+          allow_forks: true
+          allow_drafts: true
+          skip_ci: true
+          skip_reviews: true
+          fork_review_bypass: true
+          skip_completing: true
+
+      - name: Checkout trusted gate code
+        if: steps.command.outputs.continue == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Set up Go
+        if: steps.command.outputs.continue == 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
+        with:
+          go-version-file: hack/tools/go.mod
+          cache-dependency-path: hack/tools/go.sum
+
+      - name: Check root OWNERS approver
+        id: owners
+        if: steps.command.outputs.continue == 'true'
+        env:
+          ACTOR: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+          cd hack/tools
+          go run ./owners-check
+
+      - name: Resolve /e2e request
+        id: gate
+        if: steps.command.outputs.continue == 'true'
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+        env:
+          OWNERS_ALLOWED: ${{ steps.owners.outputs.allowed }}
+        with:
+          script: |
+            const markerPrefix = '<!-- karpenter-provider-gcp:e2e';
+            const botLogin = 'github-actions[bot]';
+            const body = context.payload.comment.body;
+            const issueNumber = context.payload.issue.number;
+
+            function setGateOutputs(accepted, mode = '', sha = '') {
+              core.setOutput('accepted', accepted ? 'true' : 'false');
+              core.setOutput('mode', mode);
+              core.setOutput('sha', sha);
+            }
+
+            async function upsertComment(key, message) {
+              const marker = `${markerPrefix} key=${key} -->`;
+              const fullBody = `${marker}\n${message}`;
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                ...context.repo,
+                issue_number: issueNumber,
+                per_page: 100,
+              });
+              const existing = comments.find((comment) =>
+                comment.user?.type === 'Bot' &&
+                comment.user?.login === botLogin &&
+                comment.body?.includes(marker)
+              );
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  ...context.repo,
+                  comment_id: existing.id,
+                  body: fullBody,
+                });
+                return;
+              }
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issueNumber,
+                body: fullBody,
+              });
+            }
+
+            if (process.env.OWNERS_ALLOWED !== 'true') {
+              await upsertComment('unauthorized', 'Only repository approvers listed in root `OWNERS` with write access can run `/e2e`.');
+              setGateOutputs(false);
+              return;
+            }
+
+            const match = body.match(/^\/e2e(?:[ \t]+(standard|gpu|full))?[ \t]*$/);
+            if (!match) {
+              await upsertComment('help', 'Usage: `/e2e`, `/e2e standard`, `/e2e gpu`, or `/e2e full`.');
+              setGateOutputs(false);
+              return;
+            }
+
+            const mode = match[1] || 'standard';
+            const {data: pullRequest} = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: issueNumber,
+            });
+            const sha = pullRequest.head.sha;
+            const shortSHA = sha.slice(0, 12);
+            await upsertComment(mode, `✅ On-demand e2e dry run accepted.\n\nMode: \`${mode}\`\nCommit: \`${sha}\` (\`${shortSHA}\`)\n\nPhase 1 only validates the comment gate. No GCP resources were touched and no e2e tests were started.`);
+            setGateOutputs(true, mode, sha);
