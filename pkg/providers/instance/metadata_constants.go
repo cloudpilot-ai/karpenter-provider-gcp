@@ -1,11 +1,11 @@
 /*
-Copyright 2025 The CloudPilot AI Authors.
+Copyright 2026 The CloudPilot AI Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,15 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package metadata
+package instance
 
 const (
-	ClusterNameLabel     = "cluster-name"
-	GKENodePoolLabel     = "cloud.google.com/gke-nodepool"
-	UnregisteredTaintArg = "--register-with-taints=karpenter.sh/unregistered=true:NoExecute"
-	// GPUTaintArg is the taint value (not the full flag) merged into the existing
-	// --register-with-taints flag to avoid overwriting other taints set earlier.
-	GPUTaintArg                     = "nvidia.com/gpu=present:NoSchedule"
-	KubeletConfigLabel              = "kubelet-config"
+	MaxPodsLabel         = "max-pods"
+	MaxPodsPerNodeLabel  = "max-pods-per-node"
+	GKEProvisioningLabel = "gke-provisioning"
+
+	UnregisteredTaintValue = "karpenter.sh/unregistered=true:NoExecute"
+
 	GKESecondaryBootDiskLabelPrefix = "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk-"
 )

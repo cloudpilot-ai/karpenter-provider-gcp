@@ -87,6 +87,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
 	nodeTemplateProvider := nodepooltemplate.NewDefaultProvider(
 		ctx,
+		computeService,
 		containerService,
 		options.FromContext(ctx).ClusterName,
 		region,
