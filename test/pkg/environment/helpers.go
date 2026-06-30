@@ -73,8 +73,14 @@ type TestCase struct {
 	GPUCount string
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
-	ImageFamily         string
-	ConsolidationPolicy string // defaults to WhenEmptyOrUnderutilized when empty
+	ImageFamily string
+	// ConsolidationPolicy defaults to WhenEmptyOrUnderutilized when empty.
+	ConsolidationPolicy string
+	// ConsolidateAfter defaults to DefaultConsolidateAfter when empty.
+	// Use "Never" to disable consolidation for a test NodePool.
+	ConsolidateAfter string
+	// DisruptionBudgets defaults to a permissive 100% budget when nil.
+	DisruptionBudgets []map[string]any
 }
 
 // UniqueSuffix returns a 6-character random hex string safe for use in k8s names.
@@ -420,6 +426,17 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	} else if expireAfter != "" {
 		consolidationPolicy = "WhenEmpty"
 	}
+	consolidateAfter := DefaultConsolidateAfter
+	if tc.ConsolidateAfter != "" {
+		consolidateAfter = tc.ConsolidateAfter
+	}
+	budgets := []any{map[string]any{"nodes": "100%"}}
+	if tc.DisruptionBudgets != nil {
+		budgets = make([]any, 0, len(tc.DisruptionBudgets))
+		for _, budget := range tc.DisruptionBudgets {
+			budgets = append(budgets, budget)
+		}
+	}
 	deleteIfExists(ctx, e.DynamicClient, nodePoolGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",
@@ -428,9 +445,9 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 		"spec": map[string]any{
 			"weight": int64(DefaultNodePoolWeight),
 			"disruption": map[string]any{
-				"consolidateAfter":    DefaultConsolidateAfter,
+				"consolidateAfter":    consolidateAfter,
 				"consolidationPolicy": consolidationPolicy,
-				"budgets":             []any{map[string]any{"nodes": "100%"}},
+				"budgets":             budgets,
 			},
 			"template": map[string]any{"spec": templateSpec},
 		},

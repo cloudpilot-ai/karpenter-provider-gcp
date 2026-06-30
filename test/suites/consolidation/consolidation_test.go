@@ -22,6 +22,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -38,6 +40,20 @@ var _ = Describe("Consolidation", func() {
 			Arch:          karpv1.ArchitectureAmd64,
 			Families:      []string{"n2"},
 			InstanceTypes: []string{"n2-standard-2", "n2-standard-4"},
+		})
+	}, SpecTimeout(15*time.Minute))
+
+	It("should honor Empty disruption budgets for empty nodes", func(ctx SpecContext) {
+		runEmptyBudgetBlockedTest(ctx, environment.TestCase{
+			CapacityType:        karpv1.CapacityTypeOnDemand,
+			Arch:                karpv1.ArchitectureAmd64,
+			Families:            []string{"n2"},
+			InstanceTypes:       []string{"n2-standard-2", "n2-standard-4"},
+			ConsolidationPolicy: "WhenEmpty",
+			DisruptionBudgets: []map[string]any{{
+				"nodes":   "0",
+				"reasons": []any{"Empty"},
+			}},
 		})
 	}, SpecTimeout(15*time.Minute))
 })
@@ -91,4 +107,49 @@ func runConsolidationTest(ctx context.Context, tc environment.TestCase) {
 		Expect(c.GetLabels()[karpv1.NodePoolLabelKey]).NotTo(Equal(name),
 			"unexpected NodeClaim for nodePool %s after consolidation", name)
 	}
+}
+
+func runEmptyBudgetBlockedTest(ctx context.Context, tc environment.TestCase) {
+	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "empty-budget")
+	suffix := environment.UniqueSuffix()
+	name := prefix + "-" + suffix
+
+	GinkgoWriter.Printf("[setup] empty-budget arch=%s capacityType=%s nodePool=%s\n",
+		tc.Arch, tc.CapacityType, name)
+
+	var provisionedNodeName string
+	DeferCleanup(func(ctx context.Context) {
+		env.DeleteDeployment(ctx, name)
+		env.DeleteNodePool(ctx, name)
+		env.DeleteNodeClass(ctx, name)
+		if provisionedNodeName != "" {
+			_ = env.WaitForNodeRemoval(ctx, provisionedNodeName)
+		}
+	})
+
+	env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+	env.WaitForNodeClassReady(ctx, name)
+	env.CreateNodePool(ctx, name, name, tc)
+	env.WaitForNodePoolReady(ctx, name)
+	env.CreateDeployment(ctx, name, name, name, tc.Arch)
+	env.WaitForNodeClaimLaunched(ctx, name)
+	pod := env.WaitForRunningPod(ctx, name)
+	Expect(pod.Spec.NodeName).NotTo(BeEmpty())
+	provisionedNodeName = pod.Spec.NodeName
+
+	GinkgoWriter.Printf("[empty-budget] node provisioned: %s; scaling deployment to 0\n", provisionedNodeName)
+	env.ScaleDeployment(ctx, name, 0)
+
+	// The NodePool budget blocks Empty disruptions. A provider-level direct-delete
+	// controller would ignore this budget and delete the node after its 3m Ready
+	// grace period, so observe beyond that old threshold.
+	expectNodeExistsConsistently(ctx, provisionedNodeName, 4*time.Minute)
+}
+
+func expectNodeExistsConsistently(ctx context.Context, nodeName string, duration time.Duration) {
+	Consistently(func(g Gomega) {
+		_, err := env.KubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		g.Expect(apierrors.IsNotFound(err)).To(BeFalse(), "node %s was deleted", nodeName)
+		g.Expect(err).NotTo(HaveOccurred())
+	}).WithTimeout(duration).WithPolling(environment.DefaultPollInterval).Should(Succeed())
 }

@@ -5,6 +5,14 @@
 
 ## Unreleased
 
+### Empty-node disruption now follows upstream Karpenter NodePool rules
+
+The provider no longer runs its separate empty-node cleanup controller. Empty nodes are now removed only through Karpenter's standard disruption controller, so NodePool `spec.disruption.consolidateAfter`, `consolidationPolicy`, and disruption budgets are honored consistently.
+
+A node that only contains a GKE `konnectivity-agent` Deployment pod is not considered empty by Karpenter core because the pod is Deployment-owned, not DaemonSet-owned. This avoids provider-induced delete/provision churn, but it can leave a lightly used node in place until normal underutilized consolidation can safely remove or replace it. First-class handling for non-DaemonSet system workloads should be revisited after upstream Karpenter support matures.
+
+**Action required:** review NodePool disruption settings if you relied on immediate provider-side empty-node deletion. Use `WhenEmptyOrUnderutilized` when you want Karpenter to consider consolidating lightly loaded nodes, including nodes that only run reschedulable system Deployment pods.
+
 ### Reserved `GCENodeClass.spec.metadata` keys are rejected
 
 `GCENodeClass.spec.metadata` remains available for custom Compute Engine instance metadata, but it now rejects keys reserved by GKE bootstrap metadata, including `kube-env`, `cluster-name`, `cluster-location`, `instance-template`, `startup-script`, `user-data`, `kubeconfig`, and `kubelet-config`.
