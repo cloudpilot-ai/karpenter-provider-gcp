@@ -35,27 +35,29 @@ import (
 )
 
 func TestKCSystemReserved(t *testing.T) {
+	computed := corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")}
 	tests := []struct {
 		name string
 		kc   *v1alpha1.KubeletConfiguration
 		want corev1.ResourceList
 	}{
-		{name: "nil → empty", kc: nil, want: corev1.ResourceList{}},
+		{name: "nil → computed", kc: nil, want: computed},
 		{
-			name: "cpu and memory parsed",
+			name: "user values add to computed",
 			kc: &v1alpha1.KubeletConfiguration{
 				SystemReserved: map[string]v1alpha1.KubeletQuantity{"cpu": "1", "memory": "1Gi"},
 			},
 			want: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceCPU:    resource.MustParse("1100m"),
 				corev1.ResourceMemory: resource.MustParse("1Gi"),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := kcSystemReserved(tt.kc)
+			got := kcSystemReserved(computed, tt.kc)
 			assert.True(t, quantityListsEqual(tt.want, got), "want %v, got %v", tt.want, got)
+			assert.Equal(t, "100m", computed.Cpu().String())
 		})
 	}
 }
@@ -212,6 +214,20 @@ func TestKCMaxPods(t *testing.T) {
 // It covers the #398 fix (SystemReserved verbatim, KubeReserved merged with
 // the #220 ephemeral-storage survival, PodsPerCore caps Capacity[pods]) and
 // the nil-kc baseline in a single table.
+func TestNewInstanceType_IncludesStaticKubeProxyOverhead(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	mt := &computepb.MachineType{
+		Name:      lo.ToPtr("n2-standard-1"),
+		GuestCpus: lo.ToPtr[int32](1),
+		MemoryMb:  lo.ToPtr[int32](4096),
+	}
+
+	it := NewInstanceType(ctx, mt, &v1alpha1.GCENodeClass{}, "us-central1", testOfferings())
+
+	assert.Equal(t, int64(60), it.Overhead.KubeReserved.Cpu().MilliValue())
+	assert.Equal(t, int64(staticKubeProxyCPUMilliCore), it.Overhead.SystemReserved.Cpu().MilliValue())
+}
+
 func TestNewInstanceType_RespectsKubeletConfiguration(t *testing.T) {
 	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
 	mt := &computepb.MachineType{
@@ -225,11 +241,11 @@ func TestNewInstanceType_RespectsKubeletConfiguration(t *testing.T) {
 		assert func(t *testing.T, it *cloudprovider.InstanceType)
 	}{
 		{
-			name: "nil kc → SystemReserved empty, KubeReserved computed, default max pods",
+			name: "nil kc → static kube-proxy SystemReserved, KubeReserved computed, default max pods",
 			kc:   nil,
 			assert: func(t *testing.T, it *cloudprovider.InstanceType) {
-				assert.Empty(t, it.Overhead.SystemReserved)
-				assert.Greater(t, it.Overhead.KubeReserved.Cpu().MilliValue(), int64(0))
+				assert.Equal(t, int64(staticKubeProxyCPUMilliCore), it.Overhead.SystemReserved.Cpu().MilliValue())
+				assert.Equal(t, int64(80), it.Overhead.KubeReserved.Cpu().MilliValue())
 				assert.Greater(t, it.Overhead.KubeReserved.Memory().Value(), int64(0))
 				pods := it.Capacity[corev1.ResourcePods]
 				assert.Equal(t, int64(v1alpha1.KubeletMaxPods), pods.Value())
@@ -245,7 +261,7 @@ func TestNewInstanceType_RespectsKubeletConfiguration(t *testing.T) {
 				KubeReserved:   map[string]v1alpha1.KubeletQuantity{"cpu": "500m"},
 			},
 			assert: func(t *testing.T, it *cloudprovider.InstanceType) {
-				assert.Equal(t, "1", it.Overhead.SystemReserved.Cpu().String())
+				assert.Equal(t, "1100m", it.Overhead.SystemReserved.Cpu().String())
 				assert.Equal(t, "1Gi", it.Overhead.SystemReserved.Memory().String())
 				assert.Equal(t, "500m", it.Overhead.KubeReserved.Cpu().String())
 				assert.Greater(t, it.Overhead.KubeReserved.Memory().Value(), int64(0))

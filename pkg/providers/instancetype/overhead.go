@@ -35,16 +35,25 @@ const (
 	signalNodeFSAvailable = "nodefs.available"
 )
 
-// kcSystemReserved returns Overhead.SystemReserved derived from the user's
-// systemReserved map. CRD pattern validation guarantees every value is a
-// parseable resource.Quantity, so MustParse is safe here.
-func kcSystemReserved(kc *v1alpha1.KubeletConfiguration) corev1.ResourceList {
-	out := corev1.ResourceList{}
+// kcSystemReserved returns Overhead.SystemReserved derived from computed and
+// user-provided reservations. CRD pattern validation guarantees every user
+// value is a parseable resource.Quantity, so MustParse is safe here. User
+// values are additive because computed reservations model provider overhead
+// that exists independently of explicit kubelet systemReserved settings.
+func kcSystemReserved(computed corev1.ResourceList, kc *v1alpha1.KubeletConfiguration) corev1.ResourceList {
+	out := computed.DeepCopy()
 	if kc == nil {
 		return out
 	}
 	for k, v := range kc.SystemReserved {
-		out[corev1.ResourceName(k)] = resource.MustParse(string(v))
+		name := corev1.ResourceName(k)
+		q := resource.MustParse(string(v))
+		if existing, ok := out[name]; ok {
+			existing.Add(q)
+			out[name] = existing
+			continue
+		}
+		out[name] = q
 	}
 	return out
 }

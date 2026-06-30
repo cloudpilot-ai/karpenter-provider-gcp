@@ -47,7 +47,6 @@ func init() {
 		LabelTopologyZoneID,
 		corev1.LabelWindowsBuild,
 		LabelGKEReadinessCalicoReady,
-		LabelGKEReadinessKubeProxyReady,
 		LabelGKEReadinessMetadataServerEnabled,
 		LabelGKEReadinessMasqAgentReady,
 		LabelGKEReadinessNetdReady,
@@ -101,7 +100,11 @@ var (
 	// until the node is ready for each subsystem. Registering them as well-known
 	// allows Karpenter's DaemonSet overhead simulation (isDaemonPodCompatible) to
 	// include these DaemonSets when sizing instance types, preventing undersizing
-	// and node churn. See https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/202
+	// and node churn. kube-proxy is intentionally not registered or injected by
+	// the provider: GKE supplies a node-owned mirror pod on Karpenter nodes, and
+	// treating the DaemonSet selector as compatible would double-count or run a
+	// second kube-proxy pod.
+	// See https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/202
 	LabelGKEReadinessCalicoReady           = "projectcalico.org/ds-ready"
 	LabelGKEReadinessKubeProxyReady        = "node.kubernetes.io/kube-proxy-ds-ready"
 	LabelGKEReadinessMetadataServerEnabled = "iam.gke.io/gke-metadata-server-enabled"

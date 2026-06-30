@@ -68,6 +68,8 @@ kubeletConfiguration:
 
 Both settings reduce node allocatable capacity. The scheduler accounts for these when bin-packing workloads.
 
+Karpenter also adds a provider-computed 100m CPU scheduling overhead for GKE's node-owned kube-proxy mirror pod on Karpenter nodes. User-provided `systemReserved` values add to this overhead in Karpenter's allocatable estimate, but the kube-proxy overhead is not written into the node's kubelet reservation configuration.
+
 When you set a partial `kubeReserved` (for example, only `cpu`), Karpenter preserves provider-computed defaults for unspecified keys like `ephemeral-storage` based on boot disk size.
 
 ### Eviction thresholds

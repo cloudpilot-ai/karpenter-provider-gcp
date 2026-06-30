@@ -20,7 +20,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
+
+func TestKubeProxyReadinessLabelIsNotWellKnown(t *testing.T) {
+	require.False(t, karpv1.WellKnownLabels.Has(LabelGKEReadinessKubeProxyReady))
+}
 
 func TestImageFamily_FromSpecImageFamily(t *testing.T) {
 	cos := ImageFamilyContainerOptimizedOS
