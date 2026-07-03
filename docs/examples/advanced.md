@@ -10,7 +10,7 @@ For example, if the base GKE node-pool template sets `serial-port-logging-enable
 
 ### Reserved metadata keys
 
-The following GKE bootstrap metadata keys are reserved and cannot be set in `spec.metadata`:
+The following GKE [`NodeConfig.metadata`](https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/NodeConfig) reserved keys cannot be set in `spec.metadata`:
 
 - `cluster-location`
 - `cluster-name`
@@ -27,15 +27,18 @@ The following GKE bootstrap metadata keys are reserved and cannot be set in `spe
 - `install-ssh-psm1`
 - `k8s-node-setup-psm1`
 - `kube-env`
-- `kube-labels`
-- `kubeconfig`
-- `kubelet-config`
 - `startup-script`
 - `user-data`
 - `user-profile-psm1`
 - `windows-startup-script-ps1`
 
-Using any of these keys causes a CRD validation error at admission time. Custom metadata keys not in this list work normally.
+Karpenter also rejects provider-owned bootstrap surfaces that real GKE node templates use and that Karpenter parses or rebuilds rather than passing through as user metadata:
+
+- `kube-labels`
+- `kubeconfig`
+- `kubelet-config`
+
+Using any of these keys causes a CRD validation error at admission time. Custom metadata keys not in these lists work normally.
 
 > **Note:** For GPU driver version control, use `spec.gpuDriverVersion` instead of setting `cloud.google.com/gke-gpu-driver-version` via metadata. See [GPU Nodes](../gpu-nodes.md) for details.
 
