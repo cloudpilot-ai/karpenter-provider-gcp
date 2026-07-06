@@ -5,60 +5,11 @@
 
 ## Unreleased
 
----
-
-## v0.5.0
-
-### Empty-node disruption now follows upstream Karpenter NodePool rules
-
-The provider no longer runs its separate empty-node cleanup controller. Empty nodes are now removed only through Karpenter's standard disruption controller, so NodePool `spec.disruption.consolidateAfter`, `consolidationPolicy`, and disruption budgets are honored consistently.
-
-A node that only contains a GKE `konnectivity-agent` Deployment pod is not considered empty by Karpenter core because the pod is Deployment-owned, not DaemonSet-owned. This avoids provider-induced delete/provision churn, but it can leave a lightly used node in place until normal underutilized consolidation can safely remove or replace it. First-class handling for non-DaemonSet system workloads should be revisited after upstream Karpenter support matures.
-
-**Action required:** review NodePool disruption settings if you relied on immediate provider-side empty-node deletion:
-
-```bash
-kubectl get nodepools -o yaml
-```
-
-Use `WhenEmptyOrUnderutilized` when you want Karpenter to consider consolidating lightly loaded nodes, including nodes that only run reschedulable system Deployment pods.
-
 ### Reserved `GCENodeClass.spec.metadata` keys are rejected
 
-`GCENodeClass.spec.metadata` remains available for custom Compute Engine instance metadata, but it now rejects keys reserved by GKE bootstrap metadata.
+`GCENodeClass.spec.metadata` remains available for custom Compute Engine instance metadata, but it now rejects keys reserved by GKE bootstrap metadata, including `kube-env`, `cluster-name`, `cluster-location`, `instance-template`, `startup-script`, `user-data`, `kubeconfig`, and `kubelet-config`.
 
-The following keys are rejected:
-
-- `cluster-location`
-- `cluster-name`
-- `cluster-uid`
-- `common-psm1`
-- `configure-sh`
-- `containerd-configure-sh`
-- `disable-address-manager`
-- `enable-os-login`
-- `gci-ensure-gke-docker`
-- `gci-metrics-enabled`
-- `gci-update-strategy`
-- `instance-template`
-- `install-ssh-psm1`
-- `k8s-node-setup-psm1`
-- `kube-env`
-- `kube-labels`
-- `kubeconfig`
-- `kubelet-config`
-- `startup-script`
-- `user-data`
-- `user-profile-psm1`
-- `windows-startup-script-ps1`
-
-**Action required:** audit existing `GCENodeClass` objects and remove these keys from `spec.metadata` before upgrading the CRD:
-
-```bash
-kubectl get gcenodeclasses -o yaml
-```
-
-Non-reserved custom metadata keys continue to work.
+**Action required:** audit existing `GCENodeClass` objects that set bootstrap-owned metadata keys and remove those entries before upgrading the CRD. Non-reserved custom metadata keys continue to work.
 
 ---
 

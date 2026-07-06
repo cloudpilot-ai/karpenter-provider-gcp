@@ -10,7 +10,7 @@ For example, if the base GKE node-pool template sets `serial-port-logging-enable
 
 ### Reserved metadata keys
 
-The following GKE [`NodeConfig.metadata`](https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/NodeConfig) reserved keys cannot be set in `spec.metadata`:
+The following GKE bootstrap metadata keys are reserved and cannot be set in `spec.metadata`:
 
 - `cluster-location`
 - `cluster-name`
@@ -27,18 +27,15 @@ The following GKE [`NodeConfig.metadata`](https://cloud.google.com/kubernetes-en
 - `install-ssh-psm1`
 - `k8s-node-setup-psm1`
 - `kube-env`
+- `kube-labels`
+- `kubeconfig`
+- `kubelet-config`
 - `startup-script`
 - `user-data`
 - `user-profile-psm1`
 - `windows-startup-script-ps1`
 
-Karpenter also rejects provider-owned bootstrap surfaces that real GKE node templates use and that Karpenter parses or rebuilds rather than passing through as user metadata:
-
-- `kube-labels`
-- `kubeconfig`
-- `kubelet-config`
-
-Using any of these keys causes a CRD validation error at admission time. Custom metadata keys not in these lists work normally.
+Using any of these keys causes a CRD validation error at admission time. Custom metadata keys not in this list work normally.
 
 > **Note:** For GPU driver version control, use `spec.gpuDriverVersion` instead of setting `cloud.google.com/gke-gpu-driver-version` via metadata. See [GPU Nodes](../gpu-nodes.md) for details.
 
@@ -70,8 +67,6 @@ kubeletConfiguration:
 - `kubeReserved` — resources reserved for Kubernetes components (kubelet, container runtime)
 
 Both settings reduce node allocatable capacity. The scheduler accounts for these when bin-packing workloads.
-
-Karpenter also adds a provider-computed 100m CPU scheduling overhead for GKE's node-owned kube-proxy mirror pod on Karpenter nodes. User-provided `systemReserved` values add to this overhead in Karpenter's allocatable estimate, but the kube-proxy overhead is not written into the node's kubelet reservation configuration.
 
 When you set a partial `kubeReserved` (for example, only `cpu`), Karpenter preserves provider-computed defaults for unspecified keys like `ephemeral-storage` based on boot disk size.
 
@@ -284,5 +279,3 @@ spec:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 30m
 ```
-
-Karpenter-provider-gcp relies on Karpenter's upstream disruption controller for empty-node removal. Use NodePool `spec.disruption` to express empty-node timing and budgets; provider-managed system Deployments such as GKE `konnectivity-agent` are not ignored by a provider-specific deletion loop.
