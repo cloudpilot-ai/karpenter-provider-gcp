@@ -5,8 +5,15 @@ on:
     types: [created]
 
 permissions:
+  contents: read
+  id-token: write
   issues: write
   pull-requests: write
+
+env:
+  E2E_PREFIX: ${{ vars.E2E_PREFIX || 'karpenter-e2e' }}
+  E2E_REGION: ${{ vars.E2E_REGION || 'asia-southeast1' }}
+  E2E_LOCATION: ${{ vars.E2E_LOCATION || 'asia-southeast1-b' }}
 
 jobs:
   gate:
@@ -16,6 +23,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       accepted: ${{ steps.command.outputs.continue }}
+      fork_full_name: ${{ steps.command.outputs.fork_full_name }}
       sha: ${{ steps.command.outputs.sha }}
     steps:
       - name: Parse /e2e command
@@ -38,13 +46,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
-      group: e2e-${{ github.repository }}
+      group: karpenter-e2e
       cancel-in-progress: false
     outputs:
-      preset: ${{ steps.run.outputs.preset }}
+      preset: ${{ steps.preset.outputs.preset }}
+      result: ${{ steps.result.outputs.result }}
     steps:
-      - name: E2E run
-        id: run
+      - name: Parse preset
+        id: preset
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
@@ -56,17 +65,111 @@ jobs:
           fi
           echo "preset=${preset}" >> "${GITHUB_OUTPUT}"
 
-          echo "e2e run is not implemented"
-          echo "preset: ${preset}"
-          echo "commit: ${{ needs.gate.outputs.sha }}"
+      - name: Checkout PR code
+        if: steps.preset.outputs.preset == 'standard'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ needs.gate.outputs.fork_full_name || github.repository }}
+          ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        if: steps.preset.outputs.preset == 'standard'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            hack/tools/go.sum
+
+      - name: Authenticate to GCP
+        id: auth
+        if: steps.preset.outputs.preset == 'standard'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_E2E_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_E2E_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      - name: Set up gcloud
+        if: steps.preset.outputs.preset == 'standard'
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          project_id: ${{ vars.E2E_PROJECT_ID }}
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Validate e2e configuration
+        if: steps.preset.outputs.preset == 'standard'
+        env:
+          E2E_PROJECT_ID: ${{ vars.E2E_PROJECT_ID }}
+          GCP_E2E_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_E2E_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_E2E_SERVICE_ACCOUNT: ${{ vars.GCP_E2E_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test -n "${E2E_PROJECT_ID}" || (echo "E2E_PROJECT_ID repository variable is required" >&2; exit 1)
+          test -n "${GCP_E2E_WORKLOAD_IDENTITY_PROVIDER}" || (echo "GCP_E2E_WORKLOAD_IDENTITY_PROVIDER repository variable is required" >&2; exit 1)
+          test -n "${GCP_E2E_SERVICE_ACCOUNT}" || (echo "GCP_E2E_SERVICE_ACCOUNT repository variable is required" >&2; exit 1)
+
+      - name: Install toolchain
+        if: steps.preset.outputs.preset == 'standard'
+        run: make toolchain
+
+      - name: Run standard e2e
+        id: standard
+        if: steps.preset.outputs.preset == 'standard'
+        continue-on-error: true
+        env:
+          E2E_PROJECT_ID: ${{ vars.E2E_PROJECT_ID }}
+          E2E_SA_PATH: ${{ steps.auth.outputs.credentials_file_path }}
+          E2E_PREFIX: ${{ env.E2E_PREFIX }}
+          E2E_REGION: ${{ env.E2E_REGION }}
+          E2E_LOCATION: ${{ env.E2E_LOCATION }}
+          GINKGO_PROCS: ${{ vars.E2E_GINKGO_PROCS || '4' }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          {
+            make e2e-setup
+            make e2e-deploy
+            make e2e-tests
+          } 2>&1 | tee artifacts/e2e-standard.log
+
+      - name: Set result
+        id: result
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.preset.outputs.preset }}" != "standard" ]]; then
+            result="not implemented"
+          elif [[ "${{ steps.standard.outcome }}" == "success" ]]; then
+            result="success"
+          else
+            result="failure"
+          fi
+          echo "result=${result}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload artifacts
+        if: always() && steps.preset.outputs.preset == 'standard'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-standard-${{ needs.gate.outputs.sha }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Update sticky comment
+        if: always()
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           number: ${{ github.event.issue.number }}
-          header: e2e-placeholder
+          header: e2e-standard
           message: |
-            e2e run is not implemented.
+            On-demand e2e `${{ steps.preset.outputs.preset }}` result: `${{ steps.result.outputs.result }}`.
 
-            Preset: `${{ steps.run.outputs.preset }}`
             Commit: `${{ needs.gate.outputs.sha }}`
+            Target: `${{ env.E2E_PREFIX }}` in `${{ env.E2E_LOCATION }}`
+
+      - name: Fail on e2e failure
+        if: steps.result.outputs.result == 'failure'
+        run: exit 1

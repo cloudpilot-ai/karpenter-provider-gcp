@@ -134,7 +134,7 @@ Network egress hardening can be evaluated only if it works on GitHub-hosted runn
 
 ### Locking and Persistent Cluster Hygiene
 
-Before touching GCP, each accepted run must acquire a per-target-cluster lock. Rejected commands must not wait on the e2e execution queue. In GitHub Actions this is a job-level `concurrency` group such as `e2e-${cluster}` with `queue: max`, so accepted e2e jobs queue instead of colliding. The runner should keep the lock until post-run cleanup and artifact collection finish.
+Before touching GCP, each accepted run must acquire a per-target-cluster lock. Rejected commands must not wait on the e2e execution queue. Phase 2 uses the target-specific `karpenter-e2e` GitHub Actions `concurrency` group with `cancel-in-progress: false`, so accepted e2e jobs do not collide. Native GitHub Actions concurrency keeps at most one running and one pending job per group; if we need more than one pending request retained, add an explicit queue/dispatcher layer before depending on deeper queueing. The runner should keep the lock until post-run cleanup and artifact collection finish.
 
 Before each run:
 
@@ -288,7 +288,7 @@ Parse commands, verify actor repository permission, resolve SHA, queue accepted 
 
 ### Phase 2 — Standard Mode
 
-Add WIF, persistent cluster setup, cleanup, deploy alignment checks, quota-aware standard-mode execution, artifacts, check runs, and PR reporting.
+Add WIF, target-specific `karpenter-e2e` concurrency, persistent cluster setup, deploy, standard-mode execution, artifacts, and PR reporting. GPU/full requests continue to report as not implemented until Phase 4.
 
 ### Phase 3 — KWOK Fast Lane
 
