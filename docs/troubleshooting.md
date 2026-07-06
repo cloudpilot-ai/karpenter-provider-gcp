@@ -170,6 +170,18 @@ If an idle node is not being removed, check the following:
 
 - **`consolidationPolicy`.** `WhenEmpty` removes only nodes that have no reschedulable pods. A node that still runs a Deployment-owned system pod — such as the GKE `konnectivity-agent` — is not considered empty by Karpenter core, because the pod is not DaemonSet overhead. Such a node remains until it can be consolidated as underutilized. Use `WhenEmptyOrUnderutilized` if you want Karpenter to consider removing or replacing these lightly loaded nodes.
 
+  ```yaml
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 30s
+  ```
+
+Check the current disruption settings on your NodePools with:
+
+```sh
+kubectl get nodepools -o yaml
+```
+
 See the [NodePool disruption reference](reference/nodepool.md#disruption) for the full list of settings.
 
 ---
