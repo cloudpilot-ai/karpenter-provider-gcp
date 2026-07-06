@@ -16,9 +16,9 @@
       "scope": ["pkg/providers/**"]
     },
     {
-      "path": "pkg/providers/metadata/doc.go",
-      "description": "Pure bootstrap metadata transformation ownership",
-      "scope": ["pkg/providers/**"]
+      "path": "pkg/metadata/doc.go",
+      "description": "Pure typed bootstrap metadata model and render-boundary ownership",
+      "scope": ["pkg/metadata/**", "pkg/providers/**"]
     }
   ]
 }

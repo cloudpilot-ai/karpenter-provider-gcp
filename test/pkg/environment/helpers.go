@@ -73,8 +73,14 @@ type TestCase struct {
 	GPUCount string
 	// ImageFamily selects the OS image family for the NodeClass.
 	// Defaults to ContainerOptimizedOS when empty.
-	ImageFamily         string
-	ConsolidationPolicy string // defaults to WhenEmptyOrUnderutilized when empty
+	ImageFamily string
+	// ConsolidationPolicy defaults to WhenEmptyOrUnderutilized when empty.
+	ConsolidationPolicy string
+	// ConsolidateAfter defaults to DefaultConsolidateAfter when empty.
+	// Use "Never" to disable consolidation for a test NodePool.
+	ConsolidateAfter string
+	// DisruptionBudgets defaults to a permissive 100% budget when nil.
+	DisruptionBudgets []map[string]any
 }
 
 // UniqueSuffix returns a 6-character random hex string safe for use in k8s names.
@@ -420,6 +426,17 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	} else if expireAfter != "" {
 		consolidationPolicy = "WhenEmpty"
 	}
+	consolidateAfter := DefaultConsolidateAfter
+	if tc.ConsolidateAfter != "" {
+		consolidateAfter = tc.ConsolidateAfter
+	}
+	budgets := []any{map[string]any{"nodes": "100%"}}
+	if tc.DisruptionBudgets != nil {
+		budgets = make([]any, 0, len(tc.DisruptionBudgets))
+		for _, budget := range tc.DisruptionBudgets {
+			budgets = append(budgets, budget)
+		}
+	}
 	deleteIfExists(ctx, e.DynamicClient, nodePoolGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",
@@ -428,9 +445,9 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 		"spec": map[string]any{
 			"weight": int64(DefaultNodePoolWeight),
 			"disruption": map[string]any{
-				"consolidateAfter":    DefaultConsolidateAfter,
+				"consolidateAfter":    consolidateAfter,
 				"consolidationPolicy": consolidationPolicy,
-				"budgets":             []any{map[string]any{"nodes": "100%"}},
+				"budgets":             budgets,
 			},
 			"template": map[string]any{"spec": templateSpec},
 		},
@@ -856,21 +873,82 @@ func (e *Environment) WaitForNodeClaimInitialized(ctx context.Context, nodePoolN
 	}).WithTimeout(GPUProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 }
 
-// WaitForKubeProxyRunning polls until the kube-proxy DaemonSet pod on the given
-// node is Running and Ready. GKE uses "component=kube-proxy" (not the upstream
-// "k8s-app=kube-proxy" label), so we query by that selector.
+// WaitForKubeProxyRunning polls until exactly one kube-proxy pod exists on the
+// given node, is Running/Ready, and resolves to an image matching the node arch.
+// GKE can expose kube-proxy as either a node-owned static/mirror pod
+// (component=kube-proxy) or an addonmanager-managed DaemonSet pod
+// (k8s-app=kube-proxy); a Karpenter node must not run both.
 func (e *Environment) WaitForKubeProxyRunning(ctx context.Context, nodeName string) {
 	Eventually(func(g Gomega) {
-		pods, err := e.KubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+		node, err := e.KubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred(), "getting node %s", nodeName)
+		arch := node.Labels[corev1.LabelArchStable]
+		g.Expect(arch).NotTo(BeEmpty(), "node %s has no %s label", nodeName, corev1.LabelArchStable)
+
+		fieldSelector := fmt.Sprintf("spec.nodeName=%s", nodeName)
+		staticPods, err := e.KubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
 			LabelSelector: "component=kube-proxy",
-			FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
+			FieldSelector: fieldSelector,
 		})
-		g.Expect(err).NotTo(HaveOccurred(), "listing kube-proxy pods on node %s", nodeName)
-		g.Expect(pods.Items).NotTo(BeEmpty(), "no kube-proxy pod on node %s", nodeName)
-		g.Expect(isRunningAndReady(&pods.Items[0])).To(BeTrue(),
-			"kube-proxy pod on %s is not Running/Ready (phase=%s)",
-			nodeName, pods.Items[0].Status.Phase)
+		g.Expect(err).NotTo(HaveOccurred(), "listing static kube-proxy pods on node %s", nodeName)
+		daemonSetPods, err := e.KubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+			LabelSelector: "k8s-app=kube-proxy",
+			FieldSelector: fieldSelector,
+		})
+		g.Expect(err).NotTo(HaveOccurred(), "listing DaemonSet kube-proxy pods on node %s", nodeName)
+
+		kubeProxyPods := make([]corev1.Pod, 0, len(staticPods.Items)+len(daemonSetPods.Items))
+		kubeProxyPods = append(kubeProxyPods, staticPods.Items...)
+		kubeProxyPods = append(kubeProxyPods, daemonSetPods.Items...)
+		g.Expect(kubeProxyPods).To(HaveLen(1), "expected exactly one kube-proxy pod on node %s, got %v", nodeName, podNames(kubeProxyPods))
+
+		pod := kubeProxyPods[0]
+		g.Expect(isRunningAndReady(&pod)).To(BeTrue(),
+			"kube-proxy pod %s on %s is not Running/Ready (phase=%s)",
+			pod.Name, nodeName, pod.Status.Phase)
+		g.Expect(kubeProxyImageMatchesArch(&pod, arch)).To(BeTrue(),
+			"kube-proxy pod %s on %s has images %s that do not match arch %s",
+			pod.Name, nodeName, kubeProxyImages(&pod), arch)
 	}).WithTimeout(ProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+func kubeProxyImageMatchesArch(pod *corev1.Pod, arch string) bool {
+	oppositeArch := karpv1.ArchitectureArm64
+	if arch == karpv1.ArchitectureArm64 {
+		oppositeArch = karpv1.ArchitectureAmd64
+	}
+	for _, image := range kubeProxyImages(pod) {
+		if strings.Contains(image, "kube-proxy-"+oppositeArch+":") || strings.Contains(image, "kube-proxy-"+oppositeArch+"@") {
+			return false
+		}
+	}
+	return true
+}
+
+func kubeProxyImages(pod *corev1.Pod) []string {
+	images := make([]string, 0, len(pod.Spec.Containers)+len(pod.Status.ContainerStatuses)*2)
+	for _, container := range pod.Spec.Containers {
+		if strings.Contains(container.Image, "kube-proxy") {
+			images = append(images, container.Image)
+		}
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if strings.Contains(status.Image, "kube-proxy") {
+			images = append(images, status.Image)
+		}
+		if strings.Contains(status.ImageID, "kube-proxy") {
+			images = append(images, status.ImageID)
+		}
+	}
+	return images
+}
+
+func podNames(pods []corev1.Pod) []string {
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+	return names
 }
 
 // WaitForNodeClassReady polls until the named GCENodeClass reports Ready=True.

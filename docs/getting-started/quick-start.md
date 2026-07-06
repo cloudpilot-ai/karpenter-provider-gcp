@@ -73,6 +73,8 @@ spec:
     consolidateAfter: 0s
 ```
 
+Empty-node removal is handled by Karpenter's standard NodePool disruption logic. This means `consolidateAfter`, disruption budgets, and the selected `consolidationPolicy` control when an idle node can be removed; the GCP provider does not run a separate GKE-specific empty-node cleanup loop.
+
 Apply it:
 
 ```sh

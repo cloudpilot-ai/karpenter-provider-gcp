@@ -29,7 +29,6 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/csr"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/node"
 	nodeclaimgc "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclasshash "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/hash"
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
@@ -67,7 +66,6 @@ func NewController(
 		instancetype.NewController(instanceTypeProvider),
 		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),
-		node.NewController(kubeClient, cloudProvider),
 		nodeclaimgc.NewController(kubeClient, cloudProvider),
 	}
 

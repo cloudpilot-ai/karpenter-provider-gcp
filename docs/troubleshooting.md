@@ -160,6 +160,20 @@ gcloud compute machine-types list --zones=ZONE --filter="architecture:ARM64"
 
 ---
 
+## Idle node not being removed
+
+Empty-node removal is handled entirely by Karpenter's upstream disruption controller — the GCP provider no longer runs a separate empty-node cleanup loop. A node is removed automatically only when it is empty or underutilized according to the matching NodePool's `spec.disruption` settings.
+
+If an idle node is not being removed, check the following:
+
+- **`consolidateAfter` and disruption budgets.** Karpenter waits for `consolidateAfter` to elapse before disrupting a node, and disruption budgets can block or rate-limit removals. A budget that sets `nodes: "0"` for the `Empty` reason prevents empty-node removal entirely. Review the NodePool's `spec.disruption` to confirm the timing and budgets are what you expect.
+
+- **`consolidationPolicy`.** `WhenEmpty` removes only nodes that have no reschedulable pods. A node that still runs a Deployment-owned system pod — such as the GKE `konnectivity-agent` — is not considered empty by Karpenter core, because the pod is not DaemonSet overhead. Such a node remains until it can be consolidated as underutilized. Use `WhenEmptyOrUnderutilized` if you want Karpenter to consider removing or replacing these lightly loaded nodes.
+
+See the [NodePool disruption reference](reference/nodepool.md#disruption) for the full list of settings.
+
+---
+
 ## Orphaned GCE instances
 
 Karpenter runs a garbage-collection controller that periodically finds GCE instances tagged as Karpenter-managed but not tracked by any NodeClaim, and deletes them. This handles the case where a node was partially provisioned before a crash or where a NodeClaim was deleted without the underlying instance being cleaned up.
