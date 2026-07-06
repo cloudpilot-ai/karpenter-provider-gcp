@@ -232,13 +232,12 @@ To resolve:
 
 Karpenter removes empty nodes through its disruption controller, which honors each NodePool's `spec.disruption` settings (`consolidationPolicy`, `consolidateAfter`, and disruption budgets). A node counts as empty only when every pod on it is owned by a DaemonSet. Pods owned by a Deployment are reschedulable, so a node running one is not treated as empty — this includes GKE system components such as the `konnectivity-agent` Deployment. Such a node stays in place until underutilized consolidation can safely remove or replace it.
 
-To let Karpenter consolidate lightly loaded nodes that only run reschedulable system Deployment pods, set `consolidationPolicy: WhenEmptyOrUnderutilized` on the NodePool:
+To let Karpenter consolidate lightly loaded nodes that only run reschedulable system Deployment pods, ensure underutilized consolidation is still enabled and that `consolidateAfter` has not been set to `Never`:
 
 ```yaml
 disruption:
   consolidationPolicy: WhenEmptyOrUnderutilized
   consolidateAfter: 30s
-```
 
 Check the current disruption settings on your NodePools with:
 
