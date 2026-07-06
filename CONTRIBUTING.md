@@ -206,6 +206,10 @@ make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
 
 Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`, `scheduling`, `networking`.
 
+#### On-demand PR e2e
+
+Users with `write`, `maintain`, or `admin` repository permission can request on-demand e2e from a pull request comment with `/e2e`, `/e2e standard`, `/e2e gpu`, or `/e2e full`.
+
 #### Tear down all e2e infrastructure
 
 ```bash
