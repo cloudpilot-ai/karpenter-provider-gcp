@@ -22,6 +22,16 @@ controller:
     nodeRepair: true
 ```
 
+### CapacityBuffer (Alpha)
+
+`CapacityBuffer` is an Alpha feature that pre-provisions spare capacity so pending pods can schedule without waiting for new nodes. It is disabled by default; enable it with `controller.featureGates.capacityBuffer`. The `karpenter-crd` chart installs the upstream `autoscaling.x-k8s.io/v1beta1` `CapacityBuffer` CRD whenever CRDs are applied, regardless of the gate, but Karpenter acts on `CapacityBuffer` resources only when the gate is enabled.
+
+```yaml
+controller:
+  featureGates:
+    capacityBuffer: true
+```
+
 ## Controller Options
 
 These options configure the controller's runtime behavior.
@@ -147,6 +157,18 @@ podDisruptionBudget:
 ## NodePool Features
 
 These fields are set on `NodePool` objects, not on the controller. They are part of the karpenter-core API and are available in this provider.
+
+### Balanced consolidation policy (v1.14)
+
+Karpenter core v1.14 adds a third value, `Balanced`, to `spec.disruption.consolidationPolicy`, alongside `WhenEmpty` and `WhenEmptyOrUnderutilized`. `Balanced` sits between the two: it scores each consolidation action by weighing the share of NodePool cost it saves against the pod disruption it causes, and proceeds only when the savings justify the disruption. Higher-priority pods carry more disruption weight, so nodes running them are less likely to be consolidated. Reach for it when `WhenEmptyOrUnderutilized` churns too much on marginal consolidations but `WhenEmpty` leaves too much idle capacity. The default is unchanged (`WhenEmptyOrUnderutilized`).
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+spec:
+  disruption:
+    consolidationPolicy: Balanced
+```
 
 ### Karpenter core v1.13
 
