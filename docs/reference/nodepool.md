@@ -49,6 +49,7 @@ _Appears in:_
 | --- | --- |
 | `WhenEmpty` |  |
 | `WhenEmptyOrUnderutilized` |  |
+| `Balanced` |  |
 
 
 #### Disruption
@@ -65,7 +66,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `consolidateAfter` _[NillableDuration](#nillableduration)_ | ConsolidateAfter is the duration the controller will wait<br />before attempting to terminate nodes that are underutilized.<br />Refer to ConsolidationPolicy for how underutilization is considered.<br />When replicas is set, ConsolidateAfter is simply ignored |  | Pattern: `^(([0-9]+(s\|m\|h))+\|Never)$` <br />Schemaless: \{\} <br />Type: string <br />Required: \{\} <br /> |
-| `consolidationPolicy` _[ConsolidationPolicy](#consolidationpolicy)_ | ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation<br />algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified<br />When replicas is set, ConsolidationPolicy is simply ignored | WhenEmptyOrUnderutilized | Enum: [WhenEmpty WhenEmptyOrUnderutilized] <br />Optional: \{\} <br /> |
+| `consolidationPolicy` _[ConsolidationPolicy](#consolidationpolicy)_ | ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation<br />algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified.<br />Valid values: "WhenEmpty", "WhenEmptyOrUnderutilized", "Balanced".<br />When replicas is set, ConsolidationPolicy is simply ignored. | WhenEmptyOrUnderutilized | Enum: [WhenEmpty WhenEmptyOrUnderutilized Balanced] <br />Optional: \{\} <br /> |
 | `budgets` _[Budget](#budget) array_ | Budgets is a list of Budgets.<br />If there are multiple active budgets, Karpenter uses<br />the most restrictive value. If left undefined,<br />this will default to one budget with a value to 10%. | [map[nodes:10%]] | MaxItems: 50 <br />Optional: \{\} <br /> |
 
 

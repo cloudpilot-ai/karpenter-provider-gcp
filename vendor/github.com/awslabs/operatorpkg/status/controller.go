@@ -181,7 +181,28 @@ func (c *GenericObjectController[T]) Register(_ context.Context, m manager.Manag
 }
 
 func (c *GenericObjectController[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	return c.reconcile(ctx, req, NewUnstructuredAdapter[T](object.New[T]()))
+	// Use a typed Get so controller-runtime uses its cache instead of bypassing it.
+	// UnstructuredAdapter implements runtime.Unstructured (via embedded unstructured.Unstructured),
+	// which causes controller-runtime to skip the cache and hit the API server directly when used
+	// with kubeClient.Get.
+	typedObj := object.New[T]()
+	if err := c.kubeClient.Get(ctx, req.NamespacedName, typedObj); err != nil {
+		if errors.IsNotFound(err) {
+			return reconcile.Result{}, c.cleanupNotFound(req, NewUnstructuredAdapter[T](typedObj))
+		}
+		return reconcile.Result{}, fmt.Errorf("getting object, %w", err)
+	}
+	// Convert to proper unstructured so conditions appear as []interface{} (JSON-compatible form)
+	// rather than the typed []metav1.Condition that ToPartialUnstructured would produce from a
+	// typed struct. UnstructuredAdapter.GetConditions relies on unstructured.NestedFieldNoCopy
+	// which requires []interface{}.
+	unstructuredContent, err := runtime.DefaultUnstructuredConverter.ToUnstructured(typedObj)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("converting object to unstructured, %w", err)
+	}
+	unstructuredObj := &unstructured.Unstructured{Object: unstructuredContent}
+	unstructuredObj.SetGroupVersionKind(object.GVK(typedObj))
+	return c.reconcileFound(ctx, req, &UnstructuredAdapter[T]{Unstructured: *unstructuredObj})
 }
 
 func (c *Controller[T]) toAdditionalMetricLabels(obj Object) map[string]string {
@@ -217,33 +238,40 @@ func toPrometheusLabel(k string) string {
 func (c *Controller[T]) reconcile(ctx context.Context, req reconcile.Request, o Object) (reconcile.Result, error) {
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, o); err != nil {
 		if errors.IsNotFound(err) {
-			c.observedConditions.Delete(req)
-			c.observedGaugeLabels.Delete(req)
-			c.deletePartialMatchGaugeMetric(c.ConditionCount, ConditionCount, map[string]string{
-				MetricLabelNamespace: req.Namespace,
-				MetricLabelName:      req.Name,
-			})
-			c.deletePartialMatchGaugeMetric(c.ConditionCurrentStatusSeconds, ConditionCurrentStatusSeconds, map[string]string{
-				MetricLabelNamespace: req.Namespace,
-				MetricLabelName:      req.Name,
-			})
-			c.deletePartialMatchGaugeMetric(c.TerminationCurrentTimeSeconds, TerminationCurrentTimeSeconds, map[string]string{
-				MetricLabelNamespace: req.Namespace,
-				MetricLabelName:      req.Name,
-			})
-			if obj, ok := c.terminatingObjects.LoadAndDelete(req); ok {
-				c.observeHistogram(c.TerminationDuration, TerminationDuration, time.Since(obj.(Object).GetDeletionTimestamp().Time).Seconds(), map[string]string{}, c.toAdditionalMetricLabels(obj.(Object)))
-			}
-			if finalizers, ok := c.observedFinalizers.LoadAndDelete(req); ok {
-				for _, finalizer := range finalizers.([]string) {
-					c.eventRecorder.Event(o, v1.EventTypeNormal, "Finalized", fmt.Sprintf("Finalized %s", finalizer))
-				}
-			}
-			return reconcile.Result{}, nil
+			return reconcile.Result{}, c.cleanupNotFound(req, o)
 		}
 		return reconcile.Result{}, fmt.Errorf("getting object, %w", err)
 	}
+	return c.reconcileFound(ctx, req, o)
+}
 
+func (c *Controller[T]) cleanupNotFound(req reconcile.Request, o Object) error {
+	c.observedConditions.Delete(req)
+	c.observedGaugeLabels.Delete(req)
+	c.deletePartialMatchGaugeMetric(c.ConditionCount, ConditionCount, map[string]string{
+		MetricLabelNamespace: req.Namespace,
+		MetricLabelName:      req.Name,
+	})
+	c.deletePartialMatchGaugeMetric(c.ConditionCurrentStatusSeconds, ConditionCurrentStatusSeconds, map[string]string{
+		MetricLabelNamespace: req.Namespace,
+		MetricLabelName:      req.Name,
+	})
+	c.deletePartialMatchGaugeMetric(c.TerminationCurrentTimeSeconds, TerminationCurrentTimeSeconds, map[string]string{
+		MetricLabelNamespace: req.Namespace,
+		MetricLabelName:      req.Name,
+	})
+	if obj, ok := c.terminatingObjects.LoadAndDelete(req); ok {
+		c.observeHistogram(c.TerminationDuration, TerminationDuration, time.Since(obj.(Object).GetDeletionTimestamp().Time).Seconds(), map[string]string{}, c.toAdditionalMetricLabels(obj.(Object)))
+	}
+	if finalizers, ok := c.observedFinalizers.LoadAndDelete(req); ok {
+		for _, finalizer := range finalizers.([]string) {
+			c.eventRecorder.Event(o, v1.EventTypeNormal, "Finalized", fmt.Sprintf("Finalized %s", finalizer))
+		}
+	}
+	return nil
+}
+
+func (c *Controller[T]) reconcileFound(ctx context.Context, req reconcile.Request, o Object) (reconcile.Result, error) {
 	// Detect and record terminations
 	observedFinalizers, _ := c.observedFinalizers.Swap(req, o.GetFinalizers())
 	if observedFinalizers != nil {
