@@ -113,6 +113,9 @@ controller:
     # -- reservedCapacity enables scheduling to reserved/committed GCP capacity.
     # Disabled: the GCP provider does not yet implement GCE reservation support (#239).
     reservedCapacity: false
+    # -- capacityBuffer is ALPHA and is disabled by default.
+    # Setting this to true enables CapacityBuffer support for pre-provisioning spare capacity.
+    capacityBuffer: false
   # -- disableControllerWarmup controls whether controller sources (watches/informers) start
   # before leader election is won. Set to false to enable warmup, which pre-populates caches
   # and improves leader failover time. Default true matches karpenter-core default (warmup disabled).
