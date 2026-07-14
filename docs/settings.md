@@ -13,6 +13,7 @@ Feature gates control opt-in or experimental behaviors. They are passed as a com
 | `SpotToSpotConsolidation` | `controller.featureGates.spotToSpotConsolidation` | `true`  | Beta   | Allows consolidation to replace a Spot node with a cheaper Spot node (both single- and multi-node).                                                                                            |
 | `NodeOverlay`             | `controller.featureGates.nodeOverlay`             | `false` | Alpha  | Applies `NodeOverlay` resources to instance type scheduling decisions.                                                                                                                         |
 | `StaticCapacity`          | `controller.featureGates.staticCapacity`          | `false` | Alpha  | Enables NodePools with `spec.replicas` set to maintain a fixed number of nodes regardless of pod demand.                                                                                       |
+| `CapacityBuffer`          | `controller.featureGates.capacityBuffer`          | `false` | Alpha  | Enables `CapacityBuffer` resources to pre-provision spare capacity.                                                                                                                            |
 
 Example Helm override to enable `NodeRepair`:
 
@@ -40,7 +41,7 @@ Dynamic Resource Allocation (DRA) is a Kubernetes API for requesting and sharing
 
 Karpenter ignores DRA requests during scheduling simulations by default (`controller.settings.ignoreDRARequests: true`). This preserves scheduling behavior for clusters without DRA drivers, the common case on GKE.
 
-Set `ignoreDRARequests` to `false` only when the cluster has DRA drivers installed and runs workloads that schedule against `ResourceClaim`s. When disabled, Karpenter registers the upstream device-allocation controller and accounts for DRA device availability when provisioning.
+Set `ignoreDRARequests` to `false` only when the cluster has DRA drivers installed and runs workloads that schedule against `ResourceClaim`s. When disabled, Karpenter registers the upstream device-allocation controller and accounts for already-published in-cluster DRA device availability. The GCP provider does not yet publish instance-type DRA device templates for provisioning new accelerator nodes.
 
 ```yaml
 controller:
