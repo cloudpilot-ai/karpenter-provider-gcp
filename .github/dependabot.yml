@@ -51,11 +51,23 @@ updates:
     directory: "/hack/crd-tools"
     schedule:
       interval: "weekly"
-    # kubectl-validate v0.0.4 is not compatible with newer transitive
-    # k8s.io/* releases, so only let Dependabot bump the tool itself.
+    # SECURITY updates only. `allow` also gates security updates, so the
+    # previous kubectl-validate-only allowlist silently blocked CVE fixes
+    # for every other dependency here (e.g. 13 golang.org/x/crypto
+    # advisories). Routine version bumps stay disabled (limit 0): this
+    # module's deps (etcd, cel-go, grpc-gateway, ...) are the dependency
+    # set matching the pinned k8s.io/* v0.30.x, and bumping them in
+    # isolation is likely to break kubectl-validate v0.0.4.
+    open-pull-requests-limit: 0
     allow:
-      - dependency-name: "sigs.k8s.io/kubectl-validate"
-        dependency-type: "all"
+      - dependency-type: "all"
+    ignore:
+      - dependency-name: "k8s.io/*"
+    groups:
+      crd-tools-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "gomod"
     directory: "/hack/pdcsi-data"
