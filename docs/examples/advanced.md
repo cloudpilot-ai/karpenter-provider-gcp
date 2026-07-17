@@ -229,6 +229,62 @@ parameters:
 
 StorageClasses with `use-allowed-disk-topology: "true"` can use disk-type labels in `allowedTopologies`, and bound PVs can carry these labels in node affinity so replacement pods schedule only on nodes that support the disk type.
 
+## Workload-side provider label selection
+
+Provider well-known labels can be used both in NodePool `requirements` and in pod `nodeSelector` / node affinity. Karpenter includes pod-level requirements when choosing which instance type to launch.
+
+Common GCP instance labels:
+
+| Label                                   | Source            | Notes                                                                              |
+|-----------------------------------------|-------------------|------------------------------------------------------------------------------------|
+| `karpenter.k8s.gcp/instance-family`     | Machine type name | Recommended for selecting GCP machine families, for example `c2`, `c2d`, or `n2`.  |
+| `karpenter.k8s.gcp/instance-cpu`        | Compute API       | vCPU count.                                                                        |
+| `karpenter.k8s.gcp/instance-memory`     | Compute API       | Memory in MiB.                                                                     |
+| `karpenter.k8s.gcp/instance-generation` | Machine type name | Parsed from standard machine family names; prefer `instance-family` when possible. |
+| `karpenter.k8s.gcp/instance-shape`      | Machine type name | Parsed from standard machine type names, for example `standard` or `highmem`.      |
+| `karpenter.k8s.gcp/instance-size`       | Machine type name | Parsed from standard machine type names.                                           |
+
+For example, use `nodeAffinity` when a workload can run on any of several machine families:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compute-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compute-worker
+  template:
+    metadata:
+      labels:
+        app: compute-worker
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.k8s.gcp/instance-family
+                    operator: In
+                    values: ["c2", "c2d"]
+      containers:
+        - name: compute-worker
+          image: public.ecr.aws/eks-distro/kubernetes/pause:3.2
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+```
+
+A `nodeSelector` can only match one exact value:
+
+```yaml
+nodeSelector:
+  karpenter.k8s.gcp/instance-family: c2
+```
+
 ## Multiple NodePools
 
 Run independent pools for different workload tiers, each referencing a different GCENodeClass:

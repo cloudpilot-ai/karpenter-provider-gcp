@@ -5,6 +5,17 @@
 
 ## Unreleased
 
+### Unsupported instance labels removed
+
+The provider no longer registers or exposes the following GCP instance labels:
+
+- `karpenter.k8s.gcp/instance-category`
+- `karpenter.k8s.gcp/instance-cpu-model`
+
+`instance-category` was derived from the leading letters of the machine family, but those letters do not match GCP's machine categories. For example, `c2` and `c2d` are compute-optimized, while `c3`, `c3d`, and `c4` are general-purpose. `instance-cpu-model` was registered but never populated.
+
+**Action required:** remove these labels from NodePool requirements and workload scheduling constraints before upgrading. Use `karpenter.k8s.gcp/instance-family` when you need to target specific GCP machine families.
+
 ---
 
 ## v0.5.0
