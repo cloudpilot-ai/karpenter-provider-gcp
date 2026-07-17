@@ -96,6 +96,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).ClusterLocation,
 		options.FromContext(ctx).NodeLocation,
 		options.FromContext(ctx).DefaultNodePoolTemplateName,
+		options.FromContext(ctx).BootDiskKMSKey,
 	)
 	if nodeTemplateProvider == nil {
 		log.FromContext(ctx).Error(nil, "failed to initialize node pool template provider")

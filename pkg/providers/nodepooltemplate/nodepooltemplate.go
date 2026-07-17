@@ -61,6 +61,9 @@ type ClusterInfo struct {
 	NodeLocation    string
 	Region          string
 	Name            string
+	// BootDiskKMSKey is the Cloud KMS key used to CMEK-encrypt the fallback pool boot disk.
+	// Empty means no CMEK boot-disk encryption.
+	BootDiskKMSKey string
 }
 
 const (
@@ -74,7 +77,7 @@ const (
 
 func NewDefaultProvider(_ context.Context, computeService *compute.Service, containerService *container.Service,
 	clusterName, region, projectID, serviceAccount, clusterLocation, nodeLocation string,
-	preferredPoolName string) *DefaultProvider {
+	preferredPoolName string, bootDiskKMSKey string) *DefaultProvider {
 
 	return &DefaultProvider{
 		computeService:        computeService,
@@ -87,6 +90,7 @@ func NewDefaultProvider(_ context.Context, computeService *compute.Service, cont
 			NodeLocation:    nodeLocation,
 			Region:          region,
 			Name:            clusterName,
+			BootDiskKMSKey:  bootDiskKMSKey,
 		},
 	}
 }
@@ -261,9 +265,10 @@ func hasMetadataValue(meta *compute.Metadata, key, value string) bool {
 //   - container.managed.enableWorkloadIdentityFederation: GKE_METADATA mode set when WI is active.
 //   - compute.managed.blockProjectSshKeys: always set in node metadata.
 //
-// gcp.restrictNonCmekServices cannot be auto-satisfied (requires a pre-existing customer-managed
-// KMS key). Fallback creation will fail on such clusters; the operator must pre-create a RUNNING
-// pool and set DEFAULT_NODEPOOL_TEMPLATE_NAME.
+// gcp.restrictNonCmekServices is satisfied when BOOT_DISK_KMS_KEY is set: the fallback pool's
+// boot disk is CMEK-encrypted with that key. If the policy is enforced and no key is configured,
+// fallback creation will fail; the operator must then set BOOT_DISK_KMS_KEY, or pre-create a
+// RUNNING pool and set DEFAULT_NODEPOOL_TEMPLATE_NAME.
 func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, serviceAccount string) error {
 	logger := log.FromContext(ctx)
 	nodePoolName := KarpenterFallbackNodePoolTemplate
@@ -299,7 +304,7 @@ func (p *DefaultProvider) ensureKarpenterNodePoolTemplate(ctx context.Context, s
 		logger.Error(clusterErr, "failed to fetch cluster config; fallback pool will use minimal defaults")
 	}
 
-	nodePool := buildFallbackNodePool(cluster, nodePoolName, serviceAccount)
+	nodePool := buildFallbackNodePool(cluster, nodePoolName, serviceAccount, p.ClusterInfo.BootDiskKMSKey)
 
 	clusterSelfLink := fmt.Sprintf("projects/%s/locations/%s/clusters/%s",
 		p.ClusterInfo.ProjectID, p.ClusterInfo.NodeLocation, p.ClusterInfo.Name)
@@ -329,8 +334,9 @@ func (p *DefaultProvider) fetchClusterConfig(ctx context.Context) (*container.Cl
 }
 
 // buildFallbackNodePool constructs the NodePool definition for the last-resort fallback pool,
-// applying cluster-aware policy settings when cluster config is available.
-func buildFallbackNodePool(cluster *container.Cluster, poolName, serviceAccount string) *container.NodePool {
+// applying cluster-aware policy settings when cluster config is available. When bootDiskKMSKey is
+// set, the boot disk is CMEK-encrypted so the pool complies with gcp.restrictNonCmekServices.
+func buildFallbackNodePool(cluster *container.Cluster, poolName, serviceAccount, bootDiskKMSKey string) *container.NodePool {
 	nodeConfig := &container.NodeConfig{
 		ImageType:      KarpenterFallbackNodePoolTemplateImageType,
 		ServiceAccount: serviceAccount,
@@ -344,6 +350,9 @@ func buildFallbackNodePool(cluster *container.Cluster, poolName, serviceAccount 
 		Metadata: map[string]string{
 			"block-project-ssh-keys": "true",
 		},
+	}
+	if bootDiskKMSKey != "" {
+		nodeConfig.BootDiskKmsKey = bootDiskKMSKey
 	}
 	if clusterWorkloadPool(cluster) != "" {
 		nodeConfig.WorkloadMetadataConfig = &container.WorkloadMetadataConfig{Mode: "GKE_METADATA"}

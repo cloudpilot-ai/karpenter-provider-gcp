@@ -322,6 +322,20 @@ func TestEnsureKarpenterNodePoolTemplate_AlwaysSetFields(t *testing.T) {
 	require.Equal(t, "true", cfg.Metadata["block-project-ssh-keys"])
 	require.Nil(t, cfg.WorkloadMetadataConfig, "no WI when cluster has none")
 	require.Nil(t, captured.NodePool.NetworkConfig, "no NetworkConfig for non-private cluster")
+	require.Empty(t, cfg.BootDiskKmsKey, "no CMEK boot-disk key when BootDiskKMSKey is unset")
+}
+
+func TestEnsureKarpenterNodePoolTemplate_BootDiskKMSKey(t *testing.T) {
+	const kmsKey = "projects/proj/locations/us-central1/keyRings/kr/cryptoKeys/k"
+	var captured *container.CreateNodePoolRequest
+	srv := ensureSrv(t, nil, 0, 0, &captured)
+	defer srv.Close()
+
+	p := newProvider(t, srv, "")
+	p.ClusterInfo.BootDiskKMSKey = kmsKey
+	require.NoError(t, p.ensureKarpenterNodePoolTemplate(context.Background(), "sa@proj.iam.gserviceaccount.com"))
+	require.NotNil(t, captured)
+	require.Equal(t, kmsKey, captured.NodePool.Config.BootDiskKmsKey)
 }
 
 func TestEnsureKarpenterNodePoolTemplate_PrivateNodes(t *testing.T) {

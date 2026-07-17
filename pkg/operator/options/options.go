@@ -44,6 +44,8 @@ const (
 	nodePoolServiceAccountFlagName        = "default-nodepool-service-account"
 	defaultNodePoolTemplateNameEnvVarName = "DEFAULT_NODEPOOL_TEMPLATE_NAME"
 	defaultNodePoolTemplateNameFlagName   = "default-nodepool-template-name"
+	bootDiskKMSKeyEnvVarName              = "BOOT_DISK_KMS_KEY"
+	bootDiskKMSKeyFlagName                = "boot-disk-kms-key"
 )
 
 func init() {
@@ -63,7 +65,12 @@ type Options struct {
 	GCPAuth                     string
 	NodePoolServiceAccount      string
 	DefaultNodePoolTemplateName string
-	Interruption                bool
+	// BootDiskKMSKey is the fully-qualified Cloud KMS key used to CMEK-encrypt the
+	// boot disk of the karpenter-fallback bootstrap pool. Required on clusters that
+	// enforce the gcp.restrictNonCmekServices org policy, where fallback pool
+	// creation otherwise fails. Empty means no CMEK boot-disk encryption.
+	BootDiskKMSKey string
+	Interruption   bool
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -75,6 +82,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
 	fs.StringVar(&o.NodePoolServiceAccount, nodePoolServiceAccountFlagName, env.WithDefaultString(nodePoolServiceAccountEnvVarName, ""), "Service account to use for default node pool templates. If not set, uses <project number>-compute@developer.gserviceaccount.com")
 	fs.StringVar(&o.DefaultNodePoolTemplateName, defaultNodePoolTemplateNameFlagName, env.WithDefaultString(defaultNodePoolTemplateNameEnvVarName, ""), "Pin the bootstrap source pool by name. If set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING.")
+	fs.StringVar(&o.BootDiskKMSKey, bootDiskKMSKeyFlagName, env.WithDefaultString(bootDiskKMSKeyEnvVarName, ""), "Cloud KMS key used to CMEK-encrypt the boot disk of the karpenter-fallback bootstrap pool (required on gcp.restrictNonCmekServices clusters). If unset, no CMEK boot-disk encryption is applied.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }
 
