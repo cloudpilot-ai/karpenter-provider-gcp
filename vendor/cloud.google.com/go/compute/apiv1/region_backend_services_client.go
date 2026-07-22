@@ -166,7 +166,7 @@ type RegionBackendServicesClient struct {
 
 // Wrapper methods routed to the internal client.
 
-// Close closes the connection to the API service. The user should invoke this when
+// Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
 func (c *RegionBackendServicesClient) Close() error {
 	return c.internalClient.Close()
@@ -222,8 +222,10 @@ func (c *RegionBackendServicesClient) List(ctx context.Context, req *computepb.L
 	return c.internalClient.List(ctx, req, opts...)
 }
 
-// ListUsable retrieves a list of all usable backend services in the specified project in
-// the given region.
+// ListUsable retrieves a list of all usable backend services for Application Load
+// Balancers and Proxy Network Load Balancers in the specified project in the
+// given region. Backend services for external and internal passthrough
+// Network Load Balancers are not included in the response.
 func (c *RegionBackendServicesClient) ListUsable(ctx context.Context, req *computepb.ListUsableRegionBackendServicesRequest, opts ...gax.CallOption) *BackendServiceIterator {
 	return c.internalClient.ListUsable(ctx, req, opts...)
 }
@@ -374,7 +376,7 @@ func (c *regionBackendServicesRESTClient) setGoogleClientInfo(keyval ...string) 
 	}
 }
 
-// Close closes the connection to the API service. The user should invoke this when
+// Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
 func (c *regionBackendServicesRESTClient) Close() error {
 	// Replace httpClient with nil to force cleanup.
@@ -794,8 +796,10 @@ func (c *regionBackendServicesRESTClient) List(ctx context.Context, req *compute
 	return it
 }
 
-// ListUsable retrieves a list of all usable backend services in the specified project in
-// the given region.
+// ListUsable retrieves a list of all usable backend services for Application Load
+// Balancers and Proxy Network Load Balancers in the specified project in the
+// given region. Backend services for external and internal passthrough
+// Network Load Balancers are not included in the response.
 func (c *regionBackendServicesRESTClient) ListUsable(ctx context.Context, req *computepb.ListUsableRegionBackendServicesRequest, opts ...gax.CallOption) *BackendServiceIterator {
 	it := &BackendServiceIterator{}
 	req = proto.CloneOf(req)
