@@ -43,6 +43,27 @@ v20260401
 v20260416
 ```
 
+For arm64, change the arch token in the filter (`amd64` → `arm64`):
+
+```bash
+gcloud compute images list \
+  --project=ubuntu-os-gke-cloud \
+  --filter="name~'^ubuntu-gke-2404-1-35-arm64-v[0-9].*$' AND NOT deprecated:*" \
+  --format="value(name)" \
+  | sed 's/.*-\(v[0-9][0-9]*\)$/\1/' | sort -u
+```
+
+Sample output:
+
+```
+v20260408
+v20260420
+```
+
+For Ubuntu 22.04, the `ubuntu-gke-2204` amd64 image names do not carry an `-amd64-` token, so drop the arch token from the amd64 filter — use `^ubuntu-gke-2204-1-35-v[0-9].*$` for amd64 and `^ubuntu-gke-2204-1-35-arm64-v[0-9].*$` for arm64.
+
+> **Note:** For Ubuntu families, Karpenter resolves each architecture independently from the catalog, so both an amd64 image and an arm64 image must exist for the cluster's Kubernetes minor version before a mixed or arm64-only pool can become ready. If the arm64 image is missing, the GCENodeClass's `ImagesReady` condition reports `ImageResolutionFailed`. See [Troubleshooting: GCENodeClass not becoming Ready](troubleshooting.md#gcenodeclass-not-becoming-ready).
+
 ## Controlling Image Replacement
 
 ### Option 1: Channel tracking (recommended)
