@@ -96,6 +96,8 @@ imageSelectorTerms:
 
 The bare `Ubuntu` family name is not supported. Use `Ubuntu2404` or `Ubuntu2204` explicitly.
 
+> **Note:** Ubuntu images are resolved per architecture, independently, from the `ubuntu-os-gke-cloud` catalog for the cluster's Kubernetes minor version. Only standard date builds are selected — `vYYYYMMDD`, optionally with a trailing letter (for example, `v20260416a` may be resolved by `version: latest`). Specialized GKE variant builds are excluded from selection, such as `-tpu`, `-cgroupsv1`, or `-linux64k`. If an architecture (for example, arm64) has no usable image for the cluster's Kubernetes minor, resolution fails and `ImagesReady` reports `ImageResolutionFailed`; use [Finding available versions](image-management.md#finding-available-versions) to confirm a date is published for every architecture your pool uses before pinning. amd64 and arm64 builds for a given date are published independently, so a `version: vYYYYMMDD` pin available for one architecture may not exist for the other. Pinning a date present for only one requested architecture fails the same way, rather than silently synthesizing a nonexistent image.
+
 ## Version formats
 
 | Family                 | `version: latest`                           | Version pin format            | Example             |
