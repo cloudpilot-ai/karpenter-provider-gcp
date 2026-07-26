@@ -98,19 +98,19 @@ gke mode (today, unchanged):            self-hosted mode (new):
 
 How each capability behaves per mode; "script-owned" means the capability exists but the startup script delivers it:
 
-| Capability | `gke` | `self-hosted` |
-|------------|-------|---------------|
-| Cluster discovery (network, zones, private config) | Container API | NodeClass + Compute API |
-| Bootstrap material | cloned GKE node pool template, provider-patched | `startupScript`, script-owned |
-| Image selectors | `alias`/`family`/`channel`/`id` | `id` only (phase 3 adds public-catalog `family`/`version`) |
-| Default networking | GKE cluster network and private-cluster config | derived from `networkConfig.subnetwork`, private by default |
-| Kubelet configuration delivery | provider-injected `kubelet-config` metadata | script-owned; NodeClass carries binpacking inputs only |
-| Node identity labels/tags | `gke-*` tags, `goog-gke-*` labels, readiness labels | user `networkTags` and karpenter labels only |
-| GPU drivers and taints | provider metadata, `autoGPUTaint` | script-owned; `autoGPUTaint` rejected |
-| Secondary boot disks (image cache) | supported | rejected |
-| CSR approval controller | registered | not registered (distribution-owned) |
-| Spot graceful-shutdown kubelet config | provider-injected | script-owned, required for interruption detection |
-| Consolidation, drift, pricing, interruption mechanism | same | same |
+| Capability                                            | `gke`                                               | `self-hosted`                                               |
+|-------------------------------------------------------|-----------------------------------------------------|-------------------------------------------------------------|
+| Cluster discovery (network, zones, private config)    | Container API                                       | NodeClass + Compute API                                     |
+| Bootstrap material                                    | cloned GKE node pool template, provider-patched     | `startupScript`, script-owned                               |
+| Image selectors                                       | `alias`/`family`/`channel`/`id`                     | `id` only (phase 3 adds public-catalog `family`/`version`)  |
+| Default networking                                    | GKE cluster network and private-cluster config      | derived from `networkConfig.subnetwork`, private by default |
+| Kubelet configuration delivery                        | provider-injected `kubelet-config` metadata         | script-owned; NodeClass carries binpacking inputs only      |
+| Node identity labels/tags                             | `gke-*` tags, `goog-gke-*` labels, readiness labels | user `networkTags` and karpenter labels only                |
+| GPU drivers and taints                                | provider metadata, `autoGPUTaint`                   | script-owned; `autoGPUTaint` rejected                       |
+| Secondary boot disks (image cache)                    | supported                                           | rejected                                                    |
+| CSR approval controller                               | registered                                          | not registered (distribution-owned)                         |
+| Spot graceful-shutdown kubelet config                 | provider-injected                                   | script-owned, required for interruption detection           |
+| Consolidation, drift, pricing, interruption mechanism | same                                                | same                                                        |
 
 ### Operator Options
 
@@ -122,13 +122,13 @@ How each capability behaves per mode; "script-owned" means the capability exists
 
 "Zero Container API calls" is a load-bearing guarantee, so the design names every current caller — plus the launch path that depends on GKE-created resources — and how each is handled in `self-hosted` mode:
 
-| Caller | Handling |
-|--------|----------|
-| nodepooltemplate controller (`Sync`/`EnsureFallbackPool`) | controller not registered |
-| `GetSourceTemplateMetadata` in instance launch (Compute-API-only itself, but reads templates discovered by the GKE-backed nodepooltemplate sync) | skipped (self-hosted metadata builder, below) |
-| `GetClusterConfig` for network/private-cluster defaults in launch | replaced by NodeClass-sourced values (below) |
-| `ResolveClusterZones`, called from both instance launch **and** `instancetype.List` | `self-hosted` implementation lists Compute API zones for the region; today's compute listing only runs after a successful cluster fetch, so this is a rewire, not a reorder |
-| `GetClusterConfig`/`GetServerConfig` for image `channel:` resolution, reachable through the nodeclass status image reconciler even for invalid NodeClasses | image provider returns a hard resolution error for non-`id` terms in `self-hosted` mode before touching any GKE path |
+| Caller                                                                                                                                                     | Handling                                                                                                                                                                    |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| nodepooltemplate controller (`Sync`/`EnsureFallbackPool`)                                                                                                  | controller not registered                                                                                                                                                   |
+| `GetSourceTemplateMetadata` in instance launch (Compute-API-only itself, but reads templates discovered by the GKE-backed nodepooltemplate sync)           | skipped (self-hosted metadata builder, below)                                                                                                                               |
+| `GetClusterConfig` for network/private-cluster defaults in launch                                                                                          | replaced by NodeClass-sourced values (below)                                                                                                                                |
+| `ResolveClusterZones`, called from both instance launch **and** `instancetype.List`                                                                        | `self-hosted` implementation lists Compute API zones for the region; today's compute listing only runs after a successful cluster fetch, so this is a rewire, not a reorder |
+| `GetClusterConfig`/`GetServerConfig` for image `channel:` resolution, reachable through the nodeclass status image reconciler even for invalid NodeClasses | image provider returns a hard resolution error for non-`id` terms in `self-hosted` mode before touching any GKE path                                                        |
 
 The `gke.Provider` interface gets a `self-hosted` implementation backed only by the Compute API; acceptance is verified with `container.googleapis.com` IAM denied.
 
@@ -156,15 +156,15 @@ Validation splits by what each layer can see (CEL cannot read operator options):
 
 **CEL (in-object invariants, mode-independent, spec-level):**
 
-| Rule | Reason |
-|------|--------|
-| `startupScript` set ⇒ `kubeletConfiguration.maxPods` set and ≥ 1 | Karpenter cannot parse the startup script; the provisioner must state the value binpacking should use. Required rather than defaulted: a silent default that disagrees with the startup script's kubelet is a production binpacking bug, while a missing field is an apply-time error; self-hosted NodeClasses are typically provisioner-generated, so requiring it costs nothing |
-| `startupScript` set ⇒ `networkConfig.subnetwork` required | no GKE cluster to discover the network from |
-| `startupScript` set ⇒ `disks` contains a boot disk | an empty `disks` list is not defaulted and fails only at launch (`Instances.Insert` 400 "No disks are specified"); require it at apply time |
-| `startupScript` set ⇒ every `imageSelectorTerms` entry uses `id` | alias/family/channel resolution is GKE-catalog-shaped (see Non-Goals) |
-| `startupScript` set ⇒ `kubeletConfiguration` limited to the binpacking inputs (`maxPods`, `podsPerCore`, `systemReserved`, `kubeReserved`, `evictionHard`) | every other field reaches nodes only through the GKE `kubelet-config` injection this mode removes; accepting them silently would repeat #398 (accepted-but-never-applied). CEL cannot express "any field outside this set", so the rule enumerates the complement, and a unit test asserts the two sets cover every `kubeletConfiguration` field so new fields cannot slip past |
-| `startupScript` set ⇒ `autoGPUTaint` unset/false | the taint is applied through bootstrap metadata this mode does not render |
-| `startupScript` set ⇒ no `disks[].secondaryBootImage`/`secondaryBootMode` | the container image cache requires GKE kube-labels/kube-env wiring and node tooling; the disk would attach, cost money, and never be used |
+| Rule                                                                                                                                                       | Reason                                                                                                                                                                                                                                                                                                                                                                            |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `startupScript` set ⇒ `kubeletConfiguration.maxPods` set and ≥ 1                                                                                           | Karpenter cannot parse the startup script; the provisioner must state the value binpacking should use. Required rather than defaulted: a silent default that disagrees with the startup script's kubelet is a production binpacking bug, while a missing field is an apply-time error; self-hosted NodeClasses are typically provisioner-generated, so requiring it costs nothing |
+| `startupScript` set ⇒ `networkConfig.subnetwork` required                                                                                                  | no GKE cluster to discover the network from                                                                                                                                                                                                                                                                                                                                       |
+| `startupScript` set ⇒ `disks` contains a boot disk                                                                                                         | an empty `disks` list is not defaulted and fails only at launch (`Instances.Insert` 400 "No disks are specified"); require it at apply time                                                                                                                                                                                                                                       |
+| `startupScript` set ⇒ every `imageSelectorTerms` entry uses `id`                                                                                           | alias/family/channel resolution is GKE-catalog-shaped (see Non-Goals)                                                                                                                                                                                                                                                                                                             |
+| `startupScript` set ⇒ `kubeletConfiguration` limited to the binpacking inputs (`maxPods`, `podsPerCore`, `systemReserved`, `kubeReserved`, `evictionHard`) | every other field reaches nodes only through the GKE `kubelet-config` injection this mode removes; accepting them silently would repeat #398 (accepted-but-never-applied). CEL cannot express "any field outside this set", so the rule enumerates the complement, and a unit test asserts the two sets cover every `kubeletConfiguration` field so new fields cannot slip past   |
+| `startupScript` set ⇒ `autoGPUTaint` unset/false                                                                                                           | the taint is applied through bootstrap metadata this mode does not render                                                                                                                                                                                                                                                                                                         |
+| `startupScript` set ⇒ no `disks[].secondaryBootImage`/`secondaryBootMode`                                                                                  | the container image cache requires GKE kube-labels/kube-env wiring and node tooling; the disk would attach, cost money, and never be used                                                                                                                                                                                                                                         |
 
 **Runtime (mode-aware, NodeClass status controller):** a new `BootstrapConfigReady` condition in the Ready set. `self-hosted` mode requires `startupScript` ("set spec.startupScript") and validates its UTF-8 byte length against the GCE metadata limits (CEL `maxLength` counts characters, not bytes); `gke` mode rejects NodeClasses that set it. A NotReady NodeClass blocks provisioning from that NodeClass only.
 
@@ -219,13 +219,13 @@ The controller needs only Compute Engine permissions — explicitly no `containe
 
 ## Risks and Mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| "Node never joined" reports for startup-script bugs | High | Support noise | Documented registration contract + example; `BootstrapConfigReady` distinguishes provider misconfig from startup-script bugs |
-| Startup-script kubelet diverges from NodeClass kubelet hints | Medium | Binpacking drift, missed Spot interruptions | Contract spells out maxPods, reserved resources, and graceful shutdown; provisioners generate both sides from one source |
-| A GKE user sets `startupScript` expecting augmentation | Medium | Confusion | Rejected in `gke` mode by the status controller with a message; non-goal reserves a separate field for augmentation |
-| Mode gates decay under refactoring | Medium | GKE regressions | Single mode helper; each gate commented; `gke`-mode tests assert unchanged metadata output |
-| Same-project clusters with colliding sanitized names | Low | Cross-cluster GC deletes the other cluster's Karpenter nodes | Documented requirement: cluster names in one project must stay distinct after sanitization |
+| Risk                                                         | Likelihood | Impact                                                       | Mitigation                                                                                                                   |
+|--------------------------------------------------------------|------------|--------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| "Node never joined" reports for startup-script bugs          | High       | Support noise                                                | Documented registration contract + example; `BootstrapConfigReady` distinguishes provider misconfig from startup-script bugs |
+| Startup-script kubelet diverges from NodeClass kubelet hints | Medium     | Binpacking drift, missed Spot interruptions                  | Contract spells out maxPods, reserved resources, and graceful shutdown; provisioners generate both sides from one source     |
+| A GKE user sets `startupScript` expecting augmentation       | Medium     | Confusion                                                    | Rejected in `gke` mode by the status controller with a message; non-goal reserves a separate field for augmentation          |
+| Mode gates decay under refactoring                           | Medium     | GKE regressions                                              | Single mode helper; each gate commented; `gke`-mode tests assert unchanged metadata output                                   |
+| Same-project clusters with colliding sanitized names         | Low        | Cross-cluster GC deletes the other cluster's Karpenter nodes | Documented requirement: cluster names in one project must stay distinct after sanitization                                   |
 
 ---
 
@@ -304,4 +304,3 @@ The `user-data` metadata key requires cloud-init on the image and configured for
 ### Public-catalog `family`/`version` resolution
 
 Considered and deferred: the existing selector grammar and resolvers are GKE-shaped (COS milestone/build versions, `vYYYYMMDD` Ubuntu versions, `-nvda` GPU variants, `latest` scoped to the cluster's Kubernetes patch version), none of which maps cleanly onto `cos-cloud`/`ubuntu-os-cloud`. `id:` pinning covers the provisioner use case (provisioners resolve images themselves and pin exact IDs) at the cost of manual image rollovers (an `id` change still drifts and rolls nodes correctly).
-
