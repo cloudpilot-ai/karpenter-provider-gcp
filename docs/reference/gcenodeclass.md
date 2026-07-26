@@ -115,6 +115,7 @@ _Appears in:_
 | `confidentialInstanceType` _string_ | ConfidentialInstanceType enables Confidential VM for provisioned nodes using the<br />named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory<br />encryption. Leave unset to disable. Only supported on specific machine families. |  | Enum: [SEV SEV_SNP TDX] <br />Optional: \{\} <br /> |
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
 | `autoGPUTaint` _boolean_ | AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule<br />to any GPU node at provisioning time, regardless of the NodePool configuration.<br />Disabled by default to preserve backward compatibility. |  | Optional: \{\} <br /> |
+| `startupScript` _string_ | StartupScript is written verbatim to the instance's "startup-script" metadata key and<br />owns node bootstrap end to end. Only valid with PROVISION_MODE=self-hosted. Do not embed<br />secrets: any process on the node can read instance metadata; fetch secrets by reference at boot. |  | MaxLength: 131072 <br />MinLength: 1 <br />Optional: \{\} <br /> |
 | `gpuDriverVersion` _string_ | GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.<br />Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.<br />Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),<br />"disabled" (skip automatic installation).<br />Ignored for non-GPU instance types. | default | Enum: [default latest disabled] <br />Optional: \{\} <br /> |
 
 
@@ -167,7 +168,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `alias` _string_ | Deprecated: use Family with Channel or Version instead.<br />Alias specifies which GKE image to select.<br />Valid families include: ContainerOptimizedOS, Ubuntu |  | MaxLength: 60 <br />Optional: \{\} <br /> |
-| `id` _string_ | ID specifies a GKE image by its full resource URL. |  | MaxLength: 160 <br />Optional: \{\} <br /> |
+| `id` _string_ | ID specifies a GKE image by its full resource URL. |  | MaxLength: 160 <br />MinLength: 1 <br />Optional: \{\} <br /> |
 | `family` _string_ | Family specifies the OS image family. Required when using Channel or Version.<br />Valid values: ContainerOptimizedOS, Ubuntu2404, Ubuntu2204. |  | Enum: [ContainerOptimizedOS Ubuntu2404 Ubuntu2204] <br />Optional: \{\} <br /> |
 | `channel` _string_ | Channel specifies the GKE release channel to follow. Only valid when Family is ContainerOptimizedOS.<br />Use "cluster" to track the channel the cluster is enrolled in. |  | Enum: [rapid regular stable extended cluster] <br />Optional: \{\} <br /> |
 | `version` _string_ | Version pins the image to a specific version or "latest".<br />For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").<br />For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" (e.g. "v20260416"). |  | MaxLength: 32 <br />Optional: \{\} <br /> |

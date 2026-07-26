@@ -28,6 +28,10 @@ import (
 
 // GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
 // This will contain the configuration necessary to launch instances in GCP.
+// +kubebuilder:validation:XValidation:message="startupScript requires kubeletConfiguration.maxPods to be set and >= 1",rule="!has(self.startupScript) || (has(self.kubeletConfiguration) && has(self.kubeletConfiguration.maxPods) && self.kubeletConfiguration.maxPods >= 1)"
+// +kubebuilder:validation:XValidation:message="startupScript requires networkConfig.subnetwork to be set",rule="!has(self.startupScript) || (has(self.networkConfig) && has(self.networkConfig.subnetwork) && self.networkConfig.subnetwork.size() > 0)"
+// +kubebuilder:validation:XValidation:message="startupScript requires every imageSelectorTerms entry to use id",rule="!has(self.startupScript) || self.imageSelectorTerms.all(t, has(t.id))"
+// +kubebuilder:validation:XValidation:message="startupScript requires disks to contain a boot disk",rule="!has(self.startupScript) || (has(self.disks) && self.disks.exists(d, d.boot))"
 type GCENodeClassSpec struct {
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
@@ -103,6 +107,13 @@ type GCENodeClassSpec struct {
 	// Disabled by default to preserve backward compatibility.
 	// +optional
 	AutoGPUTaint bool `json:"autoGPUTaint,omitempty"`
+	// StartupScript is written verbatim to the instance's "startup-script" metadata key and
+	// owns node bootstrap end to end. Only valid with PROVISION_MODE=self-hosted. Do not embed
+	// secrets: any process on the node can read instance metadata; fetch secrets by reference at boot.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=131072
+	// +optional
+	StartupScript *string `json:"startupScript,omitempty"`
 	// GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.
 	// Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.
 	// Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),
@@ -173,6 +184,7 @@ type ImageSelectorTerm struct {
 	Alias string `json:"alias,omitempty"`
 	// ID specifies a GKE image by its full resource URL.
 	// +kubebuilder:validation:XValidation:message="'id' is improperly formatted, must match the format 'id'",rule="self.matches('^.*$')"
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=160
 	// +optional
 	ID string `json:"id,omitempty"`

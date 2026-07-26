@@ -35,6 +35,8 @@ const (
 	// LabelClusterLocationKey is a well-known GCE label key used by GKE. The value is the
 	// cluster's location (region or zone, e.g. "us-central1" or "us-central1-f").
 	LabelClusterLocationKey string = "goog-k8s-cluster-location"
+	// maxGCELabelValueLength is the GCE limit for label keys and values.
+	maxGCELabelValueLength = 63
 )
 
 func GetAllSingleValuedRequirementLabels(instanceType *cloudprovider.InstanceType) map[string]string {
@@ -50,12 +52,32 @@ func GetAllSingleValuedRequirementLabels(instanceType *cloudprovider.InstanceTyp
 	return labels
 }
 
+// zoneRegexp matches a GCP zone (e.g. us-central1-a, europe-west10-b) as opposed to a
+// region (e.g. us-central1).
+var zoneRegexp = regexp.MustCompile(`^[a-z]+-[a-z]+\d+-[a-z]$`)
+
+// RegionFromLocation returns the region for a zonal location, or the location unchanged
+// when it is already a region.
+func RegionFromLocation(location string) string {
+	if zoneRegexp.MatchString(location) {
+		return location[:strings.LastIndex(location, "-")]
+	}
+	return location
+}
+
+var nonAlphanumericRegexp = regexp.MustCompile("[^a-zA-Z0-9]+")
+
 func SanitizeGCELabelValue(s string) string {
-	re := regexp.MustCompile("[^a-zA-Z0-9]+")
-	sanitized := re.ReplaceAllString(s, "-")
+	sanitized := nonAlphanumericRegexp.ReplaceAllString(s, "-")
 
 	sanitized = strings.Trim(sanitized, "-")
-	return strings.ToLower(sanitized)
+	sanitized = strings.ToLower(sanitized)
+	// Self-hosted cluster names are often FQDNs and can exceed the GCE label value
+	// limit; truncate so Instances.Insert does not reject the label.
+	if len(sanitized) > maxGCELabelValueLength {
+		sanitized = sanitized[:maxGCELabelValueLength]
+	}
+	return sanitized
 }
 
 func ResolveReservedResource(instanceType string, cpuMCore, memoryMiB, bootDiskGiB, totalSSDGiB, localSSDCount int64) (int64, int64, int64, int64, int64) {

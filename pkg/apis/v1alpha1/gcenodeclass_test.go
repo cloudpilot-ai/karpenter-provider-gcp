@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/ptr"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
@@ -61,6 +62,38 @@ func TestImageFamily_FromFamilyFieldUbuntu2204(t *testing.T) {
 		ImageSelectorTerms: []ImageSelectorTerm{{Family: ImageFamilyUbuntu2204, Version: "latest"}},
 	}}
 	require.Equal(t, ImageFamilyUbuntu, nc.ImageFamily())
+}
+
+// TestHash_StableForObjectsWithoutStartupScript pins the hash of a fixed GCENodeClass
+// that never sets startupScript. StartupScript is *string and the hasher runs with
+// IgnoreZeroValue+ZeroNil, so objects created before the field existed must keep
+// producing this exact hash — a change here drifts every existing NodeClaim on upgrade.
+func TestHash_StableForObjectsWithoutStartupScript(t *testing.T) {
+	cos := ImageFamilyContainerOptimizedOS
+	nc := &GCENodeClass{Spec: GCENodeClassSpec{
+		ServiceAccount:     "sa@project.iam.gserviceaccount.com",
+		Disks:              []Disk{{SizeGiB: 100, Category: "pd-balanced", Boot: true}},
+		ImageSelectorTerms: []ImageSelectorTerm{{Alias: "ContainerOptimizedOS@latest"}},
+		ImageFamily:        &cos,
+		SubnetRangeName:    ptr.To("pods"),
+		KubeletConfiguration: &KubeletConfiguration{
+			MaxPods: ptr.To(int32(110)),
+		},
+		Labels:      map[string]string{"env": "test"},
+		Metadata:    map[string]string{"key": "value"},
+		NetworkTags: []NetworkTag{"karpenter-node"},
+		ShieldedInstanceConfig: &ShieldedInstanceConfig{
+			EnableSecureBoot: ptr.To(true),
+		},
+		ConfidentialInstanceType: ptr.To("SEV"),
+		NetworkConfig: &NetworkConfig{
+			Subnetwork: "regions/us-central1/subnetworks/nodes",
+		},
+		AutoGPUTaint:     true,
+		GPUDriverVersion: "default",
+	}}
+
+	require.Equal(t, "2997872176200986840", nc.Hash())
 }
 
 func TestImageFamily_NoTerms_ReturnsCustom(t *testing.T) {

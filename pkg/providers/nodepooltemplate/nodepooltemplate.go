@@ -28,6 +28,8 @@ import (
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 )
 
 // Provider is the interface for managing the bootstrap source pool and its instance template.
@@ -68,7 +70,6 @@ const (
 	// RUNNING cluster pool is available.
 	KarpenterFallbackNodePoolTemplate          = "karpenter-fallback"
 	KarpenterFallbackNodePoolTemplateImageType = "COS_CONTAINERD"
-	clusterNameMetadataKey                     = "cluster-name"
 	nodePoolNameLabelKey                       = "goog-k8s-node-pool-name"
 )
 
@@ -228,7 +229,7 @@ func (p *DefaultProvider) GetSourceTemplateMetadata(ctx context.Context) (*compu
 		if template.Properties == nil || template.Properties.Labels == nil || template.Properties.Metadata == nil {
 			continue
 		}
-		if !hasMetadataValue(template.Properties.Metadata, clusterNameMetadataKey, p.ClusterInfo.Name) {
+		if !metadata.HasValue(template.Properties.Metadata, metadata.ClusterNameKey, p.ClusterInfo.Name) {
 			continue
 		}
 		if template.Properties.Labels[nodePoolNameLabelKey] != sourcePoolName {
@@ -239,18 +240,6 @@ func (p *DefaultProvider) GetSourceTemplateMetadata(ctx context.Context) (*compu
 	}
 
 	return nil, fmt.Errorf("no instance template found with label %s=%s", nodePoolNameLabelKey, sourcePoolName)
-}
-
-func hasMetadataValue(meta *compute.Metadata, key, value string) bool {
-	if meta == nil {
-		return false
-	}
-	for _, item := range meta.Items {
-		if item != nil && item.Key == key && item.Value != nil && *item.Value == value {
-			return true
-		}
-	}
-	return false
 }
 
 // ensureKarpenterNodePoolTemplate creates the fallback pool if it does not already exist.
