@@ -178,13 +178,7 @@ func ResolveReservedEphemeralStorage(bootDiskGiB, totalSSDGiB, localSSDCount int
 	option2 := int64(math.Round(float64(bootDiskGiB)*0.35 + 6))
 	option3 := int64(100)
 
-	systemReservation = option1
-	if option2 < systemReservation {
-		systemReservation = option2
-	}
-	if option3 < systemReservation {
-		systemReservation = option3
-	}
+	systemReservation = min(option1, option2, option3)
 
 	return evictionThreshold, systemReservation
 }
