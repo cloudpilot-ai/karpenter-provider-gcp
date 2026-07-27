@@ -48221,7 +48221,7 @@
       }
     }
   },
-  "revision": "20260629",
+  "revision": "20260709",
   "rootUrl": "https://compute.googleapis.com/",
   "schemas": {
     "AWSV4Signature": {
@@ -67877,6 +67877,7 @@
             "errors": {
               "description": "[Output Only] The array of errors encountered while processing this\noperation.",
               "items": {
+                "description": "Represents a single error encountered during the processing of an\noperation.",
                 "properties": {
                   "code": {
                     "description": "[Output Only] The error type identifier for this error.",
@@ -67885,18 +67886,23 @@
                   "errorDetails": {
                     "description": "[Output Only] An optional list of messages that contain the error\ndetails. There is a set of defined message types to use for providing\ndetails.The syntax depends on the error code. For example,\nQuotaExceededInfo will have details when the error code is\nQUOTA_EXCEEDED.",
                     "items": {
+                      "description": "Container for structured error details providing additional context\nspecific to the encountered error code.",
                       "properties": {
                         "errorInfo": {
-                          "$ref": "ErrorInfo"
+                          "$ref": "ErrorInfo",
+                          "description": "Error information containing structured domain, reason, and metadata."
                         },
                         "help": {
-                          "$ref": "Help"
+                          "$ref": "Help",
+                          "description": "Links and information to help the user resolve the error."
                         },
                         "localizedMessage": {
-                          "$ref": "LocalizedMessage"
+                          "$ref": "LocalizedMessage",
+                          "description": "A localized human-readable error message intended for end users."
                         },
                         "quotaInfo": {
-                          "$ref": "QuotaExceededInfo"
+                          "$ref": "QuotaExceededInfo",
+                          "description": "Details about quota limits and metrics when a quota is exceeded."
                         }
                       },
                       "type": "object"
@@ -67937,6 +67943,7 @@
             "errors": {
               "description": "[Output Only] The array of errors encountered while processing this\noperation.",
               "items": {
+                "description": "Represents a single error encountered during the processing of an\noperation.",
                 "properties": {
                   "code": {
                     "description": "[Output Only] The error type identifier for this error.",
@@ -67945,18 +67952,23 @@
                   "errorDetails": {
                     "description": "[Output Only] An optional list of messages that contain the error\ndetails. There is a set of defined message types to use for providing\ndetails.The syntax depends on the error code. For example,\nQuotaExceededInfo will have details when the error code is\nQUOTA_EXCEEDED.",
                     "items": {
+                      "description": "Container for structured error details providing additional context\nspecific to the encountered error code.",
                       "properties": {
                         "errorInfo": {
-                          "$ref": "ErrorInfo"
+                          "$ref": "ErrorInfo",
+                          "description": "Error information containing structured domain, reason, and metadata."
                         },
                         "help": {
-                          "$ref": "Help"
+                          "$ref": "Help",
+                          "description": "Links and information to help the user resolve the error."
                         },
                         "localizedMessage": {
-                          "$ref": "LocalizedMessage"
+                          "$ref": "LocalizedMessage",
+                          "description": "A localized human-readable error message intended for end users."
                         },
                         "quotaInfo": {
-                          "$ref": "QuotaExceededInfo"
+                          "$ref": "QuotaExceededInfo",
+                          "description": "Details about quota limits and metrics when a quota is exceeded."
                         }
                       },
                       "type": "object"
@@ -68271,6 +68283,7 @@
             "errors": {
               "description": "[Output Only] The array of errors encountered while processing this\noperation.",
               "items": {
+                "description": "Represents a single error encountered during the processing of an\noperation.",
                 "properties": {
                   "code": {
                     "description": "[Output Only] The error type identifier for this error.",
@@ -68279,18 +68292,23 @@
                   "errorDetails": {
                     "description": "[Output Only] An optional list of messages that contain the error\ndetails. There is a set of defined message types to use for providing\ndetails.The syntax depends on the error code. For example,\nQuotaExceededInfo will have details when the error code is\nQUOTA_EXCEEDED.",
                     "items": {
+                      "description": "Container for structured error details providing additional context\nspecific to the encountered error code.",
                       "properties": {
                         "errorInfo": {
-                          "$ref": "ErrorInfo"
+                          "$ref": "ErrorInfo",
+                          "description": "Error information containing structured domain, reason, and metadata."
                         },
                         "help": {
-                          "$ref": "Help"
+                          "$ref": "Help",
+                          "description": "Links and information to help the user resolve the error."
                         },
                         "localizedMessage": {
-                          "$ref": "LocalizedMessage"
+                          "$ref": "LocalizedMessage",
+                          "description": "A localized human-readable error message intended for end users."
                         },
                         "quotaInfo": {
-                          "$ref": "QuotaExceededInfo"
+                          "$ref": "QuotaExceededInfo",
+                          "description": "Details about quota limits and metrics when a quota is exceeded."
                         }
                       },
                       "type": "object"
@@ -68365,6 +68383,7 @@
             "errors": {
               "description": "[Output Only] The array of errors encountered while processing this\noperation.",
               "items": {
+                "description": "Represents a single error encountered during the processing of an\noperation.",
                 "properties": {
                   "code": {
                     "description": "[Output Only] The error type identifier for this error.",
@@ -68373,18 +68392,23 @@
                   "errorDetails": {
                     "description": "[Output Only] An optional list of messages that contain the error\ndetails. There is a set of defined message types to use for providing\ndetails.The syntax depends on the error code. For example,\nQuotaExceededInfo will have details when the error code is\nQUOTA_EXCEEDED.",
                     "items": {
+                      "description": "Container for structured error details providing additional context\nspecific to the encountered error code.",
                       "properties": {
                         "errorInfo": {
-                          "$ref": "ErrorInfo"
+                          "$ref": "ErrorInfo",
+                          "description": "Error information containing structured domain, reason, and metadata."
                         },
                         "help": {
-                          "$ref": "Help"
+                          "$ref": "Help",
+                          "description": "Links and information to help the user resolve the error."
                         },
                         "localizedMessage": {
-                          "$ref": "LocalizedMessage"
+                          "$ref": "LocalizedMessage",
+                          "description": "A localized human-readable error message intended for end users."
                         },
                         "quotaInfo": {
-                          "$ref": "QuotaExceededInfo"
+                          "$ref": "QuotaExceededInfo",
+                          "description": "Details about quota limits and metrics when a quota is exceeded."
                         }
                       },
                       "type": "object"
@@ -68678,7 +68702,7 @@
       "id": "InstanceGroupManagersApplyUpdatesRequest",
       "properties": {
         "allInstances": {
-          "description": "Flag to update all instances instead of specified list of “instances”.\nIf the flag is set to true then the instances may not be specified\nin the request.",
+          "description": "Flag to update all instances instead of specified list of \"instances\".\nIf the flag is set to true then the instances may not be specified\nin the request.",
           "type": "boolean"
         },
         "instances": {
@@ -68772,7 +68796,7 @@
       "id": "InstanceGroupManagersListErrorsResponse",
       "properties": {
         "items": {
-          "description": "Output only. [Output Only] The list of errors of the managed instance group.",
+          "description": "Output only. The list of errors of the managed instance group.",
           "items": {
             "$ref": "InstanceManagedByIgmError"
           },
@@ -68780,7 +68804,7 @@
           "type": "array"
         },
         "nextPageToken": {
-          "description": "Output only. [Output Only] This token allows you to get the next page of results for\nlist requests. If the number of results is larger thanmaxResults, use the nextPageToken as a value for\nthe query parameter pageToken in the next list request.\nSubsequent list requests will have their own nextPageToken to\ncontinue paging through the results.",
+          "description": "Output only. This token allows you to get the next page of results for list requests.\nIf the number of results is larger than maxResults\n, then use the nextPageToken as a value for\nthe query parameter pageToken in the next list request.\nSubsequent list requests will have their own nextPageToken to\ncontinue paging through the results.",
           "readOnly": true,
           "type": "string"
         }
@@ -77635,6 +77659,7 @@
             "errors": {
               "description": "[Output Only] The array of errors encountered while processing this\noperation.",
               "items": {
+                "description": "Represents a single error encountered during the processing of an\noperation.",
                 "properties": {
                   "code": {
                     "description": "[Output Only] The error type identifier for this error.",
@@ -77643,18 +77668,23 @@
                   "errorDetails": {
                     "description": "[Output Only] An optional list of messages that contain the error\ndetails. There is a set of defined message types to use for providing\ndetails.The syntax depends on the error code. For example,\nQuotaExceededInfo will have details when the error code is\nQUOTA_EXCEEDED.",
                     "items": {
+                      "description": "Container for structured error details providing additional context\nspecific to the encountered error code.",
                       "properties": {
                         "errorInfo": {
-                          "$ref": "ErrorInfo"
+                          "$ref": "ErrorInfo",
+                          "description": "Error information containing structured domain, reason, and metadata."
                         },
                         "help": {
-                          "$ref": "Help"
+                          "$ref": "Help",
+                          "description": "Links and information to help the user resolve the error."
                         },
                         "localizedMessage": {
-                          "$ref": "LocalizedMessage"
+                          "$ref": "LocalizedMessage",
+                          "description": "A localized human-readable error message intended for end users."
                         },
                         "quotaInfo": {
-                          "$ref": "QuotaExceededInfo"
+                          "$ref": "QuotaExceededInfo",
+                          "description": "Details about quota limits and metrics when a quota is exceeded."
                         }
                       },
                       "type": "object"
@@ -84341,6 +84371,7 @@
             "errors": {
               "description": "[Output Only] The array of errors encountered while processing this\noperation.",
               "items": {
+                "description": "Represents a single error encountered during the processing of an\noperation.",
                 "properties": {
                   "code": {
                     "description": "[Output Only] The error type identifier for this error.",
@@ -84349,18 +84380,23 @@
                   "errorDetails": {
                     "description": "[Output Only] An optional list of messages that contain the error\ndetails. There is a set of defined message types to use for providing\ndetails.The syntax depends on the error code. For example,\nQuotaExceededInfo will have details when the error code is\nQUOTA_EXCEEDED.",
                     "items": {
+                      "description": "Container for structured error details providing additional context\nspecific to the encountered error code.",
                       "properties": {
                         "errorInfo": {
-                          "$ref": "ErrorInfo"
+                          "$ref": "ErrorInfo",
+                          "description": "Error information containing structured domain, reason, and metadata."
                         },
                         "help": {
-                          "$ref": "Help"
+                          "$ref": "Help",
+                          "description": "Links and information to help the user resolve the error."
                         },
                         "localizedMessage": {
-                          "$ref": "LocalizedMessage"
+                          "$ref": "LocalizedMessage",
+                          "description": "A localized human-readable error message intended for end users."
                         },
                         "quotaInfo": {
-                          "$ref": "QuotaExceededInfo"
+                          "$ref": "QuotaExceededInfo",
+                          "description": "Details about quota limits and metrics when a quota is exceeded."
                         }
                       },
                       "type": "object"
@@ -84456,9 +84492,9 @@
             "RUNNING"
           ],
           "enumDescriptions": [
-            "",
-            "",
-            ""
+            "The operation has completed processing successfully or with an error.",
+            "The operation is waiting to be processed.",
+            "The operation is actively being processed."
           ],
           "type": "string"
         },
@@ -89267,7 +89303,7 @@
       "id": "RegionInstanceGroupManagersApplyUpdatesRequest",
       "properties": {
         "allInstances": {
-          "description": "Flag to update all instances instead of specified list of “instances”.\nIf the flag is set to true then the instances may not be specified\nin the request.",
+          "description": "Flag to update all instances instead of specified list of \"instances\".\nIf the flag is set to true then the instances may not be specified\nin the request.",
           "type": "boolean"
         },
         "instances": {
