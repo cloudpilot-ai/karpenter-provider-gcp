@@ -18,6 +18,7 @@ package instance
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -139,7 +140,5 @@ func mergeStringMap(target *map[string]string, values map[string]string) {
 	if *target == nil {
 		*target = map[string]string{}
 	}
-	for key, value := range values {
-		(*target)[key] = value
-	}
+	maps.Copy(*target, values)
 }
