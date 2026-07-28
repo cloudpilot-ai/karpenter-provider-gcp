@@ -32,13 +32,11 @@ import (
 func init() {
 	karpv1.RestrictedLabelDomains = karpv1.RestrictedLabelDomains.Insert(RestrictedLabelDomains...)
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(
-		LabelInstanceCategory,
 		LabelInstanceFamily,
 		LabelInstanceShape,
 		LabelInstanceGeneration,
 		LabelInstanceSize,
 		LabelInstanceCPU,
-		LabelInstanceCPUModel,
 		LabelInstanceMemory,
 		LabelInstanceGPUName,
 		LabelInstanceGPUManufacturer,
@@ -138,13 +136,11 @@ var (
 
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
-	LabelInstanceCategory                    = apis.Group + "/instance-category"
 	LabelInstanceFamily                      = apis.Group + "/instance-family"
 	LabelInstanceShape                       = apis.Group + "/instance-shape"
 	LabelInstanceGeneration                  = apis.Group + "/instance-generation"
 	LabelInstanceSize                        = apis.Group + "/instance-size"
 	LabelInstanceCPU                         = apis.Group + "/instance-cpu"
-	LabelInstanceCPUModel                    = apis.Group + "/instance-cpu-model"
 	LabelInstanceMemory                      = apis.Group + "/instance-memory"
 	LabelInstanceGPUName                     = apis.Group + "/instance-gpu-name"
 	LabelInstanceGPUManufacturer             = apis.Group + "/instance-gpu-manufacturer"

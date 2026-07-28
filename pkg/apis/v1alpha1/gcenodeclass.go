@@ -387,7 +387,7 @@ const (
 )
 
 func (in *GCENodeClass) Hash() string {
-	return fmt.Sprint(lo.Must(hashstructure.Hash([]interface{}{
+	return fmt.Sprint(lo.Must(hashstructure.Hash([]any{
 		in.Spec,
 		in.ImageFamily(),
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{

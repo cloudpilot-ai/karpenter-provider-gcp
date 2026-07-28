@@ -123,7 +123,7 @@ type GlobalForwardingRulesClient struct {
 
 // Wrapper methods routed to the internal client.
 
-// Close closes the connection to the API service. The user should invoke this when
+// Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
 func (c *GlobalForwardingRulesClient) Close() error {
 	return c.internalClient.Close()
@@ -295,7 +295,7 @@ func (c *globalForwardingRulesRESTClient) setGoogleClientInfo(keyval ...string) 
 	}
 }
 
-// Close closes the connection to the API service. The user should invoke this when
+// Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
 func (c *globalForwardingRulesRESTClient) Close() error {
 	// Replace httpClient with nil to force cleanup.
@@ -387,6 +387,13 @@ func (c *globalForwardingRulesRESTClient) Get(ctx context.Context, req *computep
 		return nil, err
 	}
 	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/global/forwardingRules/%v", req.GetProject(), req.GetForwardingRule())
+
+	params := url.Values{}
+	if req != nil && req.View != nil {
+		params.Add("view", fmt.Sprintf("%v", req.GetView()))
+	}
+
+	baseUrl.RawQuery = params.Encode()
 
 	// Build HTTP headers from client and context metadata.
 	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "forwarding_rule", url.QueryEscape(req.GetForwardingRule()))}
