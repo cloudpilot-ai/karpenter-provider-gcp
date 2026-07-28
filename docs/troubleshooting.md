@@ -152,6 +152,13 @@ Karpenter detects arm64 architecture directly from the GCP Compute API. All arm6
 
 Image resolution queries GCP image catalogs directly and does not depend on the bootstrap pool. Bootstrap pool discovery and kube-env patching allow a single source pool (of any architecture) to bootstrap nodes of any OS and architecture combination. See [Bootstrap pool selection](bootstrap-pool.md) for details.
 
+For the `Ubuntu` families, each architecture is resolved independently from the image catalog: Karpenter selects the newest clean `amd64` image and the newest clean `arm64` image separately, and excludes specialized variant builds (e.g. `-tpu`, `-cgroupsv1`, `-linux64k`, `-test`). If no usable `arm64` image exists for the cluster's Kubernetes minor version, the `GCENodeClass` reports `ImagesReady=False` with reason `ImageResolutionFailed` rather than resolving an `amd64`-only image set — so an arm64 pool never appears ready while it cannot actually provision. If you see this, confirm an `arm64` image is published for your Kubernetes version:
+
+```sh
+gcloud compute images list --project=ubuntu-os-gke-cloud \
+  --filter="name~'^ubuntu-gke-2404-<major>-<minor>-arm64-v'" --sort-by=~creationTimestamp
+```
+
 To verify arm64 machine types are available in your cluster's region:
 
 ```sh
