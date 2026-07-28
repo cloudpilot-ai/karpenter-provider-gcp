@@ -46,7 +46,7 @@ type UnavailableOfferings struct {
 
 func NewUnavailableOfferingsWithCache(c *cache.Cache) *UnavailableOfferings {
 	uo := &UnavailableOfferings{cache: c}
-	uo.cache.OnEvicted(func(_ string, _ interface{}) {
+	uo.cache.OnEvicted(func(_ string, _ any) {
 		atomic.AddUint64(&uo.seqNum, 1)
 	})
 	return uo

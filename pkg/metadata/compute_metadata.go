@@ -160,12 +160,8 @@ func (m *InstanceMetadata) ToComputeMetadata() (*compute.Metadata, error) {
 		return toComputeMetadata(metadataValues{}), nil
 	}
 	values := metadataValues{}
-	for key, value := range m.sourceMetadata {
-		values[key] = value
-	}
-	for key, value := range m.customMetadata {
-		values[key] = value
-	}
+	maps.Copy(values, m.sourceMetadata)
+	maps.Copy(values, m.customMetadata)
 	values[KubeEnvKey] = m.kubeEnv.String()
 	values[KubeLabelsKey] = m.kubeLabels.String()
 	rawKubeletConfig, err := yaml.Marshal(m.kubeletConfig)
@@ -184,9 +180,7 @@ func (m *InstanceMetadata) ToComputeInstanceLabels() map[string]string {
 	if m == nil {
 		return labels
 	}
-	for key, value := range m.instanceLabels {
-		labels[key] = value
-	}
+	maps.Copy(labels, m.instanceLabels)
 	return labels
 }
 
