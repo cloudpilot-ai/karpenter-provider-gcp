@@ -308,6 +308,11 @@
               "type": "boolean",
               "description": "Enable scheduling to reserved/committed GCP capacity. Disabled by default: GCE reservation support is not yet implemented (see #239).",
               "default": false
+            },
+            "capacityBuffer": {
+              "type": "boolean",
+              "description": "Enable CapacityBuffer support (alpha) for pre-provisioning spare capacity.",
+              "default": false
             }
           }
         },

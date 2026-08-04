@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
 	"sort"
@@ -197,8 +198,7 @@ func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *comp
 }
 
 func isTransientError(err error) bool {
-	var apiErr *googleapi.Error
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*googleapi.Error](err); ok {
 		return apiErr.Code >= 500
 	}
 	return false
@@ -320,8 +320,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	for _, instanceType := range instanceTypes {
 		instance, zone, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType)
 		if err != nil {
-			var retryableErr *retryableError
-			if errors.As(err, &retryableErr) {
+			if retryableErr, ok := errors.AsType[*retryableError](err); ok {
 				errs = append(errs, retryableErr.err)
 				continue
 			}
@@ -1092,9 +1091,7 @@ func setupScheduling(capacityType string) *compute.Scheduling {
 // be inherited by the provisioned instance.
 func initializeInstanceLabels(nodeClass *v1alpha1.GCENodeClass) map[string]string {
 	labels := make(map[string]string)
-	for k, v := range nodeClass.Spec.Labels {
-		labels[k] = v
-	}
+	maps.Copy(labels, nodeClass.Spec.Labels)
 	return labels
 }
 
@@ -1338,9 +1335,7 @@ func (p *DefaultProvider) CreateTags(ctx context.Context, providerID string, tag
 	if newLabels == nil {
 		newLabels = make(map[string]string)
 	}
-	for k, v := range tags {
-		newLabels[k] = v
-	}
+	maps.Copy(newLabels, tags)
 
 	req := &compute.InstancesSetLabelsRequest{
 		Labels:           newLabels,
@@ -1379,8 +1374,7 @@ func parseGCEProviderID(providerID string) (project, zone, instance string, err 
 }
 
 func isInstanceNotFoundError(err error) bool {
-	var apiErr *googleapi.Error
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*googleapi.Error](err); ok {
 		return apiErr.Code == 404
 	}
 	return false
