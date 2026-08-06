@@ -230,6 +230,7 @@ spec:
                     id:
                       description: ID specifies a GKE image by its full resource URL.
                       maxLength: 160
+                      minLength: 1
                       type: string
                       x-kubernetes-validations:
                       - message: '''id'' is improperly formatted, must match the format
@@ -551,6 +552,14 @@ spec:
                       enabled.
                     type: boolean
                 type: object
+              startupScript:
+                description: |-
+                  StartupScript is written verbatim to the instance's "startup-script" metadata key and
+                  owns node bootstrap end to end. Only valid with PROVISION_MODE=self-hosted. Do not embed
+                  secrets: any process on the node can read instance metadata; fetch secrets by reference at boot.
+                maxLength: 131072
+                minLength: 1
+                type: string
               subnetRangeName:
                 description: |-
                   SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
@@ -564,6 +573,21 @@ spec:
             required:
             - imageSelectorTerms
             type: object
+            x-kubernetes-validations:
+            - message: startupScript requires kubeletConfiguration.maxPods to be set
+                and >= 1
+              rule: '!has(self.startupScript) || (has(self.kubeletConfiguration) &&
+                has(self.kubeletConfiguration.maxPods) && self.kubeletConfiguration.maxPods
+                >= 1)'
+            - message: startupScript requires networkConfig.subnetwork to be set
+              rule: '!has(self.startupScript) || (has(self.networkConfig) && has(self.networkConfig.subnetwork)
+                && self.networkConfig.subnetwork.size() > 0)'
+            - message: startupScript requires every imageSelectorTerms entry to use
+                id
+              rule: '!has(self.startupScript) || self.imageSelectorTerms.all(t, has(t.id))'
+            - message: startupScript requires disks to contain a boot disk
+              rule: '!has(self.startupScript) || (has(self.disks) && self.disks.exists(d,
+                d.boot))'
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass
             properties:

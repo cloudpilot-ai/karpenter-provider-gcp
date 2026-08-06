@@ -382,6 +382,12 @@
               "type": "string",
               "description": "Default GCP service account email to attach to provisioned nodes. Overrides the Compute Engine default SA. Leave empty to use the Compute Engine default SA.",
               "default": ""
+            },
+            "provisionMode": {
+              "type": "string",
+              "enum": ["", "gke", "self-hosted"],
+              "description": "Provision mode for the cluster: gke (default) or self-hosted. In self-hosted mode node bootstrap is owned by GCENodeClass spec.startupScript and the Container API is never called.",
+              "default": ""
             }
           }
         }

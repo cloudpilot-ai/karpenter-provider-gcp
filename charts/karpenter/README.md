@@ -123,6 +123,7 @@ serviceMonitor:
 | controller.settings.ignoreDRARequests | bool | `true` | ignoreDRARequests controls whether Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations. Keep true unless the cluster has DRA drivers and resource claims that Karpenter should account for. |
 | controller.settings.nodeLocation | string | `""` | The exact GCP cluster location for GKE API calls (e.g., us-central1-a for zonal, us-central1 for regional). If not set, defaults to 'clusterLocation' for backward compatibility. |
 | controller.settings.projectID | string | `""` | The GCP project ID. |
+| controller.settings.provisionMode | string | `""` | Provision mode for the cluster: "gke" (default) or "self-hosted". In self-hosted mode node bootstrap is owned by GCENodeClass spec.startupScript and the Container API is never called. Corresponds to the PROVISION_MODE env var. Leave empty to use the default. |
 | controller.settings.vmMemoryOverheadPercent | float | `0.065` | The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%. |
 | controller.strategy.rollingUpdate.maxUnavailable | int | `1` |  |
 | controller.terminationGracePeriodSeconds | int | `30` |  |

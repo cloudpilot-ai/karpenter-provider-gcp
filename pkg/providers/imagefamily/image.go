@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
@@ -92,6 +93,17 @@ func NewDefaultProvider(computeService *compute.Service, versionProvider version
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, error) {
+	// Self-hosted mode accepts only explicit image IDs; other terms need GKE resolution
+	// and are terminal configuration errors. Gate before the cache so no GKE call is
+	// made and no cached result bypasses the restriction.
+	if options.FromContext(ctx).IsSelfHosted() {
+		for _, term := range nodeClass.Spec.ImageSelectorTerms {
+			if term.ID == "" {
+				return nil, &imageResolutionError{msg: "only id: imageSelectorTerms are supported in self-hosted mode"}
+			}
+		}
+	}
+
 	p.Lock()
 	defer p.Unlock()
 
