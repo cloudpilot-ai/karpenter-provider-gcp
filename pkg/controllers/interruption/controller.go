@@ -86,7 +86,7 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 
 		condition := node.GetCondition(&currentNode, corev1.NodeReady)
 		if condition.Status != corev1.ConditionTrue && condition.Reason == NodeConditionReasonKubeletNotReady && condition.Message == NodeConditionMessageShuttingDown {
-			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, false); err != nil {
+			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name); err != nil {
 				return fmt.Errorf("cleaning node claim: %w", err)
 			}
 		}
@@ -95,7 +95,10 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {
+// cleanNodeClaimByInstanceName deletes the NodeClaim backing the named node. When the node is
+// a spot node, the (instanceType, zone) offering is first recorded as unavailable so that the
+// scheduler does not immediately relaunch into the zone that just reclaimed capacity.
+func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string) error {
 	nodeClaim, err := c.getNodeClaimByNodeName(ctx, instanceName)
 	if err != nil {
 		return fmt.Errorf("getting node claim by node name: %w", err)
@@ -103,17 +106,36 @@ func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceN
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return nil
 	}
-	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-	instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
-	if markUnavailable && zone != "" && instanceType != "" {
-		c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
-	}
+
+	c.markOfferingUnavailable(ctx, nodeClaim)
 
 	if err := c.deleteNodeClaim(ctx, nodeClaim); err != nil {
 		return fmt.Errorf("deleting node claim: %w", err)
 	}
 
 	return nil
+}
+
+// markOfferingUnavailable records a spot preemption against the unavailable offerings cache.
+//
+// The shutdown condition this controller watches fires for any graceful node shutdown, not only
+// preemption, so on-demand NodeClaims are skipped: an operator-initiated or maintenance shutdown
+// of an on-demand node carries no signal about spot capacity in that zone, and marking it would
+// steer the scheduler away from a zone that is in fact healthy.
+func (c *Controller) markOfferingUnavailable(ctx context.Context, nodeClaim *karpv1.NodeClaim) {
+	if nodeClaim.Labels[karpv1.CapacityTypeLabelKey] != karpv1.CapacityTypeSpot {
+		return
+	}
+
+	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+	instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
+	if zone == "" || instanceType == "" {
+		log.FromContext(ctx).V(1).Info("skipping unavailable offering marking, nodeclaim is missing zone or instance type label",
+			"nodeClaim", nodeClaim.Name, "zone", zone, "instanceType", instanceType)
+		return
+	}
+
+	c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

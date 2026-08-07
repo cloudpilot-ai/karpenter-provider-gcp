@@ -31,8 +31,29 @@ import (
 	karpevents "sigs.k8s.io/karpenter/pkg/events"
 	karpmetrics "sigs.k8s.io/karpenter/pkg/metrics"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
+
+// shuttingDownNode builds a Karpenter-owned node reporting the GCE graceful-shutdown condition.
+func shuttingDownNode(name string) corev1.Node {
+	return corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{utils.LabelNodePoolKey: "my-pool"},
+		},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:    corev1.NodeReady,
+					Status:  corev1.ConditionFalse,
+					Reason:  NodeConditionReasonKubeletNotReady,
+					Message: NodeConditionMessageShuttingDown,
+				},
+			},
+		},
+	}
+}
 
 // fakeKubeClient embeds client.Client and overrides only the methods used by the controller.
 type fakeKubeClient struct {
@@ -176,8 +197,9 @@ func TestHandleStoppingSpotInstances_DeletesShuttingDownKarpenterNode(t *testing
 	}
 
 	c := &Controller{
-		kubeClient: kubeClient,
-		recorder:   recorder,
+		kubeClient:                kubeClient,
+		recorder:                  recorder,
+		unavailableOfferingsCache: unavailableofferings.NewUnavailableOfferings(),
 	}
 
 	labels := prometheus.Labels{
@@ -193,4 +215,97 @@ func TestHandleStoppingSpotInstances_DeletesShuttingDownKarpenterNode(t *testing
 	require.Len(t, kubeClient.deleted, 1)
 	require.Equal(t, "spot-claim", kubeClient.deleted[0].GetName())
 	require.Equal(t, before+1, disruptedCounterValue(t, labels))
+}
+
+func TestHandleStoppingSpotInstances_MarksSpotOfferingUnavailable(t *testing.T) {
+	t.Parallel()
+
+	unavailableOfferings := unavailableofferings.NewUnavailableOfferings()
+	kubeClient := &fakeKubeClient{
+		nodes: []corev1.Node{shuttingDownNode("spot-node")},
+		nodeClaims: []karpv1.NodeClaim{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "spot-claim",
+					Labels: map[string]string{
+						karpv1.NodePoolLabelKey:        "my-pool",
+						karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeSpot,
+						corev1.LabelTopologyZone:       "europe-west1-b",
+						corev1.LabelInstanceTypeStable: "n2-standard-4",
+					},
+				},
+				Status: karpv1.NodeClaimStatus{NodeName: "spot-node"},
+			},
+		},
+	}
+
+	c := &Controller{
+		kubeClient:                kubeClient,
+		recorder:                  &fakeRecorder{},
+		unavailableOfferingsCache: unavailableOfferings,
+	}
+
+	require.False(t, unavailableOfferings.IsUnavailable("n2-standard-4", "europe-west1-b", karpv1.CapacityTypeSpot))
+
+	require.NoError(t, c.handleStoppingSpotInstances(context.Background()))
+
+	require.Len(t, kubeClient.deleted, 1)
+	require.True(t, unavailableOfferings.IsUnavailable("n2-standard-4", "europe-west1-b", karpv1.CapacityTypeSpot),
+		"preempted spot offering should be marked unavailable so the scheduler backs off the zone")
+}
+
+func TestHandleStoppingSpotInstances_IgnoresOnDemandShutdown(t *testing.T) {
+	t.Parallel()
+
+	unavailableOfferings := unavailableofferings.NewUnavailableOfferings()
+	kubeClient := &fakeKubeClient{
+		nodes: []corev1.Node{shuttingDownNode("on-demand-node")},
+		nodeClaims: []karpv1.NodeClaim{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "on-demand-claim",
+					Labels: map[string]string{
+						karpv1.NodePoolLabelKey:        "my-pool",
+						karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       "europe-west1-b",
+						corev1.LabelInstanceTypeStable: "n2-standard-4",
+					},
+				},
+				Status: karpv1.NodeClaimStatus{NodeName: "on-demand-node"},
+			},
+		},
+	}
+
+	c := &Controller{
+		kubeClient:                kubeClient,
+		recorder:                  &fakeRecorder{},
+		unavailableOfferingsCache: unavailableOfferings,
+	}
+
+	require.NoError(t, c.handleStoppingSpotInstances(context.Background()))
+
+	require.Len(t, kubeClient.deleted, 1, "the nodeclaim should still be cleaned up")
+	require.False(t, unavailableOfferings.IsUnavailable("n2-standard-4", "europe-west1-b", karpv1.CapacityTypeSpot),
+		"an on-demand shutdown carries no spot capacity signal")
+	require.False(t, unavailableOfferings.IsUnavailable("n2-standard-4", "europe-west1-b", karpv1.CapacityTypeOnDemand))
+}
+
+func TestMarkOfferingUnavailable_SkipsIncompleteLabels(t *testing.T) {
+	t.Parallel()
+
+	unavailableOfferings := unavailableofferings.NewUnavailableOfferings()
+	c := &Controller{unavailableOfferingsCache: unavailableOfferings}
+
+	nodeClaim := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "partial-claim",
+			Labels: map[string]string{
+				karpv1.CapacityTypeLabelKey: karpv1.CapacityTypeSpot,
+				corev1.LabelTopologyZone:    "europe-west1-b",
+			},
+		},
+	}
+
+	require.NotPanics(t, func() { c.markOfferingUnavailable(context.Background(), nodeClaim) })
+	require.False(t, unavailableOfferings.IsUnavailable("", "europe-west1-b", karpv1.CapacityTypeSpot))
 }
