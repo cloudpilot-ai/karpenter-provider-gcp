@@ -129,6 +129,19 @@ kubeletConfiguration:
 - `cpuCFSQuota` — enable or disable CPU CFS quota enforcement for containers with CPU limits
 - `imageGCHighThresholdPercent` / `imageGCLowThresholdPercent` — control when kubelet garbage-collects unused container images
 
+By default, kubelet pulls container images one at a time per node. This serializes every DaemonSet image (CNI, logging, CSI, metrics) on freshly provisioned nodes and adds bootstrap latency. Setting `serializeImagePulls: false` together with `maxParallelImagePulls` parallelizes pulls to reduce that latency, mirroring GKE's [`NodeKubeletConfig.maxParallelImagePulls`](https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/NodeKubeletConfig).
+
+```yaml
+kubeletConfiguration:
+  serializeImagePulls: false
+  maxParallelImagePulls: 4
+```
+
+- `serializeImagePulls` — controls whether kubelet pulls images one at a time; defaults to `true` (serialized) and must be set to `false` explicitly to allow parallel pulls
+- `maxParallelImagePulls` — maximum number of image pulls kubelet performs in parallel; minimum accepted value is `2`
+
+> **Note:** `maxParallelImagePulls` is rejected unless `serializeImagePulls` is explicitly set to `false`, failing admission with `maxParallelImagePulls requires serializeImagePulls to be explicitly set to false`. Omitting both fields preserves the default serialized behavior.
+
 ## Shielded VM
 
 Shielded VM provides verifiable integrity for your instances, protecting against boot-level and kernel-level malware. GCP organizations that enforce `constraints/compute.requireShieldedVm` require these settings on all instances. Without them, Karpenter-provisioned nodes fail with a `412 conditionNotMet` error.
