@@ -64,7 +64,7 @@ chart-lint: ## Lint the Helm charts (validates values.schema.json and templates)
 verify-crds: ## Validate generated CRDs with Kubernetes API server validation logic
 	@tmpdir=$$(mktemp -d); \
 	trap 'rm -rf "$$tmpdir"' EXIT; \
-	helm template karpenter-crd charts/karpenter-crd --include-crds --kube-version 1.30.0 > "$$tmpdir/karpenter-crd.yaml"; \
+	helm template karpenter-crd charts/karpenter-crd --include-crds > "$$tmpdir/karpenter-crd.yaml"; \
 	(cd hack/crd-tools && go tool kubectl-validate --version 1.35 ../../charts/karpenter/crds/ "$$tmpdir")
 
 verify: ## Verify code. Includes linting, formatting, etc

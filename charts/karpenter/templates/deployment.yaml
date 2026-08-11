@@ -1,3 +1,6 @@
+{{- if and .Values.controller.featureGates.capacityBuffer (not (.Capabilities.APIVersions.Has "autoscaling.x-k8s.io/v1beta1/CapacityBuffer")) }}
+{{- fail "controller.featureGates.capacityBuffer is enabled but the CapacityBuffer CRD (autoscaling.x-k8s.io/v1beta1) is not installed on this cluster. This provider does not install it." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

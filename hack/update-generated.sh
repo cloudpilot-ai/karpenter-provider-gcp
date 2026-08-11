@@ -14,20 +14,15 @@ controller-gen crd paths=./pkg/apis/v1alpha1/... output:crd:dir=./charts/karpent
 KARPENTER_CRD_DIR=vendor/sigs.k8s.io/karpenter/pkg/apis/crds
 cp "${KARPENTER_CRD_DIR}"/*.yaml ./charts/karpenter/crds/
 
-# GKE provides the CapacityBuffer CRD natively from 1.35.2-gke.1842000 onward.
-# charts/karpenter/crds/ is Helm's unconditional crds/ directory — it can't be
-# templated, so a version (or feature-gate) condition isn't possible there.
-# It's shipped, gated, via templates/ in both charts instead.
+# CapacityBuffer support requires GKE 1.35.2-gke.1842000+, where GKE provides
+# the CapacityBuffer CRD natively — this provider never installs it. Drop the
+# copy that ships in the vendored karpenter-core CRD set.
 rm -f ./charts/karpenter/crds/autoscaling.x-k8s.io_capacitybuffers.yaml
-rm -f charts/karpenter/templates/autoscaling.x-k8s.io_capacitybuffers.yaml
-hack/mutation/crd_capacitybuffer_maintemplate.sh
 
 # Sync CRDs to karpenter-crd chart with additionalAnnotations support
 rm -f charts/karpenter-crd/templates/*.yaml
 cp charts/karpenter/crds/*.yaml charts/karpenter-crd/templates/
-cp "${KARPENTER_CRD_DIR}"/autoscaling.x-k8s.io_capacitybuffers.yaml charts/karpenter-crd/templates/
 hack/mutation/crd_annotations.sh
-hack/mutation/crd_capacitybuffer_gate.sh
 
 # Update generated code
 deepcopy-gen \
