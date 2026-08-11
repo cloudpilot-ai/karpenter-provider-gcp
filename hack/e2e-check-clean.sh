@@ -17,14 +17,16 @@ if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
     --quiet 2>/dev/null
 fi
 
-# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials file.
+# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials
+# file, falling back to the active gcloud config.
 if [ -z "${E2E_PROJECT_ID:-}" ]; then
-  if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
-    echo "ERROR: E2E_PROJECT_ID is not set and GOOGLE_APPLICATION_CREDENTIALS is not set — cannot determine project." >&2
-    exit 1
+  if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
+      || { echo "ERROR: could not parse project_id from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
+  else
+    E2E_PROJECT_ID="$(gcloud config get-value project 2>/dev/null)"
+    : "${E2E_PROJECT_ID:?E2E_PROJECT_ID is not set and could not be derived from the active gcloud config}"
   fi
-  E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
-    || { echo "ERROR: could not parse project_id from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
 fi
 
 : "${E2E_LOCATION:?E2E_LOCATION must be set (zone, e.g. us-central1-f, or region, e.g. us-central1)}"

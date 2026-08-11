@@ -64,7 +64,7 @@ chart-lint: ## Lint the Helm charts (validates values.schema.json and templates)
 verify-crds: ## Validate generated CRDs with Kubernetes API server validation logic
 	@tmpdir=$$(mktemp -d); \
 	trap 'rm -rf "$$tmpdir"' EXIT; \
-	helm template karpenter-crd charts/karpenter-crd --include-crds > "$$tmpdir/karpenter-crd.yaml"; \
+	helm template karpenter-crd charts/karpenter-crd --include-crds --kube-version 1.30.0 > "$$tmpdir/karpenter-crd.yaml"; \
 	(cd hack/crd-tools && go tool kubectl-validate --version 1.35 ../../charts/karpenter/crds/ "$$tmpdir")
 
 verify: ## Verify code. Includes linting, formatting, etc
@@ -107,7 +107,10 @@ ut-test: ## Run unit tests
 
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
 # between the setup script and the test binary.
-# E2E_PROJECT_ID, E2E_SA_PATH, and E2E_LOCATION must be set explicitly — no defaults.
+# E2E_PROJECT_ID and E2E_LOCATION must be set explicitly — no defaults.
+# E2E_SA_PATH is optional: if unset, the scripts fall back to an active
+# `gcloud auth login` session (and `gcloud auth application-default login`
+# for the Go test binary's GCP client calls).
 E2E_PROJECT_ID   ?=
 E2E_SA_PATH      ?=
 E2E_LOCATION     ?=
@@ -118,8 +121,12 @@ E2E_PODS_RANGE           ?= $(E2E_PREFIX)-pods
 E2E_KARPENTER_NAMESPACE  ?=
 E2E_KARPENTER_DEPLOYMENT ?=
 
+# Only set GOOGLE_APPLICATION_CREDENTIALS when E2E_SA_PATH is provided.
+E2E_GAC_ENV     = $(if $(E2E_SA_PATH),GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH))
+E2E_GAC_ENV_ABS = $(if $(E2E_SA_PATH),GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)))
+
 e2e-setup: require-e2e-vars ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
-	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	$(E2E_GAC_ENV) \
 	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
@@ -128,7 +135,7 @@ e2e-setup: require-e2e-vars ## Create (or reuse) the e2e GKE cluster and support
 
 RELEASE_VERSION ?=
 e2e-deploy: require-e2e-vars ## Build and deploy karpenter; set RELEASE_VERSION=X.Y.Z to install the published chart instead
-	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	$(E2E_GAC_ENV) \
 	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
@@ -138,12 +145,11 @@ e2e-deploy: require-e2e-vars ## Build and deploy karpenter; set RELEASE_VERSION=
 
 require-e2e-vars: ## Fail fast if required e2e variables are not set
 	@test -n "$(E2E_PROJECT_ID)"  || (echo "ERROR: E2E_PROJECT_ID is not set"  >&2 && exit 1)
-	@test -n "$(E2E_SA_PATH)"     || (echo "ERROR: E2E_SA_PATH is not set"     >&2 && exit 1)
 	@test -n "$(E2E_LOCATION)"    || (echo "ERROR: E2E_LOCATION is not set"    >&2 && exit 1)
 
 GINKGO_PROCS ?= 4
 e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
-	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
+	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_LOCATION) \
@@ -155,7 +161,7 @@ e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS
 FOCUS ?=
 SUITE ?=
 e2e-test: require-e2e-vars ## Run a single e2e suite or focused spec (SUITE=<name>, FOCUS="<substring>", GINKGO_PROCS=N)
-	GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)) \
+	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
 	CLUSTER_LOCATION=$(E2E_LOCATION) \
@@ -167,14 +173,14 @@ e2e-test: require-e2e-vars ## Run a single e2e suite or focused spec (SUITE=<nam
 	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...)
 
 e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
-	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	$(E2E_GAC_ENV) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-teardown.sh
 
 e2e-check-clean: ## Report any orphaned e2e GCP resources (does not delete)
-	GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH) \
+	$(E2E_GAC_ENV) \
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_LOCATION=$(E2E_LOCATION) \

@@ -2,26 +2,38 @@
 # e2e-setup.sh — Idempotently creates GCP infra for e2e tests and deploys
 # the karpenter controller via Helm. Reuses existing resources on re-runs.
 #
-# Required:
+# Optional:
 #   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
+#                                   (not needed if `gcloud auth login` is already active)
 #
 # Optional (with defaults):
-#   E2E_PROJECT_ID    GCP project ID        (default: parsed from credentials)
+#   E2E_PROJECT_ID    GCP project ID        (default: parsed from credentials, else active gcloud config)
 #   E2E_PREFIX        resource name prefix  (default: karpenter-e2e)
 #   E2E_REGION        GCP region            (default: us-central1)
 #   E2E_LOCATION      GCP location (zone or region, e.g. us-central1-f or us-central1)
 #   E2E_MACHINE_TYPE  system node type      (default: n2-standard-2)
 set -euo pipefail
 
-: "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
-
 log() { echo "e2e-setup: $*" >&2; }
 
-# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials file.
+if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+  ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null)"
+  : "${ACTIVE_ACCOUNT:?No active gcloud login found and GOOGLE_APPLICATION_CREDENTIALS is not set. Run 'gcloud auth login' or set GOOGLE_APPLICATION_CREDENTIALS.}"
+  log "Using existing gcloud login: ${ACTIVE_ACCOUNT}"
+fi
+
+# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials
+# file, falling back to the active gcloud config.
 if [ -z "${E2E_PROJECT_ID:-}" ]; then
-  E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
-    || { echo "ERROR: E2E_PROJECT_ID is not set and could not be parsed from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
-  log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
+  if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
+      || { echo "ERROR: E2E_PROJECT_ID is not set and could not be parsed from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
+    log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
+  else
+    E2E_PROJECT_ID="$(gcloud config get-value project 2>/dev/null)"
+    : "${E2E_PROJECT_ID:?E2E_PROJECT_ID is not set and could not be derived from the active gcloud config}"
+    log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from gcloud config"
+  fi
 fi
 
 : "${E2E_LOCATION:?E2E_LOCATION must be set (zone, e.g. us-central1-f, or region, e.g. us-central1)}"
@@ -48,11 +60,13 @@ SERVICES_CIDR="10.8.0.0/20"
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
-log "Authenticating..."
-gcloud auth activate-service-account \
-  --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
-  --project "${E2E_PROJECT_ID}" \
-  --quiet
+if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+  log "Authenticating with service-account key..."
+  gcloud auth activate-service-account \
+    --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+fi
 
 # Verify the project exists and is accessible; avoids silent hangs on a wrong ID.
 if ! gcloud projects describe "${E2E_PROJECT_ID}" &>/dev/null; then
@@ -276,7 +290,7 @@ gcloud iam service-accounts add-iam-policy-binding "${GSA_EMAIL}" \
   --project "${E2E_PROJECT_ID}" \
   --quiet >/dev/null
 
-GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS}" \
+GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-}" \
 E2E_PROJECT_ID="${E2E_PROJECT_ID}" \
 E2E_PREFIX="${E2E_PREFIX}" \
 E2E_REGION="${E2E_REGION}" \
