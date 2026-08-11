@@ -25,7 +25,12 @@ controller:
 
 ### CapacityBuffer (Alpha)
 
-`CapacityBuffer` is an Alpha feature that pre-provisions spare capacity so pending pods can schedule without waiting for new nodes. It is disabled by default; enable it with `controller.featureGates.capacityBuffer`. The `karpenter-crd` chart installs the upstream `autoscaling.x-k8s.io/v1beta1` `CapacityBuffer` CRD whenever CRDs are applied, regardless of the gate, but Karpenter acts on `CapacityBuffer` resources only when the gate is enabled.
+`CapacityBuffer` is an Alpha feature that pre-provisions spare capacity so pending pods can schedule without waiting for new nodes. It is disabled by default; enable it with `controller.featureGates.capacityBuffer`. Karpenter acts on `CapacityBuffer` resources only when the gate is enabled.
+
+The CRD is the upstream `autoscaling.x-k8s.io/v1beta1` `CapacityBuffer` CRD. GKE provides it natively on clusters at or above `1.35.2-gke.1842000`; below that version the chart installs it to avoid CRD ownership conflicts with GKE:
+
+- `karpenter-crd` chart: renders the CRD only when the cluster is below `1.35.2-gke.1842000`.
+- `karpenter` chart: renders the CRD only when `controller.featureGates.capacityBuffer` is enabled and the cluster is below `1.35.2-gke.1842000`.
 
 ```yaml
 controller:
