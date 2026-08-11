@@ -114,7 +114,9 @@ controller:
     # Disabled: the GCP provider does not yet implement GCE reservation support (#239).
     reservedCapacity: false
     # -- capacityBuffer is ALPHA and is disabled by default.
-    # Setting this to true enables CapacityBuffer support for pre-provisioning spare capacity.
+    # Setting this to true enables CapacityBuffer support for pre-provisioning spare capacity
+    # and installs the CapacityBuffer CRD (skipped on GKE clusters that already provide it
+    # natively — see charts/karpenter/templates/autoscaling.x-k8s.io_capacitybuffers.yaml).
     capacityBuffer: false
   # -- disableControllerWarmup controls whether controller sources (watches/informers) start
   # before leader election is won. Set to false to enable warmup, which pre-populates caches
