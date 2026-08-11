@@ -9,6 +9,14 @@ set -eu -o pipefail
 # render it on clusters below the version where GKE starts providing it.
 CRD=charts/karpenter-crd/templates/autoscaling.x-k8s.io_capacitybuffers.yaml
 
+awk '
+    {print}
+    /  annotations:/ && !n {
+        print "    helm.sh/resource-policy: keep"
+        n++
+    }
+' "$CRD" > "$CRD.new" && mv "$CRD.new" "$CRD"
+
 {
   echo '{{- if semverCompare "< 1.35.2-gke.1842000" .Capabilities.KubeVersion.Version }}'
   cat "$CRD"

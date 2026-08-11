@@ -22,6 +22,14 @@ awk '
     }
 ' "$CRD" > "$CRD.new" && mv "$CRD.new" "$CRD"
 
+awk '
+    {print}
+    /  annotations:/ && !n {
+        print "    helm.sh/resource-policy: keep"
+        n++
+    }
+' "$CRD" > "$CRD.new" && mv "$CRD.new" "$CRD"
+
 {
   echo '{{- if and .Values.controller.featureGates.capacityBuffer (semverCompare "< 1.35.2-gke.1842000" .Capabilities.KubeVersion.Version) }}'
   cat "$CRD"
