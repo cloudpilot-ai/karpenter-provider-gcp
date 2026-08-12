@@ -37,20 +37,16 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var newGlobalOrganizationOperationsClientHook clientHook
+var newReliabilityRisksClientHook clientHook
 
-// GlobalOrganizationOperationsCallOptions contains the retry settings for each method of GlobalOrganizationOperationsClient.
-type GlobalOrganizationOperationsCallOptions struct {
-	Delete []gax.CallOption
-	Get    []gax.CallOption
-	List   []gax.CallOption
+// ReliabilityRisksCallOptions contains the retry settings for each method of ReliabilityRisksClient.
+type ReliabilityRisksCallOptions struct {
+	Get  []gax.CallOption
+	List []gax.CallOption
 }
 
-func defaultGlobalOrganizationOperationsRESTCallOptions() *GlobalOrganizationOperationsCallOptions {
-	return &GlobalOrganizationOperationsCallOptions{
-		Delete: []gax.CallOption{
-			gax.WithTimeout(600000 * time.Millisecond),
-		},
+func defaultReliabilityRisksRESTCallOptions() *ReliabilityRisksCallOptions {
+	return &ReliabilityRisksCallOptions{
 		Get: []gax.CallOption{
 			gax.WithTimeout(600000 * time.Millisecond),
 			gax.WithRetry(func() gax.Retryer {
@@ -78,40 +74,39 @@ func defaultGlobalOrganizationOperationsRESTCallOptions() *GlobalOrganizationOpe
 	}
 }
 
-// internalGlobalOrganizationOperationsClient is an interface that defines the methods available from Compute Engine API.
-type internalGlobalOrganizationOperationsClient interface {
+// internalReliabilityRisksClient is an interface that defines the methods available from Compute Engine API.
+type internalReliabilityRisksClient interface {
 	Close() error
 	setGoogleClientInfo(...string)
 	Connection() *grpc.ClientConn
-	Delete(context.Context, *computepb.DeleteGlobalOrganizationOperationRequest, ...gax.CallOption) (*computepb.DeleteGlobalOrganizationOperationResponse, error)
-	Get(context.Context, *computepb.GetGlobalOrganizationOperationRequest, ...gax.CallOption) (*computepb.Operation, error)
-	List(context.Context, *computepb.ListGlobalOrganizationOperationsRequest, ...gax.CallOption) *OperationIterator
+	Get(context.Context, *computepb.GetReliabilityRiskRequest, ...gax.CallOption) (*computepb.ReliabilityRisk, error)
+	List(context.Context, *computepb.ListReliabilityRisksRequest, ...gax.CallOption) *ReliabilityRiskIterator
 }
 
-// GlobalOrganizationOperationsClient is a client for interacting with Compute Engine API.
+// ReliabilityRisksClient is a client for interacting with Compute Engine API.
 // Methods, except Close, may be called concurrently. However, fields must not be modified concurrently with method calls.
 //
-// The GlobalOrganizationOperations API.
-type GlobalOrganizationOperationsClient struct {
+// The ReliabilityRisks API.
+type ReliabilityRisksClient struct {
 	// The internal transport-dependent client.
-	internalClient internalGlobalOrganizationOperationsClient
+	internalClient internalReliabilityRisksClient
 
 	// The call options for this service.
-	CallOptions *GlobalOrganizationOperationsCallOptions
+	CallOptions *ReliabilityRisksCallOptions
 }
 
 // Wrapper methods routed to the internal client.
 
 // Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
-func (c *GlobalOrganizationOperationsClient) Close() error {
+func (c *ReliabilityRisksClient) Close() error {
 	return c.internalClient.Close()
 }
 
 // setGoogleClientInfo sets the name and version of the application in
 // the `x-goog-api-client` header passed on each request. Intended for
 // use by Google-written clients.
-func (c *GlobalOrganizationOperationsClient) setGoogleClientInfo(keyval ...string) {
+func (c *ReliabilityRisksClient) setGoogleClientInfo(keyval ...string) {
 	c.internalClient.setGoogleClientInfo(keyval...)
 }
 
@@ -119,29 +114,22 @@ func (c *GlobalOrganizationOperationsClient) setGoogleClientInfo(keyval ...strin
 //
 // Deprecated: Connections are now pooled so this method does not always
 // return the same resource.
-func (c *GlobalOrganizationOperationsClient) Connection() *grpc.ClientConn {
+func (c *ReliabilityRisksClient) Connection() *grpc.ClientConn {
 	return c.internalClient.Connection()
 }
 
-// Delete deletes the specified Operations resource.
-func (c *GlobalOrganizationOperationsClient) Delete(ctx context.Context, req *computepb.DeleteGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.DeleteGlobalOrganizationOperationResponse, error) {
-	return c.internalClient.Delete(ctx, req, opts...)
-}
-
-// Get retrieves the specified Operations resource. Gets a list of operations
-// by making a list() request.
-func (c *GlobalOrganizationOperationsClient) Get(ctx context.Context, req *computepb.GetGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.Operation, error) {
+// Get returns the specified ReliabilityRisk resource.
+func (c *ReliabilityRisksClient) Get(ctx context.Context, req *computepb.GetReliabilityRiskRequest, opts ...gax.CallOption) (*computepb.ReliabilityRisk, error) {
 	return c.internalClient.Get(ctx, req, opts...)
 }
 
-// List retrieves a list of Operation resources contained within the specified
-// organization.
-func (c *GlobalOrganizationOperationsClient) List(ctx context.Context, req *computepb.ListGlobalOrganizationOperationsRequest, opts ...gax.CallOption) *OperationIterator {
+// List retrieves the list of reliabilityRisks available in the specified project.
+func (c *ReliabilityRisksClient) List(ctx context.Context, req *computepb.ListReliabilityRisksRequest, opts ...gax.CallOption) *ReliabilityRiskIterator {
 	return c.internalClient.List(ctx, req, opts...)
 }
 
 // Methods, except Close, may be called concurrently. However, fields must not be modified concurrently with method calls.
-type globalOrganizationOperationsRESTClient struct {
+type reliabilityRisksRESTClient struct {
 	// The http endpoint to connect to.
 	endpoint string
 
@@ -151,17 +139,17 @@ type globalOrganizationOperationsRESTClient struct {
 	// The x-goog-* headers to be sent with each request.
 	xGoogHeaders []string
 
-	// Points back to the CallOptions field of the containing GlobalOrganizationOperationsClient
-	CallOptions **GlobalOrganizationOperationsCallOptions
+	// Points back to the CallOptions field of the containing ReliabilityRisksClient
+	CallOptions **ReliabilityRisksCallOptions
 
 	logger *slog.Logger
 }
 
-// NewGlobalOrganizationOperationsRESTClient creates a new global organization operations rest client.
+// NewReliabilityRisksRESTClient creates a new reliability risks rest client.
 //
-// The GlobalOrganizationOperations API.
-func NewGlobalOrganizationOperationsRESTClient(ctx context.Context, opts ...option.ClientOption) (*GlobalOrganizationOperationsClient, error) {
-	clientOpts := append(defaultGlobalOrganizationOperationsRESTClientOptions(), opts...)
+// The ReliabilityRisks API.
+func NewReliabilityRisksRESTClient(ctx context.Context, opts ...option.ClientOption) (*ReliabilityRisksClient, error) {
+	clientOpts := append(defaultReliabilityRisksRESTClientOptions(), opts...)
 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
 		clientOpts = append(clientOpts, internaloption.WithTelemetryAttributes(map[string]string{
 			"gcp.client.service":  "compute",
@@ -177,8 +165,8 @@ func NewGlobalOrganizationOperationsRESTClient(ctx context.Context, opts ...opti
 		return nil, err
 	}
 
-	callOpts := defaultGlobalOrganizationOperationsRESTCallOptions()
-	c := &globalOrganizationOperationsRESTClient{
+	callOpts := defaultReliabilityRisksRESTCallOptions()
+	c := &reliabilityRisksRESTClient{
 		endpoint:    endpoint,
 		httpClient:  httpClient,
 		CallOptions: &callOpts,
@@ -198,15 +186,14 @@ func NewGlobalOrganizationOperationsRESTClient(ctx context.Context, opts ...opti
 			}),
 		)
 
-		callOpts.Delete = append(callOpts.Delete, gax.WithClientMetrics(metrics))
 		callOpts.Get = append(callOpts.Get, gax.WithClientMetrics(metrics))
 		callOpts.List = append(callOpts.List, gax.WithClientMetrics(metrics))
 	}
 
-	return &GlobalOrganizationOperationsClient{internalClient: c, CallOptions: callOpts}, nil
+	return &ReliabilityRisksClient{internalClient: c, CallOptions: callOpts}, nil
 }
 
-func defaultGlobalOrganizationOperationsRESTClientOptions() []option.ClientOption {
+func defaultReliabilityRisksRESTClientOptions() []option.ClientOption {
 	return []option.ClientOption{
 		internaloption.WithDefaultEndpoint("https://compute.googleapis.com"),
 		internaloption.WithDefaultEndpointTemplate("https://compute.UNIVERSE_DOMAIN"),
@@ -221,7 +208,7 @@ func defaultGlobalOrganizationOperationsRESTClientOptions() []option.ClientOptio
 // setGoogleClientInfo sets the name and version of the application in
 // the `x-goog-api-client` header passed on each request. Intended for
 // use by Google-written clients.
-func (c *globalOrganizationOperationsRESTClient) setGoogleClientInfo(keyval ...string) {
+func (c *reliabilityRisksRESTClient) setGoogleClientInfo(keyval ...string) {
 	kv := append([]string{"gl-go", gax.GoVersion}, keyval...)
 	kv = append(kv, "gapic", getVersionClient(), "gax", gax.Version, "rest", "UNKNOWN", "pb", protoVersion)
 	c.xGoogHeaders = []string{
@@ -231,7 +218,7 @@ func (c *globalOrganizationOperationsRESTClient) setGoogleClientInfo(keyval ...s
 
 // Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
-func (c *globalOrganizationOperationsRESTClient) Close() error {
+func (c *reliabilityRisksRESTClient) Close() error {
 	// Replace httpClient with nil to force cleanup.
 	c.httpClient = nil
 	return nil
@@ -240,101 +227,34 @@ func (c *globalOrganizationOperationsRESTClient) Close() error {
 // Connection returns a connection to the API service.
 //
 // Deprecated: This method always returns nil.
-func (c *globalOrganizationOperationsRESTClient) Connection() *grpc.ClientConn {
+func (c *reliabilityRisksRESTClient) Connection() *grpc.ClientConn {
 	return nil
 }
 
-// Delete deletes the specified Operations resource.
-func (c *globalOrganizationOperationsRESTClient) Delete(ctx context.Context, req *computepb.DeleteGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.DeleteGlobalOrganizationOperationResponse, error) {
+// Get returns the specified ReliabilityRisk resource.
+func (c *reliabilityRisksRESTClient) Get(ctx context.Context, req *computepb.GetReliabilityRiskRequest, opts ...gax.CallOption) (*computepb.ReliabilityRisk, error) {
 	baseUrl, err := url.Parse(c.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	baseUrl.Path += fmt.Sprintf("/compute/v1/locations/global/operations/%v", req.GetOperation())
-
-	params := url.Values{}
-	if req != nil && req.ParentId != nil {
-		params.Add("parentId", fmt.Sprintf("%v", req.GetParentId()))
-	}
-
-	baseUrl.RawQuery = params.Encode()
+	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/global/reliabilityRisks/%v", req.GetProject(), req.GetReliabilityRisk())
 
 	// Build HTTP headers from client and context metadata.
-	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v", "operation", url.QueryEscape(req.GetOperation()))}
+	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "reliability_risk", url.QueryEscape(req.GetReliabilityRisk()))}
 
 	hds = append(c.xGoogHeaders, hds...)
 	hds = append(hds, "Content-Type", "application/json")
 	headers := gax.BuildHeaders(ctx, hds...)
 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/locations/global/operations/%v", req.GetOperation()))
+		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/projects/%v/global/reliabilityRisks/%v", req.GetProject(), req.GetReliabilityRisk()))
 	}
 	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.GlobalOrganizationOperations/Delete")
-		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/locations/global/operations/{operation}")
-	}
-	opts = append((*c.CallOptions).Delete[0:len((*c.CallOptions).Delete):len((*c.CallOptions).Delete)], opts...)
-	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
-	resp := &computepb.DeleteGlobalOrganizationOperationResponse{}
-	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
-		if settings.Path != "" {
-			baseUrl.Path = settings.Path
-		}
-		httpReq, err := http.NewRequest("DELETE", baseUrl.String(), nil)
-		if err != nil {
-			return err
-		}
-		httpReq = httpReq.WithContext(ctx)
-		httpReq.Header = headers
-
-		buf, err := executeHTTPRequest(ctx, c.httpClient, httpReq, c.logger, nil, "Delete")
-		if err != nil {
-			return err
-		}
-
-		if err := unm.Unmarshal(buf, resp); err != nil {
-			return err
-		}
-
-		return nil
-	}, opts...)
-	if e != nil {
-		return nil, e
-	}
-	return resp, nil
-}
-
-// Get retrieves the specified Operations resource. Gets a list of operations
-// by making a list() request.
-func (c *globalOrganizationOperationsRESTClient) Get(ctx context.Context, req *computepb.GetGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.Operation, error) {
-	baseUrl, err := url.Parse(c.endpoint)
-	if err != nil {
-		return nil, err
-	}
-	baseUrl.Path += fmt.Sprintf("/compute/v1/locations/global/operations/%v", req.GetOperation())
-
-	params := url.Values{}
-	if req != nil && req.ParentId != nil {
-		params.Add("parentId", fmt.Sprintf("%v", req.GetParentId()))
-	}
-
-	baseUrl.RawQuery = params.Encode()
-
-	// Build HTTP headers from client and context metadata.
-	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v", "operation", url.QueryEscape(req.GetOperation()))}
-
-	hds = append(c.xGoogHeaders, hds...)
-	hds = append(hds, "Content-Type", "application/json")
-	headers := gax.BuildHeaders(ctx, hds...)
-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/locations/global/operations/%v", req.GetOperation()))
-	}
-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.GlobalOrganizationOperations/Get")
-		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/locations/global/operations/{operation}")
+		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.ReliabilityRisks/Get")
+		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/projects/{project}/global/reliabilityRisks/{reliability_risk}")
 	}
 	opts = append((*c.CallOptions).Get[0:len((*c.CallOptions).Get):len((*c.CallOptions).Get)], opts...)
 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
-	resp := &computepb.Operation{}
+	resp := &computepb.ReliabilityRisk{}
 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
 		if settings.Path != "" {
 			baseUrl.Path = settings.Path
@@ -363,14 +283,13 @@ func (c *globalOrganizationOperationsRESTClient) Get(ctx context.Context, req *c
 	return resp, nil
 }
 
-// List retrieves a list of Operation resources contained within the specified
-// organization.
-func (c *globalOrganizationOperationsRESTClient) List(ctx context.Context, req *computepb.ListGlobalOrganizationOperationsRequest, opts ...gax.CallOption) *OperationIterator {
-	it := &OperationIterator{}
+// List retrieves the list of reliabilityRisks available in the specified project.
+func (c *reliabilityRisksRESTClient) List(ctx context.Context, req *computepb.ListReliabilityRisksRequest, opts ...gax.CallOption) *ReliabilityRiskIterator {
+	it := &ReliabilityRiskIterator{}
 	req = proto.CloneOf(req)
 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
-	it.InternalFetch = func(pageSize int, pageToken string) ([]*computepb.Operation, string, error) {
-		resp := &computepb.OperationList{}
+	it.InternalFetch = func(pageSize int, pageToken string) ([]*computepb.ReliabilityRisk, string, error) {
+		resp := &computepb.ReliabilityRisksListResponse{}
 		if pageToken != "" {
 			req.PageToken = proto.String(pageToken)
 		}
@@ -383,7 +302,7 @@ func (c *globalOrganizationOperationsRESTClient) List(ctx context.Context, req *
 		if err != nil {
 			return nil, "", err
 		}
-		baseUrl.Path += fmt.Sprintf("/compute/v1/locations/global/operations")
+		baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/global/reliabilityRisks", req.GetProject())
 
 		params := url.Values{}
 		if req != nil && req.Filter != nil {
@@ -397,9 +316,6 @@ func (c *globalOrganizationOperationsRESTClient) List(ctx context.Context, req *
 		}
 		if req != nil && req.PageToken != nil {
 			params.Add("pageToken", fmt.Sprintf("%v", req.GetPageToken()))
-		}
-		if req != nil && req.ParentId != nil {
-			params.Add("parentId", fmt.Sprintf("%v", req.GetParentId()))
 		}
 		if req != nil && req.ReturnPartialSuccess != nil {
 			params.Add("returnPartialSuccess", fmt.Sprintf("%v", req.GetReturnPartialSuccess()))

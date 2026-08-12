@@ -17,6 +17,7 @@
 package compute
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -37,20 +38,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var newGlobalOrganizationOperationsClientHook clientHook
+var newHostsClientHook clientHook
 
-// GlobalOrganizationOperationsCallOptions contains the retry settings for each method of GlobalOrganizationOperationsClient.
-type GlobalOrganizationOperationsCallOptions struct {
-	Delete []gax.CallOption
-	Get    []gax.CallOption
-	List   []gax.CallOption
+// HostsCallOptions contains the retry settings for each method of HostsClient.
+type HostsCallOptions struct {
+	Get        []gax.CallOption
+	GetVersion []gax.CallOption
+	List       []gax.CallOption
 }
 
-func defaultGlobalOrganizationOperationsRESTCallOptions() *GlobalOrganizationOperationsCallOptions {
-	return &GlobalOrganizationOperationsCallOptions{
-		Delete: []gax.CallOption{
-			gax.WithTimeout(600000 * time.Millisecond),
-		},
+func defaultHostsRESTCallOptions() *HostsCallOptions {
+	return &HostsCallOptions{
 		Get: []gax.CallOption{
 			gax.WithTimeout(600000 * time.Millisecond),
 			gax.WithRetry(func() gax.Retryer {
@@ -62,6 +60,9 @@ func defaultGlobalOrganizationOperationsRESTCallOptions() *GlobalOrganizationOpe
 					http.StatusGatewayTimeout,
 					http.StatusServiceUnavailable)
 			}),
+		},
+		GetVersion: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
 		},
 		List: []gax.CallOption{
 			gax.WithTimeout(600000 * time.Millisecond),
@@ -78,40 +79,40 @@ func defaultGlobalOrganizationOperationsRESTCallOptions() *GlobalOrganizationOpe
 	}
 }
 
-// internalGlobalOrganizationOperationsClient is an interface that defines the methods available from Compute Engine API.
-type internalGlobalOrganizationOperationsClient interface {
+// internalHostsClient is an interface that defines the methods available from Compute Engine API.
+type internalHostsClient interface {
 	Close() error
 	setGoogleClientInfo(...string)
 	Connection() *grpc.ClientConn
-	Delete(context.Context, *computepb.DeleteGlobalOrganizationOperationRequest, ...gax.CallOption) (*computepb.DeleteGlobalOrganizationOperationResponse, error)
-	Get(context.Context, *computepb.GetGlobalOrganizationOperationRequest, ...gax.CallOption) (*computepb.Operation, error)
-	List(context.Context, *computepb.ListGlobalOrganizationOperationsRequest, ...gax.CallOption) *OperationIterator
+	Get(context.Context, *computepb.GetHostRequest, ...gax.CallOption) (*computepb.Host, error)
+	GetVersion(context.Context, *computepb.GetVersionHostRequest, ...gax.CallOption) (*Operation, error)
+	List(context.Context, *computepb.ListHostsRequest, ...gax.CallOption) *HostIterator
 }
 
-// GlobalOrganizationOperationsClient is a client for interacting with Compute Engine API.
+// HostsClient is a client for interacting with Compute Engine API.
 // Methods, except Close, may be called concurrently. However, fields must not be modified concurrently with method calls.
 //
-// The GlobalOrganizationOperations API.
-type GlobalOrganizationOperationsClient struct {
+// The Hosts API.
+type HostsClient struct {
 	// The internal transport-dependent client.
-	internalClient internalGlobalOrganizationOperationsClient
+	internalClient internalHostsClient
 
 	// The call options for this service.
-	CallOptions *GlobalOrganizationOperationsCallOptions
+	CallOptions *HostsCallOptions
 }
 
 // Wrapper methods routed to the internal client.
 
 // Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
-func (c *GlobalOrganizationOperationsClient) Close() error {
+func (c *HostsClient) Close() error {
 	return c.internalClient.Close()
 }
 
 // setGoogleClientInfo sets the name and version of the application in
 // the `x-goog-api-client` header passed on each request. Intended for
 // use by Google-written clients.
-func (c *GlobalOrganizationOperationsClient) setGoogleClientInfo(keyval ...string) {
+func (c *HostsClient) setGoogleClientInfo(keyval ...string) {
 	c.internalClient.setGoogleClientInfo(keyval...)
 }
 
@@ -119,49 +120,50 @@ func (c *GlobalOrganizationOperationsClient) setGoogleClientInfo(keyval ...strin
 //
 // Deprecated: Connections are now pooled so this method does not always
 // return the same resource.
-func (c *GlobalOrganizationOperationsClient) Connection() *grpc.ClientConn {
+func (c *HostsClient) Connection() *grpc.ClientConn {
 	return c.internalClient.Connection()
 }
 
-// Delete deletes the specified Operations resource.
-func (c *GlobalOrganizationOperationsClient) Delete(ctx context.Context, req *computepb.DeleteGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.DeleteGlobalOrganizationOperationResponse, error) {
-	return c.internalClient.Delete(ctx, req, opts...)
-}
-
-// Get retrieves the specified Operations resource. Gets a list of operations
-// by making a list() request.
-func (c *GlobalOrganizationOperationsClient) Get(ctx context.Context, req *computepb.GetGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.Operation, error) {
+// Get retrieves information about the specified host.
+func (c *HostsClient) Get(ctx context.Context, req *computepb.GetHostRequest, opts ...gax.CallOption) (*computepb.Host, error) {
 	return c.internalClient.Get(ctx, req, opts...)
 }
 
-// List retrieves a list of Operation resources contained within the specified
-// organization.
-func (c *GlobalOrganizationOperationsClient) List(ctx context.Context, req *computepb.ListGlobalOrganizationOperationsRequest, opts ...gax.CallOption) *OperationIterator {
+// GetVersion allows customers to get SBOM versions of a host.
+func (c *HostsClient) GetVersion(ctx context.Context, req *computepb.GetVersionHostRequest, opts ...gax.CallOption) (*Operation, error) {
+	return c.internalClient.GetVersion(ctx, req, opts...)
+}
+
+// List retrieves a list of hosts.
+func (c *HostsClient) List(ctx context.Context, req *computepb.ListHostsRequest, opts ...gax.CallOption) *HostIterator {
 	return c.internalClient.List(ctx, req, opts...)
 }
 
 // Methods, except Close, may be called concurrently. However, fields must not be modified concurrently with method calls.
-type globalOrganizationOperationsRESTClient struct {
+type hostsRESTClient struct {
 	// The http endpoint to connect to.
 	endpoint string
 
 	// The http client.
 	httpClient *http.Client
 
+	// operationClient is used to call the operation-specific management service.
+	operationClient *ZoneOperationsClient
+
 	// The x-goog-* headers to be sent with each request.
 	xGoogHeaders []string
 
-	// Points back to the CallOptions field of the containing GlobalOrganizationOperationsClient
-	CallOptions **GlobalOrganizationOperationsCallOptions
+	// Points back to the CallOptions field of the containing HostsClient
+	CallOptions **HostsCallOptions
 
 	logger *slog.Logger
 }
 
-// NewGlobalOrganizationOperationsRESTClient creates a new global organization operations rest client.
+// NewHostsRESTClient creates a new hosts rest client.
 //
-// The GlobalOrganizationOperations API.
-func NewGlobalOrganizationOperationsRESTClient(ctx context.Context, opts ...option.ClientOption) (*GlobalOrganizationOperationsClient, error) {
-	clientOpts := append(defaultGlobalOrganizationOperationsRESTClientOptions(), opts...)
+// The Hosts API.
+func NewHostsRESTClient(ctx context.Context, opts ...option.ClientOption) (*HostsClient, error) {
+	clientOpts := append(defaultHostsRESTClientOptions(), opts...)
 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
 		clientOpts = append(clientOpts, internaloption.WithTelemetryAttributes(map[string]string{
 			"gcp.client.service":  "compute",
@@ -177,8 +179,8 @@ func NewGlobalOrganizationOperationsRESTClient(ctx context.Context, opts ...opti
 		return nil, err
 	}
 
-	callOpts := defaultGlobalOrganizationOperationsRESTCallOptions()
-	c := &globalOrganizationOperationsRESTClient{
+	callOpts := defaultHostsRESTCallOptions()
+	c := &hostsRESTClient{
 		endpoint:    endpoint,
 		httpClient:  httpClient,
 		CallOptions: &callOpts,
@@ -198,15 +200,25 @@ func NewGlobalOrganizationOperationsRESTClient(ctx context.Context, opts ...opti
 			}),
 		)
 
-		callOpts.Delete = append(callOpts.Delete, gax.WithClientMetrics(metrics))
 		callOpts.Get = append(callOpts.Get, gax.WithClientMetrics(metrics))
+		callOpts.GetVersion = append(callOpts.GetVersion, gax.WithClientMetrics(metrics))
 		callOpts.List = append(callOpts.List, gax.WithClientMetrics(metrics))
 	}
 
-	return &GlobalOrganizationOperationsClient{internalClient: c, CallOptions: callOpts}, nil
+	o := []option.ClientOption{
+		option.WithHTTPClient(httpClient),
+		option.WithEndpoint(endpoint),
+	}
+	opC, err := NewZoneOperationsRESTClient(ctx, o...)
+	if err != nil {
+		return nil, err
+	}
+	c.operationClient = opC
+
+	return &HostsClient{internalClient: c, CallOptions: callOpts}, nil
 }
 
-func defaultGlobalOrganizationOperationsRESTClientOptions() []option.ClientOption {
+func defaultHostsRESTClientOptions() []option.ClientOption {
 	return []option.ClientOption{
 		internaloption.WithDefaultEndpoint("https://compute.googleapis.com"),
 		internaloption.WithDefaultEndpointTemplate("https://compute.UNIVERSE_DOMAIN"),
@@ -221,7 +233,7 @@ func defaultGlobalOrganizationOperationsRESTClientOptions() []option.ClientOptio
 // setGoogleClientInfo sets the name and version of the application in
 // the `x-goog-api-client` header passed on each request. Intended for
 // use by Google-written clients.
-func (c *globalOrganizationOperationsRESTClient) setGoogleClientInfo(keyval ...string) {
+func (c *hostsRESTClient) setGoogleClientInfo(keyval ...string) {
 	kv := append([]string{"gl-go", gax.GoVersion}, keyval...)
 	kv = append(kv, "gapic", getVersionClient(), "gax", gax.Version, "rest", "UNKNOWN", "pb", protoVersion)
 	c.xGoogHeaders = []string{
@@ -231,110 +243,46 @@ func (c *globalOrganizationOperationsRESTClient) setGoogleClientInfo(keyval ...s
 
 // Close closes the connection to the API service. **Always** call Close() when
 // the client is no longer required.
-func (c *globalOrganizationOperationsRESTClient) Close() error {
+func (c *hostsRESTClient) Close() error {
 	// Replace httpClient with nil to force cleanup.
 	c.httpClient = nil
+	if err := c.operationClient.Close(); err != nil {
+		return err
+	}
 	return nil
 }
 
 // Connection returns a connection to the API service.
 //
 // Deprecated: This method always returns nil.
-func (c *globalOrganizationOperationsRESTClient) Connection() *grpc.ClientConn {
+func (c *hostsRESTClient) Connection() *grpc.ClientConn {
 	return nil
 }
 
-// Delete deletes the specified Operations resource.
-func (c *globalOrganizationOperationsRESTClient) Delete(ctx context.Context, req *computepb.DeleteGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.DeleteGlobalOrganizationOperationResponse, error) {
+// Get retrieves information about the specified host.
+func (c *hostsRESTClient) Get(ctx context.Context, req *computepb.GetHostRequest, opts ...gax.CallOption) (*computepb.Host, error) {
 	baseUrl, err := url.Parse(c.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	baseUrl.Path += fmt.Sprintf("/compute/v1/locations/global/operations/%v", req.GetOperation())
-
-	params := url.Values{}
-	if req != nil && req.ParentId != nil {
-		params.Add("parentId", fmt.Sprintf("%v", req.GetParentId()))
-	}
-
-	baseUrl.RawQuery = params.Encode()
+	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/zones/%v/%v/hosts/%v", req.GetProject(), req.GetZone(), req.GetAssociation(), req.GetHost())
 
 	// Build HTTP headers from client and context metadata.
-	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v", "operation", url.QueryEscape(req.GetOperation()))}
+	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v&%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "zone", url.QueryEscape(req.GetZone()), "association", url.QueryEscape(req.GetAssociation()), "host", url.QueryEscape(req.GetHost()))}
 
 	hds = append(c.xGoogHeaders, hds...)
 	hds = append(hds, "Content-Type", "application/json")
 	headers := gax.BuildHeaders(ctx, hds...)
 	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/locations/global/operations/%v", req.GetOperation()))
+		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/projects/%v/zones/%v", req.GetProject(), req.GetZone()))
 	}
 	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.GlobalOrganizationOperations/Delete")
-		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/locations/global/operations/{operation}")
-	}
-	opts = append((*c.CallOptions).Delete[0:len((*c.CallOptions).Delete):len((*c.CallOptions).Delete)], opts...)
-	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
-	resp := &computepb.DeleteGlobalOrganizationOperationResponse{}
-	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
-		if settings.Path != "" {
-			baseUrl.Path = settings.Path
-		}
-		httpReq, err := http.NewRequest("DELETE", baseUrl.String(), nil)
-		if err != nil {
-			return err
-		}
-		httpReq = httpReq.WithContext(ctx)
-		httpReq.Header = headers
-
-		buf, err := executeHTTPRequest(ctx, c.httpClient, httpReq, c.logger, nil, "Delete")
-		if err != nil {
-			return err
-		}
-
-		if err := unm.Unmarshal(buf, resp); err != nil {
-			return err
-		}
-
-		return nil
-	}, opts...)
-	if e != nil {
-		return nil, e
-	}
-	return resp, nil
-}
-
-// Get retrieves the specified Operations resource. Gets a list of operations
-// by making a list() request.
-func (c *globalOrganizationOperationsRESTClient) Get(ctx context.Context, req *computepb.GetGlobalOrganizationOperationRequest, opts ...gax.CallOption) (*computepb.Operation, error) {
-	baseUrl, err := url.Parse(c.endpoint)
-	if err != nil {
-		return nil, err
-	}
-	baseUrl.Path += fmt.Sprintf("/compute/v1/locations/global/operations/%v", req.GetOperation())
-
-	params := url.Values{}
-	if req != nil && req.ParentId != nil {
-		params.Add("parentId", fmt.Sprintf("%v", req.GetParentId()))
-	}
-
-	baseUrl.RawQuery = params.Encode()
-
-	// Build HTTP headers from client and context metadata.
-	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v", "operation", url.QueryEscape(req.GetOperation()))}
-
-	hds = append(c.xGoogHeaders, hds...)
-	hds = append(hds, "Content-Type", "application/json")
-	headers := gax.BuildHeaders(ctx, hds...)
-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/locations/global/operations/%v", req.GetOperation()))
-	}
-	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.GlobalOrganizationOperations/Get")
-		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/locations/global/operations/{operation}")
+		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.Hosts/Get")
+		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/projects/{project}/zones/{zone}/{association}/hosts/{host}")
 	}
 	opts = append((*c.CallOptions).Get[0:len((*c.CallOptions).Get):len((*c.CallOptions).Get)], opts...)
 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
-	resp := &computepb.Operation{}
+	resp := &computepb.Host{}
 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
 		if settings.Path != "" {
 			baseUrl.Path = settings.Path
@@ -363,14 +311,87 @@ func (c *globalOrganizationOperationsRESTClient) Get(ctx context.Context, req *c
 	return resp, nil
 }
 
-// List retrieves a list of Operation resources contained within the specified
-// organization.
-func (c *globalOrganizationOperationsRESTClient) List(ctx context.Context, req *computepb.ListGlobalOrganizationOperationsRequest, opts ...gax.CallOption) *OperationIterator {
-	it := &OperationIterator{}
+// GetVersion allows customers to get SBOM versions of a host.
+func (c *hostsRESTClient) GetVersion(ctx context.Context, req *computepb.GetVersionHostRequest, opts ...gax.CallOption) (*Operation, error) {
+	m := protojson.MarshalOptions{AllowPartial: true}
+	body := req.GetHostsGetVersionRequestResource()
+	jsonReq, err := m.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	baseUrl, err := url.Parse(c.endpoint)
+	if err != nil {
+		return nil, err
+	}
+	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/zones/%v/%v/hosts/%v/getVersion", req.GetProject(), req.GetZone(), req.GetAssociation(), req.GetHost())
+
+	params := url.Values{}
+	if req != nil && req.RequestId != nil {
+		params.Add("requestId", fmt.Sprintf("%v", req.GetRequestId()))
+	}
+
+	baseUrl.RawQuery = params.Encode()
+
+	// Build HTTP headers from client and context metadata.
+	hds := []string{"x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v&%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "zone", url.QueryEscape(req.GetZone()), "association", url.QueryEscape(req.GetAssociation()), "host", url.QueryEscape(req.GetHost()))}
+
+	hds = append(c.xGoogHeaders, hds...)
+	hds = append(hds, "Content-Type", "application/json")
+	headers := gax.BuildHeaders(ctx, hds...)
+	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/projects/%v/zones/%v", req.GetProject(), req.GetZone()))
+	}
+	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
+		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.Hosts/GetVersion")
+		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/projects/{project}/zones/{zone}/{association}/hosts/{host}/getVersion")
+	}
+	opts = append((*c.CallOptions).GetVersion[0:len((*c.CallOptions).GetVersion):len((*c.CallOptions).GetVersion)], opts...)
+	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
+	resp := &computepb.Operation{}
+	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
+		if settings.Path != "" {
+			baseUrl.Path = settings.Path
+		}
+		httpReq, err := http.NewRequest("POST", baseUrl.String(), bytes.NewReader(jsonReq))
+		if err != nil {
+			return err
+		}
+		httpReq = httpReq.WithContext(ctx)
+		httpReq.Header = headers
+
+		buf, err := executeHTTPRequest(ctx, c.httpClient, httpReq, c.logger, jsonReq, "GetVersion")
+		if err != nil {
+			return err
+		}
+
+		if err := unm.Unmarshal(buf, resp); err != nil {
+			return err
+		}
+
+		return nil
+	}, opts...)
+	if e != nil {
+		return nil, e
+	}
+	op := &Operation{
+		&zoneOperationsHandle{
+			c:       c.operationClient,
+			proto:   resp,
+			project: req.GetProject(),
+			zone:    req.GetZone(),
+		},
+	}
+	return op, nil
+}
+
+// List retrieves a list of hosts.
+func (c *hostsRESTClient) List(ctx context.Context, req *computepb.ListHostsRequest, opts ...gax.CallOption) *HostIterator {
+	it := &HostIterator{}
 	req = proto.CloneOf(req)
 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
-	it.InternalFetch = func(pageSize int, pageToken string) ([]*computepb.Operation, string, error) {
-		resp := &computepb.OperationList{}
+	it.InternalFetch = func(pageSize int, pageToken string) ([]*computepb.Host, string, error) {
+		resp := &computepb.HostsListResponse{}
 		if pageToken != "" {
 			req.PageToken = proto.String(pageToken)
 		}
@@ -383,7 +404,7 @@ func (c *globalOrganizationOperationsRESTClient) List(ctx context.Context, req *
 		if err != nil {
 			return nil, "", err
 		}
-		baseUrl.Path += fmt.Sprintf("/compute/v1/locations/global/operations")
+		baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/zones/%v/%v/hosts", req.GetProject(), req.GetZone(), req.GetAssociation())
 
 		params := url.Values{}
 		if req != nil && req.Filter != nil {
@@ -397,9 +418,6 @@ func (c *globalOrganizationOperationsRESTClient) List(ctx context.Context, req *
 		}
 		if req != nil && req.PageToken != nil {
 			params.Add("pageToken", fmt.Sprintf("%v", req.GetPageToken()))
-		}
-		if req != nil && req.ParentId != nil {
-			params.Add("parentId", fmt.Sprintf("%v", req.GetParentId()))
 		}
 		if req != nil && req.ReturnPartialSuccess != nil {
 			params.Add("returnPartialSuccess", fmt.Sprintf("%v", req.GetReturnPartialSuccess()))
