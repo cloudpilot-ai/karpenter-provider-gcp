@@ -1,6 +1,6 @@
 # Spot preemption notice
 
-GCE reclaims Spot VMs with little warning. By default Karpenter only finds out once the shutdown signal has already been delivered and kubelet reports the node as shutting down, which leaves a fraction of the 30 second shutdown window for draining.
+GCE reclaims Spot VMs with little warning. By default Karpenter only finds out once the shutdown signal has already been delivered and kubelet reports the node as shutting down, which leaves a fraction of the 30-second shutdown window for draining.
 
 This page covers how to get that warning earlier — up to two minutes earlier — so pods have time to move.
 
@@ -49,16 +49,21 @@ The two do not conflict — they set different conditions and the GKE-managed on
 
 ## Detector configuration
 
-| Value                                     | Default                            | Purpose                                               |
-|-------------------------------------------|------------------------------------|-------------------------------------------------------|
-| `spotPreemptionNotice.enabled`            | `false`                            | Deploy the DaemonSet                                  |
-| `spotPreemptionNotice.nodeSelector`       | `karpenter.sh/capacity-type: spot` | Which nodes run it                                    |
-| `spotPreemptionNotice.waitTimeoutSeconds` | `30`                               | How long each metadata poll blocks                    |
-| `spotPreemptionNotice.priorityClassName`  | `system-node-critical`             | Keeps it from being evicted off a node it is watching |
-| `spotPreemptionNotice.image.tag`          | `v0.8.20`                          | node-problem-detector version                         |
-| `spotPreemptionNotice.resources`          | 10m CPU / 32Mi                     | Per-node cost                                         |
+| Value                                        | Default                            | Purpose                                               |
+|----------------------------------------------|------------------------------------|-------------------------------------------------------|
+| `spotPreemptionNotice.enabled`               | `false`                            | Deploy the DaemonSet                                  |
+| `spotPreemptionNotice.nodeSelector`          | `karpenter.sh/capacity-type: spot` | Which nodes run it                                    |
+| `spotPreemptionNotice.pollIntervalSeconds`   | `2`                                | How often the metadata server is checked              |
+| `spotPreemptionNotice.requestTimeoutSeconds` | `5`                                | How long to wait before reporting Unknown             |
+| `spotPreemptionNotice.priorityClassName`     | `system-node-critical`             | Keeps it from being evicted off a node it is watching |
+| `spotPreemptionNotice.image.tag`             | `v0.8.20`                          | node-problem-detector version                         |
+| `spotPreemptionNotice.resources`             | 10m CPU / 32Mi                     | Per-node cost                                         |
 
 The detector runs with host networking. It has to: pods otherwise reach the GKE metadata server, which does not expose `instance/preempted`. It talks to `169.254.169.254` directly rather than resolving `metadata.google.internal`, so detection does not depend on cluster DNS still working during a shutdown.
+
+The check reads the metadata server over bash's `/dev/tcp` rather than shelling out to `curl`. The node-problem-detector image ships no `curl`, `wget`, `nc` or `python`, so overriding `image.repository` requires an image with a bash that has `/dev/tcp` support.
+
+A check that cannot reach the metadata server, times out, or gets an unexpected response reports the condition as `Unknown` rather than `False`. A broken detector is therefore visible as `Unknown` instead of silently looking like a healthy node.
 
 ## Checking it works
 
@@ -77,7 +82,7 @@ kubectl get nodes -o custom-columns=\
 'NAME:.metadata.name,PREEMPTING:.status.conditions[?(@.type=="GCESpotPreempting")].status'
 ```
 
-A healthy node reports `False`. When a preemption notice arrives it flips to `True`, and Karpenter records a `PreemptionNoticeReceived` event against the node:
+A healthy node reports `False`. `Unknown` means the check itself is failing — look at the detector pod logs. When a preemption notice arrives the condition flips to `True`, and Karpenter records a `PreemptionNoticeReceived` event against the node:
 
 ```sh
 kubectl get events --field-selector reason=PreemptionNoticeReceived

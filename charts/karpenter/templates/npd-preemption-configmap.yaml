@@ -15,8 +15,8 @@ data:
     {
       "plugin": "custom",
       "pluginConfig": {
-        "invoke_interval": "5s",
-        "timeout": "{{ add .Values.spotPreemptionNotice.waitTimeoutSeconds 15 }}s",
+        "invoke_interval": "{{ .Values.spotPreemptionNotice.pollIntervalSeconds }}s",
+        "timeout": "{{ add .Values.spotPreemptionNotice.requestTimeoutSeconds 10 }}s",
         "max_output_length": 120,
         "concurrency": 1
       },
@@ -35,55 +35,98 @@ data:
           "condition": "GCESpotPreempting",
           "reason": "SpotPreemptionImminent",
           "path": "/custom-config/check-preemption.sh",
-          "timeout": "{{ add .Values.spotPreemptionNotice.waitTimeoutSeconds 10 }}s"
+          "timeout": "{{ add .Values.spotPreemptionNotice.requestTimeoutSeconds 5 }}s"
         }
       ]
     }
   check-preemption.sh: |
-    #!/bin/sh
-    # Watches the GCE metadata server for a Spot preemption notice and exits 1
-    # when one arrives, which node-problem-detector turns into
-    # GCESpotPreempting=True. Karpenter's interruption controller reacts to that
-    # condition and starts draining.
+    #!/usr/bin/env bash
+    # Reports whether GCE has flagged this Spot VM for preemption, by reading the
+    # instance/preempted metadata key. node-problem-detector turns the exit code
+    # into the GCESpotPreempting node condition, and Karpenter's interruption
+    # controller drains on it.
     #
-    # With spec.preemptionNoticeDuration set to 120 on the GCENodeClass, GCE
-    # flips this key two minutes before the shutdown signal. With it left at 0
-    # the key still flips a few seconds before kubelet reports the node
-    # shutting down, so this is worth running either way.
-    set -u
+    # Exit codes are node-problem-detector's:
+    #   0  not preempted
+    #   1  preempted
+    #   2  could not tell
+    #
+    # Exit 2 matters. A probe that cannot reach the metadata server must not look
+    # like a healthy node, or a broken detector would sit reporting False while
+    # preemptions went unnoticed.
+    #
+    # The request is written straight to /dev/tcp rather than shelling out: the
+    # node-problem-detector image ships no curl, wget, nc, or python. Anyone
+    # overriding image.repository needs a bash with /dev/tcp support. HTTP/1.0
+    # with Connection: close makes the server close the socket after the body,
+    # so there is no chunked encoding to parse.
+    set -uo pipefail
 
-    # The literal metadata IP rather than metadata.google.internal: this must
-    # keep working during a shutdown, when cluster DNS may already be gone. Host
-    # networking puts us on the real GCE metadata server rather than the GKE one,
-    # which does not expose instance/preempted to pods.
-    URL="http://169.254.169.254/computeMetadata/v1/instance/preempted"
-    HEADER="Metadata-Flavor: Google"
-    WAIT={{ .Values.spotPreemptionNotice.waitTimeoutSeconds }}
+    HOST="${METADATA_HOST:-169.254.169.254}"
+    PORT="${METADATA_PORT:-80}"
+    REQUEST_PATH="/computeMetadata/v1/instance/preempted"
+    TIMEOUT="${REQUEST_TIMEOUT_SECONDS:-{{ .Values.spotPreemptionNotice.requestTimeoutSeconds }}}"
 
-    preempted() {
-      case "$1" in
-        TRUE|true) return 0 ;;
-        *) return 1 ;;
-      esac
+    unknown() {
+      echo "$1"
+      exit 2
     }
 
-    # Read the current value before waiting. wait_for_change blocks until the
-    # value *changes*, so a node already flagged would otherwise sit out the
-    # whole timeout before being noticed.
-    current=$(curl -s -f --max-time 5 -H "${HEADER}" "${URL}" 2>/dev/null) || current=""
-    if preempted "${current}"; then
+    exec 3<>"/dev/tcp/${HOST}/${PORT}" 2>/dev/null ||
+      unknown "cannot reach metadata server at ${HOST}:${PORT}"
+
+    printf 'GET %s HTTP/1.0\r\nHost: metadata.google.internal\r\nMetadata-Flavor: Google\r\nConnection: close\r\n\r\n' \
+      "${REQUEST_PATH}" >&3 2>/dev/null || unknown "metadata request failed"
+
+    response=""
+    line=""
+    read_status=0
+    while true; do
+      IFS= read -r -t "${TIMEOUT}" line <&3
+      read_status=$?
+      if [ "${read_status}" -eq 0 ]; then
+        response+="${line}"$'\n'
+        continue
+      fi
+      # The body arrives without a trailing newline, so the final read fails at
+      # EOF with the payload still sitting in $line. Dropping it would discard
+      # the value we came for.
+      [ -n "${line}" ] && response+="${line}"$'\n'
+      break
+    done
+    exec 3<&-
+
+    # read returns >128 when it times out and 1 at a clean EOF. A timeout means
+    # the server never finished answering, so whatever arrived cannot be trusted.
+    if [ "${read_status}" -gt 128 ]; then
+      unknown "timed out reading from metadata server after ${TIMEOUT}s"
+    fi
+    [ -n "${response}" ] || unknown "empty response from metadata server"
+
+    response="${response//$'\r'/}"
+
+    status_line="${response%%$'\n'*}"
+    case "${status_line}" in
+    HTTP/1.[01]\ 200*) ;;
+    *) unknown "unexpected metadata response: ${status_line}" ;;
+    esac
+
+    # Body is whatever follows the blank line that ends the headers.
+    case "${response}" in
+    *$'\n\n'*) body="${response#*$'\n\n'}" ;;
+    *) unknown "malformed metadata response: no header terminator" ;;
+    esac
+
+    # Trim surrounding whitespace and newlines.
+    body="${body#"${body%%[![:space:]]*}"}"
+    body="${body%"${body##*[![:space:]]}"}"
+
+    case "${body}" in
+    TRUE | true)
       echo "instance is being preempted"
       exit 1
-    fi
-
-    # Not flagged yet, so block until it flips or the timeout expires. This costs
-    # one idle connection instead of a busy poll loop.
-    changed=$(curl -s -f --max-time "$((WAIT + 5))" -H "${HEADER}" \
-      "${URL}?wait_for_change=true&timeout_sec=${WAIT}" 2>/dev/null) || changed=""
-    if preempted "${changed}"; then
-      echo "instance is being preempted"
-      exit 1
-    fi
-
-    exit 0
+      ;;
+    FALSE | false) exit 0 ;;
+    *) unknown "unexpected instance/preempted value: '${body}'" ;;
+    esac
 {{- end -}}
