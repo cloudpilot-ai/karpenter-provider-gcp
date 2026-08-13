@@ -11,6 +11,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 data:
+  # skip_initial_status keeps node-problem-detector from publishing the default
+  # False before the first probe has run. A node nothing has checked yet must not
+  # look healthy, for the same reason the plugin reports Unknown on failure.
   gce-preemption-monitor.json: |
     {
       "plugin": "custom",
@@ -18,7 +21,8 @@ data:
         "invoke_interval": "{{ .Values.spotPreemptionNotice.pollIntervalSeconds }}s",
         "timeout": "{{ add .Values.spotPreemptionNotice.requestTimeoutSeconds 10 }}s",
         "max_output_length": 120,
-        "concurrency": 1
+        "concurrency": 1,
+        "skip_initial_status": true
       },
       "source": "gce-preemption-monitor",
       "metricsReporting": true,

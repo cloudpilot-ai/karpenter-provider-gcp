@@ -162,7 +162,7 @@ serviceMonitor:
 | spotPreemptionNotice.image.tag | string | `"v0.8.20"` | Tag for the node-problem-detector image. |
 | spotPreemptionNotice.nodeSelector | object | `{"karpenter.sh/capacity-type":"spot"}` | Which nodes run the detector. Spot capacity only by default, since on-demand instances are never preempted. |
 | spotPreemptionNotice.pollIntervalSeconds | int | `2` | How often to check the metadata server, in seconds. This bounds how late a preemption notice is noticed, so it should stay small relative to the 120s notice window. |
-| spotPreemptionNotice.priorityClassName | string | `"system-node-critical"` | PriorityClass for the detector. Should be high enough that the detector is not evicted from a node it is responsible for watching. |
+| spotPreemptionNotice.priorityClassName | string | `"system-node-critical"` | PriorityClass for the detector. The priority class should be high enough that the detector is not evicted from a node it is responsible for watching. |
 | spotPreemptionNotice.requestTimeoutSeconds | int | `5` | How long to wait for a metadata server response before giving up, in seconds. A timed-out check reports Unknown rather than healthy. The plugin and rule timeouts are derived from this. |
 | spotPreemptionNotice.resources | object | `{"limits":{"memory":"64Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}` | Resource requests and limits for the detector. |
 | spotPreemptionNotice.tolerations | list | `[{"operator":"Exists"}]` | Tolerations for the detector. Defaults to tolerating everything so it reaches spot nodes regardless of workload taints. |

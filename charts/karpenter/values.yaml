@@ -200,8 +200,8 @@ spotPreemptionNotice:
     - operator: Exists
   # -- Affinity for the detector pods.
   affinity: {}
-  # -- PriorityClass for the detector. Should be high enough that the detector is
-  # not evicted from a node it is responsible for watching.
+  # -- PriorityClass for the detector. The priority class should be high enough
+  # that the detector is not evicted from a node it is responsible for watching.
   priorityClassName: system-node-critical
   # -- Resource requests and limits for the detector.
   resources:
