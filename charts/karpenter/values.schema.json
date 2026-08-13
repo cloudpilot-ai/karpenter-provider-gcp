@@ -410,12 +410,19 @@
             }
           }
         },
-        "waitTimeoutSeconds": {
+        "pollIntervalSeconds": {
           "type": "integer",
-          "minimum": 5,
-          "maximum": 300,
-          "description": "How long each metadata long-poll blocks before being retried, in seconds.",
-          "default": 30
+          "minimum": 1,
+          "maximum": 60,
+          "description": "How often to check the metadata server, in seconds.",
+          "default": 2
+        },
+        "requestTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "description": "How long to wait for a metadata server response before reporting Unknown, in seconds.",
+          "default": 5
         },
         "nodeSelector": {
           "type": "object",

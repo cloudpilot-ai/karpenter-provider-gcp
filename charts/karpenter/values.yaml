@@ -175,15 +175,21 @@ spotPreemptionNotice:
   enabled: false
   image:
     # -- Repository for the node-problem-detector image running the detection plugin.
+    # The plugin reads the metadata server over bash's /dev/tcp, because this image
+    # ships no curl, wget or python. An override must provide bash with /dev/tcp support.
     repository: registry.k8s.io/node-problem-detector/node-problem-detector
     # -- Tag for the node-problem-detector image.
     tag: v0.8.20
     # -- Image pull policy for the detector.
     pullPolicy: IfNotPresent
-  # -- How long each metadata long-poll blocks before being retried, in seconds.
-  # Lower means more requests; higher means a longer wait before a failed poll is
-  # retried. The plugin and rule timeouts are derived from this.
-  waitTimeoutSeconds: 30
+  # -- How often to check the metadata server, in seconds. This bounds how late a
+  # preemption notice is noticed, so it should stay small relative to the 120s
+  # notice window.
+  pollIntervalSeconds: 2
+  # -- How long to wait for a metadata server response before giving up, in
+  # seconds. A timed-out check reports Unknown rather than healthy. The plugin and
+  # rule timeouts are derived from this.
+  requestTimeoutSeconds: 5
   # -- Which nodes run the detector. Spot capacity only by default, since
   # on-demand instances are never preempted.
   nodeSelector:
