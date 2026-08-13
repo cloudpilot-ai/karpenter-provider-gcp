@@ -1,0 +1,89 @@
+{{- if .Values.spotPreemptionNotice.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "karpenter.preemptionNotice.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "karpenter.preemptionNotice.labels" . | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  gce-preemption-monitor.json: |
+    {
+      "plugin": "custom",
+      "pluginConfig": {
+        "invoke_interval": "5s",
+        "timeout": "{{ add .Values.spotPreemptionNotice.waitTimeoutSeconds 15 }}s",
+        "max_output_length": 120,
+        "concurrency": 1
+      },
+      "source": "gce-preemption-monitor",
+      "metricsReporting": true,
+      "conditions": [
+        {
+          "type": "GCESpotPreempting",
+          "reason": "NoPreemptionNotice",
+          "message": "no GCE Spot preemption notice"
+        }
+      ],
+      "rules": [
+        {
+          "type": "permanent",
+          "condition": "GCESpotPreempting",
+          "reason": "SpotPreemptionImminent",
+          "path": "/custom-config/check-preemption.sh",
+          "timeout": "{{ add .Values.spotPreemptionNotice.waitTimeoutSeconds 10 }}s"
+        }
+      ]
+    }
+  check-preemption.sh: |
+    #!/bin/sh
+    # Watches the GCE metadata server for a Spot preemption notice and exits 1
+    # when one arrives, which node-problem-detector turns into
+    # GCESpotPreempting=True. Karpenter's interruption controller reacts to that
+    # condition and starts draining.
+    #
+    # With spec.preemptionNoticeDuration set to 120 on the GCENodeClass, GCE
+    # flips this key two minutes before the shutdown signal. With it left at 0
+    # the key still flips a few seconds before kubelet reports the node
+    # shutting down, so this is worth running either way.
+    set -u
+
+    # The literal metadata IP rather than metadata.google.internal: this must
+    # keep working during a shutdown, when cluster DNS may already be gone. Host
+    # networking puts us on the real GCE metadata server rather than the GKE one,
+    # which does not expose instance/preempted to pods.
+    URL="http://169.254.169.254/computeMetadata/v1/instance/preempted"
+    HEADER="Metadata-Flavor: Google"
+    WAIT={{ .Values.spotPreemptionNotice.waitTimeoutSeconds }}
+
+    preempted() {
+      case "$1" in
+        TRUE|true) return 0 ;;
+        *) return 1 ;;
+      esac
+    }
+
+    # Read the current value before waiting. wait_for_change blocks until the
+    # value *changes*, so a node already flagged would otherwise sit out the
+    # whole timeout before being noticed.
+    current=$(curl -s -f --max-time 5 -H "${HEADER}" "${URL}" 2>/dev/null) || current=""
+    if preempted "${current}"; then
+      echo "instance is being preempted"
+      exit 1
+    fi
+
+    # Not flagged yet, so block until it flips or the timeout expires. This costs
+    # one idle connection instead of a busy poll loop.
+    changed=$(curl -s -f --max-time "$((WAIT + 5))" -H "${HEADER}" \
+      "${URL}?wait_for_change=true&timeout_sec=${WAIT}" 2>/dev/null) || changed=""
+    if preempted "${changed}"; then
+      echo "instance is being preempted"
+      exit 1
+    fi
+
+    exit 0
+{{- end -}}

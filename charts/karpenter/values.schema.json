@@ -387,6 +387,60 @@
         }
       }
     },
+    "spotPreemptionNotice": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional DaemonSet that watches the GCE metadata server for Spot preemption notices and sets the GCESpotPreempting node condition.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Deploy the Spot preemption notice detector DaemonSet.",
+          "default": false
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Image for the node-problem-detector that runs the detection plugin.",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1 },
+            "pullPolicy": {
+              "type": "string",
+              "enum": ["Always", "IfNotPresent", "Never"]
+            }
+          }
+        },
+        "waitTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "description": "How long each metadata long-poll blocks before being retried, in seconds.",
+          "default": 30
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Which nodes run the detector. Spot capacity only by default."
+        },
+        "tolerations": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Tolerations for the detector pods."
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Affinity for the detector pods."
+        },
+        "priorityClassName": {
+          "type": "string",
+          "description": "PriorityClass for the detector pods."
+        },
+        "resources": {
+          "type": "object",
+          "description": "Resource requests and limits for the detector."
+        }
+      }
+    },
     "credentials": {
       "type": "object",
       "additionalProperties": false,

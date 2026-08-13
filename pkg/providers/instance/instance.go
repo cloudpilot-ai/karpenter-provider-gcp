@@ -669,7 +669,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          computeMetadata,
 		Labels:            instanceMetadata.ToComputeInstanceLabels(),
-		Scheduling:        setupScheduling(capacityType),
+		Scheduling:        setupScheduling(capacityType, nodeClass),
 		Tags:              buildInstanceTags(p.clusterName, clusterConfig.Id, nodeClass.Spec.NetworkTags),
 	}
 
@@ -1034,14 +1034,22 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass)
 	}, nil
 }
 
-// setupScheduling returns scheduling config derived from capacity type alone.
-// Spot-specific fields (provisioning model, preemptibility) are set later by
-// configureInstanceCapacityProvision; this only wires the termination action so
-// GCE honors DELETE rather than the default STOP on preemption.
-func setupScheduling(capacityType string) *compute.Scheduling {
+// setupScheduling returns scheduling config derived from capacity type and the
+// NodeClass. Spot-specific fields (provisioning model, preemptibility) are set
+// later by configureInstanceCapacityProvision; this wires the termination action
+// so GCE honors DELETE rather than the default STOP on preemption, and the
+// preemption notice duration so the instance/preempted metadata key flips ahead
+// of the ACPI G2 Soft Off signal.
+func setupScheduling(capacityType string, nodeClass *v1alpha1.GCENodeClass) *compute.Scheduling {
 	sched := &compute.Scheduling{}
-	if capacityType == karpv1.CapacityTypeSpot {
-		sched.InstanceTerminationAction = instanceTerminationActionDelete
+	if capacityType != karpv1.CapacityTypeSpot {
+		return sched
+	}
+	sched.InstanceTerminationAction = instanceTerminationActionDelete
+	// Zero means no advance notice, which is also the GCE default, so leave the
+	// field unset rather than sending an explicit zero duration.
+	if seconds := nodeClass.Spec.PreemptionNoticeDuration; seconds > 0 {
+		sched.PreemptionNoticeDuration = &compute.Duration{Seconds: seconds}
 	}
 	return sched
 }

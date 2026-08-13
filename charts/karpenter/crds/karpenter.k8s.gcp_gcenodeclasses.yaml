@@ -525,6 +525,21 @@ spec:
                   type: string
                 maxItems: 20
                 type: array
+              preemptionNoticeDuration:
+                default: 0
+                description: |-
+                  PreemptionNoticeDuration is how many seconds before shutdown GCE flips the
+                  instance/preempted metadata key on a Spot VM. 0 (the default) gives no advance
+                  notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.
+                  120 gives a two-minute warning, letting Karpenter start draining before shutdown.
+                  Only applies to Spot capacity; ignored for on-demand nodes.
+                  Reading the notice requires an agent on the node that watches the metadata key
+                  and sets the GCESpotPreempting condition — see docs/spot-preemption.md.
+                enum:
+                - 0
+                - 120
+                format: int64
+                type: integer
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance

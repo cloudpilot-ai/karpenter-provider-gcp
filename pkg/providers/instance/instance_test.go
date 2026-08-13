@@ -999,15 +999,51 @@ func TestSetupScheduling(t *testing.T) {
 
 	t.Run("spot sets termination action", func(t *testing.T) {
 		t.Parallel()
-		sched := setupScheduling(karpv1.CapacityTypeSpot)
+		sched := setupScheduling(karpv1.CapacityTypeSpot, &v1alpha1.GCENodeClass{})
 		require.Equal(t, instanceTerminationActionDelete, sched.InstanceTerminationAction)
 	})
 
 	t.Run("on-demand leaves termination action empty", func(t *testing.T) {
 		t.Parallel()
-		sched := setupScheduling(karpv1.CapacityTypeOnDemand)
+		sched := setupScheduling(karpv1.CapacityTypeOnDemand, &v1alpha1.GCENodeClass{})
 		require.Empty(t, sched.InstanceTerminationAction)
 	})
+}
+
+func TestSetupSchedulingPreemptionNoticeDuration(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name            string
+		capacityType    string
+		noticeDuration  int64
+		expectedSeconds int64
+	}{
+		{name: "spot unset leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot},
+		{name: "spot zero leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot, noticeDuration: 0},
+		{name: "spot 120 sets a two-minute notice", capacityType: karpv1.CapacityTypeSpot, noticeDuration: 120, expectedSeconds: 120},
+		// GCE rejects preemptionNoticeDuration on non-preemptible instances, so it
+		// must never be sent for on-demand capacity even when the NodeClass sets it.
+		{name: "on-demand ignores notice duration", capacityType: karpv1.CapacityTypeOnDemand, noticeDuration: 120},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.PreemptionNoticeDuration = tc.noticeDuration
+
+			sched := setupScheduling(tc.capacityType, nc)
+
+			if tc.expectedSeconds == 0 {
+				require.Nil(t, sched.PreemptionNoticeDuration)
+				return
+			}
+			require.NotNil(t, sched.PreemptionNoticeDuration)
+			require.Equal(t, tc.expectedSeconds, sched.PreemptionNoticeDuration.Seconds)
+		})
+	}
 }
 
 func spotOrOnDemandNodeClaim() *karpv1.NodeClaim {

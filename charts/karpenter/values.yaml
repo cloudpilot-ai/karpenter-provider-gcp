@@ -163,6 +163,48 @@ controller:
     # Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount.
     defaultNodepoolServiceAccount: ""
 
+# -- Optional DaemonSet that watches the GCE metadata server for Spot preemption
+# notices and sets the GCESpotPreempting node condition, which Karpenter's
+# interruption controller reacts to. Pair it with
+# `GCENodeClass.spec.preemptionNoticeDuration: 120` for a two-minute drain window.
+# See docs/spot-preemption.md.
+spotPreemptionNotice:
+  # -- Deploy the preemption notice detector. Off by default: GKE Standard node
+  # pools already run their own node-problem-detector, so enabling this adds a
+  # second one. It only lands on nodes matching `nodeSelector` below.
+  enabled: false
+  image:
+    # -- Repository for the node-problem-detector image running the detection plugin.
+    repository: registry.k8s.io/node-problem-detector/node-problem-detector
+    # -- Tag for the node-problem-detector image.
+    tag: v0.8.20
+    # -- Image pull policy for the detector.
+    pullPolicy: IfNotPresent
+  # -- How long each metadata long-poll blocks before being retried, in seconds.
+  # Lower means more requests; higher means a longer wait before a failed poll is
+  # retried. The plugin and rule timeouts are derived from this.
+  waitTimeoutSeconds: 30
+  # -- Which nodes run the detector. Spot capacity only by default, since
+  # on-demand instances are never preempted.
+  nodeSelector:
+    karpenter.sh/capacity-type: spot
+  # -- Tolerations for the detector. Defaults to tolerating everything so it
+  # reaches spot nodes regardless of workload taints.
+  tolerations:
+    - operator: Exists
+  # -- Affinity for the detector pods.
+  affinity: {}
+  # -- PriorityClass for the detector. Should be high enough that the detector is
+  # not evicted from a node it is responsible for watching.
+  priorityClassName: system-node-critical
+  # -- Resource requests and limits for the detector.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
 # -- GCP credentials configuration
 credentials:
   # -- Enable or disable the use of GCP credentials secret
