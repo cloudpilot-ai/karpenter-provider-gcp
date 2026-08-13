@@ -44,6 +44,12 @@ const (
 	NodeConditionReasonKubeletNotReady = "KubeletNotReady"
 	NodeConditionMessageShuttingDown   = "node is shutting down"
 
+	// NodeConditionTypeGCESpotPreempting is set by a node-side agent that watches the
+	// instance/preempted metadata key. With spec.preemptionNoticeDuration set on the
+	// GCENodeClass, GCE flips that key ahead of the ACPI G2 Soft Off signal, so this
+	// condition arrives before the kubelet shutdown path below.
+	NodeConditionTypeGCESpotPreempting = "GCESpotPreempting"
+
 	InterruptionReason = "interruption"
 )
 
@@ -84,8 +90,17 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 			continue
 		}
 
-		condition := node.GetCondition(&currentNode, corev1.NodeReady)
-		if condition.Status != corev1.ConditionTrue && condition.Reason == NodeConditionReasonKubeletNotReady && condition.Message == NodeConditionMessageShuttingDown {
+		// A preemption notice arrives ahead of the shutdown signal, so check it first.
+		// Preemption means GCE reclaimed the capacity, so the offering is marked
+		// unavailable; the kubelet path covers shutdowns from any cause and leaves
+		// the offering alone.
+		switch {
+		case isPreempting(&currentNode):
+			c.recorder.Publish(interruptionevents.PreemptionNoticeReceived(&currentNode)...)
+			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, true); err != nil {
+				return fmt.Errorf("cleaning node claim: %w", err)
+			}
+		case isShuttingDown(&currentNode):
 			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, false); err != nil {
 				return fmt.Errorf("cleaning node claim: %w", err)
 			}
@@ -93,6 +108,22 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// isPreempting reports whether a node-side agent has flagged an imminent Spot
+// preemption by setting the GCESpotPreempting condition.
+func isPreempting(n *corev1.Node) bool {
+	return node.GetCondition(n, NodeConditionTypeGCESpotPreempting).Status == corev1.ConditionTrue
+}
+
+// isShuttingDown reports whether kubelet has observed the node shutting down. This
+// only becomes true once the ACPI G2 Soft Off signal has already been delivered,
+// which is why it is the fallback rather than the primary signal.
+func isShuttingDown(n *corev1.Node) bool {
+	condition := node.GetCondition(n, corev1.NodeReady)
+	return condition.Status != corev1.ConditionTrue &&
+		condition.Reason == NodeConditionReasonKubeletNotReady &&
+		condition.Message == NodeConditionMessageShuttingDown
 }
 
 func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {
