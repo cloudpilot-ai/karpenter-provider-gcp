@@ -201,8 +201,9 @@ node-problem-detector:
       memory: 32Mi
     limits:
       memory: 64Mi
+  # @ignored
   settings:
-    # -- Run only the preemption plugin. The GKE-managed node-problem-detector already
+    # Run only the preemption plugin. The GKE-managed node-problem-detector already
     # covers the kernel and runtime log monitors on Standard node pools.
     log_monitors: []
     # -- Activates the preemption monitor defined in `custom_monitor_definitions`.
