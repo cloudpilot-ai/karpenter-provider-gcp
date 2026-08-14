@@ -109,6 +109,12 @@ func applyNodeClassKubeletConfig(config *kubeletconfig.KubeletConfiguration, ove
 	if overlay.CPUCFSQuota != nil {
 		config.CPUCFSQuota = overlay.CPUCFSQuota
 	}
+	if overlay.SerializeImagePulls != nil {
+		config.SerializeImagePulls = overlay.SerializeImagePulls
+	}
+	if overlay.MaxParallelImagePulls != nil {
+		config.MaxParallelImagePulls = overlay.MaxParallelImagePulls
+	}
 }
 
 func mergeKubeletQuantityMap(target *map[string]string, overlay map[string]v1alpha1.KubeletQuantity) {
