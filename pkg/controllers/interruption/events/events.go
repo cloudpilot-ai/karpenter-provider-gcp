@@ -22,10 +22,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
-// PreemptionNoticeReceived records that GCE signaled an imminent Spot preemption
-// for a node, ahead of the shutdown signal. The event is attached to the Node
-// rather than the NodeClaim so it survives in `kubectl describe node` while the
-// NodeClaim is being torn down.
 func PreemptionNoticeReceived(node *corev1.Node) (evts []events.Event) {
 	evts = append(evts, events.Event{
 		InvolvedObject: node,

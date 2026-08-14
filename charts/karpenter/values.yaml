@@ -163,46 +163,37 @@ controller:
     # Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount.
     defaultNodepoolServiceAccount: ""
 
-# -- Optional DaemonSet that watches the GCE metadata server for Spot preemption
-# notices and sets the GCESpotPreempting node condition, which Karpenter's
-# interruption controller reacts to. Pair it with
+# -- Optional node-problem-detector deployment that watches the GCE metadata server
+# for Spot preemption notices and sets the GCESpotPreempting node condition, which
+# Karpenter's interruption controller reacts to. Pair it with
 # `GCENodeClass.spec.preemptionNoticeDuration: 120` for a two-minute drain window.
 # See docs/spot-preemption.md.
-spotPreemptionNotice:
-  # -- Deploy the preemption notice detector. Off by default: GKE Standard node
-  # pools already run their own node-problem-detector, so enabling this adds a
-  # second one. It only lands on nodes matching `nodeSelector` below.
+node-problem-detector:
+  # -- Deploy node-problem-detector with the Spot preemption plugin. Off by default:
+  # GKE Standard node pools already run their own node-problem-detector, so enabling
+  # this adds a second one. It only lands on nodes matching `nodeSelector`.
   enabled: false
-  image:
-    # -- Repository for the node-problem-detector image running the detection plugin.
-    # The plugin reads the metadata server over bash's /dev/tcp, because this image
-    # ships no curl, wget or python. An override must provide bash with /dev/tcp support.
-    repository: registry.k8s.io/node-problem-detector/node-problem-detector
-    # -- Tag for the node-problem-detector image.
-    tag: v0.8.20
-    # -- Image pull policy for the detector.
-    pullPolicy: IfNotPresent
-  # -- How often to check the metadata server, in seconds. This bounds how late a
-  # preemption notice is noticed, so it should stay small relative to the 120s
-  # notice window.
-  pollIntervalSeconds: 2
-  # -- How long to wait for a metadata server response before giving up, in
-  # seconds. A timed-out check reports Unknown rather than healthy. The plugin and
-  # rule timeouts are derived from this.
-  requestTimeoutSeconds: 5
-  # -- Which nodes run the detector. Spot capacity only by default, since
-  # on-demand instances are never preempted.
+  # -- Required. The plugin reads the metadata server directly, which pods cannot do
+  # through the GKE metadata server.
+  hostNetwork: true
+  # -- Only Spot nodes need the detector; on-demand instances are never preempted.
   nodeSelector:
     karpenter.sh/capacity-type: spot
-  # -- Tolerations for the detector. Defaults to tolerating everything so it
-  # reaches spot nodes regardless of workload taints.
+  # -- Tolerate every taint so the detector reaches Spot nodes regardless of workload taints.
   tolerations:
     - operator: Exists
-  # -- Affinity for the detector pods.
-  affinity: {}
-  # -- PriorityClass for the detector. The priority class should be high enough
-  # that the detector is not evicted from a node it is responsible for watching.
-  priorityClassName: system-node-critical
+  # -- The plugin only needs network access, so drop the chart's default privileged pod.
+  securityContext:
+    privileged: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # -- Not needed by the preemption plugin.
+  volume:
+    localtime:
+      enabled: false
   # -- Resource requests and limits for the detector.
   resources:
     requests:
@@ -210,6 +201,110 @@ spotPreemptionNotice:
       memory: 32Mi
     limits:
       memory: 64Mi
+  settings:
+    # -- Run only the preemption plugin. The GKE-managed node-problem-detector already
+    # covers the kernel and runtime log monitors on Standard node pools.
+    log_monitors: []
+    # -- Activates the preemption monitor defined in `custom_monitor_definitions`.
+    custom_plugin_monitors:
+      - /custom-config/gce-preemption-monitor.json
+    # -- Monitor config and probe script, mounted at /custom-config. The probe talks to
+    # the metadata server over bash's /dev/tcp because the node-problem-detector image
+    # ships no curl, wget or python; see docs/spot-preemption.md.
+    custom_monitor_definitions:
+      gce-preemption-monitor.json: |
+        {
+          "plugin": "custom",
+          "pluginConfig": {
+            "invoke_interval": "2s",
+            "timeout": "15s",
+            "max_output_length": 120,
+            "concurrency": 1,
+            "skip_initial_status": true
+          },
+          "source": "gce-preemption-monitor",
+          "metricsReporting": true,
+          "conditions": [
+            {
+              "type": "GCESpotPreempting",
+              "reason": "NoPreemptionNotice",
+              "message": "no GCE Spot preemption notice"
+            }
+          ],
+          "rules": [
+            {
+              "type": "permanent",
+              "condition": "GCESpotPreempting",
+              "reason": "SpotPreemptionImminent",
+              "path": "/custom-config/check-preemption.sh",
+              "timeout": "10s"
+            }
+          ]
+        }
+      check-preemption.sh: |
+        #!/usr/bin/env bash
+        set -uo pipefail
+
+        HOST="${METADATA_HOST:-169.254.169.254}"
+        PORT="${METADATA_PORT:-80}"
+        REQUEST_PATH="/computeMetadata/v1/instance/preempted"
+        TIMEOUT="${REQUEST_TIMEOUT_SECONDS:-5}"
+
+        unknown() {
+          echo "$1"
+          exit 2
+        }
+
+        exec 3<>"/dev/tcp/${HOST}/${PORT}" 2>/dev/null ||
+          unknown "cannot reach metadata server at ${HOST}:${PORT}"
+
+        printf 'GET %s HTTP/1.0\r\nHost: metadata.google.internal\r\nMetadata-Flavor: Google\r\nConnection: close\r\n\r\n' \
+          "${REQUEST_PATH}" >&3 2>/dev/null || unknown "metadata request failed"
+
+        response=""
+        line=""
+        read_status=0
+        while true; do
+          IFS= read -r -t "${TIMEOUT}" line <&3
+          read_status=$?
+          if [ "${read_status}" -eq 0 ]; then
+            response+="${line}"$'\n'
+            continue
+          fi
+          [ -n "${line}" ] && response+="${line}"$'\n'
+          break
+        done
+        exec 3<&-
+
+        if [ "${read_status}" -gt 128 ]; then
+          unknown "timed out reading from metadata server after ${TIMEOUT}s"
+        fi
+        [ -n "${response}" ] || unknown "empty response from metadata server"
+
+        response="${response//$'\r'/}"
+
+        status_line="${response%%$'\n'*}"
+        case "${status_line}" in
+        HTTP/1.[01]\ 200*) ;;
+        *) unknown "unexpected metadata response: ${status_line}" ;;
+        esac
+
+        case "${response}" in
+        *$'\n\n'*) body="${response#*$'\n\n'}" ;;
+        *) unknown "malformed metadata response: no header terminator" ;;
+        esac
+
+        body="${body#"${body%%[![:space:]]*}"}"
+        body="${body%"${body##*[![:space:]]}"}"
+
+        case "${body}" in
+        TRUE | true)
+          echo "instance is being preempted"
+          exit 1
+          ;;
+        FALSE | false) exit 0 ;;
+        *) unknown "unexpected instance/preempted value: '${body}'" ;;
+        esac
 
 # -- GCP credentials configuration
 credentials:

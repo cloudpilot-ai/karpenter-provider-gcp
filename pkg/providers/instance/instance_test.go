@@ -1022,8 +1022,6 @@ func TestSetupSchedulingPreemptionNoticeDuration(t *testing.T) {
 		{name: "spot unset leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot},
 		{name: "spot zero leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot, noticeDuration: 0},
 		{name: "spot 120 sets a two-minute notice", capacityType: karpv1.CapacityTypeSpot, noticeDuration: 120, expectedSeconds: 120},
-		// GCE rejects preemptionNoticeDuration on non-preemptible instances, so it
-		// must never be sent for on-demand capacity even when the NodeClass sets it.
 		{name: "on-demand ignores notice duration", capacityType: karpv1.CapacityTypeOnDemand, noticeDuration: 120},
 	}
 

@@ -387,64 +387,14 @@
         }
       }
     },
-    "spotPreemptionNotice": {
+    "node-problem-detector": {
       "type": "object",
-      "additionalProperties": false,
-      "description": "Optional DaemonSet that watches the GCE metadata server for Spot preemption notices and sets the GCESpotPreempting node condition.",
+      "description": "Values passed to the optional node-problem-detector subchart that runs the Spot preemption plugin. Schema is owned by that chart; only the enable toggle is constrained here.",
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Deploy the Spot preemption notice detector DaemonSet.",
+          "description": "Deploy node-problem-detector with the Spot preemption plugin.",
           "default": false
-        },
-        "image": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Image for the node-problem-detector that runs the detection plugin.",
-          "properties": {
-            "repository": { "type": "string", "minLength": 1 },
-            "tag": { "type": "string", "minLength": 1 },
-            "pullPolicy": {
-              "type": "string",
-              "enum": ["Always", "IfNotPresent", "Never"]
-            }
-          }
-        },
-        "pollIntervalSeconds": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 60,
-          "description": "How often to check the metadata server, in seconds.",
-          "default": 2
-        },
-        "requestTimeoutSeconds": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 60,
-          "description": "How long to wait for a metadata server response before reporting Unknown, in seconds.",
-          "default": 5
-        },
-        "nodeSelector": {
-          "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "Which nodes run the detector. Spot capacity only by default."
-        },
-        "tolerations": {
-          "type": "array",
-          "items": { "type": "object" },
-          "description": "Tolerations for the detector pods."
-        },
-        "affinity": {
-          "type": "object",
-          "description": "Affinity for the detector pods."
-        },
-        "priorityClassName": {
-          "type": "string",
-          "description": "PriorityClass for the detector pods."
-        },
-        "resources": {
-          "type": "object",
-          "description": "Resource requests and limits for the detector."
         }
       }
     },

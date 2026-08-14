@@ -130,7 +130,7 @@ The issue also proposes `npd.enabled: true` by default. This proposal defaults i
 
 ### Chart
 
-- Rendering with defaults produces no DaemonSet; rendering with `spotPreemptionNotice.enabled=true` produces exactly one.
+- Rendering with defaults produces no DaemonSet; rendering with `node-problem-detector.enabled=true` produces exactly one.
 - The rendered monitor config parses as JSON and the rendered plugin passes `sh -n` and `shellcheck`.
 
 ### Not yet covered
@@ -176,4 +176,4 @@ Rejected as unworkable. `instance/preempted` is per-instance metadata that only 
 
 1. **Should the preemption path mark the offering unavailable?** Implemented as `true`, following the issue and matching the AWS provider. The counter-argument: GCP also preempts Spot VMs simply for reaching their 24-hour maximum lifetime, which is not a capacity signal, so treating every preemption as one may pull offerings out of rotation without cause. Open — maintainer call.
 2. **Subchart or hand-written templates?** Proposal takes hand-written; see Alternatives. Open — maintainer call.
-3. **Should `spotPreemptionNotice.enabled` default to `true`?** Proposal says no, because of the GKE-managed node-problem-detector already present on Standard node pools. Open.
+3. **Should `node-problem-detector.enabled` default to `true`?** Proposal says no, because of the GKE-managed node-problem-detector already present on Standard node pools. Open.
