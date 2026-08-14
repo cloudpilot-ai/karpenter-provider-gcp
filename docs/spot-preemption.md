@@ -22,7 +22,7 @@ Turn on the detector:
 ```sh
 helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
   --namespace karpenter-system \
-  --set "spotPreemptionNotice.enabled=true" \
+  --set "node-problem-detector.enabled=true" \
   ...
 ```
 
@@ -43,23 +43,27 @@ Changing `preemptionNoticeDuration` drifts existing nodes. GCE only accepts the 
 
 ## Why it is off by default
 
-GKE Standard node pools already run their own node-problem-detector, and Karpenter's [node repair](node-repair.md) feature depends on the conditions it sets. Enabling `spotPreemptionNotice` adds a second node-problem-detector alongside it.
+GKE Standard node pools already run their own node-problem-detector, and Karpenter's [node repair](node-repair.md) feature depends on the conditions it sets. Enabling `node-problem-detector.enabled` adds a second node-problem-detector alongside it.
 
 The two do not conflict — they set different conditions and the GKE-managed one cannot be reconfigured to add custom checks — but it is a second agent on the node, so it is opt-in rather than automatic. The detector only lands on nodes matching its node selector, which defaults to Spot capacity only.
 
 ## Detector configuration
 
-| Value                                        | Default                            | Purpose                                               |
-|----------------------------------------------|------------------------------------|-------------------------------------------------------|
-| `spotPreemptionNotice.enabled`               | `false`                            | Deploy the DaemonSet                                  |
-| `spotPreemptionNotice.nodeSelector`          | `karpenter.sh/capacity-type: spot` | Which nodes run it                                    |
-| `spotPreemptionNotice.pollIntervalSeconds`   | `2`                                | How often the metadata server is checked              |
-| `spotPreemptionNotice.requestTimeoutSeconds` | `5`                                | How long to wait before reporting Unknown             |
-| `spotPreemptionNotice.priorityClassName`     | `system-node-critical`             | Keeps it from being evicted off a node it is watching |
-| `spotPreemptionNotice.image.tag`             | `v0.8.20`                          | node-problem-detector version                         |
-| `spotPreemptionNotice.resources`             | 10m CPU / 32Mi                     | Per-node cost                                         |
+The detector is the upstream [node-problem-detector chart](https://github.com/deliveryhero/helm-charts/tree/master/stable/node-problem-detector), installed as a subchart, so its full values surface is available. The values below are the ones this chart sets on your behalf.
 
-The detector runs with host networking. It has to: pods otherwise reach the GKE metadata server, which does not expose `instance/preempted`. It talks to `169.254.169.254` directly rather than resolving `metadata.google.internal`, so detection does not depend on cluster DNS still working during a shutdown.
+| Value                                     | Default                            | Purpose                                               |
+|-------------------------------------------|------------------------------------|-------------------------------------------------------|
+| `node-problem-detector.enabled`           | `false`                            | Deploy the detector                                   |
+| `node-problem-detector.nodeSelector`      | `karpenter.sh/capacity-type: spot` | Which nodes run it                                    |
+| `node-problem-detector.hostNetwork`       | `true`                             | Required to reach the metadata server                 |
+| `node-problem-detector.priorityClassName` | `system-node-critical`             | Keeps it from being evicted off a node it is watching |
+| `node-problem-detector.resources`         | 10m CPU / 32Mi                     | Per-node cost                                         |
+
+The poll interval and request timeout live in the monitor config under `node-problem-detector.settings.custom_monitor_definitions`, defaulting to a check every 2 seconds with a 5 second timeout.
+
+Host networking is not optional. Pods otherwise reach the GKE metadata server, which does not expose `instance/preempted`. The check talks to `169.254.169.254` directly rather than resolving `metadata.google.internal`, so detection does not depend on cluster DNS still working during a shutdown.
+
+This chart also overrides two upstream defaults: the detector runs unprivileged with a read-only root filesystem rather than the chart's default privileged pod, and the default kernel and container-runtime log monitors are switched off, since GKE's own node-problem-detector already covers those.
 
 The check reads the metadata server over bash's `/dev/tcp` rather than shelling out to `curl`. The node-problem-detector image ships no `curl`, `wget`, `nc` or `python`, so overriding `image.repository` requires an image with a bash that has `/dev/tcp` support.
 
@@ -77,7 +81,7 @@ gcloud compute instances describe <instance-name> --zone <zone> \
 Confirm the detector is running and reporting:
 
 ```sh
-kubectl get pods -n karpenter-system -l app.kubernetes.io/name=karpenter-preemption-notice
+kubectl get pods -n karpenter-system -l app.kubernetes.io/name=node-problem-detector
 kubectl get nodes -o custom-columns=\
 'NAME:.metadata.name,PREEMPTING:.status.conditions[?(@.type=="GCESpotPreempting")].status'
 ```

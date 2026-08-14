@@ -196,9 +196,6 @@ func TestHandleStoppingSpotInstances_DeletesShuttingDownKarpenterNode(t *testing
 	require.Equal(t, before+1, disruptedCounterValue(t, labels))
 }
 
-// preemptingNodeAndClaim builds a Karpenter-owned spot node carrying the given
-// GCESpotPreempting condition status, plus its NodeClaim with the zone and
-// instance-type labels the unavailable-offerings cache needs.
 func preemptingNodeAndClaim(status corev1.ConditionStatus) *fakeKubeClient {
 	return &fakeKubeClient{
 		nodes: []corev1.Node{
