@@ -137,10 +137,10 @@ kubeletConfiguration:
   maxParallelImagePulls: 4
 ```
 
-- `serializeImagePulls` — controls whether kubelet pulls images one at a time; defaults to `true` (serialized) and must be set to `false` explicitly to allow parallel pulls
-- `maxParallelImagePulls` — maximum number of image pulls kubelet performs in parallel; minimum accepted value is `2`
+- `serializeImagePulls` — controls whether kubelet pulls images one at a time; defaults to `true` (serialized)
+- `maxParallelImagePulls` — maximum number of image pulls kubelet performs in parallel; the minimum is `1` (the kubelet default)
 
-> **Note:** `maxParallelImagePulls` is rejected unless `serializeImagePulls` is explicitly set to `false`, failing admission with `maxParallelImagePulls requires serializeImagePulls to be explicitly set to false`. Omitting both fields preserves the default serialized behavior.
+> **Note:** Setting `maxParallelImagePulls` to `2` or greater requires `serializeImagePulls: false`; admission otherwise fails with `maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false`. `maxParallelImagePulls: 1` on its own is accepted without any `serializeImagePulls` change, and omitting both fields preserves the default serialized behavior.
 
 ## Shielded VM
 
