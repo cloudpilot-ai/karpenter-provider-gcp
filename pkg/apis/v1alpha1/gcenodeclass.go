@@ -217,7 +217,7 @@ type KubeletQuantity string
 // Wherever possible, the types and names should reflect the upstream kubelet types.
 // https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration
 // https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
-// +kubebuilder:validation:XValidation:message="maxParallelImagePulls requires serializeImagePulls to be explicitly set to false",rule="!has(self.maxParallelImagePulls) || (has(self.serializeImagePulls) && self.serializeImagePulls == false)"
+// +kubebuilder:validation:XValidation:message="maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false",rule="!has(self.maxParallelImagePulls) || self.maxParallelImagePulls < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls == false)"
 type KubeletConfiguration struct {
 	// clusterDNS is a list of IP addresses for the cluster DNS server.
 	// Note that not all providers may use all addresses.
@@ -290,16 +290,16 @@ type KubeletConfiguration struct {
 	// +optional
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 	// SerializeImagePulls, when enabled, tells the kubelet to pull images one at a
-	// time. Must be explicitly set to false to use MaxParallelImagePulls.
+	// time. Must be explicitly set to false to set MaxParallelImagePulls above 1.
 	// Default: true
 	// +optional
 	SerializeImagePulls *bool `json:"serializeImagePulls,omitempty"`
 	// MaxParallelImagePulls sets the maximum number of image pulls in parallel.
-	// Requires SerializeImagePulls to be explicitly set to false. Nodes with many
-	// DaemonSets pulling cold images concurrently (a common case right after a
-	// fresh node joins the cluster) benefit most from raising this above the
-	// kubelet default of 1.
-	// +kubebuilder:validation:Minimum:=2
+	// Values above 1 require SerializeImagePulls to be explicitly set to false.
+	// Nodes with many DaemonSets pulling cold images concurrently (a common case
+	// right after a fresh node joins the cluster) benefit most from raising this
+	// above the kubelet default of 1.
+	// +kubebuilder:validation:Minimum:=1
 	// +optional
 	MaxParallelImagePulls *int32 `json:"maxParallelImagePulls,omitempty"`
 }

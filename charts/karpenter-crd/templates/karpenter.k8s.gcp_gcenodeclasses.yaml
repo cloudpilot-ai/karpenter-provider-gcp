@@ -388,12 +388,12 @@ spec:
                   maxParallelImagePulls:
                     description: |-
                       MaxParallelImagePulls sets the maximum number of image pulls in parallel.
-                      Requires SerializeImagePulls to be explicitly set to false. Nodes with many
-                      DaemonSets pulling cold images concurrently (a common case right after a
-                      fresh node joins the cluster) benefit most from raising this above the
-                      kubelet default of 1.
+                      Values above 1 require SerializeImagePulls to be explicitly set to false.
+                      Nodes with many DaemonSets pulling cold images concurrently (a common case
+                      right after a fresh node joins the cluster) benefit most from raising this
+                      above the kubelet default of 1.
                     format: int32
-                    minimum: 2
+                    minimum: 1
                     type: integer
                   maxPods:
                     description: |-
@@ -413,7 +413,7 @@ spec:
                   serializeImagePulls:
                     description: |-
                       SerializeImagePulls, when enabled, tells the kubelet to pull images one at a
-                      time. Must be explicitly set to false to use MaxParallelImagePulls.
+                      time. Must be explicitly set to false to set MaxParallelImagePulls above 1.
                       Default: true
                     type: boolean
                   systemReserved:
@@ -447,10 +447,11 @@ spec:
                     evictionSoft
                   rule: has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e,
                     (e in self.evictionSoft)):true
-                - message: maxParallelImagePulls requires serializeImagePulls to be
-                    explicitly set to false
-                  rule: '!has(self.maxParallelImagePulls) || (has(self.serializeImagePulls)
-                    && self.serializeImagePulls == false)'
+                - message: maxParallelImagePulls greater than 1 requires serializeImagePulls
+                    to be explicitly set to false
+                  rule: '!has(self.maxParallelImagePulls) || self.maxParallelImagePulls
+                    < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls
+                    == false)'
               labels:
                 additionalProperties:
                   type: string
