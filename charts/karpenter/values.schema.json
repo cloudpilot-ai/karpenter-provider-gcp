@@ -373,6 +373,12 @@
               "description": "When true, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.",
               "default": true
             },
+            "preferencePolicy": {
+              "type": "string",
+              "enum": ["Respect", "Ignore"],
+              "description": "How Karpenter handles soft scheduling preferences. Respect preserves them; Ignore disregards preferred node/pod affinity and anti-affinity plus ScheduleAnyway topology spread constraints.",
+              "default": "Respect"
+            },
             "defaultNodePoolTemplateName": {
               "type": "string",
               "description": "Pin the GKE node pool used as the bootstrap metadata source. Leave empty for automatic discovery.",

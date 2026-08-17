@@ -116,6 +116,8 @@ spec:
             {{- end }}
             - name: IGNORE_DRA_REQUESTS
               value: "{{ .Values.controller.settings.ignoreDRARequests }}"
+            - name: PREFERENCE_POLICY
+              value: "{{ .Values.controller.settings.preferencePolicy }}"
             {{- with .Values.controller.settings.vmMemoryOverheadPercent }}
             - name: VM_MEMORY_OVERHEAD_PERCENT
               value: "{{ . }}"
