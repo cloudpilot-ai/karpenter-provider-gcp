@@ -69,3 +69,13 @@ func TestImageFamily_NoTerms_ReturnsCustom(t *testing.T) {
 	}}
 	require.Equal(t, ImageFamilyCustom, nc.ImageFamily())
 }
+
+func TestPodSubnetRangeNames(t *testing.T) {
+	t.Parallel()
+
+	require.Nil(t, (&GCENodeClass{}).PodSubnetRangeNames())
+
+	name := "custom"
+	require.Equal(t, []string{"custom"}, (&GCENodeClass{Spec: GCENodeClassSpec{SubnetRangeName: &name}}).PodSubnetRangeNames())
+	require.Equal(t, []string{"a", "b"}, (&GCENodeClass{Spec: GCENodeClassSpec{SubnetRangeNames: []string{"a", "b"}}}).PodSubnetRangeNames())
+}

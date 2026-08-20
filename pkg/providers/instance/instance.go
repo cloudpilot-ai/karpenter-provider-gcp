@@ -122,9 +122,7 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 	}
 }
 
-func (p *DefaultProvider) waitOperationDone(ctx context.Context,
-	instanceType, zone, capacityType, operationName string,
-) error {
+func (p *DefaultProvider) waitOperationDone(ctx context.Context, zone, operationName string) error {
 	waitCtx := ctx
 	cancel := func() {}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -154,7 +152,7 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context,
 
 		if op.Status == "DONE" {
 			if op.Error != nil {
-				return p.handleZoneOperationError(waitCtx, op, instanceType, zone, capacityType)
+				return handleZoneOperationError(op)
 			}
 			return nil
 		}
@@ -174,16 +172,29 @@ func waitForNextTick(ctx context.Context, ticker *time.Ticker) error {
 	}
 }
 
-func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *compute.Operation, instanceType, zone, capacityType string) error {
+// insufficientCapacityError carries the structured GCE reason code alongside the
+// human-readable reason. Callers need the code to decide whether another pod range
+// is worth trying before the offering is marked unavailable.
+type insufficientCapacityError struct {
+	reason     string
+	reasonCode string
+}
+
+func (e *insufficientCapacityError) Error() string {
+	return e.reason
+}
+
+func handleZoneOperationError(op *compute.Operation) error {
 	capacityError, found := lo.Find(op.Error.Errors, isInsufficientCapacityError)
 	if found {
 		reason := capacityError.Message
 		if reason == "" {
 			reason = capacityError.Code
 		}
-		ttl := insufficientCapacityBackoffTTL(capacityError.Code)
-		p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType, zone, capacityType, ttl)
-		return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+		return &insufficientCapacityError{
+			reason:     reason,
+			reasonCode: capacityError.Code,
+		}
 	}
 
 	errorMsgs := lo.Map(op.Error.Errors, func(e *compute.OperationErrorErrors, _ int) string {
@@ -227,11 +238,31 @@ func extractInsertInsufficientCapacityReason(err error) (string, string, bool) {
 }
 
 func insufficientCapacityBackoffTTL(reasonCode string) time.Duration {
-	if reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS" || reasonCode == "IP_SPACE_EXHAUSTED" {
+	if isIPSpaceExhausted(reasonCode) {
 		return ipSpaceInsufficientCapacityTTL
 	}
 
 	return unavailableofferings.DefaultTTL
+}
+
+func isIPSpaceExhausted(reasonCode string) bool {
+	return reasonCode == "IP_SPACE_EXHAUSTED" || reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS"
+}
+
+// markInsufficientCapacity records the offering as unavailable and converts the GCE
+// failure into the error type karpenter core understands. Only call this once no other
+// pod range is left to try, otherwise a successful fallback still evicts the offering.
+func (p *DefaultProvider) markInsufficientCapacity(ctx context.Context, reason, reasonCode, instanceType, zone, capacityType string) error {
+	if reason == "" {
+		reason = "insufficient capacity"
+	}
+	p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType, zone, capacityType, insufficientCapacityBackoffTTL(reasonCode))
+	return cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+}
+
+func logPodRangeExhausted(ctx context.Context, rangeName, instanceType, zone string) {
+	log.FromContext(ctx).Info("pod range IP space exhausted, trying next range",
+		"range", rangeName, "instanceType", instanceType, "zone", zone)
 }
 
 func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
@@ -412,33 +443,53 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 	if err != nil {
 		return nil, false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
-	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
-	if err != nil {
-		reason, reasonCode, insufficient := extractInsertInsufficientCapacityReason(err)
-		if insufficient {
-			if reason == "" {
-				reason = "insufficient capacity"
-			}
-			ttl := insufficientCapacityBackoffTTL(reasonCode)
-			p.unavailableOfferings.MarkUnavailableWithTTL(ctx, reason, instanceType.Name, zone, capacityType, ttl)
-			err = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("zone %s insufficient capacity: %s", zone, reason))
+	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), clusterConfig)
+	var lastErr error
+	for i, rangeName := range rangeNames {
+		hasMoreRanges := i < len(rangeNames)-1
+		setPrimaryAliasRange(instance, rangeName)
 
-			// If IP space is exhausted, trying other instance types won't help as they share the same subnet.
-			// We should fail fast to avoid unnecessary API calls and noise.
-			if reasonCode == "IP_SPACE_EXHAUSTED" || reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS" {
-				return nil, false, err
+		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+		if err != nil {
+			lastErr = err
+			reason, reasonCode, insufficient := extractInsertInsufficientCapacityReason(err)
+			if insufficient && isIPSpaceExhausted(reasonCode) && hasMoreRanges {
+				logPodRangeExhausted(ctx, rangeName, instanceType.Name, zone)
+				continue
 			}
+			if insufficient {
+				err = p.markInsufficientCapacity(ctx, reason, reasonCode, instanceType.Name, zone, capacityType)
+
+				// If IP space is exhausted, trying other instance types won't help as they share the same subnet.
+				// We should fail fast to avoid unnecessary API calls and noise.
+				if isIPSpaceExhausted(reasonCode) {
+					return nil, false, err
+				}
+			}
+			log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+			return nil, true, err
 		}
-		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
-		return nil, true, err
+
+		if err := p.waitOperationDone(ctx, zone, op.Name); err != nil {
+			lastErr = err
+			if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
+				if isIPSpaceExhausted(capacityErr.reasonCode) && hasMoreRanges {
+					logPodRangeExhausted(ctx, rangeName, instanceType.Name, zone)
+					continue
+				}
+				err = p.markInsufficientCapacity(ctx, capacityErr.reason, capacityErr.reasonCode, instanceType.Name, zone, capacityType)
+			}
+			log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
+			return nil, true, err
+		}
+
+		return instance, false, nil
 	}
 
-	if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
-		log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
-		return nil, true, err
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no pod secondary ranges available")
 	}
-
-	return instance, false, nil
+	return nil, true, lastErr
 }
 
 func resolveInstanceImage(instance *compute.Instance) string {
@@ -709,6 +760,17 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	return instance, nil
 }
 
+func setPrimaryAliasRange(instance *compute.Instance, rangeName string) {
+	if instance == nil || len(instance.NetworkInterfaces) == 0 {
+		return
+	}
+	iface := instance.NetworkInterfaces[0]
+	if len(iface.AliasIpRanges) == 0 {
+		return
+	}
+	iface.AliasIpRanges[0].SubnetworkRangeName = rangeName
+}
+
 func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
 	if cluster.NetworkConfig == nil {
 		return nil
@@ -716,12 +778,9 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 	targetRange := podCIDRRange(nodeClass.GetMaxPods())
 	clusterPrivate := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
 
-	// Pod CIDR range name: NodeClass → cluster IpAllocationPolicy → let GKE pick.
 	rangeName := ""
-	if nodeClass.Spec.SubnetRangeName != nil {
-		rangeName = *nodeClass.Spec.SubnetRangeName
-	} else if cluster.IpAllocationPolicy != nil {
-		rangeName = cluster.IpAllocationPolicy.ClusterSecondaryRangeName
+	if names := rankPodRangeNames(resolvedPodRangeNames(nodeClass, cluster), cluster); len(names) > 0 {
+		rangeName = names[0]
 	}
 
 	// Primary interface: built from cluster config, overrideable via NodeClass networkConfig.

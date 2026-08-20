@@ -105,3 +105,13 @@ func TestGCENodeClassCRDRejectsReservedMetadataKeys(t *testing.T) {
 	}
 	require.NotContains(t, crdText, `'serial-port-logging-enable'`, "non-reserved metadata keys must remain freeform")
 }
+
+func TestGCENodeClassCRDSubnetRangeNamesMutuallyExclusive(t *testing.T) {
+	crd, err := os.ReadFile(crdPath())
+	require.NoError(t, err)
+
+	crdText := string(crd)
+	require.Contains(t, crdText, `subnetRangeName and subnetRangeNames are mutually exclusive`)
+	require.Contains(t, crdText, `!(has(self.subnetRangeName) && has(self.subnetRangeNames))`)
+	require.Contains(t, crdText, `subnetRangeNames:`)
+}

@@ -577,14 +577,34 @@ spec:
                   SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
                   to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's
                   default pod secondary range (ClusterSecondaryRangeName from the cluster's IP
-                  allocation policy) is used.
+                  allocation policy) is used. Mutually exclusive with subnetRangeNames.
                 maxLength: 63
                 minLength: 1
                 pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
                 type: string
+              subnetRangeNames:
+                description: |-
+                  SubnetRangeNames is a list of subnetwork secondary IPv4 range names from which
+                  to allocate pod IP addresses (alias IPs for pods). When more than one name is
+                  listed, the provider selects the range with the lowest GKE-reported utilization
+                  at launch. Mutually exclusive with subnetRangeName. If neither field is set, the
+                  cluster's default pod secondary range is used (additional pod ranges are not
+                  included automatically).
+                items:
+                  maxLength: 63
+                  minLength: 1
+                  pattern: ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$
+                  type: string
+                maxItems: 16
+                minItems: 1
+                type: array
+                uniqueItems: true
             required:
             - imageSelectorTerms
             type: object
+            x-kubernetes-validations:
+            - message: subnetRangeName and subnetRangeNames are mutually exclusive
+              rule: '!(has(self.subnetRangeName) && has(self.subnetRangeNames))'
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass
             properties:
@@ -695,6 +715,26 @@ spec:
                   required:
                   - requirements
                   - sourceImage
+                  type: object
+                type: array
+              subnetRanges:
+                description: |-
+                  SubnetRanges contains the pod secondary IPv4 ranges considered for launch
+                  and their GKE-reported utilization when known.
+                items:
+                  description: SubnetRangeStatus is a resolved pod secondary range
+                    considered for node launch.
+                  properties:
+                    name:
+                      description: Name is the subnetwork secondary IPv4 range name.
+                      type: string
+                    utilization:
+                      description: |-
+                        Utilization is GKE's reported usage of the range as a decimal string
+                        between "0" and "1" when known.
+                      type: string
+                  required:
+                  - name
                   type: object
                 type: array
             type: object

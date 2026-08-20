@@ -5,6 +5,19 @@
 
 ## Unreleased
 
+### Multiple pod CIDR ranges on GCENodeClass
+
+`GCENodeClass` now accepts `spec.subnetRangeNames`, a list of GKE secondary IPv4 range names for
+pod alias IPs. When more than one name is listed, Karpenter selects the range with the lowest
+GKE-reported utilization at launch and retries remaining names if Compute returns IP space
+exhausted. Resolved names and utilization are published on `status.subnetRanges`.
+
+`spec.subnetRangeName` is unchanged. The two fields are mutually exclusive. If neither is set,
+Karpenter still uses only the cluster default pod range.
+
+**Action required:** none. To spill over across additional pod ranges, list those names (including
+the cluster default) on `subnetRangeNames` and omit `subnetRangeName`.
+
 ---
 
 ## v0.6.0
