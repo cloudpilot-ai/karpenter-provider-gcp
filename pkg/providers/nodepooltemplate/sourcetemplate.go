@@ -105,18 +105,21 @@ func (p *DefaultProvider) resolveTemplateFromNodePool(ctx context.Context, poolN
 		return nil, fmt.Errorf("node pool %q has no instance groups", poolName)
 	}
 
-	// A multi-zone pool has one instance group per zone, normally all on the same template. They
-	// only diverge mid-upgrade, in which case the newest template is the one being rolled out.
+	// A multi-zone pool has one instance group per zone, and an instance group part-way through an
+	// update names more than one template. Both normally collapse to a single template; where they
+	// do not, the newest one is the one being rolled out.
 	var templateURLs []string
 	var errs []error
 	for _, instanceGroupURL := range nodePool.InstanceGroupUrls {
-		templateURL, err := p.instanceGroupTemplateURL(ctx, instanceGroupURL)
+		urls, err := p.instanceGroupTemplateURLs(ctx, instanceGroupURL)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if !slices.Contains(templateURLs, templateURL) {
-			templateURLs = append(templateURLs, templateURL)
+		for _, templateURL := range urls {
+			if !slices.Contains(templateURLs, templateURL) {
+				templateURLs = append(templateURLs, templateURL)
+			}
 		}
 	}
 	if len(templateURLs) == 0 {
@@ -139,32 +142,43 @@ func (p *DefaultProvider) resolveTemplateFromNodePool(ctx context.Context, poolN
 	return newest, nil
 }
 
-// instanceGroupTemplateURL returns the URL of the instance template the given managed instance
-// group is currently running.
-func (p *DefaultProvider) instanceGroupTemplateURL(ctx context.Context, instanceGroupURL string) (string, error) {
+// instanceGroupTemplateURLs returns the URLs of the instance templates the given managed instance
+// group is running.
+//
+// A group normally names exactly one, in its top-level instanceTemplate. During an update it also
+// populates versions, which the Compute API defines as overriding that top-level field, so versions
+// wins wherever it is set. GKE uses a surge upgrade to roll out a new template, including on
+// credential rotation, so mid-update a group legitimately names two: the one being replaced and the
+// one being rolled out. Both are returned and the caller takes the newest.
+func (p *DefaultProvider) instanceGroupTemplateURLs(ctx context.Context, instanceGroupURL string) ([]string, error) {
 	ref, err := parseComputeResourceURL(instanceGroupURL, "instanceGroupManagers")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if ref.scope != scopeZone {
 		// GKE node pools always use zonal instance groups, and compute.regionInstanceGroupManagers.get
 		// is deliberately not in the controller's IAM role, so there is nothing to gain by calling
 		// the regional API here. The label scan covers this if GKE ever changes.
-		return "", fmt.Errorf("instance group %q is not zonal", instanceGroupURL)
+		return nil, fmt.Errorf("instance group %q is not zonal", instanceGroupURL)
 	}
 	manager, err := p.computeService.InstanceGroupManagers.Get(ref.project, ref.location, ref.name).Context(ctx).Do()
 	if err != nil {
-		return "", fmt.Errorf("getting instance group manager %q: %w", instanceGroupURL, err)
+		return nil, fmt.Errorf("getting instance group manager %q: %w", instanceGroupURL, err)
 	}
-	if manager.InstanceTemplate != "" {
-		return manager.InstanceTemplate, nil
-	}
+
+	var templateURLs []string
 	for _, version := range manager.Versions {
 		if version != nil && version.InstanceTemplate != "" {
-			return version.InstanceTemplate, nil
+			templateURLs = append(templateURLs, version.InstanceTemplate)
 		}
 	}
-	return "", fmt.Errorf("instance group manager %q names no instance template", instanceGroupURL)
+	if len(templateURLs) == 0 && manager.InstanceTemplate != "" {
+		templateURLs = append(templateURLs, manager.InstanceTemplate)
+	}
+	if len(templateURLs) == 0 {
+		return nil, fmt.Errorf("instance group manager %q names no instance template", instanceGroupURL)
+	}
+	return templateURLs, nil
 }
 
 // getInstanceTemplateByURL fetches a template from either the regional or the global collection,

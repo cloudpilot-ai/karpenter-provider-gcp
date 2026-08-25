@@ -54,6 +54,12 @@ func globalTemplateURL(name string) string {
 		testProject, name)
 }
 
+// migOnTemplate builds a managed instance group running a single template, the way the Compute
+// API reports a group that is not mid-update.
+func migOnTemplate(templateURL string) *compute.InstanceGroupManager {
+	return &compute.InstanceGroupManager{InstanceTemplate: templateURL}
+}
+
 func instanceTemplate(name, clusterName, nodePoolName, creationTimestamp string) *compute.InstanceTemplate {
 	return &compute.InstanceTemplate{
 		Name:              name,
@@ -69,8 +75,8 @@ func instanceTemplate(name, clusterName, nodePoolName, creationTimestamp string)
 type sourceTemplateFake struct {
 	// nodePool is returned by container NodePools.Get. nil → 404.
 	nodePool *container.NodePool
-	// managers maps an instance group manager name to the template URL it is running.
-	managers map[string]string
+	// managers maps an instance group manager name to the manager served for it.
+	managers map[string]*compute.InstanceGroupManager
 	// managerStatus, when non-zero, is returned instead of serving managers.
 	managerStatus int
 	// templates are served by name from both the regional and global Get endpoints, and are
@@ -109,12 +115,13 @@ func (f *sourceTemplateFake) server(t *testing.T) *httptest.Server {
 				w.WriteHeader(f.managerStatus)
 				return
 			}
-			templateURL, ok := f.managers[name]
+			manager, ok := f.managers[name]
 			if !ok {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(&compute.InstanceGroupManager{Name: name, InstanceTemplate: templateURL})
+			manager.Name = name
+			_ = json.NewEncoder(w).Encode(manager)
 
 		// The List endpoint has no trailing name, so it must be matched before the Get endpoints.
 		case strings.HasSuffix(path, fmt.Sprintf("/regions/%s/instanceTemplates", testRegion)):
@@ -191,7 +198,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 		t.Parallel()
 		fake := &sourceTemplateFake{
 			nodePool:  &container.NodePool{Name: testPool, InstanceGroupUrls: []string{migURL(testZone, "grp-a")}},
-			managers:  map[string]string{"grp-a": regionalTemplateURL("gke-current")},
+			managers:  map[string]*compute.InstanceGroupManager{"grp-a": migOnTemplate(regionalTemplateURL("gke-current"))},
 			templates: []*compute.InstanceTemplate{stale, current},
 			// The pool names the current template, so the label scan must not be consulted at all.
 			listOnly: []*compute.InstanceTemplate{},
@@ -208,7 +215,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 		t.Parallel()
 		fake := &sourceTemplateFake{
 			nodePool:  &container.NodePool{Name: testPool, InstanceGroupUrls: []string{migURL(testZone, "grp-a")}},
-			managers:  map[string]string{"grp-a": globalTemplateURL("gke-current")},
+			managers:  map[string]*compute.InstanceGroupManager{"grp-a": migOnTemplate(globalTemplateURL("gke-current"))},
 			templates: []*compute.InstanceTemplate{current},
 			listOnly:  []*compute.InstanceTemplate{},
 		}
@@ -225,12 +232,92 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 			nodePool: &container.NodePool{Name: testPool, InstanceGroupUrls: []string{
 				migURL(testZone, "grp-a"), migURL("us-central1-b", "grp-b"),
 			}},
-			managers: map[string]string{
-				"grp-a": regionalTemplateURL("gke-stale"),
-				"grp-b": regionalTemplateURL("gke-current"),
+			managers: map[string]*compute.InstanceGroupManager{
+				"grp-a": migOnTemplate(regionalTemplateURL("gke-stale")),
+				"grp-b": migOnTemplate(regionalTemplateURL("gke-current")),
 			},
 			templates: []*compute.InstanceTemplate{stale, current},
 			listOnly:  []*compute.InstanceTemplate{},
+		}
+		p := fake.provider(t)
+
+		_, err := p.GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "gke-current", templateName(p))
+	})
+
+	// The Compute API defines InstanceGroupManager.versions as overriding the top-level
+	// instanceTemplate. GKE puts a pool into that state for the duration of a surge upgrade, which
+	// is exactly how a credential rotation is rolled out — so reading the top-level field first
+	// would hand back the template being replaced.
+	t.Run("versions override the top-level instance template", func(t *testing.T) {
+		t.Parallel()
+		fake := &sourceTemplateFake{
+			nodePool: &container.NodePool{Name: testPool, InstanceGroupUrls: []string{migURL(testZone, "grp-a")}},
+			managers: map[string]*compute.InstanceGroupManager{"grp-a": {
+				InstanceTemplate: regionalTemplateURL("gke-stale"),
+				Versions: []*compute.InstanceGroupManagerVersion{
+					{Name: "v1", InstanceTemplate: regionalTemplateURL("gke-current")},
+				},
+			}},
+			templates: []*compute.InstanceTemplate{stale, current},
+			listOnly:  []*compute.InstanceTemplate{},
+		}
+		p := fake.provider(t)
+
+		_, err := p.GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "gke-current", templateName(p))
+	})
+
+	t.Run("resolves from versions when no top-level instance template is set", func(t *testing.T) {
+		t.Parallel()
+		fake := &sourceTemplateFake{
+			nodePool: &container.NodePool{Name: testPool, InstanceGroupUrls: []string{migURL(testZone, "grp-a")}},
+			managers: map[string]*compute.InstanceGroupManager{"grp-a": {
+				Versions: []*compute.InstanceGroupManagerVersion{
+					{Name: "v1", InstanceTemplate: regionalTemplateURL("gke-current")},
+				},
+			}},
+			templates: []*compute.InstanceTemplate{current},
+			listOnly:  []*compute.InstanceTemplate{},
+		}
+		p := fake.provider(t)
+
+		_, err := p.GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "gke-current", templateName(p))
+	})
+
+	t.Run("takes the newest template when an instance group carries two versions mid-surge", func(t *testing.T) {
+		t.Parallel()
+		fake := &sourceTemplateFake{
+			nodePool: &container.NodePool{Name: testPool, InstanceGroupUrls: []string{migURL(testZone, "grp-a")}},
+			managers: map[string]*compute.InstanceGroupManager{"grp-a": {
+				Versions: []*compute.InstanceGroupManagerVersion{
+					// The version being replaced is listed first and, as the one that applies to
+					// all remaining instances, is the one with no targetSize.
+					{Name: "v1", InstanceTemplate: regionalTemplateURL("gke-stale")},
+					{Name: "v2", InstanceTemplate: regionalTemplateURL("gke-current"),
+						TargetSize: &compute.FixedOrPercent{Fixed: 1}},
+				},
+			}},
+			templates: []*compute.InstanceTemplate{stale, current},
+			listOnly:  []*compute.InstanceTemplate{},
+		}
+		p := fake.provider(t)
+
+		_, err := p.GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "gke-current", templateName(p))
+	})
+
+	t.Run("falls back to the label scan when the instance group names no template", func(t *testing.T) {
+		t.Parallel()
+		fake := &sourceTemplateFake{
+			nodePool:  &container.NodePool{Name: testPool, InstanceGroupUrls: []string{migURL(testZone, "grp-a")}},
+			managers:  map[string]*compute.InstanceGroupManager{"grp-a": {}},
+			templates: []*compute.InstanceTemplate{current},
 		}
 		p := fake.provider(t)
 
