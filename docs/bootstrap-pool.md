@@ -52,9 +52,21 @@ Karpenter patches the source pool's kube-env metadata when provisioning nodes wi
 
 This allows a single source pool to bootstrap nodes of any OS and architecture combination.
 
+## Resolving the bootstrap pool's instance template
+
+Once a pool is selected, Karpenter has to find the instance template that pool is *currently* running. GKE builds a new template for a node pool on every upgrade and on credential rotation, and leaves the superseded templates in place; they all keep the same `goog-k8s-node-pool-name` label and `cluster-name` metadata, so the label alone cannot identify the live one.
+
+Karpenter therefore asks GKE, on every provisioning attempt:
+
+1. Read the selected node pool and its managed instance groups (`instanceGroupUrls`).
+2. Read each instance group manager and take the instance template it is running now.
+3. Fetch that template, from the regional or global collection depending on its URL. If the pool's instance groups disagree (which happens mid-upgrade), the most recently created template wins.
+
+If that chain cannot be completed — for example the controller's IAM role is missing `compute.instanceGroupManagers.get` — Karpenter logs the reason and falls back to scanning regional instance templates for the pool's label, taking the most recently created match. Because the chain runs per provisioning attempt, a template rotation is picked up by the next node Karpenter launches; the controller logs `source instance template selected` whenever the resolved template changes.
+
 ## Metadata sources
 
-Karpenter reads kubelet bootstrap metadata from the bootstrap pool's instance template. Other instance settings are derived from GCENodeClass, cluster config, or Karpenter/provider defaults.
+Karpenter reads kubelet bootstrap metadata from that instance template. Other instance settings are derived from GCENodeClass, cluster config, or Karpenter/provider defaults.
 
 | Metadata                               | Source                                                                                                                                             |
 |----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -120,6 +132,22 @@ Common causes:
 **Fallback pool creation fails**
 
 If fallback creation fails due to org policy violations, the error message identifies the blocking constraint. Create a compliant pool manually and set `DEFAULT_NODEPOOL_TEMPLATE_NAME` to that pool's name.
+
+**Nodes fail to join after a cluster CA or credential rotation**
+
+Rotating the control plane's CA rotates the cluster CA cert embedded in each node pool's instance template. Confirm Karpenter is using the template the pool actually runs:
+
+```sh
+kubectl logs -n karpenter-system -l app.kubernetes.io/name=karpenter | grep "source instance template selected"
+
+# ground truth: the template the pool's instance groups are running
+gcloud container node-pools describe POOL --cluster CLUSTER --location LOCATION \
+  --format='value(instanceGroupUrls)'
+gcloud compute instance-groups managed describe MIG --zone ZONE \
+  --format='value(instanceTemplate)'
+```
+
+If the logs show a fallback to the label scan, grant the controller `compute.instanceGroupManagers.get` (see [`deploy/iam/karpenter-controller-role.yaml`](../deploy/iam/karpenter-controller-role.yaml)).
 
 **Nodes fail to join the cluster after switching bootstrap pools**
 
