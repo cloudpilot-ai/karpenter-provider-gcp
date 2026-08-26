@@ -4,5 +4,5 @@ github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 golang.org/x/sys v0.45.0 h1:dO4czNzziLiiXplLQgBCEpCvXQ3dnkn0SdaZSYdQ+FY=
 golang.org/x/sys v0.45.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
-sigs.k8s.io/gcp-compute-persistent-disk-csi-driver v1.26.4 h1:Je5ihGerwGCMImDDa0VhLCui4363z255+etdYvsytOI=
-sigs.k8s.io/gcp-compute-persistent-disk-csi-driver v1.26.4/go.mod h1:gaCYEn4j4qpykjWvUv3oMC0tYePF44cmru9lLUT+uEI=
+sigs.k8s.io/gcp-compute-persistent-disk-csi-driver v1.26.5 h1:mGT3fcNyCtIh9e5ZR+8Jy0SpNRjEB6FrGvKu9FqpoGk=
+sigs.k8s.io/gcp-compute-persistent-disk-csi-driver v1.26.5/go.mod h1:gaCYEn4j4qpykjWvUv3oMC0tYePF44cmru9lLUT+uEI=
