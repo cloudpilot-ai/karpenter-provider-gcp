@@ -1190,8 +1190,8 @@ sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics
 ## explicit; go 1.23
 sigs.k8s.io/json
 sigs.k8s.io/json/internal/golang/encoding/json
-# sigs.k8s.io/karpenter v1.14.0
-## explicit; go 1.26.5
+# sigs.k8s.io/karpenter v1.14.1
+## explicit; go 1.26.6
 sigs.k8s.io/karpenter/pkg/apis
 sigs.k8s.io/karpenter/pkg/apis/autoscaling/v1beta1
 sigs.k8s.io/karpenter/pkg/apis/v1
@@ -1240,6 +1240,7 @@ sigs.k8s.io/karpenter/pkg/scheduling
 sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources
 sigs.k8s.io/karpenter/pkg/state/cost
 sigs.k8s.io/karpenter/pkg/state/nodepoolhealth
+sigs.k8s.io/karpenter/pkg/state/virtualpods
 sigs.k8s.io/karpenter/pkg/utils/apps
 sigs.k8s.io/karpenter/pkg/utils/controller
 sigs.k8s.io/karpenter/pkg/utils/daemonset
