@@ -92,15 +92,6 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 		return zones, nil
 	}
 
-	// Legacy zonal clusters may have an empty Locations field. Use the exact
-	// cluster location rather than expanding it to every zone in the region;
-	// those additional zones are not necessarily enabled for the cluster.
-	if strings.Count(cluster.Location, "-") == 2 {
-		zones := []string{cluster.Location}
-		p.zoneCache.Set(zoneCacheKey, zones, cache.DefaultExpiration)
-		return zones, nil
-	}
-
 	projectID := options.FromContext(ctx).ProjectID
 	clusterLocation := options.FromContext(ctx).ClusterLocation
 
