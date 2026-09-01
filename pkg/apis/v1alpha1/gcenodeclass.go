@@ -67,7 +67,7 @@ type GCENodeClassSpec struct {
 	// included automatically).
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
-	// +kubebuilder:validation:UniqueItems:=true
+	// +kubebuilder:validation:XValidation:message="subnetRangeNames must be unique",rule="self.all(x, self.exists_one(y, x == y))"
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=63
 	// +kubebuilder:validation:items:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`

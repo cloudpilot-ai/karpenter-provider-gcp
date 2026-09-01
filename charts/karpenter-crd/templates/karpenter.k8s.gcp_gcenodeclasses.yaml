@@ -598,7 +598,9 @@ spec:
                 maxItems: 16
                 minItems: 1
                 type: array
-                uniqueItems: true
+                x-kubernetes-validations:
+                - message: subnetRangeNames must be unique
+                  rule: self.all(x, self.exists_one(y, x == y))
             required:
             - imageSelectorTerms
             type: object

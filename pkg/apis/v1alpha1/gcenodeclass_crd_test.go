@@ -115,3 +115,13 @@ func TestGCENodeClassCRDSubnetRangeNamesMutuallyExclusive(t *testing.T) {
 	require.Contains(t, crdText, `!(has(self.subnetRangeName) && has(self.subnetRangeNames))`)
 	require.Contains(t, crdText, `subnetRangeNames:`)
 }
+
+func TestGCENodeClassCRDSubnetRangeNamesUniqueViaCEL(t *testing.T) {
+	crd, err := os.ReadFile(crdPath())
+	require.NoError(t, err)
+
+	crdText := string(crd)
+	require.NotContains(t, crdText, `uniqueItems: true`, "Kubernetes CRDs forbid uniqueItems")
+	require.Contains(t, crdText, `subnetRangeNames must be unique`)
+	require.Contains(t, crdText, `self.all(x, self.exists_one(y, x == y))`)
+}
