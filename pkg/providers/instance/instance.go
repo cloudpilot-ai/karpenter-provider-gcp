@@ -590,8 +590,10 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 	for i, disk := range disks {
 		// Create a new disk configuration for each disk to avoid sharing references
 		initParams := &compute.AttachedDiskInitializeParams{
-			DiskType:   fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category),
 			DiskSizeGb: int64(disk.SizeGiB),
+		}
+		if disk.Category != "" {
+			initParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category)
 		}
 		if disk.ProvisionedIOPS != nil {
 			initParams.ProvisionedIops = *disk.ProvisionedIOPS
