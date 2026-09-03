@@ -663,6 +663,19 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
 }
 
+func TestRenderDiskProperties_OmitsEmptyDiskCategory(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("", nil, nil)
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+	require.NoError(t, err)
+
+	require.Len(t, disks, 1)
+	require.Empty(t, disks[0].InitializeParams.DiskType)
+}
+
 func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
 	t.Parallel()
 
