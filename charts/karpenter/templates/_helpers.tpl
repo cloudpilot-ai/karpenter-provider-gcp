@@ -61,6 +61,30 @@ Create the name of the service account to use
 {{- end }}
 {{- end }}
 
+{{/*
+Name for the Spot preemption notice detector resources. Kept distinct from the
+controller's own name so its RBAC and pods are obviously separate.
+*/}}
+{{- define "karpenter.preemptionNotice.fullname" -}}
+{{- printf "%s-preemption-notice" (include "karpenter.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/* Selector labels for the Spot preemption notice detector */}}
+{{- define "karpenter.preemptionNotice.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "karpenter.name" . }}-preemption-notice
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/* Common labels for the Spot preemption notice detector */}}
+{{- define "karpenter.preemptionNotice.labels" -}}
+helm.sh/chart: {{ include "karpenter.chart" . }}
+{{ include "karpenter.preemptionNotice.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
 {{/* Get PodDisruptionBudget API Version */}}
 {{- define "karpenter.pdb.apiVersion" -}}
 {{- if and (.Capabilities.APIVersions.Has "policy/v1") (semverCompare ">= 1.21-0" .Capabilities.KubeVersion.Version) -}}
