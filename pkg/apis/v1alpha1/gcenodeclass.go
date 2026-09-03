@@ -28,6 +28,7 @@ import (
 
 // GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
 // This will contain the configuration necessary to launch instances in GCP.
+// +kubebuilder:validation:XValidation:message="subnetRangeName and subnetRangeNames are mutually exclusive",rule="!(has(self.subnetRangeName) && has(self.subnetRangeNames))"
 type GCENodeClassSpec struct {
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
@@ -52,12 +53,26 @@ type GCENodeClassSpec struct {
 	// SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
 	// to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's
 	// default pod secondary range (ClusterSecondaryRangeName from the cluster's IP
-	// allocation policy) is used.
+	// allocation policy) is used. Mutually exclusive with subnetRangeNames.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
 	// +optional
 	SubnetRangeName *string `json:"subnetRangeName,omitempty"`
+	// SubnetRangeNames is a list of subnetwork secondary IPv4 range names from which
+	// to allocate pod IP addresses (alias IPs for pods). When more than one name is
+	// listed, the provider selects the range with the lowest GKE-reported utilization
+	// at launch. Mutually exclusive with subnetRangeName. If neither field is set, the
+	// cluster's default pod secondary range is used (additional pod ranges are not
+	// included automatically).
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:XValidation:message="subnetRangeNames must be unique",rule="self.all(x, self.exists_one(y, x == y))"
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
+	// +optional
+	SubnetRangeNames []string `json:"subnetRangeNames,omitempty"`
 	// KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
 	// They are a vswitch of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
@@ -487,4 +502,19 @@ func (in *GCENodeClass) GetMaxPods() int32 {
 		return *in.Spec.KubeletConfiguration.MaxPods
 	}
 	return KubeletMaxPods
+}
+
+// PodSubnetRangeNames returns the NodeClass-configured pod secondary range names.
+// An empty result means the launch path should fall back to the cluster default.
+func (in *GCENodeClass) PodSubnetRangeNames() []string {
+	if in == nil {
+		return nil
+	}
+	if len(in.Spec.SubnetRangeNames) > 0 {
+		return append([]string(nil), in.Spec.SubnetRangeNames...)
+	}
+	if in.Spec.SubnetRangeName != nil && *in.Spec.SubnetRangeName != "" {
+		return []string{*in.Spec.SubnetRangeName}
+	}
+	return nil
 }
