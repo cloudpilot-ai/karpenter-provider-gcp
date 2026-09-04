@@ -84,6 +84,10 @@ type sourceTemplateFake struct {
 	templates []*compute.InstanceTemplate
 	// listOnly restricts the regional List endpoint to these templates. nil → all templates.
 	listOnly []*compute.InstanceTemplate
+	// templateGetStatus fails the per-template Get for these names, leaving List unaffected.
+	// That asymmetry is what lets a test tell "the chain gave up" apart from "the chain settled
+	// for whichever candidate happened to be readable".
+	templateGetStatus map[string]int
 }
 
 func (f *sourceTemplateFake) templateByName(name string) *compute.InstanceTemplate {
@@ -128,6 +132,10 @@ func (f *sourceTemplateFake) server(t *testing.T) *httptest.Server {
 			f.serveList(w, r)
 
 		case strings.Contains(path, "/instanceTemplates/"):
+			if status, ok := f.templateGetStatus[name]; ok {
+				w.WriteHeader(status)
+				return
+			}
 			template := f.templateByName(name)
 			if template == nil {
 				w.WriteHeader(http.StatusNotFound)
@@ -324,6 +332,49 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 		_, err := p.GetSourceTemplateMetadata(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, "gke-current", templateName(p))
+	})
+
+	// Two candidates exist precisely when a pool is mid-rollout, which is how a CA rotation is
+	// delivered — so the candidate that fails to read is as likely to be the new template as the
+	// old. Ranking whatever was readable and presenting it as an authoritative resolution is #577
+	// again through a narrower door, so any gap has to hand over to the label scan instead.
+	t.Run("gives up rather than ranking when a candidate template cannot be read", func(t *testing.T) {
+		t.Parallel()
+		fake := &sourceTemplateFake{
+			nodePool: &container.NodePool{Name: testPool, InstanceGroupUrls: []string{
+				migURL(testZone, "grp-a"), migURL("us-central1-b", "grp-b"),
+			}},
+			managers: map[string]*compute.InstanceGroupManager{
+				"grp-a": migOnTemplate(regionalTemplateURL("gke-stale")),
+				"grp-b": migOnTemplate(regionalTemplateURL("gke-current")),
+			},
+			// gke-stale stays readable, so settling for the survivor would resolve the stale one.
+			templateGetStatus: map[string]int{"gke-current": http.StatusInternalServerError},
+			templates:         []*compute.InstanceTemplate{stale, current},
+		}
+		p := fake.provider(t)
+
+		_, err := p.GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "gke-current", templateName(p), "expected the label-scan fallback, not the readable stale candidate")
+	})
+
+	t.Run("gives up rather than ranking when an instance group cannot be read", func(t *testing.T) {
+		t.Parallel()
+		fake := &sourceTemplateFake{
+			nodePool: &container.NodePool{Name: testPool, InstanceGroupUrls: []string{
+				migURL(testZone, "grp-a"), migURL("us-central1-b", "grp-b"),
+			}},
+			// grp-b is absent, so it 404s: the group carrying the newer template is the one we
+			// cannot see, which is exactly when a partial candidate set misleads.
+			managers:  map[string]*compute.InstanceGroupManager{"grp-a": migOnTemplate(regionalTemplateURL("gke-stale"))},
+			templates: []*compute.InstanceTemplate{stale, current},
+		}
+		p := fake.provider(t)
+
+		_, err := p.GetSourceTemplateMetadata(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "gke-current", templateName(p), "expected the label-scan fallback, not the readable stale candidate")
 	})
 
 	// Regression for cloudpilot-ai/karpenter-provider-gcp#577: GKE leaves every superseded

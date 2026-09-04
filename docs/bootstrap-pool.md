@@ -62,7 +62,7 @@ Karpenter therefore asks GKE, on every provisioning attempt:
 2. Read each instance group manager and take the instance template it is running now. A manager part-way through an update names more than one template through its `versions` field, which overrides the top-level `instanceTemplate`; all of them are considered.
 3. Fetch each template named, from the regional or global collection depending on its URL. Where more than one is named — across zones, or across versions mid-upgrade — the most recently created template wins.
 
-If that chain cannot be completed — for example the controller's IAM role is missing `compute.instanceGroupManagers.get` — Karpenter logs the reason and falls back to scanning regional instance templates for the pool's label, taking the most recently created match. Because the chain runs per provisioning attempt, a template rotation is picked up by the next node Karpenter launches; the controller logs `source instance template selected` whenever the resolved template changes.
+The chain has to resolve completely. If any part of it cannot be read — the controller's IAM role is missing `compute.instanceGroupManagers.get`, an instance group is unreachable, or one of the templates it names cannot be fetched — Karpenter does not rank whatever it did read, because the piece it could not see may well be the newer template. It logs the reason and falls back to scanning regional instance templates for the pool's label, taking the most recently created match. Because the chain runs per provisioning attempt, a template rotation is picked up by the next node Karpenter launches; the controller logs `source instance template selected` whenever the resolved template changes.
 
 ## Metadata sources
 

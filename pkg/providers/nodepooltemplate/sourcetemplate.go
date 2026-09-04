@@ -18,7 +18,6 @@ package nodepooltemplate
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -108,13 +107,18 @@ func (p *DefaultProvider) resolveTemplateFromNodePool(ctx context.Context, poolN
 	// A multi-zone pool has one instance group per zone, and an instance group part-way through an
 	// update names more than one template. Both normally collapse to a single template; where they
 	// do not, the newest one is the one being rolled out.
+	//
+	// Anything we cannot read fails the whole chain rather than narrowing it. More than one
+	// candidate means a rollout is in flight, which is how a credential rotation reaches a pool, so
+	// whatever we failed to read is as likely to be the new template as the old one. Ranking the
+	// remainder and reporting it as the pool's current template would hand the caller a stale
+	// bootstrap config while looking authoritative; giving up hands over to the label scan, which
+	// is also newest-wins and says so in the log.
 	var templateURLs []string
-	var errs []error
 	for _, instanceGroupURL := range nodePool.InstanceGroupUrls {
 		urls, err := p.instanceGroupTemplateURLs(ctx, instanceGroupURL)
 		if err != nil {
-			errs = append(errs, err)
-			continue
+			return nil, err
 		}
 		for _, templateURL := range urls {
 			if !slices.Contains(templateURLs, templateURL) {
@@ -123,21 +127,19 @@ func (p *DefaultProvider) resolveTemplateFromNodePool(ctx context.Context, poolN
 		}
 	}
 	if len(templateURLs) == 0 {
-		return nil, fmt.Errorf("no instance template named by the instance groups of node pool %q: %w",
-			poolName, errors.Join(errs...))
+		return nil, fmt.Errorf("no instance template named by the instance groups of node pool %q", poolName)
 	}
 
 	var newest *compute.InstanceTemplate
 	for _, templateURL := range templateURLs {
 		template, err := p.getInstanceTemplateByURL(ctx, templateURL)
 		if err != nil {
-			errs = append(errs, err)
-			continue
+			return nil, fmt.Errorf("fetching instance template for node pool %q: %w", poolName, err)
 		}
 		newest = newerTemplate(newest, template)
 	}
 	if newest == nil {
-		return nil, fmt.Errorf("fetching instance templates for node pool %q: %w", poolName, errors.Join(errs...))
+		return nil, fmt.Errorf("no instance template resolved for node pool %q", poolName)
 	}
 	return newest, nil
 }
