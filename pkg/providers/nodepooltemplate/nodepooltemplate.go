@@ -37,7 +37,8 @@ type Provider interface {
 	Sync(ctx context.Context) error
 	// EnsureFallbackPool creates the karpenter-fallback pool if it does not already exist.
 	EnsureFallbackPool(ctx context.Context) error
-	// GetSourceTemplateMetadata returns metadata from the currently selected source template.
+	// GetSourceTemplateMetadata returns metadata from the instance template that the selected
+	// source pool is currently running.
 	GetSourceTemplateMetadata(ctx context.Context) (*compute.Metadata, error)
 }
 
@@ -45,6 +46,9 @@ type DefaultProvider struct {
 	mu sync.RWMutex
 	// sourcePoolName is the currently selected bootstrap source pool.
 	sourcePoolName string
+	// lastTemplateName is the name of the instance template most recently resolved for
+	// sourcePoolName. Only used to log template rotations once instead of on every resolution.
+	lastTemplateName string
 
 	computeService        *compute.Service
 	containerService      *container.Service
@@ -213,34 +217,14 @@ func (p *DefaultProvider) getSourcePoolName(_ context.Context) (string, error) {
 	return name, nil
 }
 
-func (p *DefaultProvider) GetSourceTemplateMetadata(ctx context.Context) (*compute.Metadata, error) {
-	sourcePoolName, err := p.getSourcePoolName(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting source pool name: %w", err)
-	}
-
-	instanceTemplates, err := p.computeService.RegionInstanceTemplates.List(p.ClusterInfo.ProjectID, p.ClusterInfo.Region).Context(ctx).Do()
-	if err != nil {
-		return nil, fmt.Errorf("cannot list all instance templates for node pool name %q: %w", sourcePoolName, err)
-	}
-
-	for _, template := range instanceTemplates.Items {
-		if template.Properties == nil || template.Properties.Labels == nil || template.Properties.Metadata == nil {
-			continue
-		}
-		if !hasMetadataValue(template.Properties.Metadata, clusterNameMetadataKey, p.ClusterInfo.Name) {
-			continue
-		}
-		if template.Properties.Labels[nodePoolNameLabelKey] != sourcePoolName {
-			continue
-		}
-		log.FromContext(ctx).Info("Found instance template", "templateName", template.Name, "clusterName", p.ClusterInfo.Name)
-		return template.Properties.Metadata, nil
-	}
-
-	return nil, fmt.Errorf("no instance template found with label %s=%s", nodePoolNameLabelKey, sourcePoolName)
+// namesCluster reports whether instance template metadata identifies the given cluster.
+func namesCluster(meta *compute.Metadata, clusterName string) bool {
+	return hasMetadataValue(meta, clusterNameMetadataKey, clusterName)
 }
 
+// hasMetadataValue reports whether the metadata carries the given key with the given value.
+//
+//nolint:unparam // generic by design; every caller happens to pass clusterNameMetadataKey today.
 func hasMetadataValue(meta *compute.Metadata, key, value string) bool {
 	if meta == nil {
 		return false
