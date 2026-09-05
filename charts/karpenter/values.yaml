@@ -165,6 +165,10 @@ controller:
     # Recommended: set to a dedicated SA with roles/container.nodeServiceAccount.
     # Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount.
     defaultNodepoolServiceAccount: ""
+    # -- Provision mode for the cluster: "gke" (default) or "self-hosted". In self-hosted mode
+    # node bootstrap is owned by GCENodeClass spec.startupScript and the Container API is never
+    # called. Corresponds to the PROVISION_MODE env var. Leave empty to use the default.
+    provisionMode: ""
 
 # -- GCP credentials configuration
 credentials:

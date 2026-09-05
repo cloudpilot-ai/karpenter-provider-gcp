@@ -211,6 +211,11 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 		*out = new(NetworkConfig)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.StartupScript != nil {
+		in, out := &in.StartupScript, &out.StartupScript
+		*out = new(string)
+		**out = **in
+	}
 	return
 }
 
