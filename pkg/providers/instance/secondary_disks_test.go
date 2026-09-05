@@ -59,6 +59,7 @@ func TestBuildInstance_DropsStaleSourceSecondaryBootDiskMetadata(t *testing.T) {
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-secondary-boot-disk-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -80,6 +81,7 @@ func TestBuildInstance_SecondaryBootDiskMetadata(t *testing.T) {
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-secondary-boot-disk-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)

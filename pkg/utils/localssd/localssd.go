@@ -16,10 +16,85 @@ limitations under the License.
 
 package localssd
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // DefaultPartitionGiB is the standard NVMe local SSD partition size for most GCP machine families.
 const DefaultPartitionGiB int64 = 375
+
+// FamilySupportsConfigurableLocalSSDs reports whether a machine family accepts an explicit SSD count.
+func FamilySupportsConfigurableLocalSSDs(machineName string) bool {
+	_, ok := configurableLocalSSDFamilies[familyPrefix(machineName)]
+	return ok
+}
+
+// AllowedLocalSSDCounts returns the documented non-zero SSD counts for a machine shape.
+// Sources:
+//   - https://cloud.google.com/compute/docs/general-purpose-machines
+//   - https://cloud.google.com/compute/docs/compute-optimized-machines
+func AllowedLocalSSDCounts(machineName string, vCPUs int32) []int {
+	family, ok := configurableLocalSSDFamilies[familyPrefix(machineName)]
+	if !ok {
+		return nil
+	}
+	if family.fixed != nil {
+		return slices.Clone(family.fixed)
+	}
+	for _, b := range family.brackets {
+		if vCPUs >= b.minVCPUs {
+			return slices.Clone(b.counts)
+		}
+	}
+	return nil
+}
+
+type vcpuBracket struct {
+	minVCPUs int32
+	counts   []int
+}
+
+type configurableFamily struct {
+	fixed    []int
+	brackets []vcpuBracket
+}
+
+var configurableLocalSSDFamilies = map[string]configurableFamily{
+	"n1": {fixed: []int{1, 2, 3, 4, 5, 6, 7, 8, 16, 24}},
+	"n2": {brackets: []vcpuBracket{
+		{minVCPUs: 82, counts: []int{16, 24}},
+		{minVCPUs: 42, counts: []int{8, 16, 24}},
+		{minVCPUs: 22, counts: []int{4, 8, 16, 24}},
+		{minVCPUs: 12, counts: []int{2, 4, 8, 16, 24}},
+		{minVCPUs: 2, counts: []int{1, 2, 4, 8, 16, 24}},
+	}},
+	"n2d": {brackets: []vcpuBracket{
+		{minVCPUs: 96, counts: []int{8, 16, 24}},
+		{minVCPUs: 64, counts: []int{4, 8, 16, 24}},
+		{minVCPUs: 32, counts: []int{2, 4, 8, 16, 24}},
+		{minVCPUs: 2, counts: []int{1, 2, 4, 8, 16, 24}},
+	}},
+	"c2": {brackets: []vcpuBracket{
+		{minVCPUs: 60, counts: []int{8}},
+		{minVCPUs: 30, counts: []int{4, 8}},
+		{minVCPUs: 16, counts: []int{2, 4, 8}},
+		{minVCPUs: 4, counts: []int{1, 2, 4, 8}},
+	}},
+	"c2d": {brackets: []vcpuBracket{
+		{minVCPUs: 112, counts: []int{8}},
+		{minVCPUs: 56, counts: []int{4, 8}},
+		{minVCPUs: 32, counts: []int{2, 4, 8}},
+		{minVCPUs: 2, counts: []int{1, 2, 4, 8}},
+	}},
+}
+
+func familyPrefix(machineName string) string {
+	if i := strings.IndexByte(machineName, '-'); i > 0 {
+		return machineName[:i]
+	}
+	return machineName
+}
 
 type entry struct {
 	totalGiB   int64 // total SSD capacity; 0 = compute from partitions
@@ -35,10 +110,6 @@ type entry struct {
 var table = map[string]entry{
 	// z3 uses 3 TiB NVMe per partition; all other families use 375 GiB
 	"z3": {perPartGiB: 3000},
-
-	// c4d lssd variants: Compute API reports PartitionCount=1 but actual capacity differs
-	"c4d-highmem-8-lssd":  {totalGiB: 2250}, // 6 × 375 GiB
-	"c4d-highmem-16-lssd": {totalGiB: 3000}, // 8 × 375 GiB
 
 	// Bare-metal variants use 3000 GiB per partition (not 375 GiB)
 	"c4-highmem-288-lssd-metal":     {totalGiB: 18000}, // 6 × 3000 GiB
