@@ -24,7 +24,9 @@ import (
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -77,6 +79,48 @@ func TestListEphemeralStorageCacheIsolation(t *testing.T) {
 		"30 GiB disk should produce 15 Gi kubeReserved ephemeral-storage, not the cached 76 Gi")
 	assert.Equal(t, 2, p.staticInstanceTypesCache.ItemCount(),
 		"each distinct disk config must produce a separate cache entry")
+}
+
+func TestListRequiresInstanceTypesByName(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+	p.instanceTypesByName = nil
+
+	_, err := p.List(ctx, &v1alpha1.GCENodeClass{})
+	require.EqualError(t, err, "no instance types found")
+}
+
+func TestListDeduplicatesRegionalMachineTypesByName(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+
+	e2 := p.instanceTypesByName["n2-standard-4"]
+	e2.Name = lo.ToPtr("e2-standard-4")
+	e2.Zone = lo.ToPtr("zones/us-central1-a")
+	e2.SelfLink = lo.ToPtr("projects/test-project/zones/us-central1-a/machineTypes/e2-standard-4")
+	e2Duplicate := &computepb.MachineType{
+		Name:      lo.ToPtr("e2-standard-4"),
+		GuestCpus: lo.ToPtr[int32](4),
+		MemoryMb:  lo.ToPtr[int32](16384),
+		Zone:      lo.ToPtr("zones/us-central1-b"),
+		SelfLink:  lo.ToPtr("projects/test-project/zones/us-central1-b/machineTypes/e2-standard-4"),
+	}
+	c4 := &computepb.MachineType{
+		Name:      lo.ToPtr("c4-standard-2"),
+		GuestCpus: lo.ToPtr[int32](2),
+		MemoryMb:  lo.ToPtr[int32](7680),
+	}
+	p.instanceTypesByName = indexInstanceTypesByName([]*computepb.MachineType{e2, c4, e2Duplicate})
+	p.instanceTypesOfferings = map[string]sets.Set[string]{
+		"c4-standard-2": sets.New("us-central1-a"),
+		"e2-standard-4": sets.New("us-central1-a"),
+	}
+
+	instanceTypes, err := p.List(ctx, &v1alpha1.GCENodeClass{})
+	require.NoError(t, err)
+	require.Len(t, instanceTypes, 2)
+	assert.Equal(t, "c4-standard-2", instanceTypes[0].Name)
+	assert.Equal(t, "e2-standard-4", instanceTypes[1].Name)
 }
 
 func TestListUnavailableOfferingsDoNotGrowStaticCache(t *testing.T) {
