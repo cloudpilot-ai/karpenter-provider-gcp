@@ -222,7 +222,7 @@ func TestNewInstanceType_IncludesStaticKubeProxyOverhead(t *testing.T) {
 		MemoryMb:  lo.ToPtr[int32](4096),
 	}
 
-	it := NewInstanceType(ctx, mt, &v1alpha1.GCENodeClass{}, "us-central1", testOfferings())
+	it := NewInstanceType(ctx, mt, &v1alpha1.GCENodeClass{}, "us-central1", testOfferings(), 0)
 
 	assert.Equal(t, int64(60), it.Overhead.KubeReserved.Cpu().MilliValue())
 	assert.Equal(t, int64(staticKubeProxyCPUMilliCore), it.Overhead.SystemReserved.Cpu().MilliValue())
@@ -280,7 +280,7 @@ func TestNewInstanceType_RespectsKubeletConfiguration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{KubeletConfiguration: tt.kc}}
-			it := NewInstanceType(ctx, mt, nodeClass, "us-central1", testOfferings())
+			it := NewInstanceType(ctx, mt, nodeClass, "us-central1", testOfferings(), 0)
 			assert.NotNil(t, it)
 			tt.assert(t, it)
 		})

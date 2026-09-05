@@ -42,6 +42,7 @@ func init() {
 		LabelInstanceGPUManufacturer,
 		LabelInstanceGPUCount,
 		LabelInstanceGPUMemory,
+		LabelInstanceLocalSsdCount,
 		LabelTopologyZoneID,
 		corev1.LabelWindowsBuild,
 		LabelGKEReadinessCalicoReady,
@@ -146,6 +147,7 @@ var (
 	LabelInstanceGPUManufacturer             = apis.Group + "/instance-gpu-manufacturer"
 	LabelInstanceGPUCount                    = apis.Group + "/instance-gpu-count"
 	LabelInstanceGPUMemory                   = apis.Group + "/instance-gpu-memory"
+	LabelInstanceLocalSsdCount               = apis.Group + "/instance-local-ssd-count"
 	AnnotationGCENodeClassHash               = apis.Group + "/gcenodeclass-hash"
 	AnnotationClusterNameTaggedCompatability = apis.CompatibilityGroup + "/cluster-name-tagged"
 	AnnotationGCENodeClassHashVersion        = apis.Group + "/gcenodeclass-hash-version"

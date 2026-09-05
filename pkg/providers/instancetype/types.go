@@ -43,25 +43,31 @@ import (
 const staticKubeProxyCPUMilliCore = 100
 
 func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass,
-	region string, offerings cloudprovider.Offerings) *cloudprovider.InstanceType {
+	region string, offerings cloudprovider.Offerings, ssdCount int) *cloudprovider.InstanceType {
 	if offerings == nil {
 		return nil
 	}
 
-	it := NewStaticInstanceType(ctx, mt, nodeClass)
+	it := NewStaticInstanceType(ctx, mt, nodeClass, ssdCount)
 	if it == nil {
 		return nil
 	}
-	it.Requirements = computeRequirements(mt, offerings, region)
+	it.Requirements = computeRequirements(mt, offerings, region, ssdCount)
 	it.Offerings = offerings
 	return it
 }
 
-func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass) *cloudprovider.InstanceType {
-	// Calculate disk configuration from GCENodeClass
-	bootDiskGiB, totalSSDGiB, localSSDCount := calculateDiskConfigGiB(nodeClass, mt)
-	totalStorageGiB := totalSSDGiB
-	if totalSSDGiB == 0 {
+func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass, ssdCount int) *cloudprovider.InstanceType {
+	bootDiskGiB, totalSSDGiB := calculateDiskConfigGiB(nodeClass, mt, ssdCount)
+
+	// RawBlock SSDs do not contribute to kubelet ephemeral storage.
+	kubeletEphemeralSSDGiB, kubeletEphemeralSSDCount := totalSSDGiB, ssdCount
+	if nodeClass.Spec.LocalSsdMode != v1alpha1.LocalSSDModeEphemeral {
+		kubeletEphemeralSSDGiB, kubeletEphemeralSSDCount = 0, 0
+	}
+
+	totalStorageGiB := kubeletEphemeralSSDGiB
+	if totalStorageGiB == 0 {
 		totalStorageGiB = bootDiskGiB
 	}
 	totalStorageBytes := totalStorageGiB * 1024 * 1024 * 1024
@@ -71,15 +77,18 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 		int64(mt.GetGuestCpus()*1000),
 		int64(mt.GetMemoryMb()),
 		bootDiskGiB,
-		totalSSDGiB,
-		localSSDCount,
+		kubeletEphemeralSSDGiB,
+		int64(kubeletEphemeralSSDCount),
 	)
 
 	log.FromContext(ctx).V(1).Info("calculated ephemeral storage reservations",
 		"instanceType", lo.FromPtr(mt.Name),
+		"localSsdMode", nodeClass.Spec.LocalSsdMode,
 		"bootDiskGiB", bootDiskGiB,
 		"totalSSDGiB", totalSSDGiB,
-		"localSSDCount", localSSDCount,
+		"localSSDCount", ssdCount,
+		"kubeletEphemeralSSDGiB", kubeletEphemeralSSDGiB,
+		"kubeletEphemeralSSDCount", kubeletEphemeralSSDCount,
 		"ephemeralEviction", ephemeralEviction,
 		"ephemeralSystem", ephemeralSystem)
 
@@ -124,7 +133,7 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 }
 
 //nolint:gocyclo
-func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offerings, region string) scheduling.Requirements {
+func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offerings, region string, ssdCount int) scheduling.Requirements {
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, lo.FromPtr(mt.Name)),
@@ -154,6 +163,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUMemory, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelGKEAccelerator, corev1.NodeSelectorOpDoesNotExist),
 	)
+	requirements.Add(localSSDCountRequirement(ssdCount))
 	for _, label := range disktype.AllLabels() {
 		requirements.Add(scheduling.NewRequirement(label, corev1.NodeSelectorOpDoesNotExist))
 	}
@@ -200,6 +210,14 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 	}
 
 	return requirements
+}
+
+func localSSDCountRequirement(ssdCount int) *scheduling.Requirement {
+	return scheduling.NewRequirement(
+		v1alpha1.LabelInstanceLocalSsdCount,
+		corev1.NodeSelectorOpIn,
+		fmt.Sprintf("%d", ssdCount),
+	)
 }
 
 func extractGPUName(mt *computepb.MachineType) string {
@@ -250,30 +268,16 @@ func memory(ctx context.Context, mt *computepb.MachineType) *resource.Quantity {
 	return resource.NewQuantity(totalQuantity-int64(float64(totalQuantity)*osReservedPercent), resource.DecimalSI)
 }
 
-func calculateDiskConfigGiB(nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType) (int64, int64, int64) {
+func calculateDiskConfigGiB(nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType, ssdCount int) (int64, int64) {
 	bootDiskGiB := int64(100) // Default boot disk size
-	totalSSDGiB := int64(0)
-	localSSDCount := int64(0)
-
-	if nodeClass != nil && len(nodeClass.Spec.Disks) > 0 {
-		// Use disk configuration from GCENodeClass
+	if nodeClass != nil {
 		for _, disk := range nodeClass.Spec.Disks {
-			if disk.Boot {
-				// Boot disk size from nodeClass
+			if disk.Boot && disk.SizeGiB > 0 {
 				bootDiskGiB = int64(disk.SizeGiB)
-			} else if disk.Category == "local-ssd" {
-				// Local SSD from nodeClass
-				totalSSDGiB += int64(disk.SizeGiB)
-				localSSDCount++
+				break
 			}
 		}
-		return bootDiskGiB, totalSSDGiB, localSSDCount
 	}
-
-	// Fallback to machine type bundled local SSDs if no nodeClass disk config
-	if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil && *bls.PartitionCount > 0 {
-		localSSDCount = int64(*bls.PartitionCount)
-		totalSSDGiB = localssd.TotalGiB(lo.FromPtr(mt.Name), int(*bls.PartitionCount))
-	}
-	return bootDiskGiB, totalSSDGiB, localSSDCount
+	totalSSDGiB := localssd.TotalGiB(lo.FromPtr(mt.Name), ssdCount)
+	return bootDiskGiB, totalSSDGiB
 }

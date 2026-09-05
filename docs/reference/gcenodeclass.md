@@ -44,7 +44,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `sizeGiB` _integer_ | SizeGiB is the size of the disk. Unit: GiB |  | Optional: \{\} <br /> |
-| `category` _[DiskCategory](#diskcategory)_ | The category of the disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme). |  | Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput local-ssd pd-balanced pd-extreme pd-ssd pd-standard] <br />Optional: \{\} <br /> |
+| `category` _[DiskCategory](#diskcategory)_ | The category of the disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme). |  | Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput pd-balanced pd-extreme pd-ssd pd-standard] <br />Optional: \{\} <br /> |
 | `boot` _boolean_ | Indicates that this is a boot disk. |  | Optional: \{\} <br /> |
 | `secondaryBootImage` _string_ | SecondaryBootImage is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME). |  | Optional: \{\} <br /> |
 | `secondaryBootMode` _[SecondaryBootDiskMode](#secondarybootdiskmode)_ | SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE). |  | Enum: [MODE_UNSPECIFIED CONTAINER_IMAGE_CACHE] <br />Optional: \{\} <br /> |
@@ -61,7 +61,7 @@ _Underlying type:_ _string_
 DiskCategory represents a disk category type
 
 _Validation:_
-- Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput local-ssd pd-balanced pd-extreme pd-ssd pd-standard]
+- Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput pd-balanced pd-extreme pd-ssd pd-standard]
 
 _Appears in:_
 - [Disk](#disk)
@@ -116,6 +116,7 @@ _Appears in:_
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
 | `autoGPUTaint` _boolean_ | AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule<br />to any GPU node at provisioning time, regardless of the NodePool configuration.<br />Disabled by default to preserve backward compatibility. |  | Optional: \{\} <br /> |
 | `gpuDriverVersion` _string_ | GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.<br />Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.<br />Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),<br />"disabled" (skip automatic installation).<br />Ignored for non-GPU instance types. | default | Enum: [default latest disabled] <br />Optional: \{\} <br /> |
+| `localSsdMode` _[LocalSSDMode](#localssdmode)_ | LocalSsdMode exposes local SSDs as raw devices or kubelet ephemeral storage. | RawBlock | Enum: [RawBlock Ephemeral] <br />Optional: \{\} <br /> |
 | `preemptionNoticeDuration` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | PreemptionNoticeDuration is how long before shutdown GCE flips the<br />instance/preempted metadata key on a Spot VM. Unset (the default) gives no advance<br />notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.<br />"120s" gives a two-minute warning, letting Karpenter start draining before shutdown.<br />GCE currently accepts up to two minutes.<br />Only applies to Spot capacity; ignored for on-demand nodes.<br />Reading the notice requires an agent on the node that watches the metadata key<br />and sets the GCESpotPreempting condition — see docs/spot-preemption.md. |  | Pattern: `^([0-9]+(s\|m\|h))+$` <br />Type: string <br />Optional: \{\} <br /> |
 
 
@@ -219,6 +220,24 @@ _Validation:_
 _Appears in:_
 - [KubeletConfiguration](#kubeletconfiguration)
 
+
+
+#### LocalSSDMode
+
+_Underlying type:_ _string_
+
+LocalSSDMode controls how local SSDs are exposed to workloads.
+
+_Validation:_
+- Enum: [RawBlock Ephemeral]
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description |
+| --- | --- |
+| `RawBlock` | LocalSSDModeRawBlock leaves local SSDs unformatted.<br /> |
+| `Ephemeral` | LocalSSDModeEphemeral uses local SSDs for kubelet ephemeral storage.<br /> |
 
 
 #### NetworkConfig

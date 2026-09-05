@@ -27,9 +27,11 @@ import (
 	"math"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
@@ -49,10 +51,12 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 const (
@@ -91,6 +95,7 @@ type Provider interface {
 
 type DefaultProvider struct {
 	gkeProvider              gke.Provider
+	instanceTypeProvider     instancetype.Provider
 	nodePoolTemplateProvider nodepooltemplate.Provider
 	versionProvider          version.Provider
 	unavailableOfferings     *unavailableofferings.UnavailableOfferings
@@ -110,12 +115,14 @@ type DefaultProvider struct {
 func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount, computeDefaultSA string,
 	computeService *compute.Service,
 	gkeProvider gke.Provider,
+	instanceTypeProvider instancetype.Provider,
 	nodePoolTemplateProvider nodepooltemplate.Provider,
 	versionProvider version.Provider,
 	unavailableOfferings *unavailableofferings.UnavailableOfferings,
 ) Provider {
 	return &DefaultProvider{
 		gkeProvider:              gkeProvider,
+		instanceTypeProvider:     instanceTypeProvider,
 		nodePoolTemplateProvider: nodePoolTemplateProvider,
 		versionProvider:          versionProvider,
 		unavailableOfferings:     unavailableOfferings,
@@ -356,16 +363,24 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		return nil, fmt.Errorf("no instance types provided")
 	}
 
-	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
-	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	instanceTypes = orderInstanceTypesByPrice(instanceTypes, requirements)
+	launchInstanceTypes, rejectedConfigurable := instanceTypesForLaunch(nodeClaim, instanceTypes)
 
-	// Check if the instance already exists in any zone
+	// Check for an instance in any zone before validating launch candidates so earlier attempts are adopted.
 	if existingInstance, err := p.findInstanceByNodeClaim(ctx, nodeClaim); err != nil {
 		log.FromContext(ctx).Error(err, "failed to check if instance exists in region", "nodeClaim", nodeClaim.Name)
 	} else if existingInstance != nil {
-		return p.adoptExistingInstance(ctx, existingInstance, capacityType), nil
+		return p.adoptExistingInstance(ctx, existingInstance, p.getCapacityType(nodeClaim, instanceTypes)), nil
 	}
 
+	launchInstanceTypes, err := validateLaunchInstanceTypes(launchInstanceTypes, rejectedConfigurable)
+	if err != nil {
+		return nil, err
+	}
+
+	instanceTypes = orderInstanceTypesByPrice(launchInstanceTypes, requirements)
+	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
 	var errs []error
 	var attemptedZones []string
 	// try all instance types, if one is available, use it
@@ -423,6 +438,13 @@ func (e *retryableError) Error() string {
 }
 
 func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, capacityType string, attemptedZones []string) (*compute.Instance, string, error) {
+	mt := p.instanceTypeProvider.GetMachineType(instanceType.Name)
+
+	ssdCount, err := resolveCreateSSDCount(instanceType)
+	if err != nil {
+		return nil, "", err
+	}
+
 	zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
@@ -441,7 +463,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, zone, &retryableError{err}
 	}
 
-	instance, effectiveZone, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType, attemptedZones)
+	instance, effectiveZone, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType, attemptedZones, mt, ssdCount)
 	if err != nil {
 		if retryable {
 			return nil, zone, &retryableError{err}
@@ -452,7 +474,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 	return instance, effectiveZone, nil
 }
 
-func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string, attemptedZones []string) (*compute.Instance, string, bool, error) {
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string, attemptedZones []string, mt *computepb.MachineType, ssdCount int) (*compute.Instance, string, bool, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
 	for _, candidate := range lo.Uniq(append([]string{zone}, attemptedZones...)) {
 		existing, exists, err := p.isInstanceExists(ctx, candidate, instanceName)
@@ -469,7 +491,7 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		}
 	}
 
-	instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType)
+	instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
@@ -540,12 +562,82 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 		if len(instanceTypes[j].Offerings.Available().Compatible(requirements)) > 0 {
 			jPrice = instanceTypes[j].Offerings.Available().Compatible(requirements).Cheapest().Price
 		}
-		if iPrice == jPrice {
+		if iPrice != jPrice {
+			return iPrice < jPrice
+		}
+		if instanceTypes[i].Name != instanceTypes[j].Name {
 			return instanceTypes[i].Name < instanceTypes[j].Name
 		}
-		return iPrice < jPrice
+		return variantSSDCount(instanceTypes[i]) < variantSSDCount(instanceTypes[j])
 	})
 	return instanceTypes
+}
+
+func instanceTypesForLaunch(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, bool) {
+	exactCount, defaultZero, hasExactCount := requestedLocalSSDCount(nodeClaim)
+	rejectedConfigurable := false
+	filtered := lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
+		if !localssd.FamilySupportsConfigurableLocalSSDs(instanceType.Name) {
+			return true
+		}
+		variantCount, err := resolveCreateSSDCount(instanceType)
+		if err != nil {
+			return true
+		}
+		allowed := (defaultZero && variantCount == 0) || (hasExactCount && variantCount == exactCount)
+		rejectedConfigurable = rejectedConfigurable || !allowed
+		return allowed
+	})
+	return filtered, rejectedConfigurable
+}
+
+func requestedLocalSSDCount(nodeClaim *karpv1.NodeClaim) (int, bool, bool) {
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	countRequirement, hasCount := requirements[v1alpha1.LabelInstanceLocalSsdCount]
+	if !hasCount {
+		return 0, true, false
+	}
+	if countRequirement.Operator() != corev1.NodeSelectorOpIn || countRequirement.Len() != 1 {
+		return 0, false, false
+	}
+	count, err := strconv.Atoi(countRequirement.Any())
+	return count, false, err == nil && count >= 0
+}
+
+func validateLaunchInstanceTypes(instanceTypes []*cloudprovider.InstanceType, rejectedConfigurable bool) ([]*cloudprovider.InstanceType, error) {
+	if len(instanceTypes) != 0 {
+		return instanceTypes, nil
+	}
+	if rejectedConfigurable {
+		// Core deletes InsufficientCapacityError NodeClaims immediately. No offering is marked unavailable.
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf(
+			"configurable local SSD launches require %s to resolve to one exact count, or to be absent with a count=0 variant that fits the request",
+			v1alpha1.LabelInstanceLocalSsdCount,
+		))
+	}
+	return nil, fmt.Errorf("no instance types remained after applying launch requirements")
+}
+
+func resolveCreateSSDCount(it *cloudprovider.InstanceType) (int, error) {
+	req := it.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount)
+	if req.Operator() != corev1.NodeSelectorOpIn || req.Len() != 1 {
+		return 0, fmt.Errorf("instance type %s has no single-valued %s requirement; every variant must pin exactly one count",
+			it.Name, v1alpha1.LabelInstanceLocalSsdCount)
+	}
+	n, err := strconv.Atoi(req.Any())
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("instance type %s %s value %q is not a non-negative integer; every variant must pin an integer count",
+			it.Name, v1alpha1.LabelInstanceLocalSsdCount, req.Any())
+	}
+	return n, nil
+}
+
+func variantSSDCount(it *cloudprovider.InstanceType) int {
+	n, err := resolveCreateSSDCount(it)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func filterZonesByRequirement(zones []string, reqs scheduling.Requirements) []string {
@@ -637,15 +729,18 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClass *v1alpha1.GCENodeClass, zone string,
+	nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int,
 ) ([]*compute.AttachedDisk, error) {
 	disks := nodeClass.Spec.Disks
 	sort.Slice(disks, func(i, j int) bool {
 		return disks[i].Boot
 	})
 
-	attachedDisks := make([]*compute.AttachedDisk, len(disks))
-	for i, disk := range disks {
+	attachedDisks := make([]*compute.AttachedDisk, 0, len(disks)+ssdCount)
+	for _, disk := range disks {
+		if disk.Category == "local-ssd" {
+			continue
+		}
 		// Create a new disk configuration for each disk to avoid sharing references
 		initParams := &compute.AttachedDiskInitializeParams{
 			DiskSizeGb: int64(disk.SizeGiB),
@@ -692,14 +787,38 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 			}
 		}
 
-		attachedDisks[i] = attachedDisk
+		attachedDisks = append(attachedDisks, attachedDisk)
 	}
 
+	attachedDisks = append(attachedDisks, p.localSSDDisks(instanceType.Name, zone, ssdCount)...)
 	return attachedDisks, nil
 }
 
-func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string) (*compute.Instance, error) {
-	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone)
+func (p *DefaultProvider) localSSDDisks(instanceType, zone string, count int) []*compute.AttachedDisk {
+	if !localssd.FamilySupportsConfigurableLocalSSDs(instanceType) {
+		return nil
+	}
+	disks := make([]*compute.AttachedDisk, count)
+	for i := range count {
+		disks[i] = p.scratchDisk(zone)
+	}
+	return disks
+}
+
+func (p *DefaultProvider) scratchDisk(zone string) *compute.AttachedDisk {
+	return &compute.AttachedDisk{
+		Type:       "SCRATCH",
+		AutoDelete: true,
+		Boot:       false,
+		Interface:  "NVME",
+		InitializeParams: &compute.AttachedDiskInitializeParams{
+			DiskType: fmt.Sprintf("projects/%s/zones/%s/diskTypes/local-ssd", p.projectID, zone),
+		},
+	}
+}
+
+func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int) (*compute.Instance, error) {
+	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone, ssdCount)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
@@ -707,7 +826,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	isGPUInstance := instanceTypeHasGPU(instanceType)
 
 	// Setup metadata
-	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance)
+	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount)
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
@@ -754,15 +873,14 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
 
-	// A2, A3, G2 machine types have built-in GPUs and do not support live migration.
-	if isGPUInstance {
-		instance.Scheduling.OnHostMaintenance = "TERMINATE"
+	if policy := onHostMaintenancePolicy(instanceType, capacityType, mt); policy != "" {
+		instance.Scheduling.OnHostMaintenance = policy
 	}
 
 	p.configureConfidentialInstance(instance, nodeClass)
 
 	// Setup karpenter built-in labels
-	p.setupInstanceLabels(instance, nodeClaim, nodeClass, clusterConfig.Id)
+	p.setupInstanceLabels(instance, nodeClaim, nodeClass, clusterConfig.Id, ssdCount)
 
 	return instance, nil
 }
@@ -864,7 +982,7 @@ func podCIDRRange(maxPods int32) int32 {
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance.
-func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool) (*metadata.InstanceMetadata, error) {
+func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool, ssdCount int) (*metadata.InstanceMetadata, error) {
 	target, err := metadata.FromSourceTemplate(sourceMetadata)
 	if err != nil {
 		return nil, err
@@ -886,6 +1004,7 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 		return nil, err
 	}
 	p.buildTargetMetadata(ctx, target, sourceMetadata, nodeClass, instanceType, nodeClaim, provisioningModel, isGPUInstance)
+	patchLocalSSDMetadata(target, nodeClass, ssdCount)
 
 	return target, nil
 }
@@ -934,6 +1053,35 @@ func (p *DefaultProvider) buildTargetMetadata(ctx context.Context, target *metad
 		target.SetKubeLabel(key, value)
 		target.SetRegistrationNodeLabel(key, value)
 	}
+}
+
+// Local SSD metadata consumed by the GKE bootstrapper.
+const (
+	kubeEnvKeyLocalNVMeBlockExt        = "NODE_LOCAL_NVME_SSD_BLOCK_EXT"
+	kubeEnvKeyEphemeralStorageLocalSSD = "NODE_EPHEMERAL_STORAGE_LOCAL_SSD"
+	kubeLabelKeyLocalNVMe              = "cloud.google.com/gke-local-nvme-ssd"
+	kubeLabelKeyEphemeralLS            = "cloud.google.com/gke-ephemeral-storage-local-ssd"
+)
+
+func patchLocalSSDMetadata(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, ssdCount int) {
+	if ssdCount <= 0 {
+		return
+	}
+	var envKey, envValue, envDrop, labelKey string
+	switch nodeClass.Spec.LocalSsdMode {
+	case v1alpha1.LocalSSDModeEphemeral:
+		envKey, envValue = kubeEnvKeyEphemeralStorageLocalSSD, "true"
+		envDrop = kubeEnvKeyLocalNVMeBlockExt
+		labelKey = kubeLabelKeyEphemeralLS
+	default:
+		envKey, envValue = kubeEnvKeyLocalNVMeBlockExt, fmt.Sprintf("%d,nvme,block", ssdCount)
+		envDrop = kubeEnvKeyEphemeralStorageLocalSSD
+		labelKey = kubeLabelKeyLocalNVMe
+	}
+	target.UnsetKubeEnvEntry(envDrop)
+	target.SetKubeEnvEntry(envKey, envValue)
+	target.SetKubeLabel(labelKey, "true")
+	target.SetRegistrationNodeLabel(labelKey, "true")
 }
 
 // instanceTypeHasGPU reports whether the instance type has a built-in GPU requirement.
@@ -1134,8 +1282,37 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 		instance.Scheduling.ProvisioningModel = "SPOT"
 		instance.Scheduling.Preemptible = true
 		instance.Scheduling.AutomaticRestart = ptr.To(false)
-		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
+}
+
+// GCE requires z3 instances with more than 18 TiB of bundled local SSD to terminate on maintenance.
+const z3HighSsdGiBThreshold = 18 * 1024
+
+// onHostMaintenancePolicy returns TERMINATE for shapes that GCE cannot live-migrate.
+func onHostMaintenancePolicy(instanceType *cloudprovider.InstanceType, capacityType string, mt *computepb.MachineType) string {
+	if capacityType == karpv1.CapacityTypeSpot {
+		return "TERMINATE"
+	}
+	if instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0 {
+		return "TERMINATE"
+	}
+	if strings.HasPrefix(instanceType.Name, "z3-") && !strings.HasSuffix(instanceType.Name, "-metal") {
+		if mt != nil {
+			if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil {
+				if localssd.TotalGiB(instanceType.Name, int(*bls.PartitionCount)) > z3HighSsdGiBThreshold {
+					return "TERMINATE"
+				}
+			}
+		}
+		return "MIGRATE"
+	}
+	if strings.HasSuffix(instanceType.Name, "-metal") {
+		return "TERMINATE"
+	}
+	if strings.HasPrefix(instanceType.Name, "h4d-") {
+		return "TERMINATE"
+	}
+	return ""
 }
 
 // configureConfidentialInstance applies the NodeClass ConfidentialInstanceType
@@ -1158,7 +1335,7 @@ func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instan
 // setupInstanceLabels writes controller-owned GCE labels for a new instance.
 // Kubernetes node labels are rebuilt separately in bootstrap metadata and must
 // not be copied to GCE instance labels.
-func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, clusterID string) {
+func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, clusterID string, ssdCount int) {
 	if id, ok := clusterIDBase32(clusterID); ok {
 		instance.Labels["goog-gke-cluster-id-base32"] = id
 	}
@@ -1173,6 +1350,7 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	// is checked by belongsToCluster to distinguish same-named clusters in different locations.
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
 	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
+	instance.Labels[utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)] = strconv.Itoa(ssdCount)
 }
 
 func clusterIDBase32(clusterID string) (string, bool) {

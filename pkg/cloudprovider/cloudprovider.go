@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/awslabs/operatorpkg/status"
@@ -42,6 +43,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 const CloudProviderName = "gcp"
@@ -105,9 +107,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, fmt.Errorf("creating instance, %w", err)
 	}
 
-	instanceType, _ := lo.Find(instanceTypes, func(i *cloudprovider.InstanceType) bool {
-		return i.Name == instance.Type
-	})
+	instanceType, _ := matchVariantForInstance(instanceTypes, instance)
 
 	nc := c.instanceToNodeClaim(instance, instanceType)
 	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
@@ -146,19 +146,40 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context, ins
 		return nil, client.IgnoreNotFound(fmt.Errorf("resolving nodepool, %w", err))
 	}
 
-	instanceTypes, err := c.GetInstanceTypes(ctx, nodePool)
+	instanceTypes, err := c.getAllInstanceTypes(ctx, nodePool)
 	if err != nil {
 		return nil, client.IgnoreNotFound(fmt.Errorf("getting instance types, %w", err))
 	}
 
-	instanceType, ok := lo.Find(instanceTypes, func(i *cloudprovider.InstanceType) bool {
-		return i.Name == instance.Type
-	})
-
+	instanceType, ok := matchVariantForInstance(instanceTypes, instance)
 	if !ok {
 		return nil, fmt.Errorf("instance type %s not found in offerings", instance.Type)
 	}
 	return instanceType, nil
+}
+
+// matchVariantForInstance disambiguates same-name instance types using the
+// local-SSD count stamped on the VM. Unlabeled VMs use the first name match.
+func matchVariantForInstance(its []*cloudprovider.InstanceType, inst *instance.Instance) (*cloudprovider.InstanceType, bool) {
+	gceCountKey := utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)
+	wantCount, hasCount := inst.Labels[gceCountKey]
+	var fallback *cloudprovider.InstanceType
+	for _, i := range its {
+		if i.Name != inst.Type {
+			continue
+		}
+		if fallback == nil {
+			fallback = i
+		}
+		if !hasCount {
+			return i, true
+		}
+		req := i.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount)
+		if req.Operator() == corev1.NodeSelectorOpIn && req.Len() == 1 && req.Any() == wantCount {
+			return i, true
+		}
+	}
+	return fallback, fallback != nil
 }
 
 func (c *CloudProvider) resolveNodePoolFromInstance(ctx context.Context, instance *instance.Instance) (*karpv1.NodePool, error) {
@@ -196,7 +217,9 @@ func (c *CloudProvider) LivenessProbe(req *http.Request) error {
 	return c.instanceTypeProvider.LivenessProbe(req)
 }
 
-// GetInstanceTypes returns all available InstanceTypes
+// GetInstanceTypes returns the instance types the scheduler may use for a NodePool.
+// Non-zero configurable SSD counts require the count label on the NodePool;
+// existing instances are reconciled against the unfiltered catalog.
 func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
 	if err != nil {
@@ -215,7 +238,30 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 	if err != nil {
 		return nil, err
 	}
-	return instanceTypes, nil
+	return instanceTypesForScheduling(nodePool, instanceTypes), nil
+}
+
+func (c *CloudProvider) getAllInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
+	if err != nil {
+		return nil, err
+	}
+	return c.instanceTypeProvider.List(ctx, nodeClass)
+}
+
+func instanceTypesForScheduling(nodePool *karpv1.NodePool, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...)
+	requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
+	if requirements.Has(v1alpha1.LabelInstanceLocalSsdCount) {
+		return slices.Clone(instanceTypes)
+	}
+	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
+		if !localssd.FamilySupportsConfigurableLocalSSDs(instanceType.Name) {
+			return true
+		}
+		count := instanceType.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount)
+		return count.Operator() == corev1.NodeSelectorOpIn && count.Len() == 1 && count.Any() == "0"
+	})
 }
 
 func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *karpv1.NodePool) (*v1alpha1.GCENodeClass, error) {
