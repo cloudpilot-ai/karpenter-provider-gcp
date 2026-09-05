@@ -72,36 +72,126 @@ func TestIsInsufficientCapacityErrorNonMatching(t *testing.T) {
 	require.False(t, isInsufficientCapacityError(entry))
 }
 
-func TestExtractInsertInsufficientCapacityReasonMatchesReason(t *testing.T) {
+func TestExtractOperationInsufficientCapacityDetails(t *testing.T) {
 	t.Parallel()
 
-	reason, code, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{
+	details, ok := extractOperationInsufficientCapacityDetails(&compute.Operation{
+		Name: "operation-123",
+		Error: &compute.OperationError{
+			Errors: []*compute.OperationErrorErrors{{
+				Code:    "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+				Message: "generic capacity message",
+				ErrorDetails: []*compute.OperationErrorErrorsErrorDetails{
+					{LocalizedMessage: &compute.LocalizedMessage{Message: "localized capacity message"}},
+					{ErrorInfo: &compute.ErrorInfo{Reason: "resource_availability"}},
+				},
+			}},
+		},
+	})
+
+	require.True(t, ok)
+	require.Equal(t, insufficientCapacityDetails{
+		code:             "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+		structuredReason: "resource_availability",
+		message:          "localized capacity message",
+		operation:        "operation-123",
+	}, details)
+}
+
+func TestExtractOperationInsufficientCapacityDetailsFallsBackToCode(t *testing.T) {
+	t.Parallel()
+
+	details, ok := extractOperationInsufficientCapacityDetails(&compute.Operation{
+		Name: "operation-123",
+		Error: &compute.OperationError{
+			Errors: []*compute.OperationErrorErrors{{
+				Code: "ZONE_RESOURCE_POOL_EXHAUSTED",
+			}},
+		},
+	})
+
+	require.True(t, ok)
+	require.Equal(t, "ZONE_RESOURCE_POOL_EXHAUSTED", details.message)
+	require.Empty(t, details.structuredReason)
+}
+
+func TestExtractInsertInsufficientCapacityDetailsMatchesReason(t *testing.T) {
+	t.Parallel()
+
+	details, ok := extractInsertInsufficientCapacityDetails(&googleapi.Error{
 		Errors: []googleapi.ErrorItem{{Reason: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}},
 	})
 
 	require.True(t, ok)
-	require.Equal(t, "IP_SPACE_EXHAUSTED_WITH_DETAILS", reason)
-	require.Equal(t, "IP_SPACE_EXHAUSTED_WITH_DETAILS", code)
+	require.Equal(t, insufficientCapacityDetails{
+		code:             "IP_SPACE_EXHAUSTED_WITH_DETAILS",
+		structuredReason: "IP_SPACE_EXHAUSTED_WITH_DETAILS",
+		message:          "IP_SPACE_EXHAUSTED_WITH_DETAILS",
+	}, details)
 }
 
-func TestExtractInsertInsufficientCapacityReasonRequiresStructuredReason(t *testing.T) {
+func TestExtractInsertInsufficientCapacityDetailsRequiresStructuredReason(t *testing.T) {
 	t.Parallel()
 
-	reason, code, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{
+	details, ok := extractInsertInsufficientCapacityDetails(&googleapi.Error{
 		Message: "some failure IP_SPACE_EXHAUSTED for range",
 	})
 
 	require.False(t, ok)
-	require.Empty(t, reason)
-	require.Empty(t, code)
+	require.Empty(t, details)
 }
 
-func TestExtractInsertInsufficientCapacityReasonNonMatching(t *testing.T) {
+func TestExtractInsertInsufficientCapacityDetailsNonMatching(t *testing.T) {
 	t.Parallel()
 
-	_, _, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{Message: "some other issue"})
+	_, ok := extractInsertInsufficientCapacityDetails(&googleapi.Error{Message: "some other issue"})
 
 	require.False(t, ok)
+}
+
+func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
+	t.Parallel()
+
+	const operation = "operation-1788548040491-65aacca9e01b7-9614bc69-e30ce63a"
+	unavailable := unavailableofferings.NewUnavailableOfferings()
+	p := &DefaultProvider{unavailableOfferings: unavailable}
+	err := p.handleZoneOperationError(context.Background(), &compute.Operation{
+		Name: operation,
+		Error: &compute.OperationError{
+			Errors: []*compute.OperationErrorErrors{{
+				Code:    "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+				Message: "generic capacity message",
+				ErrorDetails: []*compute.OperationErrorErrorsErrorDetails{
+					{LocalizedMessage: &compute.LocalizedMessage{Message: "localized capacity message"}},
+					{ErrorInfo: &compute.ErrorInfo{Reason: "resource_availability"}},
+				},
+			}},
+		},
+	}, "z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand)
+
+	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
+	require.ErrorContains(t, err, "insufficient capacity, z3-highmem-8-highlssd on-demand/us-east4-a unavailable 30m0s")
+	require.ErrorContains(t, err, "reason=resource_availability, op="+operation+", code=ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS")
+	require.ErrorContains(t, err, "localized capacity message")
+	require.True(t, unavailable.IsUnavailable("z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand))
+
+	wrappedErr := fmt.Errorf("creating instance, failed to create instance after trying all instance types: %w", err)
+	require.True(t, cloudprovider.IsInsufficientCapacityError(wrappedErr))
+	wrapped := wrappedErr.Error()
+	if len(wrapped) > 300 {
+		wrapped = wrapped[:300]
+	}
+	for _, field := range []string{
+		"z3-highmem-8-highlssd",
+		"on-demand",
+		"us-east4-a",
+		"30m0s",
+		"ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+		"resource_availability",
+		operation,
+	} {
+		require.Contains(t, wrapped, field)
+	}
 }
 
 func TestInsufficientCapacityBackoffTTLForIPSpace(t *testing.T) {
