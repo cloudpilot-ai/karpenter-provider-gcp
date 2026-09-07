@@ -1,0 +1,15 @@
+# Direct pod IPs across several secondary IP ranges.
+# At launch Karpenter picks the listed range with the lowest GKE utilization.
+# subnetRangeNames is mutually exclusive with subnetRangeName.
+# Use networkConfig.subnetwork for the node subnet.
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: subnet-ranges-example
+spec:
+  imageSelectorTerms:
+    - family: ContainerOptimizedOS
+      channel: cluster
+  subnetRangeNames:
+    - gke-example-pods
+    - gke-example-additional
