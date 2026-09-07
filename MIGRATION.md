@@ -9,6 +9,19 @@
 
 `GCENodeClass.spec.disks[].category: local-ssd` never provisioned local SSDs successfully and is no longer accepted by the CRD. If your NodeClass uses it, remove that disk entry before upgrading the CRD. To provision local SSDs, use `spec.localSsdMode` (`RawBlock` by default; set `Ephemeral` for kubelet storage). For configurable machine families (`n1`, `n2`, `n2d`, `c2`, `c2d`), declare `karpenter.k8s.gcp/instance-local-ssd-count` on the NodePool and select one exact count through the NodePool or Pod requirements. Fixed-count local SSD machine types, such as `c4d-standard-8-lssd`, do not need a Pod count selector. See [Proposal 0003](proposals/0003-local-ssd-support.md#migration) for examples.
 
+### Multiple pod CIDR ranges on GCENodeClass
+
+`GCENodeClass` now accepts `spec.subnetRangeNames`, a list of GKE secondary IPv4 range names for
+pod alias IPs. When more than one name is listed, Karpenter selects the range with the lowest
+GKE-reported utilization at launch and retries remaining names if Compute returns IP space
+exhausted. Resolved names and utilization are published on `status.subnetRanges`.
+
+`spec.subnetRangeName` is unchanged. The two fields are mutually exclusive. If neither is set,
+Karpenter still uses only the cluster default pod range.
+
+**Action required:** none. To spill over across additional pod ranges, list those names (including
+the cluster default) on `subnetRangeNames` and omit `subnetRangeName`.
+
 ---
 
 ## v0.6.0

@@ -123,3 +123,23 @@ func TestGCENodeClassCRDRejectsZeroHugepages(t *testing.T) {
 		require.Equal(t, float64(1), *field.Minimum, "%s must reject 0", name)
 	}
 }
+
+func TestGCENodeClassCRDSubnetRangeNamesMutuallyExclusive(t *testing.T) {
+	crd, err := os.ReadFile(crdPath())
+	require.NoError(t, err)
+
+	crdText := string(crd)
+	require.Contains(t, crdText, `subnetRangeName and subnetRangeNames are mutually exclusive`)
+	require.Contains(t, crdText, `!(has(self.subnetRangeName) && has(self.subnetRangeNames))`)
+	require.Contains(t, crdText, `subnetRangeNames:`)
+}
+
+func TestGCENodeClassCRDSubnetRangeNamesUniqueViaCEL(t *testing.T) {
+	crd, err := os.ReadFile(crdPath())
+	require.NoError(t, err)
+
+	crdText := string(crd)
+	require.NotContains(t, crdText, `uniqueItems: true`, "Kubernetes CRDs forbid uniqueItems")
+	require.Contains(t, crdText, `subnetRangeNames must be unique`)
+	require.Contains(t, crdText, `self.all(x, self.exists_one(y, x == y))`)
+}

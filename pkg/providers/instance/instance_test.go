@@ -19,6 +19,7 @@ package instance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -168,7 +169,7 @@ func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
 	const operation = "operation-1788548040491-65aacca9e01b7-9614bc69-e30ce63a"
 	unavailable := unavailableofferings.NewUnavailableOfferings()
 	p := &DefaultProvider{unavailableOfferings: unavailable}
-	err := p.handleZoneOperationError(context.Background(), &compute.Operation{
+	op := &compute.Operation{
 		Name: operation,
 		Error: &compute.OperationError{
 			Errors: []*compute.OperationErrorErrors{{
@@ -180,7 +181,10 @@ func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
 				},
 			}},
 		},
-	}, "z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand)
+	}
+	details, found := extractOperationInsufficientCapacityDetails(op)
+	require.True(t, found)
+	err := p.markInsufficientCapacity(context.Background(), "z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand, details)
 
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.ErrorContains(t, err, "insufficient capacity, z3-highmem-8-highlssd on-demand/us-east4-a unavailable 5m0s")
@@ -257,14 +261,17 @@ func TestHandleZoneOperationErrorUnsupportedConfiguration(t *testing.T) {
 
 	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
 	p := &DefaultProvider{unavailableOfferings: unavailableofferings.NewUnavailableOfferingsWithCache(c)}
-	err := p.handleZoneOperationError(context.Background(), &compute.Operation{
+	operationErr := handleZoneOperationError(&compute.Operation{
 		Error: &compute.OperationError{
 			Errors: []*compute.OperationErrorErrors{{
 				Code:         "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
 				ErrorDetails: []*compute.OperationErrorErrorsErrorDetails{{ErrorInfo: &compute.ErrorInfo{Reason: "configuration_availability"}}},
 			}},
 		},
-	}, "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand)
+	})
+	capacityErr, ok := errors.AsType[*insufficientCapacityError](operationErr)
+	require.True(t, ok)
+	err := p.markInsufficientCapacity(context.Background(), "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, capacityErr.details)
 
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.ErrorContains(t, err, "n2-standard-4 on-demand/us-east4-a unsupported configuration 1h0m0s")
@@ -310,6 +317,150 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 			require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 			require.Equal(t, tt.wantRetryable, retryable)
 			requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeOnDemand, tt.wantTTL)
+		})
+	}
+}
+
+func TestSetPrimaryAliasRange(t *testing.T) {
+	t.Parallel()
+
+	instance := &compute.Instance{
+		NetworkInterfaces: []*compute.NetworkInterface{{
+			AliasIpRanges: []*compute.AliasIpRange{{SubnetworkRangeName: "first"}},
+		}},
+	}
+	setPrimaryAliasRange(instance, "second")
+	require.Equal(t, "second", instance.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName)
+}
+
+func TestIsIPSpaceExhausted(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isIPSpaceExhausted(insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED"}))
+	require.True(t, isIPSpaceExhausted(insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}))
+	require.False(t, isIPSpaceExhausted(insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED"}))
+}
+
+func TestHandleZoneOperationErrorPreservesReasonCode(t *testing.T) {
+	t.Parallel()
+
+	op := &compute.Operation{Error: &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
+		Code: "IP_SPACE_EXHAUSTED",
+		// GCE messages do not necessarily repeat the reason code, so the code itself
+		// must survive the conversion for the pod range fallback to trigger.
+		Message: "IP address range of subnetwork is exhausted",
+	}}}}
+
+	capacityErr, ok := errors.AsType[*insufficientCapacityError](handleZoneOperationError(op))
+	require.True(t, ok)
+	require.Equal(t, "IP_SPACE_EXHAUSTED", capacityErr.details.code)
+	require.True(t, isIPSpaceExhausted(capacityErr.details))
+}
+
+func TestHandleZoneOperationErrorForNonCapacityFailure(t *testing.T) {
+	t.Parallel()
+
+	op := &compute.Operation{Error: &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
+		Code:    "QUOTA_EXCEEDED",
+		Message: "quota exceeded",
+	}}}}
+
+	err := handleZoneOperationError(op)
+	require.Error(t, err)
+	_, ok := errors.AsType[*insufficientCapacityError](err)
+	require.False(t, ok)
+}
+
+// podRangeFallbackCluster reports two pod ranges so the launch loop has somewhere to fall back to.
+func podRangeFallbackCluster() *containerv1.Cluster {
+	cluster := makeCluster("net", "subnet", "default-pods", false)
+	cluster.IpAllocationPolicy.AdditionalPodRangesConfig = &containerv1.AdditionalPodRangesConfig{
+		PodRangeInfo: []*containerv1.RangeInfo{
+			{RangeName: "default-pods", Utilization: 0.1},
+			{RangeName: "extra-pods", Utilization: 0.9},
+		},
+	}
+	return cluster
+}
+
+// podRangeFallbackHandler serves the instance-get, insert and operation-poll calls of a
+// single launch, failing the first insert with an IP exhaustion error of the given kind.
+// asyncFailure reports the exhaustion through the zone operation instead of the insert call.
+func podRangeFallbackHandler(inserts *atomic.Int32, asyncFailure bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/operations/"):
+			op := &compute.Operation{Name: "op-1", Status: "DONE"}
+			if asyncFailure && inserts.Load() == 1 {
+				op.Error = &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
+					Code:    "IP_SPACE_EXHAUSTED",
+					Message: "IP address range of subnetwork is exhausted",
+				}}}
+			}
+			writeJSON(w, op)
+		case r.Method == http.MethodPost:
+			if inserts.Add(1) == 1 && !asyncFailure {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]any{"error": map[string]any{
+					"code":    http.StatusBadRequest,
+					"message": "IP address range of subnetwork is exhausted",
+					"errors":  []map[string]string{{"reason": "IP_SPACE_EXHAUSTED", "message": "range exhausted"}},
+				}})
+				return
+			}
+			writeJSON(w, &compute.Operation{Name: "op-1", Status: "RUNNING"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(w, map[string]any{"error": map[string]any{
+				"code":    http.StatusNotFound,
+				"message": "not found",
+				"errors":  []map[string]string{{"reason": "notFound"}},
+			}})
+		}
+	}
+}
+
+func TestGetOrCreateInstanceFallsBackToNextPodRange(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		asyncFailure bool
+	}{
+		{name: "insert call reports exhaustion"},
+		{name: "zone operation reports exhaustion", asyncFailure: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var inserts atomic.Int32
+			p := newFakeComputeProvider(t, podRangeFallbackHandler(&inserts, tc.asyncFailure))
+			p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+			p.unavailableOfferings = unavailableofferings.NewUnavailableOfferings()
+
+			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+				SubnetRangeNames: []string{"default-pods", "extra-pods"},
+			}}
+			instanceType := &cloudprovider.InstanceType{
+				Name:         "n2-standard-2",
+				Requirements: scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64")),
+				Overhead:     &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+			}
+
+			instance, _, retryable, err := p.getOrCreateInstance(context.Background(),
+				spotOrOnDemandNodeClaim(), nodeClass, instanceType, makeSourceMetadata("max-pods-per-node=110"),
+				podRangeFallbackCluster(), "us-central1-f", karpv1.CapacityTypeOnDemand, nil, nil, 0,
+			)
+
+			require.NoError(t, err)
+			require.False(t, retryable)
+			require.NotNil(t, instance)
+			require.Equal(t, int32(2), inserts.Load(), "the exhausted range must be retried with the next range")
+			require.Equal(t, "extra-pods", instance.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName)
+			require.False(t, p.unavailableOfferings.IsUnavailable("n2-standard-2", "us-central1-f", karpv1.CapacityTypeOnDemand),
+				"a successful fallback must not mark the offering unavailable")
 		})
 	}
 }
@@ -1148,6 +1299,24 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Equal(t, "custom-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
+	})
+
+	t.Run("NodeClass SubnetRangeNames selects lowest utilization", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"full-pods", "free-pods"}},
+		}
+		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
+		cluster.IpAllocationPolicy.AdditionalPodRangesConfig = &containerv1.AdditionalPodRangesConfig{
+			PodRangeInfo: []*containerv1.RangeInfo{
+				{RangeName: "full-pods", Utilization: 0.95},
+				{RangeName: "free-pods", Utilization: 0.1},
+			},
+		}
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+		require.Equal(t, "free-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
 
 	t.Run("CIDR prefix derived from maxPods", func(t *testing.T) {
@@ -2062,7 +2231,7 @@ func TestWaitOperationDone_RetriesOnTransient503(t *testing.T) {
 		writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
 	}))
 
-	err := p.waitOperationDone(context.Background(), "n1-standard-1", "us-central1-a", "on-demand", "op-123")
+	err := p.waitOperationDone(context.Background(), "us-central1-a", "op-123")
 	require.NoError(t, err)
 
 	require.Equal(t, int32(3), callCount.Load())
@@ -2079,7 +2248,7 @@ func TestWaitOperationDone_FailsOnPersistent503(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := p.waitOperationDone(ctx, "n1-standard-1", "us-central1-a", "on-demand", "op-123")
+	err := p.waitOperationDone(ctx, "us-central1-a", "op-123")
 
 	require.Error(t, err)
 }
