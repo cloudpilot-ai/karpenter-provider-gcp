@@ -44,6 +44,15 @@ const (
 	nodePoolServiceAccountFlagName        = "default-nodepool-service-account"
 	defaultNodePoolTemplateNameEnvVarName = "DEFAULT_NODEPOOL_TEMPLATE_NAME"
 	defaultNodePoolTemplateNameFlagName   = "default-nodepool-template-name"
+	provisionModeEnvVarName               = "PROVISION_MODE"
+	provisionModeFlagName                 = "provision-mode"
+)
+
+// PROVISION_MODE selects whether nodes bootstrap through GKE (default) or through a
+// user-supplied startup script on a self-hosted cluster.
+const (
+	ProvisionModeGKE        = "gke"
+	ProvisionModeSelfHosted = "self-hosted"
 )
 
 func init() {
@@ -63,7 +72,14 @@ type Options struct {
 	GCPAuth                     string
 	NodePoolServiceAccount      string
 	DefaultNodePoolTemplateName string
+	ProvisionMode               string
 	Interruption                bool
+}
+
+// IsSelfHosted is the nil-safe provision mode gate; contexts without injected
+// options (e.g. unit tests) default to GKE behavior.
+func (o *Options) IsSelfHosted() bool {
+	return o != nil && o.ProvisionMode == ProvisionModeSelfHosted
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -75,6 +91,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.GCPAuth, GCPAuth, env.WithDefaultString(GCPAuth, ""), "Path to the Google Application Credentials JSON file. If not set, the controller will use the default credentials from the environment.")
 	fs.StringVar(&o.NodePoolServiceAccount, nodePoolServiceAccountFlagName, env.WithDefaultString(nodePoolServiceAccountEnvVarName, ""), "Service account to use for default node pool templates. If not set, uses <project number>-compute@developer.gserviceaccount.com")
 	fs.StringVar(&o.DefaultNodePoolTemplateName, defaultNodePoolTemplateNameFlagName, env.WithDefaultString(defaultNodePoolTemplateNameEnvVarName, ""), "Pin the bootstrap source pool by name. If set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING.")
+	fs.StringVar(&o.ProvisionMode, provisionModeFlagName, env.WithDefaultString(provisionModeEnvVarName, ProvisionModeGKE), "Provision mode for the cluster: 'gke' (default) or 'self-hosted'. In self-hosted mode node bootstrap is owned by GCENodeClass spec.startupScript and the Container API is never called.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 }
 
@@ -84,6 +101,12 @@ func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
 			os.Exit(0)
 		}
 		return fmt.Errorf("parsing flags, %w", err)
+	}
+
+	// In self-hosted mode a zonal location normalizes to its region: zones are listed
+	// region-wide and placement belongs to NodePool topology requirements.
+	if o.IsSelfHosted() {
+		o.ClusterLocation = utils.RegionFromLocation(o.ClusterLocation)
 	}
 
 	// Backward compatibility: if NodeLocation not set, default to ClusterLocation

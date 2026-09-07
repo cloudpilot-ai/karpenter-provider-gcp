@@ -29,6 +29,8 @@ import (
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 )
 
 func buildContainerService(t *testing.T, srv *httptest.Server) *container.Service {
@@ -207,7 +209,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 		p := sourceTemplateProvider(t, srv)
 		source, err := p.GetSourceTemplateMetadata(context.Background())
 		require.NoError(t, err)
-		require.True(t, hasMetadataValue(source, clusterNameMetadataKey, "cluster"))
+		require.True(t, metadata.HasValue(source, metadata.ClusterNameKey, "cluster"))
 	})
 
 	t.Run("ignores templates from other clusters", func(t *testing.T) {
@@ -219,7 +221,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 
 		source, err := sourceTemplateProvider(t, srv).GetSourceTemplateMetadata(context.Background())
 		require.NoError(t, err)
-		require.True(t, hasMetadataValue(source, clusterNameMetadataKey, "cluster"))
+		require.True(t, metadata.HasValue(source, metadata.ClusterNameKey, "cluster"))
 	})
 
 	t.Run("missing matching template returns error", func(t *testing.T) {

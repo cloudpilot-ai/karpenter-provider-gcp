@@ -302,6 +302,13 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			},
 			want: NodeClassDrift,
 		},
+		{
+			name: "StartupScript",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.StartupScript = ptr("#!/bin/bash\necho bootstrap\n")
+			},
+			want: NodeClassDrift,
+		},
 	}
 
 	for _, tt := range tests {

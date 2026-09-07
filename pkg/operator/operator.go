@@ -18,10 +18,7 @@ package operator
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"regexp"
-	"strings"
 
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
@@ -42,6 +39,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 func init() {
@@ -62,21 +60,26 @@ type Operator struct {
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	os.Setenv(options.GCPAuth, options.FromContext(ctx).GCPAuth)
 
-	region, err := determineRegion(ctx, options.FromContext(ctx).ProjectID, options.FromContext(ctx).ClusterLocation)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to determine region")
-		os.Exit(1)
-	}
+	region := utils.RegionFromLocation(options.FromContext(ctx).ClusterLocation)
+	log.FromContext(ctx).Info("determined region", "Region", region, "Location", options.FromContext(ctx).ClusterLocation)
 
 	computeService, err := compute.NewService(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create compute service")
 		os.Exit(1)
 	}
-	containerService, err := container.NewService(ctx)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to create container service")
-		os.Exit(1)
+
+	// Self-hosted mode never calls the Container API, so the container service and the
+	// GKE bootstrap template provider are not built.
+	selfHosted := options.FromContext(ctx).IsSelfHosted()
+	var containerService *container.Service
+	var nodeTemplateProvider nodepooltemplate.Provider
+	if !selfHosted {
+		containerService, err = container.NewService(ctx)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to create container service")
+			os.Exit(1)
+		}
 	}
 	auth := auth.Credential{
 		ProjectID:    options.FromContext(ctx).ProjectID,
@@ -85,21 +88,19 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
-	nodeTemplateProvider := nodepooltemplate.NewDefaultProvider(
-		ctx,
-		computeService,
-		containerService,
-		options.FromContext(ctx).ClusterName,
-		region,
-		options.FromContext(ctx).ProjectID,
-		options.FromContext(ctx).NodePoolServiceAccount,
-		options.FromContext(ctx).ClusterLocation,
-		options.FromContext(ctx).NodeLocation,
-		options.FromContext(ctx).DefaultNodePoolTemplateName,
-	)
-	if nodeTemplateProvider == nil {
-		log.FromContext(ctx).Error(nil, "failed to initialize node pool template provider")
-		os.Exit(1)
+	if !selfHosted {
+		nodeTemplateProvider = nodepooltemplate.NewDefaultProvider(
+			ctx,
+			computeService,
+			containerService,
+			options.FromContext(ctx).ClusterName,
+			region,
+			options.FromContext(ctx).ProjectID,
+			options.FromContext(ctx).NodePoolServiceAccount,
+			options.FromContext(ctx).ClusterLocation,
+			options.FromContext(ctx).NodeLocation,
+			options.FromContext(ctx).DefaultNodePoolTemplateName,
+		)
 	}
 	billingClient, err := instanceprice.New(ctx)
 	if err != nil {
@@ -113,11 +114,16 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	unavailableOfferingsCache := unavailableofferings.NewUnavailableOfferings()
-	gkeProvider := gke.NewDefaultProvider(computeService, containerService,
-		options.FromContext(ctx).ProjectID,
-		options.FromContext(ctx).NodeLocation,
-		options.FromContext(ctx).ClusterName,
-	)
+	var gkeProvider gke.Provider
+	if selfHosted {
+		gkeProvider = gke.NewSelfHostedProvider(computeService, options.FromContext(ctx).ProjectID, region)
+	} else {
+		gkeProvider = gke.NewDefaultProvider(computeService, containerService,
+			options.FromContext(ctx).ProjectID,
+			options.FromContext(ctx).NodeLocation,
+			options.FromContext(ctx).ClusterName,
+		)
+	}
 	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider, gkeProvider)
 
 	projectID := options.FromContext(ctx).ProjectID
@@ -152,21 +158,4 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceTypeProvider:      instanceTypeProvider,
 		InstanceProvider:          instanceProvider,
 	}
-}
-
-func determineRegion(ctx context.Context, projectID, location string) (string, error) {
-	log.FromContext(ctx).Info("attempting to determine if location is a region or a zone", "ProjectID", projectID, "Location", location)
-
-	match, err := regexp.MatchString(`^[a-z]+-[a-z]+\d-[a-z]{1}$`, location)
-	if err != nil {
-		return "", err
-	}
-	if match {
-		log.FromContext(ctx).Info("location is a zone, extracting region", "ProjectID", projectID, "Location", location)
-
-		parts := strings.Split(location, "-")
-		return fmt.Sprintf("%s-%s", parts[0], parts[1]), nil
-	}
-	log.FromContext(ctx).Info("location is a region", "ProjectID", projectID, "Location", location)
-	return location, nil
 }

@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
@@ -92,20 +93,23 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 		return zones, nil
 	}
 
-	projectID := options.FromContext(ctx).ProjectID
-	clusterLocation := options.FromContext(ctx).ClusterLocation
-
-	region := clusterLocation
-	if strings.Count(clusterLocation, "-") == 2 {
-		parts := strings.Split(clusterLocation, "-")
-		region = strings.Join(parts[:2], "-")
+	region := utils.RegionFromLocation(options.FromContext(ctx).ClusterLocation)
+	zones, err := listZoneNamesInRegion(ctx, p.computeService, options.FromContext(ctx).ProjectID, region, false)
+	if err != nil {
+		return nil, err
 	}
+	p.zoneCache.Set(zoneCacheKey, zones, cache.DefaultExpiration)
+	return zones, nil
+}
 
+// listZoneNamesInRegion lists the project's zone names in region via the Compute API,
+// optionally restricted to zones whose status is UP.
+func listZoneNamesInRegion(ctx context.Context, computeService *compute.Service, projectID, region string, onlyUp bool) ([]string, error) {
 	var zones []string
 	prefix := region + "-"
-	err = p.computeService.Zones.List(projectID).Pages(ctx, func(page *compute.ZoneList) error {
+	err := computeService.Zones.List(projectID).Pages(ctx, func(page *compute.ZoneList) error {
 		for _, z := range page.Items {
-			if strings.HasPrefix(z.Name, prefix) {
+			if strings.HasPrefix(z.Name, prefix) && (!onlyUp || z.Status == "UP") {
 				zones = append(zones, z.Name)
 			}
 		}
@@ -121,7 +125,6 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 	}
 
 	sort.Strings(zones)
-	p.zoneCache.Set(zoneCacheKey, zones, cache.DefaultExpiration)
 	return zones, nil
 }
 

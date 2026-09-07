@@ -130,6 +130,10 @@ spec:
             - name: DEFAULT_NODEPOOL_SERVICE_ACCOUNT
               value: "{{ . }}"
             {{- end }}
+            {{- with .Values.controller.settings.provisionMode }}
+            - name: PROVISION_MODE
+              value: "{{ . }}"
+            {{- end }}
             - name: METRICS_PORT
               value: "{{ .Values.controller.metrics.port }}"
             - name: KARPENTER_SERVICE

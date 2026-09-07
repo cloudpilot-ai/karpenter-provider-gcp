@@ -60,13 +60,20 @@ func NewController(
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
-		nodepooltemplate.NewController(nodePoolTemplateProvider),
 		nodeclasstermination.NewController(kubeClient),
 		nodeclasshash.NewController(kubeClient),
 		instancetype.NewController(instanceTypeProvider),
-		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),
 		nodeclaimgc.NewController(kubeClient, cloudProvider),
+	}
+
+	// Self-hosted clusters have no GKE bootstrap templates to sync; auto-approving
+	// kubelet CSRs would bypass the distribution's own node authorization.
+	if !options.FromContext(ctx).IsSelfHosted() {
+		controllers = append(controllers,
+			nodepooltemplate.NewController(nodePoolTemplateProvider),
+			csr.NewController(kubernetesInterface),
+		)
 	}
 
 	if options.FromContext(ctx).Interruption {

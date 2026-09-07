@@ -18,6 +18,7 @@ package utils
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -260,6 +261,72 @@ func TestResolveReservedResource(t *testing.T) {
 			assert.Equal(t, tt.expectedEvict, evict, "Memory eviction mismatch")
 			assert.Equal(t, tt.expectedEphEvict, ephEvict, "Ephemeral eviction mismatch")
 			assert.Equal(t, tt.expectedEphSys, ephSys, "Ephemeral system mismatch")
+		})
+	}
+}
+
+func TestSanitizeGCELabelValue(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "label-safe value unchanged",
+			input:    "my-cluster",
+			expected: "my-cluster",
+		},
+		{
+			name:     "FQDN cluster name maps dots to dashes",
+			input:    "poc0006.k8s.local",
+			expected: "poc0006-k8s-local",
+		},
+		{
+			name:     "uppercase is lowered",
+			input:    "My.Cluster",
+			expected: "my-cluster",
+		},
+		{
+			name:     "leading and trailing separators trimmed",
+			input:    ".my-cluster.",
+			expected: "my-cluster",
+		},
+		{
+			name:     "value longer than 63 characters is truncated",
+			input:    strings.Repeat("a", 62) + ".example.com",
+			expected: strings.Repeat("a", 62) + "-",
+		},
+		{
+			name:     "only separators sanitizes to empty",
+			input:    "---",
+			expected: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := SanitizeGCELabelValue(tc.input)
+			assert.Equal(t, tc.expected, result)
+			assert.LessOrEqual(t, len(result), 63)
+		})
+	}
+}
+
+func TestRegionFromLocation(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "zone", input: "us-central1-a", expected: "us-central1"},
+		{name: "two-digit region zone", input: "europe-west10-b", expected: "europe-west10"},
+		{name: "region unchanged", input: "us-central1", expected: "us-central1"},
+		{name: "two-digit region unchanged", input: "europe-west10", expected: "europe-west10"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, RegionFromLocation(tc.input))
 		})
 	}
 }
