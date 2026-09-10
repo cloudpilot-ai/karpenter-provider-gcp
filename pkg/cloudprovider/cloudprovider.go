@@ -211,11 +211,26 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 		return nil, fmt.Errorf("resolving node class, %w", err)
 	}
 	// TODO, break this coupling
-	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass, requestedInstanceTypeNames(nodePool.Spec.Template.Spec.Requirements))
 	if err != nil {
 		return nil, err
 	}
 	return instanceTypes, nil
+}
+
+// requestedInstanceTypeNames extracts the exact instance-type names named by an "In"
+// requirement on the well-known instance-type label. This lets List resolve GCE custom
+// machine types (e.g. n2-custom-8-24576), which are never returned by the general catalog
+// refresh and can otherwise only be discovered by exact name.
+func requestedInstanceTypeNames(reqs []karpv1.NodeSelectorRequirementWithMinValues) []string {
+	var names []string
+	for _, req := range reqs {
+		if req.Key != corev1.LabelInstanceTypeStable || req.Operator != corev1.NodeSelectorOpIn {
+			continue
+		}
+		names = append(names, req.Values...)
+	}
+	return names
 }
 
 func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *karpv1.NodePool) (*v1alpha1.GCENodeClass, error) {
@@ -386,7 +401,7 @@ func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeC
 }
 
 func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
-	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass, requestedInstanceTypeNames(nodeClaim.Spec.Requirements))
 	if err != nil {
 		return nil, err
 	}

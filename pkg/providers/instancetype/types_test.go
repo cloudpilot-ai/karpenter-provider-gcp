@@ -60,13 +60,13 @@ func TestListEphemeralStorageCacheIsolation(t *testing.T) {
 	}
 
 	// First call: 200 GiB disk – populates the cache.
-	its200, err := p.List(ctx, nodeClass200)
+	its200, err := p.List(ctx, nodeClass200, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, its200)
 	ephemeral200 := its200[0].Overhead.KubeReserved.StorageEphemeral()
 
 	// Second call: 30 GiB disk – must NOT reuse the 200 GiB cache entry.
-	its30, err := p.List(ctx, nodeClass30)
+	its30, err := p.List(ctx, nodeClass30, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, its30)
 	ephemeral30 := its30[0].Overhead.KubeReserved.StorageEphemeral()
@@ -84,14 +84,14 @@ func TestListUnavailableOfferingsDoNotGrowStaticCache(t *testing.T) {
 	p := newTestProvider()
 	nodeClass := &v1alpha1.GCENodeClass{}
 
-	first, err := p.List(ctx, nodeClass)
+	first, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, first)
 	assert.True(t, spotOfferingAvailable(first[0].Offerings))
 
 	p.unavailableOfferings.MarkUnavailable(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot)
 
-	second, err := p.List(ctx, nodeClass)
+	second, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, second)
 	assert.False(t, spotOfferingAvailable(second[0].Offerings))
@@ -104,14 +104,14 @@ func TestListRebuildsRequirementsWithInjectedOfferings(t *testing.T) {
 	p := newTestProvider()
 	nodeClass := &v1alpha1.GCENodeClass{}
 
-	first, err := p.List(ctx, nodeClass)
+	first, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, first)
 	assert.Contains(t, first[0].Requirements.Get(karpv1.CapacityTypeLabelKey).Values(), karpv1.CapacityTypeSpot)
 
 	p.unavailableOfferings.MarkUnavailable(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot)
 
-	second, err := p.List(ctx, nodeClass)
+	second, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, second)
 	assert.NotContains(t, second[0].Requirements.Get(karpv1.CapacityTypeLabelKey).Values(), karpv1.CapacityTypeSpot)
@@ -125,14 +125,14 @@ func TestListUnavailableOfferingExpiryDoesNotGrowStaticCache(t *testing.T) {
 
 	p.unavailableOfferings.MarkUnavailableWithTTL(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot, time.Millisecond)
 
-	unavailable, err := p.List(ctx, nodeClass)
+	unavailable, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, unavailable)
 	assert.False(t, spotOfferingAvailable(unavailable[0].Offerings))
 
 	time.Sleep(2 * time.Millisecond)
 
-	available, err := p.List(ctx, nodeClass)
+	available, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, available)
 	assert.True(t, spotOfferingAvailable(available[0].Offerings))
@@ -145,14 +145,14 @@ func TestListDoesNotMutatePreviousResults(t *testing.T) {
 	p := newTestProvider()
 	nodeClass := &v1alpha1.GCENodeClass{}
 
-	first, err := p.List(ctx, nodeClass)
+	first, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, first)
 	assert.True(t, spotOfferingAvailable(first[0].Offerings))
 
 	p.unavailableOfferings.MarkUnavailable(ctx, "ICE", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot)
 
-	second, err := p.List(ctx, nodeClass)
+	second, err := p.List(ctx, nodeClass, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, second)
 	assert.False(t, spotOfferingAvailable(second[0].Offerings))

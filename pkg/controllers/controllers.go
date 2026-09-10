@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/awslabs/operatorpkg/controller"
+	"google.golang.org/api/compute/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
@@ -57,6 +58,8 @@ func NewController(
 	instanceTypeProvider providerinstancetype.Provider,
 	cloudProvider *cloudprovider.CloudProvider,
 	pricingProvider pricing.Provider,
+	computeService *compute.Service,
+	projectID string,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
@@ -74,6 +77,8 @@ func NewController(
 			kubeClient,
 			recorder,
 			unavailableOfferings,
+			computeService,
+			projectID,
 		))
 	}
 
