@@ -18,6 +18,8 @@ package instancetype
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -25,7 +27,9 @@ import (
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
+	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -92,9 +96,25 @@ func resolveCustomMachineTypes(
 	return machineTypes, offerings
 }
 
-// getCachedCustomMachineType resolves a single custom machine type name against the
-// given zones, caching the result (including a negative result, briefly) to avoid
-// re-querying GCP for the same name on every List call.
+// isMachineTypeNotFoundError reports whether err is a definitive "this machine type does not
+// exist in this zone" response (HTTP 404), as opposed to a transient, authorization, quota, or
+// context error, which says nothing about whether the shape is actually valid or available.
+func isMachineTypeNotFoundError(err error) bool {
+	var apiErr *googleapi.Error
+	return errors.As(err, &apiErr) && apiErr.Code == http.StatusNotFound
+}
+
+// getCachedCustomMachineType resolves a single custom machine type name against the given
+// zones, caching the result to avoid re-querying GCP for the same name on every List call.
+//
+// Only a definitive not-found response (the shape is invalid for the family, or the family
+// isn't offered in that zone) is treated as "not available in this zone". Any other error -
+// transient, authorization, quota, or a canceled context - leaves that zone's availability
+// unresolved and is logged rather than cached: caching it as unavailable would misreport a
+// temporary API failure as the shape genuinely being absent, and would keep it unavailable
+// for the cache TTL even after the API recovers. When any zone hit such an error, the whole
+// result is left uncached (even zones that did resolve) so the next List call retries
+// instead of settling for a possibly-incomplete zone set.
 func getCachedCustomMachineType(
 	ctx context.Context,
 	name string,
@@ -109,17 +129,25 @@ func getCachedCustomMachineType(
 
 	var machineType *computepb.MachineType
 	availableZones := sets.New[string]()
+	sawUnresolvedZone := false
 	for _, zone := range zones {
 		mt, err := getMachineType(ctx, zone, name)
-		if err != nil || mt == nil {
-			// Not available in this zone (e.g. the family isn't offered there), or the
-			// requested shape is invalid for the family - either way, just skip it.
-			continue
+		switch {
+		case err == nil && mt != nil:
+			if machineType == nil {
+				machineType = mt
+			}
+			availableZones.Insert(zone)
+		case isMachineTypeNotFoundError(err):
+			// Confirmed: not a valid/available shape in this zone.
+		default:
+			sawUnresolvedZone = true
+			log.FromContext(ctx).Error(err, "failed to resolve custom machine type, leaving unresolved rather than caching as unavailable",
+				"name", name, "zone", zone)
 		}
-		if machineType == nil {
-			machineType = mt
-		}
-		availableZones.Insert(zone)
+	}
+	if sawUnresolvedZone {
+		return machineType, availableZones
 	}
 
 	ttl := customMachineTypeCacheTTL

@@ -19,12 +19,14 @@ package instancetype
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -36,6 +38,12 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 )
+
+// notFoundErr simulates the 404 googleapi.Error machineTypes.get returns for an invalid or
+// unavailable custom shape. errTransient simulates any other failure (5xx, auth, quota,
+// canceled context, network error) that says nothing about whether the shape is valid.
+var notFoundErr = &googleapi.Error{Code: http.StatusNotFound}
+var errTransient = fmt.Errorf("rpc error: internal")
 
 func TestIsCustomMachineTypeName(t *testing.T) {
 	for _, tc := range []struct {
@@ -115,7 +123,7 @@ func TestResolveCustomMachineTypesInvalidShapeYieldsNoResult(t *testing.T) {
 	cacheStore := cache.New(customMachineTypeCacheTTL, customMachineTypeCacheTTL)
 
 	getMachineType := func(_ context.Context, _, _ string) (*computepb.MachineType, error) {
-		return nil, assert.AnError
+		return nil, notFoundErr
 	}
 
 	machineTypes, offerings := resolveCustomMachineTypes(
@@ -125,7 +133,7 @@ func TestResolveCustomMachineTypesInvalidShapeYieldsNoResult(t *testing.T) {
 	assert.Empty(t, offerings)
 
 	cached, ok := cacheStore.Get("n2-custom-3-24576")
-	assert.True(t, ok, "an invalid shape must still be cached to avoid repeated lookups")
+	assert.True(t, ok, "a definitive not-found in every zone must still be cached to avoid repeated lookups")
 	assert.Nil(t, cached.(customMachineTypeCacheEntry).machineType)
 }
 
@@ -136,7 +144,8 @@ func TestResolveCustomMachineTypesPartialZoneAvailability(t *testing.T) {
 
 	getMachineType := func(_ context.Context, zone, name string) (*computepb.MachineType, error) {
 		if zone == "us-central1-b" {
-			return nil, assert.AnError
+			// A definitive not-found: the family simply isn't offered in this zone.
+			return nil, notFoundErr
 		}
 		return &computepb.MachineType{Name: lo.ToPtr(name), GuestCpus: lo.ToPtr[int32](8), MemoryMb: lo.ToPtr[int32](24576)}, nil
 	}
@@ -146,6 +155,67 @@ func TestResolveCustomMachineTypesPartialZoneAvailability(t *testing.T) {
 
 	assert.Len(t, machineTypes, 1)
 	assert.ElementsMatch(t, []string{"us-central1-a"}, offerings["n2-custom-8-24576"].UnsortedList())
+
+	cached, ok := cacheStore.Get("n2-custom-8-24576")
+	assert.True(t, ok, "a clean pass (found + definitive not-found only) must be cached")
+	assert.ElementsMatch(t, []string{"us-central1-a"}, cached.(customMachineTypeCacheEntry).zones.UnsortedList())
+}
+
+// TestResolveCustomMachineTypesTransientErrorNotCached is a regression test for a Greptile
+// review finding on PR #601: a transient error (unlike a definitive 404) says nothing about
+// whether the shape is actually valid or available, so it must not be cached as unavailable -
+// doing so would misreport a temporary API failure as the shape being absent and would keep a
+// valid custom type unschedulable for the negative-cache TTL even after the API recovers.
+func TestResolveCustomMachineTypesTransientErrorNotCached(t *testing.T) {
+	ctx := context.Background()
+	zones := []string{"us-central1-a"}
+	cacheStore := cache.New(customMachineTypeCacheTTL, customMachineTypeCacheTTL)
+
+	calls := 0
+	getMachineType := func(_ context.Context, _, _ string) (*computepb.MachineType, error) {
+		calls++
+		return nil, errTransient
+	}
+
+	machineTypes, offerings := resolveCustomMachineTypes(
+		ctx, []string{"n2-custom-8-24576"}, zones, nil, cacheStore, getMachineType)
+	assert.Empty(t, machineTypes)
+	assert.Empty(t, offerings)
+
+	_, ok := cacheStore.Get("n2-custom-8-24576")
+	assert.False(t, ok, "a transient error must not be cached, so the next List call retries")
+
+	// A second resolution call should hit the API again, not serve a cached negative result.
+	resolveCustomMachineTypes(ctx, []string{"n2-custom-8-24576"}, zones, nil, cacheStore, getMachineType)
+	assert.Equal(t, 2, calls, "each uncached resolution should re-query the API")
+}
+
+// TestResolveCustomMachineTypesPartialTransientErrorNotCached covers the "partial failure"
+// half of the same Greptile finding: one zone resolves cleanly but another hits a transient
+// error, so the zone set is incomplete and must not be cached, even though a machine type was
+// found.
+func TestResolveCustomMachineTypesPartialTransientErrorNotCached(t *testing.T) {
+	ctx := context.Background()
+	zones := []string{"us-central1-a", "us-central1-b"}
+	cacheStore := cache.New(customMachineTypeCacheTTL, customMachineTypeCacheTTL)
+
+	getMachineType := func(_ context.Context, zone, name string) (*computepb.MachineType, error) {
+		if zone == "us-central1-b" {
+			return nil, errTransient
+		}
+		return &computepb.MachineType{Name: lo.ToPtr(name), GuestCpus: lo.ToPtr[int32](8), MemoryMb: lo.ToPtr[int32](24576)}, nil
+	}
+
+	machineTypes, offerings := resolveCustomMachineTypes(
+		ctx, []string{"n2-custom-8-24576"}, zones, nil, cacheStore, getMachineType)
+
+	// The immediate result still reflects what was confirmed so far...
+	assert.Len(t, machineTypes, 1)
+	assert.ElementsMatch(t, []string{"us-central1-a"}, offerings["n2-custom-8-24576"].UnsortedList())
+
+	// ...but must not be cached, since us-central1-b's availability is still unresolved.
+	_, ok := cacheStore.Get("n2-custom-8-24576")
+	assert.False(t, ok, "an incomplete zone set must not be cached")
 }
 
 // TestListDiscoversRequestedCustomMachineType is a regression test for issue #144: a
