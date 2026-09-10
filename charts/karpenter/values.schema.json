@@ -393,6 +393,17 @@
         }
       }
     },
+    "node-problem-detector": {
+      "type": "object",
+      "description": "Values passed to the optional node-problem-detector subchart that runs the Spot preemption plugin. Schema is owned by that chart; only the enable toggle is constrained here.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Deploy node-problem-detector with the Spot preemption plugin.",
+          "default": false
+        }
+      }
+    },
     "credentials": {
       "type": "object",
       "additionalProperties": false,
