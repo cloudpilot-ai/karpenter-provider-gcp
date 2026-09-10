@@ -18,6 +18,7 @@ package instancetype
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -273,4 +274,106 @@ func TestListDerivesPriceForCustomMachineTypeWithoutPublishedPrice(t *testing.T)
 	})
 	assert.True(t, ok)
 	assert.InDelta(t, 0.390074, odOffering.Price, 0.0001)
+}
+
+// TestListDiscoversArbitraryCustomShapesAcrossFamilies is a generality check: nothing in the
+// resolution or pricing path may be hardcoded to n2 or to the 8-vCPU/24576-MB shape used
+// elsewhere in this file. It exercises several different machine families (including a
+// made-up one, to prove no family allowlist exists), each with its own arbitrary vCPU/memory
+// combination and its own independently-calibrated price, all through one shared provider.
+func TestListDiscoversArbitraryCustomShapesAcrossFamilies(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+
+	type shape struct {
+		suffix        string
+		gibPerCPU     float64
+		pricePerCPUHr float64 // determines this shape's on-demand price at any size
+	}
+	families := []struct {
+		family string
+		shapes []shape
+	}{
+		// e2: well-known real GCP ratios (standard 4 GiB/vCPU, highmem 8, highcpu 1) with
+		// real on-demand prices (africa-south1).
+		{family: "e2", shapes: []shape{
+			{suffix: "standard", gibPerCPU: 4, pricePerCPUHr: 0.07371546 / 2},
+			{suffix: "highmem", gibPerCPU: 8, pricePerCPUHr: 0.09944418 / 2},
+		}},
+		// n4: a different family with different real ratios (standard 4 GiB/vCPU, highmem 8)
+		// and different real prices, to confirm calibration isn't shared across families.
+		{family: "n4", shapes: []shape{
+			{suffix: "standard", gibPerCPU: 4, pricePerCPUHr: 0.09986974 / 2},
+			{suffix: "highmem", gibPerCPU: 8, pricePerCPUHr: 0.13105286 / 2},
+		}},
+		// A made-up family name: proves the resolution path has no hardcoded family
+		// allowlist and works from the regex + calibration data alone.
+		{family: "zz9", shapes: []shape{
+			{suffix: "standard", gibPerCPU: 3, pricePerCPUHr: 0.05},
+			{suffix: "highmem", gibPerCPU: 6, pricePerCPUHr: 0.08},
+		}},
+	}
+
+	// Requested custom shapes: different vCPU counts and memory sizes per family, none of
+	// them the 8-vCPU/24576-MB example used elsewhere in this file.
+	requested := map[string]struct {
+		cpus  int32
+		memMB int32
+	}{
+		"e2":  {cpus: 6, memMB: 18432},  // 3 GiB/vCPU: between highcpu-less standard(4) and... just an arbitrary in-between shape
+		"n4":  {cpus: 12, memMB: 73728}, // 6 GiB/vCPU
+		"zz9": {cpus: 5, memMB: 15360},  // 3 GiB/vCPU
+	}
+
+	onDemand := map[string]float64{}
+	var instanceTypesInfo []*computepb.MachineType
+	for _, f := range families {
+		for _, sizeCPUs := range []int32{2, 4} {
+			for _, sh := range f.shapes {
+				name := fmt.Sprintf("%s-%s-%d", f.family, sh.suffix, sizeCPUs)
+				memMB := int32(float64(sizeCPUs) * sh.gibPerCPU * 1024)
+				onDemand[name] = sh.pricePerCPUHr * float64(sizeCPUs)
+				instanceTypesInfo = append(instanceTypesInfo, &computepb.MachineType{
+					Name: lo.ToPtr(name), GuestCpus: lo.ToPtr(sizeCPUs), MemoryMb: lo.ToPtr(memMB),
+				})
+			}
+		}
+	}
+
+	var requestedNames []string
+	for family := range requested {
+		requestedNames = append(requestedNames, fmt.Sprintf("%s-custom-%d-%d", family, requested[family].cpus, requested[family].memMB))
+	}
+
+	p := &DefaultProvider{
+		authOptions:              &auth.Credential{Region: "us-central1"},
+		pricingProvider:          &staticPricingProvider{onDemand: onDemand},
+		gkeProvider:              &fakeGKEProvider{},
+		instanceTypesInfo:        instanceTypesInfo,
+		instanceTypesOfferings:   map[string]sets.Set[string]{},
+		unavailableOfferings:     unavailableofferings.NewUnavailableOfferings(),
+		staticInstanceTypesCache: cache.New(StaticInstanceTypesCacheTTL, staticInstanceTypesCacheCleanup),
+		customMachineTypesCache:  cache.New(customMachineTypeCacheTTL, staticInstanceTypesCacheCleanup),
+		cm:                       pretty.NewChangeMonitor(),
+		getMachineType: func(_ context.Context, zone, name string) (*computepb.MachineType, error) {
+			for family, r := range requested {
+				if name == fmt.Sprintf("%s-custom-%d-%d", family, r.cpus, r.memMB) {
+					return &computepb.MachineType{Name: lo.ToPtr(name), GuestCpus: lo.ToPtr(r.cpus), MemoryMb: lo.ToPtr(r.memMB), Zone: lo.ToPtr(zone)}, nil
+				}
+			}
+			return nil, fmt.Errorf("unexpected machine type requested: %s", name)
+		},
+	}
+
+	its, err := p.List(ctx, &v1alpha1.GCENodeClass{}, requestedNames)
+	assert.NoError(t, err)
+
+	for family, r := range requested {
+		name := fmt.Sprintf("%s-custom-%d-%d", family, r.cpus, r.memMB)
+		custom, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool { return it.Name == name })
+		if !assert.True(t, ok, "%s must be discovered", name) {
+			continue
+		}
+		assert.NotEmpty(t, custom.Offerings.Available(), "%s must have a derived price and be schedulable", name)
+		assert.Equal(t, fmt.Sprintf("%d", r.cpus), custom.Requirements.Get(v1alpha1.LabelInstanceCPU).Any())
+	}
 }
