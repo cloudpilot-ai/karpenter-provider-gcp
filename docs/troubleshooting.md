@@ -74,9 +74,18 @@ See [Image management](image-management.md) for version pinning options and form
 
 ## Custom machine types not discovered
 
-Karpenter discovers instance types by querying the GCP `machineTypes.aggregatedList` API, which returns only predefined catalog types. Custom machine types (e.g. `n2-custom-8-24576`) are not returned by this API and are therefore not available for scheduling via standard `karpenter.sh/instance-type` label requirements.
+Karpenter discovers most instance types by querying the GCP `machineTypes.aggregatedList` API, which returns only predefined catalog types. Custom machine types (e.g. `n2-custom-8-24576`) are never returned by this API, even when instances using that exact shape already exist in the project.
 
-This is a known limitation tracked in [GitHub issue #245](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/245).
+To support scheduling onto a custom machine type, add an exact `In` requirement for it on the `node.kubernetes.io/instance-type` label in the NodePool (or on the NodeClaim's requirements, if managed some other way). When a NodePool requests a specific custom machine type by name, Karpenter resolves it individually via the GCP `machineTypes.get` API, which does support custom shapes, and merges it into that NodePool's available instance types. Custom types not explicitly requested by name are still not enumerated, since the shape space is unbounded.
+
+```yaml
+requirements:
+  - key: node.kubernetes.io/instance-type
+    operator: In
+    values: ["n2-custom-8-24576"]
+```
+
+If the named shape is invalid for its machine family, or the family doesn't support custom shapes in any zone available to the cluster, it will still resolve to zero instance types.
 
 ---
 

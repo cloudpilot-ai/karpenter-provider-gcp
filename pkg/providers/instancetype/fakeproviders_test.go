@@ -18,6 +18,7 @@ package instancetype
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -79,6 +80,10 @@ func newTestProvider() *DefaultProvider {
 		},
 		unavailableOfferings:     unavailableofferings.NewUnavailableOfferings(),
 		staticInstanceTypesCache: cache.New(StaticInstanceTypesCacheTTL, staticInstanceTypesCacheCleanup),
+		customMachineTypesCache:  cache.New(customMachineTypeCacheTTL, staticInstanceTypesCacheCleanup),
 		cm:                       pretty.NewChangeMonitor(),
+		getMachineType: func(_ context.Context, _, _ string) (*computepb.MachineType, error) {
+			return nil, fmt.Errorf("no fake GCP client wired up for this test")
+		},
 	}
 }

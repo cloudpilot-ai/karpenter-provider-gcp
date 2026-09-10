@@ -64,7 +64,7 @@ type ZoneData struct {
 
 type Provider interface {
 	LivenessProbe(*http.Request) error
-	List(context.Context, *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error)
+	List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, requestedInstanceTypes []string) ([]*cloudprovider.InstanceType, error)
 	UpdateInstanceTypes(ctx context.Context) error
 	UpdateInstanceTypeOfferings(ctx context.Context) error
 }
@@ -88,6 +88,15 @@ type DefaultProvider struct {
 
 	staticInstanceTypesCache   *cache.Cache
 	muStaticInstanceTypesCache sync.Mutex
+
+	// customMachineTypesCache holds GCE custom machine types (e.g. n2-custom-8-24576)
+	// resolved via a direct machineTypes.get lookup, keyed by instance type name. These
+	// never appear in the machineTypes.aggregatedList catalog (see resolveCustomMachineTypes),
+	// so they are looked up on demand instead of during the periodic catalog refresh.
+	customMachineTypesCache *cache.Cache
+	// getMachineType defaults to getMachineTypeFromAPI; overridable in tests so the custom
+	// machine type resolution path can be exercised without a live GCP client.
+	getMachineType func(ctx context.Context, zone, name string) (*computepb.MachineType, error)
 }
 
 type staticInstanceType struct {
@@ -102,7 +111,7 @@ func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, prici
 		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
 		os.Exit(1)
 	}
-	return &DefaultProvider{
+	p := &DefaultProvider{
 		authOptions:              authOptions,
 		machineTypesClient:       machineTypesClient,
 		pricingProvider:          pricingProvider,
@@ -112,7 +121,10 @@ func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, prici
 		unavailableOfferings:     unavailableOfferingsCache,
 		cm:                       pretty.NewChangeMonitor(),
 		instanceTypesSeqNum:      0,
+		customMachineTypesCache:  cache.New(customMachineTypeCacheTTL, staticInstanceTypesCacheCleanup),
 	}
+	p.getMachineType = p.getMachineTypeFromAPI
+	return p
 }
 
 func (p *DefaultProvider) LivenessProbe(req *http.Request) error {
@@ -127,7 +139,7 @@ func (p *DefaultProvider) validateState() error {
 	return nil
 }
 
-func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
+func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, requestedInstanceTypes []string) ([]*cloudprovider.InstanceType, error) {
 	p.muInstanceTypesInfo.RLock()
 	defer p.muInstanceTypesInfo.RUnlock()
 
@@ -145,7 +157,17 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		return nil, err
 	}
 
-	return p.injectOfferings(ctx, staticInstanceTypes, zones), nil
+	customMachineTypes, customOfferings := resolveCustomMachineTypes(
+		ctx, requestedInstanceTypes, zones, p.instanceTypesInfo, p.customMachineTypesCache, p.getMachineType)
+	for _, mt := range customMachineTypes {
+		it := NewStaticInstanceType(ctx, mt, nodeClass)
+		if it == nil {
+			continue
+		}
+		staticInstanceTypes = append(staticInstanceTypes, staticInstanceType{machineType: mt, instanceType: it})
+	}
+
+	return p.injectOfferings(ctx, staticInstanceTypes, zones, customOfferings), nil
 }
 
 func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]staticInstanceType, error) {
@@ -180,11 +202,11 @@ func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass 
 	return instanceTypes, nil
 }
 
-func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTypes []staticInstanceType, zones []string) []*cloudprovider.InstanceType {
+func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTypes []staticInstanceType, zones []string, customOfferings map[string]sets.Set[string]) []*cloudprovider.InstanceType {
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for _, cached := range staticInstanceTypes {
 		instanceType := cached.instanceType.Name
-		zoneData := p.buildZoneData(instanceType, zones)
+		zoneData := p.buildZoneData(instanceType, zones, customOfferings)
 		offerings := p.createOfferings(ctx, instanceType, zoneData)
 		if len(offerings) == 0 {
 			continue
@@ -199,9 +221,14 @@ func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTyp
 }
 
 // buildZoneData checks zonal availability from cached offerings while keeping spot
-// availability enabled for all zones per GCP spot provisioning behavior.
-func (p *DefaultProvider) buildZoneData(instanceType string, zones []string) []ZoneData {
+// availability enabled for all zones per GCP spot provisioning behavior. customOfferings
+// carries zone availability for machine types resolved outside the catalog refresh (see
+// resolveCustomMachineTypes) and is consulted when the type isn't in the regular catalog.
+func (p *DefaultProvider) buildZoneData(instanceType string, zones []string, customOfferings map[string]sets.Set[string]) []ZoneData {
 	ofs, ok := p.instanceTypesOfferings[instanceType]
+	if !ok {
+		ofs, ok = customOfferings[instanceType]
+	}
 	return lo.Map(zones, func(zoneID string, _ int) ZoneData {
 		ret := ZoneData{ID: zoneID, Available: true, SpotAvailable: true}
 		if !ok || !ofs.Has(zoneID) {
@@ -331,4 +358,16 @@ func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.Ma
 	}
 
 	return vmTypes, nil
+}
+
+// getMachineTypeFromAPI looks up a single machine type by exact name in a zone via
+// machineTypes.get. Unlike machineTypes.aggregatedList, this succeeds for valid GCE custom
+// machine types (e.g. n2-custom-8-24576) even though they are never enumerated by the list
+// API. See resolveCustomMachineTypes for why this is needed.
+func (p *DefaultProvider) getMachineTypeFromAPI(ctx context.Context, zone, name string) (*computepb.MachineType, error) {
+	return p.machineTypesClient.Get(ctx, &computepb.GetMachineTypeRequest{
+		Project:     p.authOptions.ProjectID,
+		Zone:        zone,
+		MachineType: name,
+	})
 }
