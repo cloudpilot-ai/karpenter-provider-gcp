@@ -25,7 +25,7 @@ controller:
 
 ### CapacityBuffer (Alpha)
 
-`CapacityBuffer` is an Alpha feature that pre-provisions spare capacity so pending pods can schedule without waiting for new nodes. It is disabled by default; enable it with `controller.featureGates.capacityBuffer`. The `karpenter-crd` chart installs the upstream `autoscaling.x-k8s.io/v1beta1` `CapacityBuffer` CRD whenever CRDs are applied, regardless of the gate, but Karpenter acts on `CapacityBuffer` resources only when the gate is enabled.
+`CapacityBuffer` is an Alpha feature that pre-provisions spare capacity so pending pods can schedule without waiting for new nodes. It is disabled by default; enable it with `controller.featureGates.capacityBuffer`. This provider does not install the `autoscaling.x-k8s.io/v1beta1` `CapacityBuffer` CRD; neither the `karpenter-crd` chart nor the `karpenter` chart ships it. GKE provides the CRD natively starting at cluster version `1.35.2-gke.1842000`. Enabling `controller.featureGates.capacityBuffer` on a cluster where the CRD is not already installed fails at template-render time during `helm install` or `helm upgrade`.
 
 ```yaml
 controller:
@@ -37,13 +37,26 @@ controller:
 
 These options configure the controller's runtime behavior.
 
-| Option                        | Env var                     | Helm value                              | Default | Description                                                                                                                                       |
-|-------------------------------|-----------------------------|-----------------------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--disable-controller-warmup` | `DISABLE_CONTROLLER_WARMUP` | `controller.disableControllerWarmup`    | `true`  | When `false`, controllers pre-populate caches before winning leader election, reducing failover time. Set to `false` in production for better HA. |
-| `--log-level`                 | `LOG_LEVEL`                 | `logLevel`                              | `info`  | Controller log level (`debug`, `info`, `warn`, `error`).                                                                                          |
-| `--batch-max-duration`        | `BATCH_MAX_DURATION`        | `controller.settings.batchMaxDuration`  | `10s`   | Maximum time Karpenter batches incoming pods before provisioning.                                                                                 |
-| `--batch-idle-duration`       | `BATCH_IDLE_DURATION`       | `controller.settings.batchIdleDuration` | `1s`    | Idle time after the last pod event before Karpenter triggers provisioning.                                                                        |
-| `--ignore-dra-requests`       | `IGNORE_DRA_REQUESTS`       | `controller.settings.ignoreDRARequests` | `true`  | When `true`, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.                                          |
+| Option                        | Env var                     | Helm value                              | Default   | Description                                                                                                                                       |
+|-------------------------------|-----------------------------|-----------------------------------------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--disable-controller-warmup` | `DISABLE_CONTROLLER_WARMUP` | `controller.disableControllerWarmup`    | `true`    | When `false`, controllers pre-populate caches before winning leader election, reducing failover time. Set to `false` in production for better HA. |
+| `--log-level`                 | `LOG_LEVEL`                 | `logLevel`                              | `info`    | Controller log level (`debug`, `info`, `warn`, `error`).                                                                                          |
+| `--batch-max-duration`        | `BATCH_MAX_DURATION`        | `controller.settings.batchMaxDuration`  | `10s`     | Maximum time Karpenter batches incoming pods before provisioning.                                                                                 |
+| `--batch-idle-duration`       | `BATCH_IDLE_DURATION`       | `controller.settings.batchIdleDuration` | `1s`      | Idle time after the last pod event before Karpenter triggers provisioning.                                                                        |
+| `--ignore-dra-requests`       | `IGNORE_DRA_REQUESTS`       | `controller.settings.ignoreDRARequests` | `true`    | When `true`, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.                                          |
+| `--preference-policy`         | `PREFERENCE_POLICY`         | `controller.settings.preferencePolicy`  | `Respect` | How Karpenter handles soft scheduling preferences. Valid values are `Respect` and `Ignore`.                                                       |
+
+### Preference policy
+
+`controller.settings.preferencePolicy` defaults to `Respect`, which retains soft scheduling preferences during provisioning and consolidation. Set it to `Ignore` to disregard `preferredDuringSchedulingIgnoredDuringExecution` node affinity, pod affinity, and pod anti-affinity, as well as topology spread constraints with `whenUnsatisfiable: ScheduleAnyway`.
+
+`Ignore` does not bypass required node or pod affinity/anti-affinity, topology spread constraints with `whenUnsatisfiable: DoNotSchedule`, taints, resource requirements, PodDisruptionBudgets, or other disruption controls.
+
+```yaml
+controller:
+  settings:
+    preferencePolicy: Ignore
+```
 
 ### Dynamic Resource Allocation (DRA)
 

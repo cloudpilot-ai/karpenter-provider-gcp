@@ -37,6 +37,18 @@ Karpenter observes the aggregate resource requests of unscheduled pods and makes
   </p>
 </div>
 
+## Karpenter and GKE ComputeClasses
+
+Karpenter and [GKE custom ComputeClasses](https://cloud.google.com/kubernetes-engine/docs/concepts/about-custom-compute-classes) both provide workload-driven compute. ComputeClasses offer a GKE-managed way to describe preferred capacity, while Karpenter provides an open and extensible provisioning layer with direct control over compute selection and node lifecycle.
+
+Choose Karpenter when extensibility and infrastructure control matter:
+
+* **Extensible by design** — Karpenter's controller and cloud-provider architecture can be extended with new provisioning, scheduling, pricing, lifecycle, and repair capabilities. Teams can evolve the provisioner with their platform instead of waiting for those capabilities to become available in a specific GKE release.
+* **A consistent multi-cloud model** — Karpenter uses the same core `NodePool` and `NodeClaim` APIs and operational model across AWS, Azure, and GCP. Provider-specific settings remain in each `NodeClass`, while shared policies, automation, and tooling can follow the same pattern. This reduces friction for multi-cloud platforms and future cloud migrations.
+* **Direct, workload-aware provisioning** — Karpenter evaluates native pod requests and scheduling constraints, bin-packs pending workloads, and directly creates the best-fitting GCE VM for each decision. This removes the managed node pool as a provisioning layer and avoids maintaining a node pool for every capacity shape.
+
+GKE ComputeClasses are a good fit when fully managed GKE integration, especially Autopilot, is the primary goal. For platform teams that expect to customize autoscaling, operate across clouds, or retain deeper control over infrastructure decisions, Karpenter provides the more adaptable foundation. Karpenter Provider for GCP currently targets GKE Standard clusters.
+
 
 ## Managed optimization for production Kubernetes
 

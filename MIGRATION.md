@@ -5,6 +5,18 @@
 
 ## Unreleased
 
+---
+
+## v0.6.0
+
+### CapacityBuffer requires the CRD to already be installed; the CRD is not installed by this provider
+
+This provider does not ship the `CapacityBuffer` CRD in either the `karpenter` or `karpenter-crd`
+chart. GKE provides it natively starting at `1.35.2-gke.1842000`. Setting
+`controller.featureGates.capacityBuffer: true` now checks the cluster for the CRD
+(`autoscaling.x-k8s.io/v1beta1/CapacityBuffer`) at Helm template time and fails the install/upgrade
+if it isn't present, instead of silently enabling a feature the controller can't back with a CRD.
+
 ### Unsupported instance labels removed
 
 The provider no longer registers or exposes the following GCP instance labels:

@@ -366,6 +366,16 @@ func (in *KubeletConfiguration) DeepCopyInto(out *KubeletConfiguration) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.SerializeImagePulls != nil {
+		in, out := &in.SerializeImagePulls, &out.SerializeImagePulls
+		*out = new(bool)
+		**out = **in
+	}
+	if in.MaxParallelImagePulls != nil {
+		in, out := &in.MaxParallelImagePulls, &out.MaxParallelImagePulls
+		*out = new(int32)
+		**out = **in
+	}
 	return
 }
 

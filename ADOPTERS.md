@@ -12,3 +12,4 @@ If you are using the Karpenter GCP Cloud Provider and would like to be listed he
 | --- | --- |
 | [BEAT81](https://www.beat81.com) | The Karpenter GCP Cloud Provider is the core of their autoscaling. They run Spot instances for cost efficiency and provision dedicated nodes for mission-critical workloads. |
 | [CloudPilot AI](https://www.cloudpilot.ai/en/) | CloudPilot AI leverages the Karpenter GCP Provider to provision and balance Spot and on-demand instances, maximizing cloud cost savings while maintaining workload stability. |
+| [PlanetScale](https://planetscale.com/) | PlanetScale uses the Karpenter GCP Cloud Provider to dynamically scale their database infrastructure, ensuring optimal performance and cost efficiency for their global user base. |

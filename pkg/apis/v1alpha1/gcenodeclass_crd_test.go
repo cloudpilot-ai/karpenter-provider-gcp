@@ -22,11 +22,53 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"sigs.k8s.io/yaml"
 )
 
+func crdPath() string {
+	return filepath.Join("..", "..", "..", "charts", "karpenter", "crds", "karpenter.k8s.gcp_gcenodeclasses.yaml")
+}
+
+func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+
+	raw, err := os.ReadFile(crdPath())
+	require.NoError(t, err)
+
+	var crd apiextensionsv1.CustomResourceDefinition
+	require.NoError(t, yaml.Unmarshal(raw, &crd))
+	require.Len(t, crd.Spec.Versions, 1)
+
+	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.
+		Properties["spec"].Properties["kubeletConfiguration"]
+}
+
+func TestGCENodeClassCRDAllowsMaxParallelImagePullsOfOne(t *testing.T) {
+	field := kubeletConfigurationSchema(t).Properties["maxParallelImagePulls"]
+
+	require.NotNil(t, field.Minimum, "maxParallelImagePulls must declare a minimum")
+	require.Equal(t, float64(1), *field.Minimum, "maxParallelImagePulls must accept 1, the kubelet default")
+}
+
+func TestGCENodeClassCRDRestrictsParallelImagePullsAboveOne(t *testing.T) {
+	const rule = `!has(self.maxParallelImagePulls) || self.maxParallelImagePulls < 2 || ` +
+		`(has(self.serializeImagePulls) && self.serializeImagePulls == false)`
+
+	var found bool
+	for _, v := range kubeletConfigurationSchema(t).XValidations {
+		if v.Rule == rule {
+			found = true
+			require.Equal(t,
+				"maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false",
+				v.Message)
+		}
+	}
+	require.True(t, found, "serializeImagePulls must still be required from maxParallelImagePulls 2 upwards")
+}
+
 func TestGCENodeClassCRDRejectsReservedMetadataKeys(t *testing.T) {
-	crdPath := filepath.Join("..", "..", "..", "charts", "karpenter", "crds", "karpenter.k8s.gcp_gcenodeclasses.yaml")
-	crd, err := os.ReadFile(crdPath)
+	crd, err := os.ReadFile(crdPath())
 	require.NoError(t, err)
 
 	crdText := string(crd)

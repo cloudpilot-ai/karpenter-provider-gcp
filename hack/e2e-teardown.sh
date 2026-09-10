@@ -3,25 +3,37 @@
 # Order matters: Helm uninstall first, then cluster (so GKE removes its
 # firewall rules/routes), then VPC.
 #
-# Required:
+# Optional:
 #   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
+#                                   (not needed if `gcloud auth login` is already active)
 #
 # Optional (with defaults matching e2e-setup.sh):
-#   E2E_PROJECT_ID  GCP project ID  (default: parsed from credentials)
+#   E2E_PROJECT_ID  GCP project ID  (default: parsed from credentials, else active gcloud config)
 #   E2E_PREFIX      (default: karpenter-e2e)
 #   E2E_REGION      (default: us-central1)
 #   E2E_LOCATION    GCP location (zone or region)
 set -euo pipefail
 
-: "${GOOGLE_APPLICATION_CREDENTIALS:?GOOGLE_APPLICATION_CREDENTIALS must be set}"
-
 log() { echo "e2e-teardown: $*" >&2; }
 
-# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials file.
+if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+  ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null)"
+  : "${ACTIVE_ACCOUNT:?No active gcloud login found and GOOGLE_APPLICATION_CREDENTIALS is not set. Run 'gcloud auth login' or set GOOGLE_APPLICATION_CREDENTIALS.}"
+  log "Using existing gcloud login: ${ACTIVE_ACCOUNT}"
+fi
+
+# E2E_PROJECT_ID can be set explicitly; if not, extract it from the credentials
+# file, falling back to the active gcloud config.
 if [ -z "${E2E_PROJECT_ID:-}" ]; then
-  E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
-    || { echo "ERROR: E2E_PROJECT_ID is not set and could not be parsed from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
-  log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
+  if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    E2E_PROJECT_ID="$(python3 -c "import json; print(json.load(open('${GOOGLE_APPLICATION_CREDENTIALS}'))['project_id'])")" \
+      || { echo "ERROR: E2E_PROJECT_ID is not set and could not be parsed from ${GOOGLE_APPLICATION_CREDENTIALS}" >&2; exit 1; }
+    log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from credentials file"
+  else
+    E2E_PROJECT_ID="$(gcloud config get-value project 2>/dev/null)"
+    : "${E2E_PROJECT_ID:?E2E_PROJECT_ID is not set and could not be derived from the active gcloud config}"
+    log "Derived E2E_PROJECT_ID=${E2E_PROJECT_ID} from gcloud config"
+  fi
 fi
 
 : "${E2E_LOCATION:?E2E_LOCATION must be set (zone, e.g. us-central1-f, or region, e.g. us-central1)}"
@@ -37,10 +49,12 @@ AR_REPO="${E2E_PREFIX}-images"
 ROUTER_NAME="${E2E_PREFIX}-router"
 NAT_NAME="${E2E_PREFIX}-nat"
 
-gcloud auth activate-service-account \
-  --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
-  --project "${E2E_PROJECT_ID}" \
-  --quiet
+if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+  gcloud auth activate-service-account \
+    --key-file "${GOOGLE_APPLICATION_CREDENTIALS}" \
+    --project "${E2E_PROJECT_ID}" \
+    --quiet
+fi
 
 # Uninstall karpenter before deleting the cluster so it can clean up GCP instances.
 if gcloud container clusters describe "${CLUSTER_NAME}" \

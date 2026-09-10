@@ -98,7 +98,7 @@ serviceMonitor:
 | controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey | string | `"kubernetes.io/hostname"` |  |
 | controller.disableControllerWarmup | bool | `true` | disableControllerWarmup controls whether controller sources (watches/informers) start before leader election is won. Set to false to enable warmup, which pre-populates caches and improves leader failover time. Default true matches karpenter-core default (warmup disabled). |
 | controller.env | list | `[]` |  |
-| controller.featureGates.capacityBuffer | bool | `false` | capacityBuffer is ALPHA and is disabled by default. Setting this to true enables CapacityBuffer support for pre-provisioning spare capacity. |
+| controller.featureGates.capacityBuffer | bool | `false` | capacityBuffer is ALPHA and is disabled by default. Setting this to true enables CapacityBuffer support for pre-provisioning spare capacity. This provider does not install the CapacityBuffer CRD (GKE provides it natively starting at 1.35.2-gke.1842000) — enabling this on a cluster where the CRD isn't already installed fails at template render time. |
 | controller.featureGates.nodeOverlay | bool | `false` | nodeOverlay is ALPHA and is disabled by default. Setting this will allow the use of node overlay to impact scheduling decisions |
 | controller.featureGates.nodeRepair | bool | `false` | nodeRepair is ALPHA and is disabled by default. When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions. |
 | controller.featureGates.reservedCapacity | bool | `false` | reservedCapacity enables scheduling to reserved/committed GCP capacity. Disabled: the GCP provider does not yet implement GCE reservation support (#239). |
@@ -122,6 +122,7 @@ serviceMonitor:
 | controller.settings.defaultNodepoolServiceAccount | string | `""` | Default GCP service account email to attach to provisioned nodes. When set, overrides the Compute Engine default SA. Corresponds to the DEFAULT_NODEPOOL_SERVICE_ACCOUNT env var. Recommended: set to a dedicated SA with roles/container.nodeServiceAccount. Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount. |
 | controller.settings.ignoreDRARequests | bool | `true` | ignoreDRARequests controls whether Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations. Keep true unless the cluster has DRA drivers and resource claims that Karpenter should account for. |
 | controller.settings.nodeLocation | string | `""` | The exact GCP cluster location for GKE API calls (e.g., us-central1-a for zonal, us-central1 for regional). If not set, defaults to 'clusterLocation' for backward compatibility. |
+| controller.settings.preferencePolicy | string | `"Respect"` | preferencePolicy controls how Karpenter handles soft scheduling preferences. `Respect` is the default; `Ignore` disregards preferred node/pod affinity and anti-affinity plus ScheduleAnyway topology spread constraints. |
 | controller.settings.projectID | string | `""` | The GCP project ID. |
 | controller.settings.vmMemoryOverheadPercent | float | `0.065` | The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%. |
 | controller.strategy.rollingUpdate.maxUnavailable | int | `1` |  |
