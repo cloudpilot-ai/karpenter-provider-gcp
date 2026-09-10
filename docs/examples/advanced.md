@@ -206,6 +206,30 @@ spec:
 
 This NodePool provisions only instance types from families that support Hyperdisk Balanced (such as n2, n4, c3, c4). Instance types from families without Hyperdisk Balanced support (such as e2, n1) are excluded.
 
+### Spanning machine families with default disk types
+
+The `category` field in a `spec.disks[]` entry is optional. When you omit it, Karpenter leaves the disk type unset and Compute Engine applies the machine-family default disk type for whichever family it provisions. When `category` is set, behavior is unchanged: Karpenter uses the disk type you specify.
+
+GCP capacity shortages are often isolated to specific machine families. Omitting `category` lets one GCENodeClass (and the NodePool that references it) span families that support different disk technologies, both persistent disk families and Hyperdisk families. This widens capacity options without requiring a separate GCENodeClass or NodePool per family. The default varies by family. For example:
+
+- **N2, N2D** — default to a persistent disk type such as `pd-standard`
+- **C3, C3D** — default to `pd-balanced`
+- **N4, N4D** — default to `hyperdisk-balanced`
+
+These illustrate GCE's per-family defaults, not a complete or Karpenter-owned mapping; see the [GCP machine family disk support matrix](https://cloud.google.com/compute/docs/disks#disk-types) for which families support which disk types.
+
+> **Note:** Because each family falls back to its own default disk type, nodes in a single NodePool can end up with different disk types, which differ in performance and cost. For performance-sensitive workloads, set `category` explicitly — optionally combined with the `disk-type.gke.io/*` requirement labels — rather than relying on the per-family default.
+
+The following fragment shows the `spec.disks` portion of a GCENodeClass with `category` omitted. It is partial: `disks` nests directly under `spec`, and you supply the rest of a valid GCENodeClass (for example `imageSelectorTerms`) — see the [quick start](../getting-started/quick-start.md) for a complete manifest. The `boot: true` entry here is just a typical boot-disk entry; omitting `category` works the same on any `disks[]` entry, boot or not.
+
+```yaml
+disks:
+  - sizeGiB: 60
+    boot: true
+```
+
+This is the GCENodeClass-side complement to the NodePool `disk-type.gke.io/*` requirements described above. Those requirement labels constrain only which instance types Karpenter selects (see [Constraining instance types by disk support](#constraining-instance-types-by-disk-support)); they do not pin the disk type GCE attaches when `category` is unset. To guarantee a specific applied disk type, set `category` explicitly. For the full `disks[]` field spec, see the [GCENodeClass reference](../reference/gcenodeclass.md).
+
 ### Available disk-type labels
 
 The supported labels correspond to GCP disk types:
