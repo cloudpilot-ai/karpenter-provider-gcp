@@ -87,6 +87,8 @@ requirements:
 
 If the named shape is invalid for its machine family, or the family doesn't support custom shapes in any zone available to the cluster, it will still resolve to zero instance types.
 
+GCP does not publish an on-demand price for custom shapes either, so it's estimated from the family's predefined shapes (which bill linearly per vCPU and per GB of memory); spot uses the standard on-demand fallback ratio, since there's no published spot price to fall back to.
+
 ---
 
 ## Private node clusters (org policy)

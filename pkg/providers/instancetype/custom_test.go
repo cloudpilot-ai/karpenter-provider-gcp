@@ -25,10 +25,15 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 )
 
 func TestIsCustomMachineTypeName(t *testing.T) {
@@ -174,4 +179,98 @@ func TestListDiscoversRequestedCustomMachineType(t *testing.T) {
 	assert.NoError(t, err)
 	_, found := lo.Find(itsWithoutRequest, func(it *cloudprovider.InstanceType) bool { return it.Name == "n2-custom-8-24576" })
 	assert.False(t, found, "an unrequested custom machine type must not be synthesized")
+}
+
+func TestDeriveCustomPrice(t *testing.T) {
+	// Real n2 on-demand prices (africa-south1), which are exactly linear in vCPU count per
+	// shape: standard is billed at 4 GiB/vCPU, highmem at 8 GiB/vCPU. c is $/vCPU-hour, m is
+	// $/MB-hour; solving c + 4096m = 0.053417 and c + 8192m = 0.072061 gives the expected
+	// price below for an 8 vCPU / 24576 MB custom shape.
+	p := &DefaultProvider{
+		pricingProvider: &staticPricingProvider{
+			onDemand: map[string]float64{
+				"n2-standard-2": 0.106834,
+				"n2-standard-4": 0.213668,
+				"n2-highmem-2":  0.144122,
+				"n2-highmem-4":  0.288244,
+			},
+		},
+		instanceTypesInfo: []*computepb.MachineType{
+			{Name: lo.ToPtr("n2-standard-2"), GuestCpus: lo.ToPtr[int32](2), MemoryMb: lo.ToPtr[int32](8192)},
+			{Name: lo.ToPtr("n2-standard-4"), GuestCpus: lo.ToPtr[int32](4), MemoryMb: lo.ToPtr[int32](16384)},
+			{Name: lo.ToPtr("n2-highmem-2"), GuestCpus: lo.ToPtr[int32](2), MemoryMb: lo.ToPtr[int32](16384)},
+			{Name: lo.ToPtr("n2-highmem-4"), GuestCpus: lo.ToPtr[int32](4), MemoryMb: lo.ToPtr[int32](32768)},
+		},
+	}
+
+	price, ok := p.deriveCustomPrice(&computepb.MachineType{
+		Name:      lo.ToPtr("n2-custom-8-24576"),
+		GuestCpus: lo.ToPtr[int32](8),
+		MemoryMb:  lo.ToPtr[int32](24576),
+	})
+	assert.True(t, ok)
+	assert.InDelta(t, 0.390074, price, 0.0001)
+}
+
+func TestDeriveCustomPriceInsufficientData(t *testing.T) {
+	p := &DefaultProvider{
+		pricingProvider: &staticPricingProvider{
+			onDemand: map[string]float64{"n2-standard-2": 0.106834},
+		},
+		instanceTypesInfo: []*computepb.MachineType{
+			{Name: lo.ToPtr("n2-standard-2"), GuestCpus: lo.ToPtr[int32](2), MemoryMb: lo.ToPtr[int32](8192)},
+		},
+	}
+
+	_, ok := p.deriveCustomPrice(&computepb.MachineType{
+		Name:      lo.ToPtr("n2-custom-8-24576"),
+		GuestCpus: lo.ToPtr[int32](8),
+		MemoryMb:  lo.ToPtr[int32](24576),
+	})
+	assert.False(t, ok, "a single known sibling price cannot calibrate the two-parameter model")
+}
+
+// TestListDerivesPriceForCustomMachineTypeWithoutPublishedPrice is a regression test: GCP's
+// pricing data never has an entry for a custom shape's exact name (only predefined catalog
+// names), so a pricing provider that behaves like the real one - returning ok=false for an
+// unknown name, rather than fakePricingProvider's fixed price for every name - must not
+// cause the resolved custom machine type to be dropped for lack of offerings.
+func TestListDerivesPriceForCustomMachineTypeWithoutPublishedPrice(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	standard2 := &computepb.MachineType{Name: lo.ToPtr("n2-standard-2"), GuestCpus: lo.ToPtr[int32](2), MemoryMb: lo.ToPtr[int32](8192)}
+	highmem2 := &computepb.MachineType{Name: lo.ToPtr("n2-highmem-2"), GuestCpus: lo.ToPtr[int32](2), MemoryMb: lo.ToPtr[int32](16384)}
+
+	p := &DefaultProvider{
+		authOptions: &auth.Credential{Region: "us-central1"},
+		pricingProvider: &staticPricingProvider{
+			onDemand: map[string]float64{"n2-standard-2": 0.106834, "n2-highmem-2": 0.144122},
+		},
+		gkeProvider:              &fakeGKEProvider{},
+		instanceTypesInfo:        []*computepb.MachineType{standard2, highmem2},
+		instanceTypesOfferings:   map[string]sets.Set[string]{},
+		unavailableOfferings:     unavailableofferings.NewUnavailableOfferings(),
+		staticInstanceTypesCache: cache.New(StaticInstanceTypesCacheTTL, staticInstanceTypesCacheCleanup),
+		customMachineTypesCache:  cache.New(customMachineTypeCacheTTL, staticInstanceTypesCacheCleanup),
+		cm:                       pretty.NewChangeMonitor(),
+		getMachineType: func(_ context.Context, zone, name string) (*computepb.MachineType, error) {
+			return &computepb.MachineType{
+				Name:      lo.ToPtr(name),
+				GuestCpus: lo.ToPtr[int32](8),
+				MemoryMb:  lo.ToPtr[int32](24576),
+				Zone:      lo.ToPtr(zone),
+			}, nil
+		},
+	}
+
+	its, err := p.List(ctx, &v1alpha1.GCENodeClass{}, []string{"n2-custom-8-24576"})
+	assert.NoError(t, err)
+
+	custom, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool { return it.Name == "n2-custom-8-24576" })
+	assert.True(t, ok, "custom machine type must still be discoverable when its exact name has no published price")
+	assert.NotEmpty(t, custom.Offerings.Available(), "a derived price must produce available offerings")
+	odOffering, ok := lo.Find(custom.Offerings, func(o *cloudprovider.Offering) bool {
+		return o.Requirements.Get(karpv1.CapacityTypeLabelKey).Any() == karpv1.CapacityTypeOnDemand
+	})
+	assert.True(t, ok)
+	assert.InDelta(t, 0.390074, odOffering.Price, 0.0001)
 }

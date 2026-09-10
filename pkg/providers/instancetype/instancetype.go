@@ -207,7 +207,7 @@ func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTyp
 	for _, cached := range staticInstanceTypes {
 		instanceType := cached.instanceType.Name
 		zoneData := p.buildZoneData(instanceType, zones, customOfferings)
-		offerings := p.createOfferings(ctx, instanceType, zoneData)
+		offerings := p.createOfferings(ctx, cached.machineType, zoneData)
 		if len(offerings) == 0 {
 			continue
 		}
@@ -247,7 +247,8 @@ func (p *DefaultProvider) buildZoneData(instanceType string, zones []string, cus
 // offering, you can do the following thanks to this invariant:
 //
 //	offering.Requirements.Get(v1.TopologyLabelZone).Any()
-func (p *DefaultProvider) createOfferings(_ context.Context, instanceType string, zones []ZoneData) []*cloudprovider.Offering {
+func (p *DefaultProvider) createOfferings(_ context.Context, mt *computepb.MachineType, zones []ZoneData) []*cloudprovider.Offering {
+	instanceType := lo.FromPtr(mt.Name)
 	var offerings []*cloudprovider.Offering
 	for _, zone := range zones {
 		if !zone.Available {
@@ -256,6 +257,15 @@ func (p *DefaultProvider) createOfferings(_ context.Context, instanceType string
 
 		odPrice, odOK := p.pricingProvider.OnDemandPrice(instanceType)
 		spotPrice, spotOK := p.pricingProvider.SpotPrice(instanceType, zone.ID)
+		if !odOK && isCustomMachineTypeName(instanceType) {
+			// Custom machine types have no published price of their own (GCP doesn't
+			// publish prices for arbitrary custom shapes); derive on-demand from the
+			// family's predefined shapes, and derive spot from the standard fallback
+			// ratio since there's no published spot price to fall back to either.
+			if odPrice, odOK = p.deriveCustomPrice(mt); odOK {
+				spotPrice, spotOK = odPrice*pricing.SpotFallbackRatio, true
+			}
+		}
 
 		if odOK {
 			isUnavailable := p.unavailableOfferings.IsUnavailable(instanceType, zone.ID, karpv1.CapacityTypeOnDemand)

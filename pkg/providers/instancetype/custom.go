@@ -19,6 +19,8 @@ package instancetype
 import (
 	"context"
 	"regexp"
+	"sort"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -127,4 +129,61 @@ func getCachedCustomMachineType(
 	}
 	cacheStore.Set(name, customMachineTypeCacheEntry{machineType: machineType, zones: availableZones}, ttl)
 	return machineType, availableZones
+}
+
+// deriveCustomPrice estimates the on-demand hourly price of a custom machine type using GCP's
+// linear vCPU + memory pricing model: predefined machine types bill as
+// (vCPUs * perVCPUPrice) + (memoryMB * perMBPrice), with per-vCPU/per-MB rates constant within
+// a machine family. GCP does not publish prices for custom shapes directly (unlike
+// aggregatedList/get, which do resolve custom shapes), so those rates are calibrated here from
+// two predefined shapes of the same family with different memory-per-vCPU ratios (e.g.
+// standard/highmem) whose prices are already known.
+func (p *DefaultProvider) deriveCustomPrice(mt *computepb.MachineType) (float64, bool) {
+	family, _, ok := strings.Cut(lo.FromPtr(mt.Name), "-")
+	if !ok {
+		return 0, false
+	}
+
+	type pricePoint struct{ ratio, pricePerCPU float64 }
+	seenRatios := make(map[float64]struct{})
+	var points []pricePoint
+	for _, sibling := range p.instanceTypesInfo {
+		siblingName := lo.FromPtr(sibling.Name)
+		siblingFamily, _, _ := strings.Cut(siblingName, "-")
+		if siblingFamily != family || isCustomMachineTypeName(siblingName) {
+			continue
+		}
+		cpus := sibling.GetGuestCpus()
+		if cpus == 0 {
+			continue
+		}
+		price, ok := p.pricingProvider.OnDemandPrice(siblingName)
+		if !ok {
+			continue
+		}
+		ratio := float64(sibling.GetMemoryMb()) / float64(cpus)
+		if _, dup := seenRatios[ratio]; dup {
+			continue
+		}
+		seenRatios[ratio] = struct{}{}
+		points = append(points, pricePoint{ratio: ratio, pricePerCPU: price / float64(cpus)})
+	}
+	if len(points) < 2 {
+		return 0, false
+	}
+	sort.Slice(points, func(i, j int) bool { return points[i].ratio < points[j].ratio })
+
+	lowest, highest := points[0], points[len(points)-1]
+	if highest.ratio == lowest.ratio {
+		return 0, false
+	}
+
+	perMBPrice := (highest.pricePerCPU - lowest.pricePerCPU) / (highest.ratio - lowest.ratio)
+	perCPUPrice := lowest.pricePerCPU - perMBPrice*lowest.ratio
+
+	price := perCPUPrice*float64(mt.GetGuestCpus()) + perMBPrice*float64(mt.GetMemoryMb())
+	if price <= 0 {
+		return 0, false
+	}
+	return price, true
 }

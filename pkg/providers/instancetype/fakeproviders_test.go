@@ -62,6 +62,23 @@ func (f *fakePricingProvider) OnDemandPrice(_ string) (float64, bool) { return 1
 func (f *fakePricingProvider) SpotPrice(_, _ string) (float64, bool)  { return 0.5, true }
 func (f *fakePricingProvider) UpdatePrices(_ context.Context) error   { return nil }
 
+// staticPricingProvider returns on-demand prices from a fixed map and nothing else, so
+// (unlike fakePricingProvider, which returns a price for any name) tests can reproduce
+// realistic behavior for a name with no published price - e.g. a GCE custom machine type,
+// which never has a catalog entry in production pricing data.
+type staticPricingProvider struct {
+	onDemand map[string]float64
+}
+
+func (s *staticPricingProvider) LivenessProbe(_ *http.Request) error { return nil }
+func (s *staticPricingProvider) InstanceTypes() []string             { return nil }
+func (s *staticPricingProvider) OnDemandPrice(instanceType string) (float64, bool) {
+	price, ok := s.onDemand[instanceType]
+	return price, ok
+}
+func (s *staticPricingProvider) SpotPrice(_, _ string) (float64, bool) { return 0, false }
+func (s *staticPricingProvider) UpdatePrices(_ context.Context) error  { return nil }
+
 // newTestProvider builds a DefaultProvider wired with fakes and pre-populated
 // with one machine type so that List can return results without network calls.
 func newTestProvider() *DefaultProvider {
