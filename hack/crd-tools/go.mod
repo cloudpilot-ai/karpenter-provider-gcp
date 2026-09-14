@@ -1,6 +1,6 @@
 module github.com/cloudpilot-ai/karpenter-provider-gcp/hack/crd-tools
 
-go 1.26.2
+go 1.27.0
 
 tool sigs.k8s.io/kubectl-validate
 

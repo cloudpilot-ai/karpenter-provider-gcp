@@ -1,4 +1,5 @@
 {
+  "ignorePatterns": "vendor/**",
   "instructions": "Use package comments as the source of truth for package ownership boundaries. Flag changes that move GCE VM lifecycle, GKE cluster API reads, source node-pool selection, or provider policy into the wrong package. For pkg/metadata specifically, enforce that it remains a pure typed bootstrap metadata model and render boundary with no provider policy or API calls.",
   "rules": [
     {
