@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -103,9 +104,23 @@ func TestPrefix(arch, capacityType string, parts ...string) string {
 // with the same name already exists (leftover from a previous run), it is deleted first.
 // Ubuntu requires a 50 GiB boot disk; all other families use DefaultE2EDiskGiB.
 func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily string) {
+	e.createNodeClass(ctx, name, imageFamily, "pd-balanced")
+}
+
+// CreateNodeClassWithDefaultDisk creates a GCENodeClass that lets Compute Engine
+// select the boot disk type for the provisioned machine series.
+func (e *Environment) CreateNodeClassWithDefaultDisk(ctx context.Context, name, imageFamily string) {
+	e.createNodeClass(ctx, name, imageFamily, "")
+}
+
+func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, diskCategory string) {
 	diskGiB := int64(DefaultE2EDiskGiB)
 	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
 		diskGiB = 50 // ubuntu-gke images require more space than COS
+	}
+	disk := map[string]any{"sizeGiB": diskGiB, "boot": true}
+	if diskCategory != "" {
+		disk["category"] = diskCategory
 	}
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
@@ -116,9 +131,7 @@ func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily str
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
 			},
-			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
-			},
+			"disks":           []any{disk},
 			"subnetRangeName": e.PodsRangeName,
 		},
 	}}
@@ -358,6 +371,35 @@ func (e *Environment) GetGCEInstance(ctx context.Context, providerID string) (*c
 		return nil, err
 	}
 	return e.computeSvc.Instances.Get(project, zone, name).Context(ctx).Do()
+}
+
+// GetGCEBootDiskType returns the short disk type name for an instance's boot disk.
+func (e *Environment) GetGCEBootDiskType(ctx context.Context, providerID string) (string, error) {
+	project, zone, _, err := parseProviderID(providerID)
+	if err != nil {
+		return "", err
+	}
+	instance, err := e.GetGCEInstance(ctx, providerID)
+	if err != nil {
+		return "", fmt.Errorf("getting instance: %w", err)
+	}
+	for _, attachedDisk := range instance.Disks {
+		if !attachedDisk.Boot {
+			continue
+		}
+		if attachedDisk.Source == "" {
+			return "", fmt.Errorf("instance %q boot disk has no source", instance.Name)
+		}
+		disk, err := e.computeSvc.Disks.Get(project, zone, path.Base(attachedDisk.Source)).Context(ctx).Do()
+		if err != nil {
+			return "", fmt.Errorf("getting instance %q boot disk: %w", instance.Name, err)
+		}
+		if disk.Type == "" {
+			return "", fmt.Errorf("instance %q boot disk has no type", instance.Name)
+		}
+		return path.Base(disk.Type), nil
+	}
+	return "", fmt.Errorf("instance %q has no boot disk", instance.Name)
 }
 
 // CreateNodePool creates a NodePool with the given requirements and the default
