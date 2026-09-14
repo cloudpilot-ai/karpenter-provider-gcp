@@ -100,6 +100,10 @@ func applyNodeClassKubeletConfig(config *kubeletconfig.KubeletConfiguration, ove
 	if overlay.EvictionMaxPodGracePeriod != nil {
 		config.EvictionMaxPodGracePeriod = *overlay.EvictionMaxPodGracePeriod
 	}
+	applyNodeClassRuntimeKubeletConfig(config, overlay)
+}
+
+func applyNodeClassRuntimeKubeletConfig(config *kubeletconfig.KubeletConfiguration, overlay *v1alpha1.KubeletConfiguration) {
 	if overlay.ImageGCHighThresholdPercent != nil {
 		config.ImageGCHighThresholdPercent = overlay.ImageGCHighThresholdPercent
 	}

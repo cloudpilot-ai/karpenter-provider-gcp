@@ -61,11 +61,12 @@ chart-lint: ## Lint the Helm charts (validates values.schema.json and templates)
 	helm lint charts/karpenter/
 	helm lint charts/karpenter-crd/
 
+# Remove nojsonv2 once kubectl-validate no longer uses its legacy vendored JSON implementation.
 verify-crds: ## Validate generated CRDs with Kubernetes API server validation logic
 	@tmpdir=$$(mktemp -d); \
 	trap 'rm -rf "$$tmpdir"' EXIT; \
 	helm template karpenter-crd charts/karpenter-crd --include-crds > "$$tmpdir/karpenter-crd.yaml"; \
-	(cd hack/crd-tools && go tool kubectl-validate --version 1.35 ../../charts/karpenter/crds/ "$$tmpdir")
+	(cd hack/crd-tools && GOEXPERIMENT=nojsonv2 go tool kubectl-validate --version 1.35 ../../charts/karpenter/crds/ "$$tmpdir")
 
 verify: ## Verify code. Includes linting, formatting, etc
 	@command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not found — install it from https://golangci-lint.run/welcome/install/" && exit 1)
