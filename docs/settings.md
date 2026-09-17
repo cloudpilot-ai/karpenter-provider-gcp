@@ -191,13 +191,13 @@ controller:
 
 ## Additional Labels
 
-`additionalLabels` adds labels to the `metadata.labels` of the Kubernetes resources that the chart renders: the controller Deployment, Service, ServiceAccount, ClusterRole and ClusterRoleBinding, Role and RoleBinding, PodDisruptionBudget, and ServiceMonitor. Any key that matches one of the controller Deployment's immutable selector labels (`app.kubernetes.io/name`, `app.kubernetes.io/instance`) is dropped before the labels are applied, so `additionalLabels` cannot change the controller's pod selector.
+`additionalLabels` adds labels to the `metadata.labels` of the Kubernetes resources that the chart renders: the controller Deployment and the controller pods it creates (its pod template), the Service, the ServiceAccount, the chart's ClusterRoles and ClusterRoleBindings, its Roles and RoleBindings, the PodDisruptionBudget, and the ServiceMonitor. The chart merges `additionalLabels` with the labels it sets by default, and its own default labels win, so `additionalLabels` cannot override any label the chart manages (`helm.sh/chart`, `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/version`, and `app.kubernetes.io/managed-by`). Because `app.kubernetes.io/name` and `app.kubernetes.io/instance` are among those managed labels, `additionalLabels` cannot change the controller's immutable pod selector.
 
 | Helm value         | Default | Description                                                                     |
 |--------------------|---------|---------------------------------------------------------------------------------|
 | `additionalLabels` | `{}`    | Labels added to the metadata of the Kubernetes resources rendered by the chart. |
 
-The labels do not reach the CustomResourceDefinitions. The CRDs ship as static manifests and install through the separate `karpenter-crd` chart, so chart values do not apply to them.
+The labels do not reach the CustomResourceDefinitions. Helm installs the CRD manifests in the chart's `crds/` directory as-is, without templating, so chart values such as `additionalLabels` never apply to them. The CRDs are also distributed through the separate `karpenter-crd` chart.
 
 This value is distinct from `serviceMonitor.additionalLabels`, which applies only to the ServiceMonitor to match a Prometheus instance's selector.
 
