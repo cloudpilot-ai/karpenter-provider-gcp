@@ -206,6 +206,41 @@ spec:
 
 This NodePool provisions only instance types from families that support Hyperdisk Balanced (such as n2, n4, c3, c4). Instance types from families without Hyperdisk Balanced support (such as e2, n1) are excluded.
 
+### Default disk selection
+
+Omit `category` from `spec.disks[]` unless the workload requires a specific disk type:
+
+```yaml
+disks:
+  - sizeGiB: 60
+    boot: true
+```
+
+Karpenter leaves the disk type unset, and Compute Engine applies the default for the machine family that is provisioned. This lets one GCENodeClass and NodePool span families that use different disk technologies, widening capacity options without requiring separate resources per family. Compute Engine documents these representative defaults:
+
+- **N2, N2D** — `pd-standard`
+- **C3, C3D** — `pd-balanced`
+- **N4, N4D** — `hyperdisk-balanced`
+
+See the Compute Engine API documentation for [`disks[].initializeParams.diskType`](https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert) for the complete default mapping. These defaults belong to Compute Engine, not Karpenter.
+
+> **Note:** Nodes in one NodePool can receive different disk types with different performance and cost characteristics. Pin `category` when a workload requires predictable disk characteristics.
+
+### Pinning a disk type
+
+Set `category` when the workload requires a specific compatible disk type:
+
+```yaml
+disks:
+  - category: pd-balanced
+    sizeGiB: 60
+    boot: true
+```
+
+An explicit category makes disk performance and cost more predictable, but it is only compatible with machine families that support that disk type. Disks that set `provisionedIOPS` or `provisionedThroughput` require an explicit compatible `category`.
+
+The NodePool `disk-type.gke.io/*` requirements described above constrain which instance types Karpenter selects; they do not select the boot disk type. Combine them with an explicit `category` to keep machine selection compatible with the fixed disk type. For the full `disks[]` field specification, see the [GCENodeClass reference](../reference/gcenodeclass.md).
+
 ### Available disk-type labels
 
 The supported labels correspond to GCP disk types:

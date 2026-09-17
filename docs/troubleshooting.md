@@ -117,8 +117,7 @@ shieldedInstanceConfig:
 
 ```yaml
 disks:
-  - category: pd-balanced
-    sizeGiB: 60
+  - sizeGiB: 60
     boot: true
     kmsKeyName: projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key
 ```
