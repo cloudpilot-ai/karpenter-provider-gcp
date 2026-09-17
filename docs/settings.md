@@ -168,6 +168,45 @@ podDisruptionBudget:
   maxUnavailable: 1
 ```
 
+## Topology Spread Constraints
+
+[Topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) cap how unevenly the controller's pods may be distributed across a topology domain such as a zone or node, and let you choose whether Karpenter still schedules a pod when the skew limit (`maxSkew`) cannot be honored (`whenUnsatisfiable`). The chart can set them on the controller Deployment's pod template. The controller runs 2 replicas by default (`controller.replicaCount: 2`), so spreading them across zones improves availability.
+
+| Helm value                             | Default | Description                                                               |
+|----------------------------------------|---------|---------------------------------------------------------------------------|
+| `controller.topologySpreadConstraints` | `[]`    | Topology spread constraints for the controller Deployment's pod template. |
+
+The value accepts the standard Kubernetes `topologySpreadConstraints` schema. The field is rendered into `spec.template.spec.topologySpreadConstraints` only when you provide a non-empty list, so leaving it unset applies no constraints.
+
+```yaml
+controller:
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: karpenter
+```
+
+## Additional Labels
+
+`additionalLabels` adds labels to the `metadata.labels` of the Kubernetes resources that the chart renders: the controller Deployment and the controller pods it creates (its pod template), the Service, the ServiceAccount, the chart's ClusterRoles and ClusterRoleBindings, its Roles and RoleBindings, the PodDisruptionBudget, and the ServiceMonitor. The chart merges `additionalLabels` with the labels it sets by default, and its own default labels win, so `additionalLabels` cannot override any label the chart manages (`helm.sh/chart`, `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/version`, and `app.kubernetes.io/managed-by`). Because `app.kubernetes.io/name` and `app.kubernetes.io/instance` are among those managed labels, `additionalLabels` cannot change the controller's immutable pod selector.
+
+| Helm value         | Default | Description                                                                     |
+|--------------------|---------|---------------------------------------------------------------------------------|
+| `additionalLabels` | `{}`    | Labels added to the metadata of the Kubernetes resources rendered by the chart. |
+
+The labels do not reach the CustomResourceDefinitions. Helm installs the CRD manifests in the chart's `crds/` directory as-is, without templating, so chart values such as `additionalLabels` never apply to them. The CRDs are also distributed through the separate `karpenter-crd` chart.
+
+This value is distinct from `serviceMonitor.additionalLabels`, which applies only to the ServiceMonitor to match a Prometheus instance's selector.
+
+```yaml
+additionalLabels:
+  team: platform
+  cost-center: infra-1234
+```
+
 ## NodePool Features
 
 These fields are set on `NodePool` objects, not on the controller. They are part of the karpenter-core API and are available in this provider.
