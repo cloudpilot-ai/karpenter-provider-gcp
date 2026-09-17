@@ -66,7 +66,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bep/godartsass/v2 v2.5.0 // indirect
 	github.com/bep/golibsass v1.2.0 // indirect
-	github.com/bep/helpers v0.12.0 // indirect
 	github.com/bits-and-blooms/bitset v1.25.0 // indirect
 	github.com/bwplotka/mdox v0.9.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -141,11 +140,11 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/gobuffalo/flect v1.0.3 // indirect
 	// Pin until Hugo and Colly support glob v1; Colly tracks this in https://github.com/gocolly/colly/pull/927.
-	github.com/gobwas/glob v1.0.0 // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/gocolly/colly/v2 v2.3.0 // indirect
 	github.com/gohugoio/hashstructure v1.1.0 // indirect
-	github.com/gohugoio/hugo v0.166.0 // indirect
+	github.com/gohugoio/hugo v0.165.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
