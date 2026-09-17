@@ -498,8 +498,8 @@ golang.org/x/tools/internal/versions
 # gomodules.xyz/jsonpatch/v2 v2.5.0
 ## explicit; go 1.20
 gomodules.xyz/jsonpatch/v2
-# google.golang.org/api v0.297.0
-## explicit; go 1.26.0
+# google.golang.org/api v0.298.0
+## explicit; go 1.25.0
 google.golang.org/api/compute/v1
 google.golang.org/api/container/v1
 google.golang.org/api/googleapi
