@@ -38,7 +38,12 @@
     "additionalAnnotations": {
       "type": "object",
       "additionalProperties": { "type": "string" },
-      "description": "Additional annotations added to all resources."
+      "description": "Additional annotations to add into metadata for templated resources (excludes CRDs)"
+    },
+    "additionalLabels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Additional labels to add into metadata for templated resources (excludes CRDs). Labels that the chart adds by default will not be overridden by these additional labels."
     },
     "imagePullSecrets": {
       "type": "array",
@@ -328,6 +333,11 @@
         "tolerations": {
           "type": "array",
           "description": "Tolerations for the controller pod.",
+          "items": { "type": "object" }
+        },
+        "topologySpreadConstraints": {
+          "type": "array",
+          "description": "Topology spread constraints for the controller pod.",
           "items": { "type": "object" }
         },
         "settings": {
