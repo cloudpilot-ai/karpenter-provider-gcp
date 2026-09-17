@@ -206,21 +206,9 @@ spec:
 
 This NodePool provisions only instance types from families that support Hyperdisk Balanced (such as n2, n4, c3, c4). Instance types from families without Hyperdisk Balanced support (such as e2, n1) are excluded.
 
-### Spanning machine families with default disk types
+### Default disk selection
 
-The `category` field in a `spec.disks[]` entry is optional. When you omit it, Karpenter leaves the disk type unset and Compute Engine applies the machine-family default disk type for whichever family it provisions. When `category` is set, behavior is unchanged: Karpenter uses the disk type you specify. Disks that specify `provisionedIOPS` or `provisionedThroughput` require an explicit compatible `category`.
-
-GCP capacity shortages are often isolated to specific machine families. Omitting `category` lets one GCENodeClass and NodePool span families that use different disk technologies, widening capacity options without requiring a separate GCENodeClass or NodePool per family. Compute Engine documents these representative defaults:
-
-- **N2, N2D** — `pd-standard`
-- **C3, C3D** — `pd-balanced`
-- **N4, N4D** — `hyperdisk-balanced`
-
-See the Compute Engine API documentation for [`disks[].initializeParams.diskType`](https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert) for the complete default mapping. These defaults belong to Compute Engine, not Karpenter.
-
-> **Note:** Because each family falls back to its own default disk type, nodes in a single NodePool can have different disk types with different performance and cost characteristics. For performance-sensitive workloads, set `category` explicitly — optionally combined with the `disk-type.gke.io/*` requirement labels — instead of relying on the per-family default.
-
-The following partial `spec.disks` fragment omits `category`:
+Omit `category` from `spec.disks[]` unless the workload requires a specific disk type:
 
 ```yaml
 disks:
@@ -228,7 +216,30 @@ disks:
     boot: true
 ```
 
-The NodePool `disk-type.gke.io/*` requirements described above constrain which instance types Karpenter selects; they do not pin the disk type that Compute Engine attaches when `category` is unset. To guarantee a specific disk type, set `category` explicitly. For the full `disks[]` field specification, see the [GCENodeClass reference](../reference/gcenodeclass.md).
+Karpenter leaves the disk type unset, and Compute Engine applies the default for the machine family that is provisioned. This lets one GCENodeClass and NodePool span families that use different disk technologies, widening capacity options without requiring separate resources per family. Compute Engine documents these representative defaults:
+
+- **N2, N2D** — `pd-standard`
+- **C3, C3D** — `pd-balanced`
+- **N4, N4D** — `hyperdisk-balanced`
+
+See the Compute Engine API documentation for [`disks[].initializeParams.diskType`](https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert) for the complete default mapping. These defaults belong to Compute Engine, not Karpenter.
+
+> **Note:** Nodes in one NodePool can receive different disk types with different performance and cost characteristics. Pin `category` when a workload requires predictable disk characteristics.
+
+### Pinning a disk type
+
+Set `category` when the workload requires a specific compatible disk type:
+
+```yaml
+disks:
+  - category: pd-balanced
+    sizeGiB: 60
+    boot: true
+```
+
+An explicit category makes disk performance and cost more predictable, but it is only compatible with machine families that support that disk type. Disks that set `provisionedIOPS` or `provisionedThroughput` require an explicit compatible `category`.
+
+The NodePool `disk-type.gke.io/*` requirements described above constrain which instance types Karpenter selects; they do not select the boot disk type. Combine them with an explicit `category` to keep machine selection compatible with the fixed disk type. For the full `disks[]` field specification, see the [GCENodeClass reference](../reference/gcenodeclass.md).
 
 ### Available disk-type labels
 

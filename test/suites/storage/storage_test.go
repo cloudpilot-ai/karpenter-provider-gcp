@@ -30,12 +30,12 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Default Disk Selection", func() {
+var _ = Describe("Disk Selection", func() {
 	It("should use the machine-series default when disk category is omitted", func(ctx SpecContext) {
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "default-disk")
 		nodeClassName := prefix + "-" + environment.UniqueSuffix()
 
-		env.CreateNodeClassWithDefaultDisk(ctx, nodeClassName, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+		env.CreateNodeClass(ctx, nodeClassName, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
 		env.WaitForNodeClassReady(ctx, nodeClassName)
 		DeferCleanup(func(ctx context.Context) {
 			env.DeleteNodeClass(ctx, nodeClassName)
@@ -88,6 +88,41 @@ var _ = Describe("Default Disk Selection", func() {
 			provisionedNodeName = ""
 		}
 	}, SpecTimeout(25*time.Minute))
+
+	It("should override the N2 default with an explicit disk category", func(ctx SpecContext) {
+		name := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "explicit-disk") + "-" + environment.UniqueSuffix()
+		var provisionedNodeName string
+		DeferCleanup(func(ctx context.Context) {
+			env.DeleteDeployment(ctx, name)
+			env.DeleteNodePool(ctx, name)
+			if provisionedNodeName != "" {
+				Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
+			}
+			env.DeleteNodeClass(ctx, name)
+		})
+
+		env.CreateNodeClassWithDiskCategory(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS, "pd-balanced")
+		env.WaitForNodeClassReady(ctx, name)
+		env.CreateNodePool(ctx, name, name, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2"},
+		})
+		env.WaitForNodePoolReady(ctx, name)
+		env.CreateDeployment(ctx, name, name, name, karpv1.ArchitectureAmd64)
+
+		pod := env.WaitForRunningPod(ctx, name)
+		Expect(pod.Spec.NodeName).NotTo(BeEmpty())
+		provisionedNodeName = pod.Spec.NodeName
+		node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, provisionedNodeName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(node.Spec.ProviderID).NotTo(BeEmpty())
+
+		diskType, err := env.GetGCEBootDiskType(ctx, node.Spec.ProviderID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(diskType).To(Equal("pd-balanced"))
+	}, SpecTimeout(15*time.Minute))
 })
 
 var _ = Describe("PDCSI Disk Type Labels", func() {

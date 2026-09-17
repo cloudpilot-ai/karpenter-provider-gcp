@@ -104,13 +104,12 @@ func TestPrefix(arch, capacityType string, parts ...string) string {
 // with the same name already exists (leftover from a previous run), it is deleted first.
 // Ubuntu requires a 50 GiB boot disk; all other families use DefaultE2EDiskGiB.
 func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily string) {
-	e.createNodeClass(ctx, name, imageFamily, "pd-balanced")
+	e.createNodeClass(ctx, name, imageFamily, "")
 }
 
-// CreateNodeClassWithDefaultDisk creates a GCENodeClass that lets Compute Engine
-// select the boot disk type for the provisioned machine series.
-func (e *Environment) CreateNodeClassWithDefaultDisk(ctx context.Context, name, imageFamily string) {
-	e.createNodeClass(ctx, name, imageFamily, "")
+// CreateNodeClassWithDiskCategory creates a GCENodeClass with an explicit boot disk category.
+func (e *Environment) CreateNodeClassWithDiskCategory(ctx context.Context, name, imageFamily, diskCategory string) {
+	e.createNodeClass(ctx, name, imageFamily, diskCategory)
 }
 
 func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, diskCategory string) {
@@ -165,7 +164,7 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 				map[string]any{"alias": imageFamily + "@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName":      e.PodsRangeName,
 			"kubeletConfiguration": kubeletConfig,
@@ -193,7 +192,7 @@ func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name
 				map[string]any{"family": family, "channel": channel},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -220,7 +219,7 @@ func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name
 				map[string]any{"family": family, "version": version},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -245,7 +244,7 @@ func (e *Environment) CreateNodeClassWithConfidentialType(ctx context.Context, n
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -269,7 +268,7 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 			"networkConfig": map[string]any{
@@ -297,7 +296,7 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name,
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -1036,7 +1035,7 @@ func (e *Environment) CreateNodeClassWithAlias(ctx context.Context, name, alias 
 				map[string]any{"alias": alias},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -1065,7 +1064,7 @@ func (e *Environment) CreateNodeClassWithImageID(ctx context.Context, name, imag
 				map[string]any{"id": imageID},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
