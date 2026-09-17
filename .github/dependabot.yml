@@ -3,7 +3,9 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "cron"
+      cronjob: "0 9 25 * *"
+      timezone: "Etc/UTC"
     # k8s.io/* are transitive deps driven by karpenter-core/controller-runtime;
     # never update them in isolation.
     ignore:
@@ -28,7 +30,9 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "cron"
+      cronjob: "0 9 25 * *"
+      timezone: "Etc/UTC"
     groups:
       github-actions:
         patterns:
@@ -37,11 +41,22 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/hack/tools"
     schedule:
-      interval: "weekly"
+      interval: "cron"
+      cronjob: "0 9 25 * *"
+      timezone: "Etc/UTC"
     # Go 1.24 tool directives cause all entries (including tool binaries) to
     # appear as //indirect in go.mod; allow indirect so the group can match them.
     allow:
       - dependency-type: "all"
+    # Hugo 0.166 requires glob v1, whose removed API still breaks mdox and Colly.
+    # Remove both ignores after https://github.com/gocolly/colly/pull/927 lands.
+    ignore:
+      - dependency-name: "github.com/gobwas/glob"
+        versions:
+          - ">= 1.0.0"
+      - dependency-name: "github.com/gohugoio/hugo"
+        versions:
+          - ">= 0.166.0"
     groups:
       dev-tools:
         patterns:
@@ -50,7 +65,9 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/hack/crd-tools"
     schedule:
-      interval: "weekly"
+      interval: "cron"
+      cronjob: "0 9 25 * *"
+      timezone: "Etc/UTC"
     # SECURITY updates only. `allow` also gates security updates, so the
     # previous kubectl-validate-only allowlist silently blocked CVE fixes
     # for every other dependency here (e.g. 13 golang.org/x/crypto
@@ -72,7 +89,9 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/hack/pdcsi-data"
     schedule:
-      interval: "weekly"
+      interval: "cron"
+      cronjob: "0 9 25 * *"
+      timezone: "Etc/UTC"
     # This module pins the PDCSI repository as a data source for copied
     # node-labeler compatibility data; don't update its transitives alone.
     allow:
