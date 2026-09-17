@@ -10,8 +10,12 @@ logOutputPaths:
 logErrorOutputPaths:
   - stderr
 
-# -- Additional annotations to add into metadata.
+# -- Additional annotations to add into metadata for templated resources (excludes CRDs).
 additionalAnnotations: {} # Empty dictionary for extra annotations
+
+# -- Additional labels to add into metadata for templated resources (excludes CRDs).
+# Labels that the chart adds by default will not be overridden by these additional labels.
+additionalLabels: {} # Empty dictionary for extra labels
 
 serviceAccount:
   # Specifies whether a service account should be created
@@ -131,6 +135,7 @@ controller:
               app.kubernetes.io/name: karpenter
           topologyKey: kubernetes.io/hostname
   tolerations: []
+  topologySpreadConstraints: []
   settings:
     # -- The GCP project ID.
     projectID: ""

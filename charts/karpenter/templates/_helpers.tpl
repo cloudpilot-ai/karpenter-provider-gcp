@@ -31,15 +31,23 @@ Create chart name and version as used by the chart label.
 {{- end }}
 
 {{/*
-Common labels
+Used in the generation of common labels
 */}}
-{{- define "karpenter.labels" -}}
+{{- define "karpenter.defaultLabels" -}}
 helm.sh/chart: {{ include "karpenter.chart" . }}
 {{ include "karpenter.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "karpenter.labels" -}}
+{{- $defaultLabels := include "karpenter.defaultLabels" . | fromYaml -}}
+{{- merge $defaultLabels (.Values.additionalLabels | default (dict)) | toYaml -}}
 {{- end }}
 
 {{/*

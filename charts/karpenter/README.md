@@ -93,7 +93,8 @@ serviceMonitor:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| additionalAnnotations | object | `{}` | Additional annotations to add into metadata. |
+| additionalAnnotations | object | `{}` | Additional annotations to add into metadata for templated resources (excludes CRDs). |
+| additionalLabels | object | `{}` | Additional labels to add into metadata for templated resources (excludes CRDs). Labels that the chart adds by default will not be overridden by these additional labels. |
 | controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].labelSelector.matchLabels."app.kubernetes.io/name" | string | `"karpenter"` |  |
 | controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey | string | `"kubernetes.io/hostname"` |  |
 | controller.disableControllerWarmup | bool | `true` | disableControllerWarmup controls whether controller sources (watches/informers) start before leader election is won. Set to false to enable warmup, which pre-populates caches and improves leader failover time. Default true matches karpenter-core default (warmup disabled). |
@@ -128,6 +129,7 @@ serviceMonitor:
 | controller.strategy.rollingUpdate.maxUnavailable | int | `1` |  |
 | controller.terminationGracePeriodSeconds | int | `30` |  |
 | controller.tolerations | list | `[]` |  |
+| controller.topologySpreadConstraints | list | `[]` |  |
 | credentials | object | `{"enabled":true,"secretKey":"key.json","secretName":""}` | GCP credentials configuration |
 | credentials.enabled | bool | `true` | Enable or disable the use of GCP credentials secret Set to true if you want to use a Kubernetes secret for GCP authentication Set to false to rely on other authentication methods (e.g., Workload Identity, instance metadata) |
 | credentials.secretKey | string | `"key.json"` | Key within the secret that contains the service account JSON |
