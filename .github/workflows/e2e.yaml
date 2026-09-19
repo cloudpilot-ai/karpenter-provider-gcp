@@ -4,27 +4,25 @@ on:
   issue_comment:
     types: [created]
 
-permissions:
-  contents: read
-  id-token: write
-  issues: write
-  pull-requests: write
-
-env:
-  E2E_PREFIX: ${{ vars.E2E_PREFIX || 'karpenter-e2e' }}
-  E2E_REGION: ${{ vars.E2E_REGION || 'asia-southeast1' }}
-  E2E_LOCATION: ${{ vars.E2E_LOCATION || 'asia-southeast1-b' }}
+permissions: {}
 
 jobs:
   gate:
     name: Comment gate
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     if: github.event.issue.pull_request && (github.event.comment.body == '/e2e' || startsWith(github.event.comment.body, '/e2e '))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      accepted: ${{ steps.command.outputs.continue }}
-      fork_full_name: ${{ steps.command.outputs.fork_full_name }}
-      sha: ${{ steps.command.outputs.sha }}
+      accepted: ${{ steps.parse.outputs.accepted }}
+      mode: ${{ steps.parse.outputs.mode }}
+      sha: ${{ steps.capture.outputs.tested_sha }}
+      tested_repository: ${{ steps.capture.outputs.tested_repository }}
+      tooling_sha: ${{ steps.capture.outputs.tooling_sha }}
+      invocation: ${{ steps.capture.outputs.invocation }}
     steps:
       - name: Parse /e2e command
         id: command
@@ -39,137 +37,315 @@ jobs:
           skip_reviews: true
           skip_completing: true
 
-  e2e:
-    name: E2E run
-    needs: gate
-    if: needs.gate.outputs.accepted == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    concurrency:
-      group: karpenter-e2e
-      cancel-in-progress: false
-    outputs:
-      preset: ${{ steps.preset.outputs.preset }}
-      result: ${{ steps.result.outputs.result }}
-    steps:
-      - name: Parse preset
-        id: preset
-        env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
-        run: |
-          set -euo pipefail
-          preset="${COMMENT_BODY#/e2e}"
-          preset="${preset#${preset%%[![:space:]]*}}"
-          if [[ -z "${preset}" ]]; then
-            preset="standard"
-          fi
-          echo "preset=${preset}" >> "${GITHUB_OUTPUT}"
-
-      - name: Checkout PR code
-        if: steps.preset.outputs.preset == 'standard'
+      - name: Checkout workflow source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: ${{ needs.gate.outputs.fork_full_name || github.repository }}
-          ref: ${{ needs.gate.outputs.sha }}
-          fetch-depth: 0
+          ref: ${{ github.sha }}
           persist-credentials: false
-
-      - name: Set up Go
-        if: steps.preset.outputs.preset == 'standard'
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            hack/tools/go.sum
-
-      - name: Authenticate to GCP
-        id: auth
-        if: steps.preset.outputs.preset == 'standard'
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        with:
-          workload_identity_provider: ${{ vars.GCP_E2E_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_E2E_SERVICE_ACCOUNT }}
-          create_credentials_file: true
-
-      - name: Set up gcloud
-        if: steps.preset.outputs.preset == 'standard'
-        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
-        with:
-          project_id: ${{ vars.E2E_PROJECT_ID }}
-          install_components: gke-gcloud-auth-plugin
-
-      - name: Validate e2e configuration
-        if: steps.preset.outputs.preset == 'standard'
+      - name: Validate exact command
+        id: parse
         env:
-          E2E_PROJECT_ID: ${{ vars.E2E_PROJECT_ID }}
-          GCP_E2E_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_E2E_WORKLOAD_IDENTITY_PROVIDER }}
-          GCP_E2E_SERVICE_ACCOUNT: ${{ vars.GCP_E2E_SERVICE_ACCOUNT }}
-        run: |
-          set -euo pipefail
-          test -n "${E2E_PROJECT_ID}" || (echo "E2E_PROJECT_ID repository variable is required" >&2; exit 1)
-          test -n "${GCP_E2E_WORKLOAD_IDENTITY_PROVIDER}" || (echo "GCP_E2E_WORKLOAD_IDENTITY_PROVIDER repository variable is required" >&2; exit 1)
-          test -n "${GCP_E2E_SERVICE_ACCOUNT}" || (echo "GCP_E2E_SERVICE_ACCOUNT repository variable is required" >&2; exit 1)
+          COMMAND_AUTHORIZED: ${{ steps.command.outputs.continue }}
+        run: node hack/ci/gate.cjs
 
-      - name: Install toolchain
-        if: steps.preset.outputs.preset == 'standard'
-        run: make toolchain
-
-      - name: Run standard e2e
-        id: standard
-        if: steps.preset.outputs.preset == 'standard'
-        continue-on-error: true
+      - name: Freeze source identities and administrative configuration
+        if: steps.parse.outputs.accepted == 'true'
+        id: capture
         env:
-          E2E_PROJECT_ID: ${{ vars.E2E_PROJECT_ID }}
-          E2E_SA_PATH: ${{ steps.auth.outputs.credentials_file_path }}
-          E2E_PREFIX: ${{ env.E2E_PREFIX }}
-          E2E_REGION: ${{ env.E2E_REGION }}
-          E2E_LOCATION: ${{ env.E2E_LOCATION }}
-          GINKGO_PROCS: ${{ vars.E2E_GINKGO_PROCS || '4' }}
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          {
-            make e2e-setup
-            make e2e-deploy
-            make e2e-tests
-          } 2>&1 | tee artifacts/e2e-standard.log
-
-      - name: Set result
-        id: result
-        if: always()
-        run: |
-          set -euo pipefail
-          if [[ "${{ steps.preset.outputs.preset }}" != "standard" ]]; then
-            result="not implemented"
-          elif [[ "${{ steps.standard.outcome }}" == "success" ]]; then
-            result="success"
-          else
-            result="failure"
-          fi
-          echo "result=${result}" >> "${GITHUB_OUTPUT}"
-
-      - name: Upload artifacts
-        if: always() && steps.preset.outputs.preset == 'standard'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: e2e-standard-${{ needs.gate.outputs.sha }}
-          path: artifacts/
-          if-no-files-found: ignore
-          retention-days: 30
-
-      - name: Update sticky comment
-        if: always()
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.parse.outputs.mode }}
+          TOOLING_REF: ${{ vars.E2E_TOOLING_REF }}
+          RUNTIME_ENABLED: ${{ vars.E2E_RUNTIME_ENABLED }}
+          TARGET_PROJECT: ${{ vars.E2E_PROJECT_ID }}
+          TARGET_REGION: ${{ vars.E2E_REGION }}
+          TARGET_LOCATION: ${{ vars.E2E_LOCATION }}
+          TARGET_PREFIX: ${{ vars.E2E_PREFIX }}
+          TARGET_PROVIDER: ${{ vars.GCP_E2E_WORKLOAD_IDENTITY_PROVIDER }}
+          TARGET_SERVICEACCOUNT: ${{ vars.GCP_E2E_SERVICE_ACCOUNT }}
+        run: node hack/ci/bridge.cjs capture
+      - name: Update sticky request
+        if: steps.capture.outcome == 'success'
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           number: ${{ github.event.issue.number }}
-          header: e2e-standard
+          header: e2e-${{ steps.parse.outputs.mode }}
           message: |
-            On-demand e2e `${{ steps.preset.outputs.preset }}` result: `${{ steps.result.outputs.result }}`.
+            E2E request accepted for `${{ steps.parse.outputs.mode }}`; real tests have not run.
 
-            Commit: `${{ needs.gate.outputs.sha }}`
-            Target: `${{ env.E2E_PREFIX }}` in `${{ env.E2E_LOCATION }}`
+            Tested SHA: `${{ steps.capture.outputs.tested_sha }}`.
+            Tooling SHA: `${{ steps.capture.outputs.tooling_sha || 'not resolved (unsupported mode)' }}`.
 
-      - name: Fail on e2e failure
-        if: steps.result.outputs.result == 'failure'
+            [Workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+  tooling-preflight:
+    needs: gate
+    if: needs.gate.outputs.accepted == 'true' && needs.gate.outputs.mode == 'standard'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      state: ${{ steps.capabilities.outputs.state }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          path: workflow
+          persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: cloudpilot-ai/karpenter-provider-gcp
+          ref: ${{ needs.gate.outputs.tooling_sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
+        with:
+          go-version-file: tooling/go.mod
+          cache: false
+      - run: go build -o "$GITHUB_WORKSPACE/runner" ./hack/ci/e2e-runner
+        working-directory: tooling
+      - id: capabilities
+        env:
+          INVOCATION: ${{ needs.gate.outputs.invocation }}
+        run: node workflow/hack/ci/bridge.cjs preflight
+
+      - name: Upload preflight diagnostics
+        if: always() && hashFiles('diagnostics/**') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-preflight-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: diagnostics/
+          if-no-files-found: error
+          retention-days: 30
+
+  build:
+    needs: [gate, tooling-preflight]
+    if: needs.tooling-preflight.outputs.state == 'ready'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      INVOCATION: ${{ needs.gate.outputs.invocation }}
+    outputs:
+      artifact_id: ${{ steps.bundle.outputs.artifact-id }}
+      manifest_sha: ${{ steps.prepare.outputs.manifest_sha }}
+    steps:
+      - name: Checkout workflow bridge
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          path: workflow
+          persist-credentials: false
+      - name: Checkout frozen tooling
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: cloudpilot-ai/karpenter-provider-gcp
+          ref: ${{ needs.gate.outputs.tooling_sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
+        with:
+          go-version-file: tooling/go.mod
+          cache: false
+      - name: Build trusted runner separately
+        working-directory: tooling
+        run: go build -o "$GITHUB_WORKSPACE/runner" ./hack/ci/e2e-runner
+      - name: Checkout code under test without credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ needs.gate.outputs.tested_repository }}
+          ref: ${{ needs.gate.outputs.sha }}
+          path: source
+          persist-credentials: false
+      - name: Prepare code-under-test bundle
+        id: prepare
+        run: node workflow/hack/ci/bridge.cjs prepare
+      - name: Upload e2e-bundle
+        if: always()
+        id: bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            bundle/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload e2e-build-diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            diagnostics/
+          if-no-files-found: error
+          retention-days: 30
+
+  runtime:
+    name: Runtime approval — tested ${{ needs.gate.outputs.sha }} / tooling ${{ needs.gate.outputs.tooling_sha }}
+    needs: [gate, tooling-preflight, build]
+    if: needs.tooling-preflight.outputs.state == 'ready' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: e2e-runtime
+    concurrency:
+      group: e2e-${{ fromJSON(needs.gate.outputs.invocation).target.project }}-${{ fromJSON(needs.gate.outputs.invocation).target.location }}-${{ fromJSON(needs.gate.outputs.invocation).target.prefix }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      INVOCATION: ${{ needs.gate.outputs.invocation }}
+      EXPECTED_MANIFEST_SHA: ${{ needs.build.outputs.manifest_sha }}
+      E2E_PROJECT_ID: ${{ fromJSON(needs.gate.outputs.invocation).target.project }}
+      E2E_REGION: ${{ fromJSON(needs.gate.outputs.invocation).target.region }}
+      E2E_LOCATION: ${{ fromJSON(needs.gate.outputs.invocation).target.location }}
+      E2E_PREFIX: ${{ fromJSON(needs.gate.outputs.invocation).target.prefix }}
+    outputs:
+      artifact_id: ${{ steps.results.outputs.artifact-id }}
+      manifest_sha: ${{ steps.package.outputs.manifest_sha }}
+    steps:
+      - name: Checkout workflow bridge
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          path: workflow
+          persist-credentials: false
+      - name: Checkout frozen tooling
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: cloudpilot-ai/karpenter-provider-gcp
+          ref: ${{ needs.gate.outputs.tooling_sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
+        with:
+          go-version-file: tooling/go.mod
+          cache: false
+      - name: Build trusted runner separately
+        working-directory: tooling
+        run: go build -o "$GITHUB_WORKSPACE/runner" ./hack/ci/e2e-runner
+      - name: Download this run's prepared bundle
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: bundle
+          merge-multiple: true
+      - name: Validate handoff before cloud authentication
+        run: node workflow/hack/ci/bridge.cjs validate
+      - name: Authenticate only to approved runtime identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ fromJSON(needs.gate.outputs.invocation).target.provider }}
+          service_account: ${{ fromJSON(needs.gate.outputs.invocation).target.serviceAccount }}
+          create_credentials_file: true
+      - name: Set up runtime cloud client
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          project_id: ${{ fromJSON(needs.gate.outputs.invocation).target.project }}
+          install_components: gke-gcloud-auth-plugin
+      - name: Run trusted coordinator (no setup or teardown)
+        run: node workflow/hack/ci/bridge.cjs run
+      - name: Package result data
+        id: package
+        if: always()
+        run: node workflow/hack/ci/bridge.cjs package
+      - name: Upload e2e-results
+        if: always()
+        id: results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            results/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload e2e-runtime-diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-runtime-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            diagnostics/
+          if-no-files-found: error
+          retention-days: 30
+
+  reporter:
+    needs: [gate, tooling-preflight, build, runtime]
+    if: always() && needs.gate.outputs.accepted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          path: workflow
+          persist-credentials: false
+      - name: Checkout frozen reporter tooling
+        if: needs.tooling-preflight.result == 'success'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: cloudpilot-ai/karpenter-provider-gcp
+          ref: ${{ needs.gate.outputs.tooling_sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
+        if: needs.tooling-preflight.result == 'success'
+        with:
+          go-version-file: tooling/go.mod
+          cache: false
+      - name: Build trusted reporter
+        if: needs.tooling-preflight.result == 'success'
+        working-directory: tooling
+        run: go build -o "$GITHUB_WORKSPACE/runner" ./hack/ci/e2e-runner
+      - name: Download this run's result data only
+        if: needs.runtime.outputs.artifact_id != ''
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          artifact-ids: ${{ needs.runtime.outputs.artifact_id }}
+          path: bundle
+          merge-multiple: true
+      - name: Validate data and run trusted report command
+        if: needs.tooling-preflight.result == 'success'
+        id: report
+        env:
+          INVOCATION: ${{ needs.gate.outputs.invocation }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.runtime.outputs.manifest_sha }}
+          PREFLIGHT_STATE: ${{ needs.tooling-preflight.outputs.state }}
+        run: node workflow/hack/ci/bridge.cjs report
+      - name: Upload reporter diagnostics
+        if: always() && hashFiles('diagnostics/**') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-reporter-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: diagnostics/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record reporter setup or data failure
+        if: failure() || cancelled()
+        id: reporter-failure
+        run: echo 'failed=true' >> "$GITHUB_OUTPUT"
+      - name: Publish tested-SHA checks
+        if: always()
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INVOCATION: ${{ needs.gate.outputs.invocation }}
+          JOBS: ${{ toJSON(needs) }}
+          REPORT_OUTCOME: ${{ steps.report.outcome }}
+          REPORT_FAILED: ${{ steps.reporter-failure.outputs.failed }}
+        run: node workflow/hack/ci/bridge.cjs publish
+      - name: Update sticky result (preserve invocation comments)
+        if: always() && steps.publish.outcome != 'skipped'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          number: ${{ github.event.issue.number }}
+          header: e2e-${{ needs.gate.outputs.mode }}
+          path: report.md
+      - name: Preserve failure status
+        if: always() && (steps.publish.outputs.failed == 'true' || failure() || cancelled())
         run: exit 1
