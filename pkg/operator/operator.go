@@ -57,6 +57,8 @@ type Operator struct {
 	PricingProvider           pricing.Provider
 	InstanceTypeProvider      instancetype.Provider
 	InstanceProvider          instance.Provider
+	ComputeService            *compute.Service
+	ProjectID                 string
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -151,6 +153,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		PricingProvider:           pricingProvider,
 		InstanceTypeProvider:      instanceTypeProvider,
 		InstanceProvider:          instanceProvider,
+		ComputeService:            computeService,
+		ProjectID:                 projectID,
 	}
 }
 

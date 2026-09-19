@@ -23,6 +23,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
+	compute "google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -53,13 +54,19 @@ type Controller struct {
 	recorder   events.Recorder
 
 	unavailableOfferingsCache *unavailableofferings.UnavailableOfferings
+
+	computeService *compute.Service
+	projectID      string
 }
 
-func NewController(kubeClient client.Client, recorder events.Recorder, unavailableOfferingsCache *unavailableofferings.UnavailableOfferings) *Controller {
+func NewController(kubeClient client.Client, recorder events.Recorder, unavailableOfferingsCache *unavailableofferings.UnavailableOfferings,
+	computeService *compute.Service, projectID string) *Controller {
 	return &Controller{
 		kubeClient:                kubeClient,
 		recorder:                  recorder,
 		unavailableOfferingsCache: unavailableOfferingsCache,
+		computeService:            computeService,
+		projectID:                 projectID,
 	}
 }
 
@@ -86,7 +93,7 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 
 		condition := node.GetCondition(&currentNode, corev1.NodeReady)
 		if condition.Status != corev1.ConditionTrue && condition.Reason == NodeConditionReasonKubeletNotReady && condition.Message == NodeConditionMessageShuttingDown {
-			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, false); err != nil {
+			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name); err != nil {
 				return fmt.Errorf("cleaning node claim: %w", err)
 			}
 		}
@@ -95,7 +102,10 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {
+// cleanNodeClaimByInstanceName deletes the NodeClaim backing the named node. When the node is
+// a spot node, the (instanceType, zone) offering is first recorded as unavailable so that the
+// scheduler does not immediately relaunch into the zone that just reclaimed capacity.
+func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string) error {
 	nodeClaim, err := c.getNodeClaimByNodeName(ctx, instanceName)
 	if err != nil {
 		return fmt.Errorf("getting node claim by node name: %w", err)
@@ -103,17 +113,65 @@ func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceN
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return nil
 	}
-	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-	instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
-	if markUnavailable && zone != "" && instanceType != "" {
-		c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
-	}
+
+	c.markOfferingUnavailable(ctx, nodeClaim, instanceName)
 
 	if err := c.deleteNodeClaim(ctx, nodeClaim); err != nil {
 		return fmt.Errorf("deleting node claim: %w", err)
 	}
 
 	return nil
+}
+
+// markOfferingUnavailable records a spot preemption against the unavailable offerings cache.
+//
+// The shutdown condition this controller watches fires for any graceful node shutdown, not only
+// preemption: on-demand NodeClaims are skipped outright, since an operator-initiated or
+// maintenance shutdown of an on-demand node carries no signal about spot capacity in that zone.
+// A spot NodeClaim's shutdown isn't necessarily a preemption either (an operator can stop a spot
+// VM directly, and GCE terminates rather than live-migrates a spot VM for host maintenance), so
+// it's only marked once isPreempted confirms GCE actually reclaimed the instance - otherwise the
+// scheduler would be steered away from a zone that is in fact healthy.
+func (c *Controller) markOfferingUnavailable(ctx context.Context, nodeClaim *karpv1.NodeClaim, instanceName string) {
+	if nodeClaim.Labels[karpv1.CapacityTypeLabelKey] != karpv1.CapacityTypeSpot {
+		return
+	}
+
+	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+	instanceType := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
+	if zone == "" || instanceType == "" {
+		log.FromContext(ctx).V(1).Info("skipping unavailable offering marking, nodeclaim is missing zone or instance type label",
+			"nodeClaim", nodeClaim.Name, "zone", zone, "instanceType", instanceType)
+		return
+	}
+
+	if !c.isPreempted(ctx, zone, instanceName) {
+		return
+	}
+
+	c.unavailableOfferingsCache.MarkUnavailable(ctx, OperationTypePreempted, instanceType, zone, karpv1.CapacityTypeSpot)
+}
+
+// isPreempted reports whether GCE recorded a compute.instances.preempted operation against the
+// named instance in zone - the documented way to confirm after the fact that a spot VM's
+// shutdown was in fact a preemption, since by the time this controller observes the node's
+// shutdown condition the instance itself is already gone.
+// See: https://cloud.google.com/compute/docs/instances/create-use-spot#detect-preemption
+//
+// On a lookup error, this conservatively reports false (not confirmed preempted): failing to
+// mark a genuine preemption only costs one slightly-suboptimal retry, whereas a false positive
+// actively steers the scheduler away from healthy capacity for the unavailable-offering TTL.
+func (c *Controller) isPreempted(ctx context.Context, zone, instanceName string) bool {
+	targetLink := fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/instances/%s", c.projectID, zone, instanceName)
+	filter := fmt.Sprintf(`operationType="%s" AND targetLink="%s"`, OperationTypePreempted, targetLink)
+
+	ops, err := c.computeService.ZoneOperations.List(c.projectID, zone).Filter(filter).Context(ctx).Do()
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to check for a preemption operation; not marking offering unavailable",
+			"zone", zone, "instanceName", instanceName)
+		return false
+	}
+	return len(ops.Items) > 0
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

@@ -98,3 +98,15 @@ func TestRepairPolicies_NPDConditionsPolarity(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestedInstanceTypeNames(t *testing.T) {
+	reqs := []karpv1.NodeSelectorRequirementWithMinValues{
+		{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"n2-custom-8-24576", "n2-standard-4"}},
+		// A NotIn on the same label must not be treated as a request for these types.
+		{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"n1-standard-1"}},
+		{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-central1-a"}},
+	}
+
+	require.ElementsMatch(t, []string{"n2-custom-8-24576", "n2-standard-4"}, requestedInstanceTypeNames(reqs))
+	require.Empty(t, requestedInstanceTypeNames(nil))
+}
