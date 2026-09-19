@@ -31,6 +31,7 @@ import (
 	karpevents "sigs.k8s.io/karpenter/pkg/events"
 	karpmetrics "sigs.k8s.io/karpenter/pkg/metrics"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -193,4 +194,98 @@ func TestHandleStoppingSpotInstances_DeletesShuttingDownKarpenterNode(t *testing
 	require.Len(t, kubeClient.deleted, 1)
 	require.Equal(t, "spot-claim", kubeClient.deleted[0].GetName())
 	require.Equal(t, before+1, disruptedCounterValue(t, labels))
+}
+
+func preemptingNodeAndClaim(status corev1.ConditionStatus) *fakeKubeClient {
+	return &fakeKubeClient{
+		nodes: []corev1.Node{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "spot-node",
+					Labels: map[string]string{utils.LabelNodePoolKey: "preempt-pool"},
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{
+							Type:    NodeConditionTypeGCESpotPreempting,
+							Status:  status,
+							Reason:  "SpotPreemptionImminent",
+							Message: "instance is being preempted",
+						},
+					},
+				},
+			},
+		},
+		nodeClaims: []karpv1.NodeClaim{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "spot-claim",
+					Labels: map[string]string{
+						karpv1.NodePoolLabelKey:        "preempt-pool",
+						karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeSpot,
+						corev1.LabelTopologyZone:       "us-central1-a",
+						corev1.LabelInstanceTypeStable: "n2d-standard-4",
+					},
+				},
+				Status: karpv1.NodeClaimStatus{NodeName: "spot-node"},
+			},
+		},
+	}
+}
+
+func TestHandleStoppingSpotInstances_DeletesPreemptingNode(t *testing.T) {
+	t.Parallel()
+
+	recorder := &fakeRecorder{}
+	kubeClient := preemptingNodeAndClaim(corev1.ConditionTrue)
+	unavailableOfferings := unavailableofferings.NewUnavailableOfferings()
+
+	c := &Controller{
+		kubeClient:                kubeClient,
+		recorder:                  recorder,
+		unavailableOfferingsCache: unavailableOfferings,
+	}
+
+	labels := prometheus.Labels{
+		karpmetrics.ReasonLabel:       InterruptionReason,
+		karpmetrics.NodePoolLabel:     "preempt-pool",
+		karpmetrics.CapacityTypeLabel: karpv1.CapacityTypeSpot,
+	}
+	before := disruptedCounterValue(t, labels)
+
+	err := c.handleStoppingSpotInstances(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, kubeClient.deleted, 1)
+	require.Equal(t, "spot-claim", kubeClient.deleted[0].GetName())
+	require.Equal(t, before+1, disruptedCounterValue(t, labels))
+
+	// Unlike the kubelet shutdown path, preemption pulls the offering out of
+	// rotation so the scheduler stops picking it while capacity is reclaimed.
+	require.True(t, unavailableOfferings.IsUnavailable("n2d-standard-4", "us-central1-a", karpv1.CapacityTypeSpot))
+
+	require.Len(t, recorder.events, 2)
+	require.Equal(t, "PreemptionNoticeReceived", recorder.events[0].Reason)
+	require.Equal(t, "TerminatingOnInterruption", recorder.events[1].Reason)
+}
+
+func TestHandleStoppingSpotInstances_IgnoresPreemptingConditionFalse(t *testing.T) {
+	t.Parallel()
+
+	recorder := &fakeRecorder{}
+	kubeClient := preemptingNodeAndClaim(corev1.ConditionFalse)
+	unavailableOfferings := unavailableofferings.NewUnavailableOfferings()
+
+	c := &Controller{
+		kubeClient:                kubeClient,
+		recorder:                  recorder,
+		unavailableOfferingsCache: unavailableOfferings,
+	}
+
+	err := c.handleStoppingSpotInstances(context.Background())
+	require.NoError(t, err)
+
+	require.Empty(t, kubeClient.deleted)
+	require.Empty(t, recorder.events)
+	require.False(t, unavailableOfferings.IsUnavailable("n2d-standard-4", "us-central1-a", karpv1.CapacityTypeSpot))
 }

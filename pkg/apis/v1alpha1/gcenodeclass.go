@@ -112,6 +112,17 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:default=default
 	// +optional
 	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
+	// PreemptionNoticeDuration is how many seconds before shutdown GCE flips the
+	// instance/preempted metadata key on a Spot VM. 0 (the default) gives no advance
+	// notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.
+	// 120 gives a two-minute warning, letting Karpenter start draining before shutdown.
+	// Only applies to Spot capacity; ignored for on-demand nodes.
+	// Reading the notice requires an agent on the node that watches the metadata key
+	// and sets the GCESpotPreempting condition — see docs/spot-preemption.md.
+	// +kubebuilder:validation:Enum=0;120
+	// +kubebuilder:default=0
+	// +optional
+	PreemptionNoticeDuration int64 `json:"preemptionNoticeDuration,omitempty"`
 }
 
 // NetworkConfig holds network settings for provisioned nodes.
