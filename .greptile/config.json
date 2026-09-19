@@ -1,6 +1,6 @@
 {
   "ignorePatterns": "vendor/**",
-  "instructions": "Use package comments as the source of truth for package ownership boundaries. Flag changes that move GCE VM lifecycle, GKE cluster API reads, source node-pool selection, or provider policy into the wrong package. For pkg/metadata specifically, enforce that it remains a pure typed bootstrap metadata model and render boundary with no provider policy or API calls.",
+  "instructions": "Use package comments as the source of truth for package ownership boundaries. Flag changes that move GCE VM lifecycle, GKE cluster API reads, source node-pool selection, or provider policy into the wrong package. For pkg/metadata specifically, enforce that it remains a pure typed bootstrap metadata model and render boundary with no provider policy or API calls. For new user-visible behavior, consider whether an end-to-end test would cover meaningful GKE, GCP, or Kubernetes integration risk that unit tests cannot.",
   "rules": [
     {
       "id": "provider-boundaries",
@@ -25,6 +25,12 @@
       "rule": "New or renamed proposals must use a four-digit proposal number that has not already been used by another proposal. Check existing proposal filenames and proposal contents, including implemented or superseded proposals. If the new proposal explicitly declares its number in its contents, it must match the filename; references to other proposals do not declare the new proposal's number.",
       "scope": ["proposals/**"],
       "severity": "high"
+    },
+    {
+      "id": "e2e-coverage-opportunity",
+      "rule": "When a change adds or materially changes user-visible behavior that depends on real GKE, GCP, or Kubernetes integration, assess whether an end-to-end test would cover risk that unit tests cannot. Only flag practical, high-value scenarios that fit the existing test/suites infrastructure, such as provisioning, node registration or configuration, lifecycle, drift, consolidation, repair, networking, storage, or GPU behavior. Do not request end-to-end coverage for refactors, generated or documentation-only changes, or behavior already well covered below cloud and process boundaries. Explain the uncovered integration risk and suggest a compact test outline with the existing or proposed suite, setup, action, key observable assertions, and cleanup; avoid implementation-level detail.",
+      "scope": ["cmd/**", "pkg/**", "charts/**", "deploy/**", "hack/**"],
+      "severity": "low"
     }
   ]
 }
