@@ -71,6 +71,7 @@ var InsufficientCapacityErrorCodes = sets.NewString(
 	"ZONE_RESOURCE_POOL_EXHAUSTED",
 	"IP_SPACE_EXHAUSTED_WITH_DETAILS",
 	"IP_SPACE_EXHAUSTED",
+	"MACHINE_TYPE_UNSUPPORTED",
 )
 
 type Provider interface {
