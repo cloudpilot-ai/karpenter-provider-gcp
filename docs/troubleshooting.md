@@ -208,7 +208,7 @@ GC only deletes instances that carry the Karpenter cluster tag and have no corre
 
 ## Insufficient capacity errors
 
-When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable for 30 minutes. Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones can recover and become available again.
+When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable for 30 minutes. Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones whose capacity shortage was transient can recover and become available again. An instance type the catalog advertises but the zone cannot create is cached the same way. This entry does not recover on its own — see [Machine type unsupported in a zone](#machine-type-unsupported-in-a-zone).
 
 If all zones for a given instance type are exhausted, Karpenter returns an insufficient capacity error immediately without attempting GCP API calls that would fail.
 
@@ -231,6 +231,44 @@ To increase provisioning success:
   ```
 
 - Allow both spot and on-demand to let Karpenter fall back automatically.
+
+---
+
+## Machine type unsupported in a zone
+
+Pods stay `Pending` and no node appears. The `NodeClaim` launch fails with an `InsufficientCapacityError`, and the controller log records the offering being marked unavailable (`Marking offering as unavailable`).
+
+This happens when GCE rejects the `instances.insert` call with reason `MACHINE_TYPE_UNSUPPORTED`. GCP calls an instance type a "machine type", the term in that error code, while Karpenter and this documentation call it an instance type throughout. The catalog — the predefined list Karpenter queries through `machineTypes.aggregatedList` — advertises the instance-type family in that zone, yet GCE cannot actually create it there.
+
+Karpenter marks the instance-type/zone/capacity-type combination unavailable for 30 minutes and skips it during selection, using the same cache described in [Insufficient capacity errors](#insufficient-capacity-errors). Provisioning then falls through to another viable instance type or `NodePool`, if one exists.
+
+Unlike a genuine capacity shortage, an unsupported instance type does not recover when the TTL expires. After 30 minutes the offering becomes eligible again, is re-probed, and fails the same way, repeating until the `NodePool` requirements change. Waiting does not help.
+
+This differs from [Custom machine types not discovered](#custom-machine-types-not-discovered): that section covers custom instance types the catalog never returns, whereas this is a predefined, catalog-advertised instance type that GCE refuses to create.
+
+To restore provisioning:
+
+- Widen your `NodePool`'s existing requirement for the affected key so a creatable instance-type and zone combination exists — extend the `values` list on the requirement you already have for that key rather than adding a second entry for the same key. Broaden the `karpenter.k8s.gcp/instance-family` requirement (and, if needed, the `topology.kubernetes.io/zone` requirement), replacing the example families and zones with ones valid for your project and cluster locations:
+
+  ```yaml
+  # Partial NodePool spec.template.spec.requirements
+  - key: karpenter.k8s.gcp/instance-family
+    operator: In
+    values: ["n4", "n2", "e2", "n2d"]
+  ```
+
+  ```yaml
+  # Partial NodePool spec.template.spec.requirements
+  - key: topology.kubernetes.io/zone
+    operator: In
+    values: ["us-central1-a", "us-central1-b", "us-central1-c"]
+  ```
+
+- Confirm recovery. After widening the requirement, a previously `Pending` pod schedules once Karpenter provisions using one of the added instance families or zones. If pods stay `Pending`, re-check `kubectl get nodeclaims` for the current failure reason:
+
+  ```sh
+  kubectl get nodeclaims
+  ```
 
 ---
 
