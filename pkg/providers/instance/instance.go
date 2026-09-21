@@ -1093,8 +1093,8 @@ func setupScheduling(capacityType string, nodeClass *v1alpha1.GCENodeClass) *com
 		return sched
 	}
 	sched.InstanceTerminationAction = instanceTerminationActionDelete
-	if seconds := nodeClass.Spec.PreemptionNoticeDuration; seconds > 0 {
-		sched.PreemptionNoticeDuration = &compute.Duration{Seconds: seconds}
+	if notice := nodeClass.Spec.PreemptionNoticeDuration; notice != nil && notice.Duration > 0 {
+		sched.PreemptionNoticeDuration = &compute.Duration{Seconds: int64(notice.Duration.Seconds())}
 	}
 	return sched
 }

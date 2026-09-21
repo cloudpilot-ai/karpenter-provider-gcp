@@ -8,7 +8,7 @@ This page covers how to get that warning earlier — up to two minutes earlier �
 
 Two pieces, and they are useful independently:
 
-1. **`GCENodeClass.spec.preemptionNoticeDuration`** asks GCE to flip the `instance/preempted` metadata key ahead of the shutdown signal instead of at the same moment. Set it to `120` for two minutes of warning.
+1. **`GCENodeClass.spec.preemptionNoticeDuration`** asks GCE to flip the `instance/preempted` metadata key ahead of the shutdown signal instead of at the same moment. Set it to `120s` for two minutes of warning.
 2. **The preemption notice detector**, an optional DaemonSet in the Karpenter chart, watches that metadata key on each Spot node and sets a `GCESpotPreempting` node condition when it flips.
 
 Karpenter's interruption controller watches for `GCESpotPreempting=True` and immediately deletes the NodeClaim, which starts the drain. It also marks that instance type and zone unavailable for a while, so replacement capacity is not requested from the same place GCE just reclaimed.
@@ -34,10 +34,10 @@ kind: GCENodeClass
 metadata:
   name: spot
 spec:
-  preemptionNoticeDuration: 120
+  preemptionNoticeDuration: 120s
 ```
 
-Valid values are `0` (no advance notice, the default) and `120`. The field only affects Spot capacity — it is ignored when provisioning on-demand nodes, because those are never preempted.
+The value is a duration, so `120s` and `2m` mean the same thing. GCE currently accepts up to two minutes, and the field is rejected above that. Leaving it unset — the default — asks for no advance notice. The field only affects Spot capacity; it is ignored when provisioning on-demand nodes, because those are never preempted.
 
 Changing `preemptionNoticeDuration` drifts existing nodes. GCE only accepts the setting when an instance is created, so Karpenter has to replace nodes to apply it.
 

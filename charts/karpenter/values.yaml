@@ -174,7 +174,7 @@ controller:
 # -- Optional node-problem-detector deployment that watches the GCE metadata server
 # for Spot preemption notices and sets the GCESpotPreempting node condition, which
 # Karpenter's interruption controller reacts to. Pair it with
-# `GCENodeClass.spec.preemptionNoticeDuration: 120` for a two-minute drain window.
+# `GCENodeClass.spec.preemptionNoticeDuration: 120s` for a two-minute drain window.
 # See docs/spot-preemption.md.
 node-problem-detector:
   # -- Deploy node-problem-detector with the Spot preemption plugin. Off by default:

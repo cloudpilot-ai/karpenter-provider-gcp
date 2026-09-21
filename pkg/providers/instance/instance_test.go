@@ -1129,13 +1129,15 @@ func TestSetupSchedulingPreemptionNoticeDuration(t *testing.T) {
 	cases := []struct {
 		name            string
 		capacityType    string
-		noticeDuration  int64
+		noticeDuration  *metav1.Duration
 		expectedSeconds int64
 	}{
 		{name: "spot unset leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot},
-		{name: "spot zero leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot, noticeDuration: 0},
-		{name: "spot 120 sets a two-minute notice", capacityType: karpv1.CapacityTypeSpot, noticeDuration: 120, expectedSeconds: 120},
-		{name: "on-demand ignores notice duration", capacityType: karpv1.CapacityTypeOnDemand, noticeDuration: 120},
+		{name: "spot zero leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 0}},
+		{name: "spot 120s sets a two-minute notice", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 120 * time.Second}, expectedSeconds: 120},
+		{name: "spot 2m sets the same notice as 120s", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 2 * time.Minute}, expectedSeconds: 120},
+		{name: "spot 90s is passed through unrounded", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 90 * time.Second}, expectedSeconds: 90},
+		{name: "on-demand ignores notice duration", capacityType: karpv1.CapacityTypeOnDemand, noticeDuration: &metav1.Duration{Duration: 120 * time.Second}},
 	}
 
 	for _, tc := range cases {
