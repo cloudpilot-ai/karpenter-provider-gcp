@@ -130,6 +130,16 @@ func TestExtractInsertInsufficientCapacityDetailsMatchesReason(t *testing.T) {
 	}, details)
 }
 
+func TestMachineTypeUnsupportedIsInsufficientCapacity(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isInsufficientCapacityError(&compute.OperationErrorErrors{Code: "MACHINE_TYPE_UNSUPPORTED"}))
+	_, ok := extractInsertInsufficientCapacityDetails(&googleapi.Error{
+		Errors: []googleapi.ErrorItem{{Reason: "MACHINE_TYPE_UNSUPPORTED"}},
+	})
+	require.True(t, ok)
+}
+
 func TestExtractInsertInsufficientCapacityDetailsRequiresStructuredReason(t *testing.T) {
 	t.Parallel()
 
