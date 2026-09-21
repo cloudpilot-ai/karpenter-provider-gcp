@@ -2093,3 +2093,73 @@ func TestConfidentialInstanceType(t *testing.T) {
 		})
 	}
 }
+
+func TestGetOrCreateInstance_AdoptsInstanceFromAnotherZoneInsteadOfDuplicating(t *testing.T) {
+	t.Parallel()
+
+	insertCalled := false
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			insertCalled = true
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			return
+		}
+		writeJSON(w, &compute.InstanceAggregatedList{Items: map[string]compute.InstancesScopedList{
+			"zones/us-central1-f": {Instances: []*compute.Instance{{
+				Name:   "karpenter-default-vzmzs",
+				Zone:   "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-f",
+				Status: InstanceStatusRunning,
+			}}},
+		}})
+	}))
+
+	nodeClaim := &karpv1.NodeClaim{}
+	nodeClaim.Name = "default-vzmzs"
+
+	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil, "us-central1-c", karpv1.CapacityTypeOnDemand)
+
+	require.NoError(t, err)
+	require.False(t, retryable)
+	require.False(t, insertCalled, "a second instance must not be created when one already exists in another zone")
+	require.NotNil(t, instance)
+	require.Equal(t, "us-central1-f", zone, "the adopted instance's real zone must be returned, not the newly selected zone")
+}
+
+func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
+	t.Parallel()
+
+	insertCalled := false
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			insertCalled = true
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			return
+		}
+		writeJSON(w, &compute.InstanceAggregatedList{Items: map[string]compute.InstancesScopedList{
+			"zones/us-central1-c": {Instances: []*compute.Instance{{
+				Name:   "karpenter-default-sgfkv",
+				Zone:   "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-c",
+				Status: InstanceStatusRunning,
+			}}},
+		}})
+	}))
+
+	nodeClaim := &karpv1.NodeClaim{}
+	nodeClaim.Name = "default-sgfkv"
+
+	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil, "us-central1-c", karpv1.CapacityTypeOnDemand)
+
+	require.NoError(t, err)
+	require.False(t, retryable)
+	require.False(t, insertCalled)
+	require.NotNil(t, instance)
+	require.Equal(t, "us-central1-c", zone)
+}
+
+func TestZoneFromURL(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "us-central1-f", zoneFromURL("https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-f"))
+	require.Equal(t, "us-central1-c", zoneFromURL("us-central1-c"))
+	require.Equal(t, "", zoneFromURL(""))
+}

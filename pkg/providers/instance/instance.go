@@ -289,17 +289,6 @@ func insufficientCapacityBackoffTTL(reasonCode string) time.Duration {
 	return unavailableofferings.DefaultTTL
 }
 
-func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
-	instance, err := p.computeService.Instances.Get(p.projectID, zone, instanceName).Context(ctx).Do()
-	if err != nil {
-		if isInstanceNotFoundError(err) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("failed to get instance: %w", err)
-	}
-	return instance, true, nil
-}
-
 func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*compute.Instance, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
 	call := p.computeService.Instances.AggregatedList(p.projectID).Filter(fmt.Sprintf("name eq %s", instanceName))
@@ -324,11 +313,15 @@ func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim
 	return instance, nil
 }
 
-func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance, capacityType string) *Instance {
-	zone := existingInstance.Zone
-	if split := strings.Split(zone, "/"); len(split) > 0 {
-		zone = split[len(split)-1]
+func zoneFromURL(zoneURL string) string {
+	if split := strings.Split(zoneURL, "/"); len(split) > 0 {
+		return split[len(split)-1]
 	}
+	return zoneURL
+}
+
+func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance, capacityType string) *Instance {
+	zone := zoneFromURL(existingInstance.Zone)
 	machineType := existingInstance.MachineType
 	if split := strings.Split(machineType, "/"); len(split) > 0 {
 		machineType = split[len(split)-1]
@@ -436,7 +429,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, "", &retryableError{err}
 	}
 
-	instance, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType)
+	instance, effectiveZone, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType)
 	if err != nil {
 		if retryable {
 			return nil, "", &retryableError{err}
@@ -444,24 +437,29 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, "", err
 	}
 
-	return instance, zone, nil
+	return instance, effectiveZone, nil
 }
 
-func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string) (*compute.Instance, bool, error) {
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string) (*compute.Instance, string, bool, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
-	instance, exists, err := p.isInstanceExists(ctx, zone, instanceName)
+	existing, err := p.findInstanceByNodeClaim(ctx, nodeClaim)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
-		return nil, false, fmt.Errorf("failed to check if instance exists: %w", err)
+		return nil, "", false, fmt.Errorf("failed to check if instance exists: %w", err)
 	}
 
-	if exists {
-		return instance, false, nil
+	if existing != nil {
+		existingZone := zoneFromURL(existing.Zone)
+		if existingZone != zone {
+			log.FromContext(ctx).Info("adopting existing instance instead of creating a duplicate in another zone",
+				"instanceName", instanceName, "existingZone", existingZone, "selectedZone", zone)
+		}
+		return existing, existingZone, false, nil
 	}
 
-	instance, err = p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType)
+	instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType)
 	if err != nil {
-		return nil, false, fmt.Errorf("building instance %s: %w", instanceName, err)
+		return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
@@ -474,19 +472,19 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 			// If IP space is exhausted, trying other instance types won't help as they share the same subnet.
 			// We should fail fast to avoid unnecessary API calls and noise.
 			if details.code == "IP_SPACE_EXHAUSTED" || details.code == "IP_SPACE_EXHAUSTED_WITH_DETAILS" {
-				return nil, false, err
+				return nil, "", false, err
 			}
 		}
 		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
-		return nil, true, err
+		return nil, "", true, err
 	}
 
 	if err := p.waitOperationDone(ctx, instanceType.Name, zone, capacityType, op.Name); err != nil {
 		log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
-		return nil, true, err
+		return nil, "", true, err
 	}
 
-	return instance, false, nil
+	return instance, zone, false, nil
 }
 
 func resolveInstanceImage(instance *compute.Instance) string {
