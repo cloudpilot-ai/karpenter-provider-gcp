@@ -1086,15 +1086,16 @@ func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass)
 
 // setupScheduling returns scheduling config derived from capacity type and the
 // NodeClass. Spot-specific fields (provisioning model, preemptibility) are set
-// later by configureInstanceCapacityProvision.
+// later by configureInstanceCapacityProvision; this wires the termination action
+// so GCE honors DELETE rather than the default STOP on preemption, and the
+// preemption notice duration when the NodeClass asks for one.
 func setupScheduling(capacityType string, nodeClass *v1alpha1.GCENodeClass) *compute.Scheduling {
 	sched := &compute.Scheduling{}
-	if capacityType != karpv1.CapacityTypeSpot {
-		return sched
-	}
-	sched.InstanceTerminationAction = instanceTerminationActionDelete
-	if notice := nodeClass.Spec.PreemptionNoticeDuration; notice != nil && notice.Duration > 0 {
-		sched.PreemptionNoticeDuration = &compute.Duration{Seconds: int64(notice.Seconds())}
+	if capacityType == karpv1.CapacityTypeSpot {
+		sched.InstanceTerminationAction = instanceTerminationActionDelete
+		if notice := nodeClass.Spec.PreemptionNoticeDuration; notice != nil && notice.Duration > 0 {
+			sched.PreemptionNoticeDuration = &compute.Duration{Seconds: int64(notice.Seconds())}
+		}
 	}
 	return sched
 }
