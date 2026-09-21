@@ -1,6 +1,6 @@
 # Proposal: Spot Preemption Notice
 
-- **Status**: Provisional
+- **Status**: In Review
 - **Authors**: @ryan-macdonald-nb
 - **Created**: 2026-08-13
 - **Related Issues**: [#295](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/295)
@@ -13,7 +13,7 @@ Karpenter-GCP currently learns that a Spot VM is going away only after GCE has a
 
 GCE exposes `scheduling.preemptionNoticeDuration`. Set to 120 seconds, the `instance/preempted` metadata key flips two minutes before the shutdown signal. That key is per-instance metadata, readable only from the instance itself, so reading it requires something running on the node.
 
-This proposal adds three things: a `GCENodeClass.spec.preemptionNoticeDuration` field that requests the notice, an optional DaemonSet that watches the metadata key and sets a `GCESpotPreempting` node condition, and handling in the interruption controller that reacts to that condition. The existing kubelet path stays as the fallback.
+This proposal adds three things: a `GCENodeClass.spec.preemptionNoticeDuration` field that requests the notice, an optional `node-problem-detector` subchart that watches the metadata key and sets a `GCESpotPreempting` node condition, and handling in the interruption controller that reacts to that condition. The existing kubelet path stays as the fallback.
 
 ---
 
@@ -62,7 +62,7 @@ GCE sends G2 Soft Off ──▶ kubelet marks node shutting down ──▶ Karpe
                           (already inside the 30s window)
 ```
 
-After — with `preemptionNoticeDuration: 120` and the detector deployed:
+After — with `preemptionNoticeDuration: 120s` and the detector deployed:
 
 ```text
 GCE flips instance/preempted ──▶ detector sets GCESpotPreempting=True ──▶ Karpenter drains
@@ -78,17 +78,22 @@ GCE flips instance/preempted ──▶ detector sets GCESpotPreempting=True ─�
 **API.** A new field on `GCENodeClassSpec`:
 
 ```go
-// +kubebuilder:validation:Enum=0;120
-// +kubebuilder:default=0
+// +kubebuilder:validation:Type=string
+// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+// +kubebuilder:validation:XValidation:message="preemptionNoticeDuration must not exceed 120s",rule="duration(self) <= duration('120s')"
 // +optional
-PreemptionNoticeDuration int64 `json:"preemptionNoticeDuration,omitempty"`
+PreemptionNoticeDuration *metav1.Duration `json:"preemptionNoticeDuration,omitempty"`
 ```
 
-The enum matches what GCE currently accepts. `setupScheduling` in `pkg/providers/instance/instance.go` takes the NodeClass and, for Spot capacity with a non-zero value, sets `Scheduling.PreemptionNoticeDuration`. Zero is left unset rather than sent explicitly, since zero is already the GCE default.
+A duration rather than an enum of the two values GCE documents today. The GCE API models this field as a `Duration`, and the Terraform provider exposes it as `scheduling.preemption_notice_duration` with `seconds` and `nanos`, so a duration keeps the interface recognisable to anyone arriving from Terraform. `metav1.Duration` is the Kubernetes spelling of the same idea, already used in this API for `kubelet.evictionSoftGracePeriod`, and matches `expireAfter` and `consolidateAfter` in karpenter-core. Users write `120s` or `2m`.
+
+The CEL bound rejects anything above two minutes at admission rather than letting GCE reject it at instance creation, where the failure is slower and harder to read. If GCE raises the ceiling, the bound is a one-line change. The pattern allows only `s`, `m` and `h`, so sub-second values cannot be expressed.
+
+`setupScheduling` in `pkg/providers/instance/instance.go` takes the NodeClass and, for Spot capacity with a non-zero duration, sets `Scheduling.PreemptionNoticeDuration`. Unset and zero are both left off the request rather than sent explicitly, since no notice is already the GCE default.
 
 The field participates in the NodeClass hash, so changing it drifts nodes. That is correct: GCE only accepts the setting at instance creation, so applying it requires replacement.
 
-**Detection.** An optional DaemonSet running upstream `node-problem-detector` with a single custom-plugin monitor. The plugin reads `instance/preempted` every two seconds; exit 1 sets `GCESpotPreempting=True` on the node. Two seconds of detection lag against a 120-second notice is not worth the complexity of long-polling with `wait_for_change`, which would also need a pre-read to avoid waiting out the timeout on an already-flagged node.
+**Detection.** The upstream `node-problem-detector` chart as an optional subchart, carrying a single custom-plugin monitor. The plugin reads `instance/preempted` every two seconds; exit 1 sets `GCESpotPreempting=True` on the node. Two seconds of detection lag against a 120-second notice is not worth the complexity of long-polling with `wait_for_change`, which would also need a pre-read to avoid waiting out the timeout on an already-flagged node.
 
 The plugin distinguishes *not preempted* (exit 0) from *could not tell* (exit 2), which surfaces as `Unknown` rather than `False`. Without that split, a probe that cannot reach the metadata server is indistinguishable from a healthy node, and a silently broken detector would report `False` forever while preemptions went unnoticed.
 
@@ -113,10 +118,10 @@ The issue also proposes `npd.enabled: true` by default. This proposal defaults i
 | Risk                                                                                   | Likelihood           | Impact                              | Mitigation                                                                                                                              |
 |----------------------------------------------------------------------------------------|----------------------|-------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
 | A second node-problem-detector alongside the GKE-managed one                           | Certain when enabled | Extra agent per node                | Off by default; Spot-only node selector; distinct condition so the two never collide                                                    |
-| `preemptionNoticeDuration` rejected by GCE in some regions or on some machine families | Possible             | Instance creation fails             | Enum-restricted to `0` and `120`; zero is never sent explicitly, so existing behaviour is untouched for anyone who does not opt in      |
+| `preemptionNoticeDuration` rejected by GCE in some regions or on some machine families | Possible             | Instance creation fails             | Bounded at 120s at admission; never sent when unset, so existing behaviour is untouched for anyone who does not opt in                  |
 | Detector misses a notice (crash, throttling, network)                                  | Low                  | Drain starts late                   | Kubelet fallback path is unchanged and still fires; a failing probe reports `Unknown`, not `False`, so it is visible rather than silent |
 | An image override drops bash or `/dev/tcp` support                                     | Low                  | Detector never fires                | Probe reports `Unknown`; documented in `values.yaml` and `docs/spot-preemption.md`                                                      |
-| Marking the offering unavailable shrinks the pool unnecessarily                        | Medium               | Fewer placement options for a while | See Open Questions                                                                                                                      |
+| Marking the offering unavailable shrinks the pool unnecessarily                        | Low                  | Fewer placement options for a while | Preemption signals capacity pressure in that zone; the entry expires on the usual unavailable-offerings TTL                             |
 
 ---
 
@@ -124,7 +129,7 @@ The issue also proposes `npd.enabled: true` by default. This proposal defaults i
 
 ### Unit Tests
 
-- `setupScheduling` sets the notice duration for Spot at `120`, leaves it nil at `0` and when unset, and never sets it for on-demand.
+- `setupScheduling` sets the notice duration for Spot at `120s`, resolves `2m` to the same 120 seconds, leaves it nil at `0s` and when unset, and never sets it for on-demand.
 - The interruption controller deletes the NodeClaim, increments the disrupted counter, marks the offering unavailable, and publishes both events when a node reports `GCESpotPreempting=True`.
 - The controller takes no action when the condition is present but `False`.
 
@@ -145,15 +150,19 @@ The full 120-second path has not been exercised against a real preemption. GCE d
 - [ ] `GCESpotPreempting=True` triggers NodeClaim deletion ahead of the kubelet condition.
 - [ ] The offering is marked unavailable on preemption.
 - [ ] Installations that do not opt in see no new workloads and no behaviour change.
-- [ ] A real preemption on a node with `preemptionNoticeDuration: 120` produces the condition about two minutes before shutdown.
+- [ ] A real preemption on a node with `preemptionNoticeDuration: 120s` produces the condition about two minutes before shutdown.
 
 ---
 
 ## Alternatives Considered
 
-### node-problem-detector as a Helm subchart
+### Hand-written DaemonSet templates instead of a subchart
 
-This is what issue #295 proposes. Rejected for scope: the chart has no `dependencies:` block and no DaemonSet today, so this would introduce the first external chart-repo dependency, a `Chart.lock`, and a large third-party values surface that `values.schema.json` would have to declare in full — it sets `additionalProperties: false` at the root and in every nested object. Three hand-written templates give the same behaviour with a much smaller review and maintenance surface. If maintainers would rather take the subchart, the plugin config and condition semantics here carry over unchanged.
+The first draft of this proposal took three hand-written templates, to avoid introducing the chart's first external dependency, a `Chart.lock`, and a third-party values surface that `values.schema.json` has to declare (it sets `additionalProperties: false` at the root and in every nested object).
+
+Rejected on review. The subchart is what issue #295 asks for, it gives operators the upstream chart's full customisation surface, and it moves DaemonSet maintenance upstream. The plugin config and condition semantics are identical either way. Two upstream defaults are overridden: the pod runs unprivileged with a read-only root filesystem rather than privileged, and `settings.log_monitors` is emptied so only the preemption plugin runs — the GKE-managed node-problem-detector already covers the kernel and container-runtime log monitors.
+
+The subchart archive is not committed. `Chart.lock` pins the version and digest, and `helm dependency build` fetches it in `make chart-deps`, which `chart-lint` and `apply` depend on, and in the release workflow before `helm package`.
 
 ### A purpose-built Go agent instead of node-problem-detector
 
@@ -167,13 +176,14 @@ Rejected as unworkable. `instance/preempted` is per-instance metadata that only 
 
 ## Future Direction
 
-- If GCE accepts notice durations beyond 120 seconds, the enum widens with no other change.
+- If GCE accepts notice durations beyond two minutes, the CEL bound widens with no other change.
 - The unavailable-offerings TTL could be tuned per interruption cause rather than using the default.
 
 ---
 
-## Open Questions
+## Resolved Questions
 
-1. **Should the preemption path mark the offering unavailable?** Implemented as `true`, following the issue and matching the AWS provider. The counter-argument: GCP also preempts Spot VMs simply for reaching their 24-hour maximum lifetime, which is not a capacity signal, so treating every preemption as one may pull offerings out of rotation without cause. Open — maintainer call.
-2. **Subchart or hand-written templates?** Proposal takes hand-written; see Alternatives. Open — maintainer call.
-3. **Should `node-problem-detector.enabled` default to `true`?** Proposal says no, because of the GKE-managed node-problem-detector already present on Standard node pools. Open.
+1. **Should the preemption path mark the offering unavailable?** Yes, and not configurable. Settled on review. An earlier draft argued the opposite on the grounds that GCP preempts Spot VMs for reaching a 24-hour maximum lifetime, which is not a capacity signal. That was wrong: the 24-hour cap belongs to legacy Preemptible VMs, and [GCE documents](https://docs.cloud.google.com/compute/docs/instances/preemptible) that "preemptible VMs can only run for up to 24 hours at a time, but Spot VMs don't have a maximum runtime unless you limit the runtime". Preemption of a Spot VM therefore does indicate pressure on that instance type in that zone, so marking the offering unavailable is correct. No other Karpenter provider makes this switchable.
+2. **Subchart or hand-written templates?** Subchart; see Alternatives.
+3. **Should `node-problem-detector.enabled` default to `true`?** No, because of the GKE-managed node-problem-detector already present on Standard node pools.
+4. **Enum or duration for `preemptionNoticeDuration`?** Duration, to stay close to the GCE API and the Terraform provider; see Design Details.
