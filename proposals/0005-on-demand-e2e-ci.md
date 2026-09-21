@@ -1,311 +1,82 @@
-# Proposal: On-Demand E2E CI for Pull Requests
+# Proposal: Reusable E2E Tooling and On-Demand CI
 
 - **Status**: Draft
 - **Authors**: @dm3ch
 - **Created**: 2026-06-21
-- **Related Issues**: [#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296), [#250](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/250)
-
----
+- **Related Issues**: [#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296), [#556](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/556)
 
 ## Summary
 
-PlanetScale now provides the GCP project for this repository's e2e infrastructure. This proposal defines an e2e roadmap that covers both on-demand real GKE CI ([#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296)) and test coverage growth toward AWS-provider parity ([#250](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/250)).
+Build reliable local e2e orchestration first, provision a shared GCP environment with Terraform, then reuse the tooling from a manually triggered GitHub Actions pipeline. Add PR-comment commands last, as a thin wrapper around that pipeline.
 
-A user with `write`, `maintain`, or `admin` repository permission posts `/e2e`, `/e2e gpu`, or `/e2e full` on a PR. GitHub Actions verifies repository permission, resolves the PR head SHA, and queues the request behind the shared e2e concurrency lock. The first phase only publishes a sticky placeholder comment; later phases check out that immutable SHA, deploy that exact commit to a persistent GKE e2e cluster, run the requested suites, and publish a PR comment plus a GitHub check.
-
-The real GKE cluster is not torn down after each run. Reusing the cluster should keep latency low and cost acceptable. Runs still clean Kubernetes and Karpenter-created resources before and after test execution. A separate KWOK fast lane may be added for cheap provider-agnostic coverage on ready PRs, but it does not replace real GKE validation.
-
----
+Each stage ships a useful, independently testable result. Normal runs reuse a persistent GKE cluster; infrastructure creation and teardown remain explicit maintenance operations.
 
 ## Motivation
 
-E2E validation is currently a maintainer-local process. That makes results harder to audit, harder to reproduce, and unavailable to contributors without maintainer credentials.
-
-Issue [#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296) asks for a maintainer-approved e2e flow in GitHub Actions: secrets remain in the base repo, untrusted contributor code runs only after maintainer approval, and the tested revision is pinned by SHA.
-
-### Goals
-
-- Maintainer-triggered real GKE e2e runs from PR comments.
-- Secure base-repo access to GCP credentials.
-- Immutable SHA checkout and deploy/test alignment verification.
-- Separate modes for standard, GPU, and full runs.
-- Persistent GKE infrastructure; no normal per-run teardown.
-- Optional KWOK fast lane for provider-agnostic e2e signal on ready PRs.
-- A phased path to expand e2e coverage toward AWS-provider parity.
-- PR-visible results and GitHub checks.
-
-### Non-Goals
-
-- Auto-running e2e on every PR push.
-- Replacing local maintainer debugging workflows.
-- Completing all AWS-provider parity tests in the first PR.
-- Treating KWOK as a substitute for real GKE e2e.
-
----
+Maintainer-local e2e runs require manual quota planning, waved execution, log collection and result formatting. Building ChatOps before those operations are reusable adds integration complexity without delivering real test results. A shared runner makes local validation useful immediately and keeps local and CI behavior consistent.
 
 ## Proposal
 
-### User Interface
+### Shared runner and presets
 
-| Command         | Mode       | Runs                                      |
-|-----------------|------------|-------------------------------------------|
-| `/e2e`          | `standard` | All non-GPU suites                        |
-| `/e2e standard` | `standard` | All non-GPU suites                        |
-| `/e2e gpu`      | `gpu`      | GPU suite only, with `E2E_GPU_TESTS=true` |
-| `/e2e full`     | `full`     | Standard suites plus GPU                  |
+Add a small Go coordinator around the existing Ginkgo suites, with `plan`, `run` and `report` operations. It schedules quota-safe suite waves and Ginkgo spec workers, verifies controller/chart/test revision alignment, and collects results and diagnostics. It does not require GitHub access or provision infrastructure.
 
-The IssueOps gate accepts pull request comments whose body is `/e2e` or starts with `/e2e `. The e2e runner owns option validation before real execution is added. Malformed commands may still reach the placeholder queue during Phase 1, but they must not touch GCP.
+| Preset               | Selection                                    |
+|----------------------|----------------------------------------------|
+| `standard` (default) | All non-GPU suites                           |
+| `gpu`                | GPU suites only                              |
+| `full`               | Standard and GPU suites, without duplication |
 
-### Initial Infrastructure Model
+Use one preset definition across local, manual CI and ChatOps entry points. GPU execution is explicit; insufficient quota or capacity is reported, never silently converted to a smaller preset.
 
-Start with one persistent GKE cluster for all modes:
+Save structured run JSON, native Ginkgo JSON/JUnit, suite logs and Karpenter controller logs. Render a per-spec Markdown results table from saved data using Go templates, including durations, failures, controller CPU/memory samples and log findings. Reports can be regenerated offline. Resource summaries describe observed run/wave usage, not precise per-spec attribution; missing samples are explicit. Optional pprof collection is follow-up work.
 
-```text
-E2E_PROJECT_ID=<sponsored project from secrets/vars>
-E2E_PREFIX=karpenter-e2e
-E2E_LOCATION=asia-southeast1-b
-E2E_REGION=asia-southeast1
-```
+### Infrastructure and execution boundaries
 
-`asia-southeast1-b` is preferred because it can potentially satisfy standard, full, and GPU runs while avoiding known `asia-southeast1-a` ARM-machine issues in the e2e set. GPU mode is enabled only after maintainers validate both `nvidia-l4` capacity and required ARM machine availability in this zone.
+Terraform manages persistent e2e resources in the GCP project provided by PlanetScale: cluster, networking, registry, identities and WIF. Maintenance credentials and Terraform state are separate from runtime access. Resource ownership must not overlap with existing setup scripts. Agree trusted workflow identity and WIF claim restrictions before enabling grants; the pipeline stage implements and verifies that contract.
 
-Keep the mode-to-cluster abstraction even while all modes target one cluster. If future quota or parallelism requires it, GPU or standard runs can move to separate clusters by changing configuration, not runner logic.
+A maintainer selects a PR and preset in the manual pipeline. The pipeline captures the PR head SHA once and builds the matching controller, chart and tests without cloud credentials or GitHub write access. Trusted orchestration uses a captured upstream workflow/tooling revision, separate from the code under test. Runtime uses short-lived WIF credentials scoped to the dedicated target; a separate trusted reporter publishes results without executing PR code or accessing GCP.
 
-CI must pass `E2E_REGION`, `E2E_LOCATION`, `E2E_PROJECT_ID`, and `E2E_PREFIX` explicitly to every reused setup, deploy, image publishing, and test command. CI scripts must fail fast if any required target input is missing rather than relying on local-development defaults.
+Checks identify the tested SHA. PR reports include the preset, revision, results and artifact links; artifacts are retained for 30 days. Public output excludes credentials and internal infrastructure identifiers. Publication failure is visible and cannot turn a failed run into success.
 
-### Repository Layout and Ownership
+ChatOps accepts `/e2e`, `/e2e standard`, `/e2e gpu` and `/e2e full` only from users with `write`, `maintain` or `admin` permission. It invokes the same pipeline with the captured latest PR SHA, not a second orchestration implementation.
 
-Use one GitHub Actions workflow for the first version and keep most logic outside YAML:
+### Required safety properties
 
-```text
-.github/workflows/e2e.yaml       # issue_comment trigger, auth, WIF, concurrency, artifacts
-hack/ci/e2e.sh                   # shell entrypoint and CI glue
-hack/ci/e2e-clean.sh             # cleanup and health checks
-hack/ci/e2e-infra/               # manual/one-time infrastructure setup scripts
-hack/tools/e2e-runner/           # future Go runner for mode selection, execution, reporting
-```
+- Lock the existing target across local, CI and supported legacy entry points; retain ownership through diagnostics and cleanup. Initial provisioning and cluster outages need an explicit exclusive maintenance procedure, not a Kubernetes lock that cannot be acquired.
+- Check quota and cluster health before mutation. Use bounded waves, timeouts and cancellation; preserve partial results on failure.
+- Clean only proven test-owned resources, allowing the existing controller to drain finalizers before replacement. Never repair IAM, force finalizers or tear down infrastructure during normal runs.
+- Separate maintenance, build, runtime and reporting authority. Audit reachable controller and node identities as well as the CI identity; this is approved-code execution, not a sandbox.
+- Authorize the exact captured revision before cloud execution. Later PR pushes require another invocation; third-party actions are SHA-pinned and untrusted inputs are validated.
+- Distinguish test failure, infrastructure failure, cancellation and incomplete execution. Missing reports or zero executed tests cannot count as success. Automatic test retries are deferred.
 
-A split workflow (`e2e-comment.yaml` dispatching `e2e-run.yaml`) is deferred until there is a concrete reuse need such as scheduled runs, manual dispatch, or separate trusted-push lanes. The first implementation should avoid splitting only for abstraction.
+## Staged Delivery and Acceptance Criteria
 
-YAML should handle event wiring, generic IssueOps command gating, permissions, OIDC/WIF setup, trusted-code checkout, checkout of the immutable PR SHA for the code under test, concurrency, and artifact upload. The first placeholder phase may keep minimal preset display and sticky-comment wiring in the workflow; option validation, substantial reporting, and test orchestration logic should move into repository code before real execution is added.
+Each stage is reviewed separately; later stages do not block shipping earlier useful work. Maintainers may explicitly approve starting ChatOps once manual standard runs work, while stage 3 remains partial and unvalidated GPU/full modes stay disabled. Final completion still requires live evidence for all three presets unless maintainers explicitly revise the scope.
 
-The workflow, runner, shell orchestration, and e2e test definitions should run from trusted default-branch code. Pull request workflow files, scripts, and tests must not run before authorization. Later execution phases may build and deploy the pull request's Karpenter controller code at the resolved immutable SHA because validating that code is the purpose of the lane; that code must run only with the dedicated e2e project and least-privilege service accounts described here.
+| Stage                    | Deliverable                                                                | Completion evidence                                                                                                                                                                                              |
+|--------------------------|----------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0. Proposal              | This proposal, separate from implementation changes                        | Maintainer review and merge agree the scope, stages and ownership.                                                                                                                                               |
+| 1. Local tooling         | Go wave runner, presets, saved results, templated report, metrics and logs | Real local standard run on the existing environment; deterministic tests cover presets, quota limits, failure/cancellation and cleanup. GPU/full live validation is explicitly approved and recorded separately. |
+| 2. Terraform environment | Reproducible persistent environment and WIF resources; resolves #556       | Approved provisioning, repeat plan without unexpected changes, runtime/maintenance permission checks, and the local runner works against the new target.                                                         |
+| 3. Manual pipeline       | Maintainer-triggered PR/preset execution with WIF and PR reporting         | Real aligned run, controlled failure, retained diagnostics, tested-SHA check, shared-target exclusion and working cleanup; all three presets have live evidence before this stage is complete.                   |
+| 4. ChatOps               | Permission-checked comments invoking the existing pipeline                 | Authorization, malformed input, PR-push race and preset tests; a real post-merge comment-triggered run uses the captured SHA.                                                                                    |
+| 5. Completion            | Mark the proposal implemented and record follow-up issues                  | Maintainers can operate and recover the system; standard, gpu and full have live evidence, all stage outcomes are verified, and remaining limitations are recorded.                                              |
 
-Bash should remain glue: validate required environment variables, set strict shell options, call `gcloud`, `kubectl`, `ko`, `helm`, and `go test`, and preserve logs/artifacts.
+## Migration
 
-A pinned generic IssueOps action may own coarse command detection, GitHub permission checks, and immutable SHA discovery. A pinned sticky-comment action may own placeholder PR comment create/update behavior during Phase 1. A later Go runner should own option validation, test suite selection, cleanup planning, result classification, JSON summary generation, reporting, and artifact indexing.
+Keep existing local and release workflows working while the runner is introduced. Validate it against the current environment before requiring the new Terraform target. Confirm sponsored-project quotas, machine availability, budget and ownership before provisioning; budget alerts are not spending caps.
 
-The existing `e2e/` package remains focused on test definitions and shared test utilities. CI-specific orchestration should not be melted into `e2e/`; the gate and future runner invoke the tests from outside so local e2e development is not coupled to GitHub comments or artifact/reporting concerns.
+Provision the new environment separately, or explicitly plan imports if resources already exist. Switch targets only after validation; retain the old environment until its owner approves retirement. Setup scripts must delegate to Terraform or stop managing Terraform-owned resources. GitHub environment/WIF configuration and infrastructure apply/destroy require separate approval. Normal test execution never calls setup.
 
-All first-version CI code and infrastructure setup scripts live in this repository.
+Existing ChatOps work can be reused selectively when stage 4 is reached. A temporary tooling-branch override and placeholder execution harness are not prerequisites for this roadmap.
 
-### Authentication
+## Alternatives Considered
 
-Use GitHub Actions OIDC to GCP Workload Identity Federation:
-
-```text
-GitHub Actions OIDC token
-→ GCP Workload Identity Federation provider
-→ dedicated e2e CI service account
-→ short-lived credentials for gcloud/kubectl/ko/helm
-```
-
-No long-lived JSON key should be needed.
-
-The PR-triggered CI identity must be limited to the e2e project and e2e resources. A separate maintenance identity can own rare project-wide setup or teardown tasks.
-
-### Security Model
-
-Required controls:
-
-- Accept triggers only on pull request comments; ignore or reject `/e2e` comments on normal issues before any GCP authentication or SHA resolution.
-- Accept triggers only from users with `write`, `maintain`, or `admin` repository permission.
-- Resolve the PR head SHA at trigger time; later execution phases must test that immutable SHA and never test a mutable branch ref.
-- Run workflow, runner, orchestration, and e2e test code from the trusted default branch.
-- Do not run PR-controlled workflow code, scripts, or tests before authorization.
-- Treat PR title, commit messages, labels, file names, and workflow inputs as untrusted.
-- Pin third-party GitHub Actions by full commit SHA.
-- Pass GitHub context/secrets through environment variables before shell use, then quote them.
-- Keep secrets out of public comments and logs.
-- Use job timeouts, bounded parallelism, bounded retries, and per-cluster concurrency.
-- Never call `make e2e-teardown` from normal PR-triggered runs.
-
-Network egress hardening can be evaluated only if it works on GitHub-hosted runners without paid SaaS or self-hosted infrastructure. Otherwise, document that it is out of scope.
-
-### Locking and Persistent Cluster Hygiene
-
-Before touching GCP, each accepted run must acquire a per-target-cluster lock. Rejected commands must not wait on the e2e execution queue. In GitHub Actions this is a job-level `concurrency` group such as `e2e-${cluster}` with `queue: max`, so accepted e2e jobs queue instead of colliding. The runner should keep the lock until post-run cleanup and artifact collection finish.
-
-Before each run:
-
-- Verify cluster API and system pods are healthy.
-- Clean CRD-backed resources first: NodeClaims, GCENodeClasses, then NodePools.
-- Delete/recreate test namespaces and the Karpenter deployment state only after CRD cleanup has had a chance to process finalizers.
-- Check for orphaned GCE instances/disks only within the configured project, location, and e2e ownership labels. Name prefixes are diagnostic hints, not sufficient deletion selectors.
-- Re-run setup idempotently if infrastructure drift must be reconciled.
-- Run quota checks before deciding parallelism.
-
-Cleanup has a 5-minute normal timeout. If cleanup hangs, classify the run as infrastructure failure and point maintainers to manual cleanup. Force deletion may be used only by cleanup scripts with explicit logging and the same project/location/ownership-label guard; it must not hide finalizer bugs.
-
-### Test Parallelism
-
-Use two levels of parallelism:
-
-1. **Suite-level:** run independent non-GPU suites concurrently.
-2. **Spec-level:** run long suites such as provisioning with Ginkgo `--procs=N`.
-
-The runner computes safe parallelism from current GCP quotas: addresses, SSD GB, regional CPUs, and all-regions CPUs. If full parallelism does not fit, run quota-safe waves instead of falling back to fully sequential execution.
-
-Initial mode behavior:
-
-- `standard`: non-GPU suites in suite-level parallel + provisioning with quota-safe `--procs=N`.
-- `gpu`: GPU suite only, `E2E_GPU_TESTS=true`.
-- `full`: standard and GPU as sub-runs; initially serial or quota-safe waves on the same cluster.
-
-### Retries
-
-Retries are intentionally limited:
-
-- Transient setup/deploy operations may retry with backoff.
-- Deploy alignment mismatch may redeploy once, then fail before tests.
-- Quota exhaustion and GPU capacity failures do not loop; report them as infrastructure failures.
-- Test assertion failures do not become green because of automatic reruns. A future flake-confirmation rerun may be added, but both attempts must be reported and the first failure must remain visible.
-- Maintainers can always post the command again for a manual rerun.
-
-### Reporting
-
-Each run produces:
-
-1. GitHub check on the tested SHA.
-2. PR comment replacing the previous bot-authored result for that mode or response type. User invocation comments are preserved.
-3. Artifacts retained for 30 days:
-   - JUnit XML per suite/attempt,
-   - JSON run summary,
-   - plain-text suite logs,
-   - controller log scan and diagnostics.
-
-PR comments include mode, commit, duration, suite/spec result table, controller resource samples when available, Karpenter panic/error scan result, overall status, and artifact links. They must not include GCP project IDs, credential paths, tokens, or raw environment dumps.
-
----
-
-## Existing Karpenter CI Patterns
-
-The design intentionally borrows from nearby projects:
-
-| Project                                        | Useful pattern                                                                     | GCP decision                                                               |
-|------------------------------------------------|------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
-| `kubernetes-sigs/karpenter`                    | Reusable workflows, kind/KWOK, pinned actions, 30-day artifacts                    | Reuse workflow/artifact discipline; cloud e2e still needs real GCP.        |
-| `aws/karpenter-provider-aws`                   | OIDC to cloud identity, suite matrix, jitter, commit statuses, failure log dump    | Use GCP WIF equivalent; add jitter/backoff; keep checks/statuses.          |
-| `Azure/karpenter-provider-azure`               | SHA-pinned actions, env-var indirection for shell safety                           | Adopt security conventions where compatible.                               |
-| `kubernetes-sigs/karpenter-provider-ibm-cloud` | Existing-cluster PR e2e, SHA-derived image tags, label/tag cleanup, rich artifacts | Reuse persistent-cluster and cleanup ideas; keep GCP parallelism stronger. |
-
-Adopt from the start:
-
-- reusable workflow + portable runner scripts,
-- GitHub OIDC/WIF cloud auth,
-- SHA-pinned actions,
-- env-var indirection for shell safety,
-- per-cluster locking,
-- failure diagnostics under `if: always()`,
-- JUnit/JSON/log artifacts with 30-day retention,
-- ownership-label-gated cleanup, with name prefixes used only as diagnostic hints.
-
-Defer until needed:
-
-- suite matrix expansion beyond `standard`/`gpu`/`full`,
-- strict egress allowlist if it requires paid SaaS or self-hosted infrastructure,
-- multi-project leasing.
-
-We should not copy ephemeral cluster teardown from AWS/Azure because this proposal intentionally keeps GKE infrastructure alive between runs.
-
-### KWOK
-
-KWOK is useful for cheap, fast validation of provider-agnostic Karpenter behavior: scheduling logic, NodePool/NodeClaim controller interactions, disruption flows, and report/runner plumbing. It is not a replacement for this proposal's GKE e2e CI because it cannot validate GCP Compute API calls, GKE bootstrap metadata, IAM, images, networking, disks, GPUs, quota, or actual node registration.
-
-KWOK should be included in this proposal as a later phase, not as a prerequisite for the first real GKE CI PR. A useful split is:
-
-- **GKE lane**: maintainer-triggered, real GCP/GKE behavior, required for merge confidence.
-- **KWOK lane**: cheap fast e2e for ready PRs or every trusted push, useful before spending GCP quota.
-
-The KWOK lane can support issue #250 by covering portable scheduling/disruption scenarios early, while GCP-specific scenarios still run only in the GKE lane.
-
----
-
-## Risks and Mitigations
-
-| Risk                                        | Mitigation                                                                                                                                             |
-|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Malicious PR burns quota or mines resources | trigger restricted to users with write-or-higher repository permission, dedicated project, quotas/budget alerts, timeouts, bounded parallelism/retries |
-| Secret exfiltration                         | WIF short-lived credentials, least-privilege service account, no unrelated secrets in env                                                              |
-| Wrong commit tested                         | resolve SHA at trigger time; verify deployed image and embedded commit                                                                                 |
-| Persistent cluster leaks resources          | pre/post cleanup, ownership-label-gated cleanup, prefix diagnostics, manual maintenance runbook                                                        |
-| GPU capacity unavailable                    | separate `gpu` mode, explicit capacity validation, infra-failure reporting                                                                             |
-
----
-
-## Coverage Roadmap
-
-Use issue [#250](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/250) as the coverage backlog.
-
-Suggested phasing:
-
-1. **Infra first**: comment trigger, WIF, locking, cleanup, reports, and existing suites in GKE.
-2. **KWOK fast lane**: provider-agnostic scheduling/disruption coverage on ready PRs without GCP credentials.
-3. **Portable GKE parity**: scheduling, validation, consolidation, drift/hash, and expiration scenarios that do not need special GCP events.
-4. **GCP-specific parity**: Spot termination notice handling, image drift, maintenance-event behavior, GPU, storage, networking, and arm64 coverage.
-
-This keeps one proposal for the e2e program while allowing small phased PRs.
-
----
-
-## Acceptance Criteria
-
-- [ ] Phase 1: `/e2e`, `/e2e gpu`, and `/e2e full` can be triggered by users with `write`, `maintain`, or `admin` repository permission and are ignored/rejected for unauthorized users.
-- [ ] Phase 1: accepted requests queue behind a shared e2e concurrency lock and update a sticky placeholder PR comment with preset and immutable PR head SHA.
-- [ ] Execution phases: the workflow checks out and tests an immutable PR head SHA.
-- [ ] Execution phases: GitHub Actions authenticates to GCP through OIDC/WIF in steady state.
-- [ ] Standard, GPU, and full modes initially target one persistent `asia-southeast1-b` cluster.
-- [ ] GPU mode is enabled only after `nvidia-l4` and required ARM capacity are validated in `asia-southeast1-b`.
-- [ ] The workflow verifies deploy/test alignment before running tests.
-- [ ] Standard mode uses suite-level parallelism and quota-safe Ginkgo spec-level parallelism.
-- [ ] Normal runs reuse infrastructure and do not perform teardown.
-- [ ] Failures distinguish test failures from infrastructure/setup/quota/capacity failures.
-- [ ] Reports include GitHub checks, Markdown PR comments, JUnit XML, JSON summaries, logs, and artifact links.
-- [ ] Artifacts are retained for 30 days.
-- [ ] Third-party actions are pinned by SHA and shell steps avoid direct unquoted GitHub-context interpolation.
-- [ ] First-version CI and runner code lives in this repository.
-- [ ] Documentation explains trigger syntax, permissions, modes, security model, troubleshooting, and maintenance.
-- [ ] KWOK fast-lane design is documented before implementation and clearly separated from real GKE e2e.
-- [ ] New coverage work references the #250 roadmap and identifies whether each scenario belongs in KWOK, GKE, or both.
-
----
-
-## Implementation Phases
-
-### Phase 1 — Comment Gate and Placeholder Queue
-
-Parse commands, verify actor repository permission, resolve SHA, queue accepted requests behind the shared e2e concurrency lock, and post or update a sticky placeholder comment containing the requested preset text and immutable PR head SHA. Runner-level option validation is deferred until real execution is added. No GCP access, PR checkout, or test execution yet.
-
-### Phase 2 — Standard Mode
-
-Add WIF, persistent cluster setup, cleanup, deploy alignment checks, quota-aware standard-mode execution, artifacts, check runs, and PR reporting.
-
-### Phase 3 — KWOK Fast Lane
-
-Add cheap provider-agnostic e2e for ready PRs or trusted pushes. Use it for portable #250 coverage that does not require GCP APIs or real nodes.
-
-### Phase 4 — GPU, Full Mode, and Coverage Expansion
-
-Validate `asia-southeast1-b` GPU/ARM capacity, enable GPU mode, add full-mode aggregation, and start adding GKE parity suites from #250.
-
-### Phase 5 — Hardening
-
-Tune quota logic, formalize JSON schema, and document maintenance.
-
----
+- **ChatOps/harness first:** rejected because it requires temporary contracts and trust configuration before useful execution exists.
+- **Separate local and CI runners:** rejected because scheduling, cleanup and reports would diverge.
+- **Replace Ginkgo or build a general workflow engine:** unnecessary; reuse native execution and reports, adding only quota-aware coordination and lifecycle handling.
 
 ## Future Direction
 
-- Multiple clusters for parallel runs.
-- `/e2e retry` for maintainer-requested reruns.
-- Periodic maintenance workflow for explicit cleanup or cluster rebuilds.
+Automatic retries with visible attempt history, resumable waves, optional pprof, historical scheduling optimization, multiple targets and a durable request queue are follow-ups. Mutual exclusion does not promise FIFO delivery. Broader coverage and a possible KWOK lane remain in [#250](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/250), outside this delivery plan.
