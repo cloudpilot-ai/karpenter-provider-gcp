@@ -57,7 +57,10 @@ update: tidy download ## Update go files header, CRD and generated code
 verify-codegen: update ## Verify generated code is up to date
 	git diff --exit-code || (echo "Generated files are out of date — run 'make update' and commit the changes" && exit 1)
 
-chart-lint: ## Lint the Helm charts (validates values.schema.json and templates)
+chart-deps: ## Fetch Helm subchart archives pinned in charts/karpenter/Chart.lock
+	helm dependency build charts/karpenter
+
+chart-lint: chart-deps ## Lint the Helm charts (validates values.schema.json and templates)
 	helm lint charts/karpenter/
 	helm lint charts/karpenter-crd/
 
@@ -89,7 +92,7 @@ image: ## Build the Karpenter controller images using ko build
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 
-apply: image ## Deploy the controller from the current state of your git repository into your ~/.kube/config cluster
+apply: image chart-deps ## Deploy the controller from the current state of your git repository into your ~/.kube/config cluster
 	helm upgrade --install karpenter charts/karpenter \
 		--create-namespace \
 		--namespace ${KARPENTER_NAMESPACE} \
