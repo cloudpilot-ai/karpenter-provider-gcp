@@ -84,6 +84,18 @@ func TestExtractInsertInsufficientCapacityReasonMatchesReason(t *testing.T) {
 	require.Equal(t, "IP_SPACE_EXHAUSTED_WITH_DETAILS", code)
 }
 
+func TestMachineTypeUnsupportedIsInsufficientCapacity(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isInsufficientCapacityError(&compute.OperationErrorErrors{Code: "MACHINE_TYPE_UNSUPPORTED"}))
+	reason, code, ok := extractInsertInsufficientCapacityReason(&googleapi.Error{
+		Errors: []googleapi.ErrorItem{{Reason: "MACHINE_TYPE_UNSUPPORTED"}},
+	})
+	require.True(t, ok)
+	require.Equal(t, "MACHINE_TYPE_UNSUPPORTED", reason)
+	require.Equal(t, "MACHINE_TYPE_UNSUPPORTED", code)
+}
+
 func TestExtractInsertInsufficientCapacityReasonRequiresStructuredReason(t *testing.T) {
 	t.Parallel()
 
