@@ -289,6 +289,17 @@ func insufficientCapacityBackoffTTL(reasonCode string) time.Duration {
 	return unavailableofferings.DefaultTTL
 }
 
+func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
+	instance, err := p.computeService.Instances.Get(p.projectID, zone, instanceName).Context(ctx).Do()
+	if err != nil {
+		if isInstanceNotFoundError(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("failed to get instance: %w", err)
+	}
+	return instance, true, nil
+}
+
 func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*compute.Instance, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
 	call := p.computeService.Instances.AggregatedList(p.projectID).Filter(fmt.Sprintf("name eq %s", instanceName))
@@ -313,19 +324,16 @@ func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim
 	return instance, nil
 }
 
-func zoneFromURL(zoneURL string) string {
-	if split := strings.Split(zoneURL, "/"); len(split) > 0 {
+func lastPathSegment(value string) string {
+	if split := strings.Split(value, "/"); len(split) > 0 {
 		return split[len(split)-1]
 	}
-	return zoneURL
+	return value
 }
 
 func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance, capacityType string) *Instance {
-	zone := zoneFromURL(existingInstance.Zone)
-	machineType := existingInstance.MachineType
-	if split := strings.Split(machineType, "/"); len(split) > 0 {
-		machineType = split[len(split)-1]
-	}
+	zone := lastPathSegment(existingInstance.Zone)
+	machineType := lastPathSegment(existingInstance.MachineType)
 
 	log.FromContext(ctx).Info("Found existing instance for NodeClaim", "instance", existingInstance.Name, "zone", zone)
 	return &Instance{
@@ -359,9 +367,13 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	}
 
 	var errs []error
+	var attemptedZones []string
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
-		instance, zone, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType)
+		instance, zone, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType, attemptedZones)
+		if zone != "" && !lo.Contains(attemptedZones, zone) {
+			attemptedZones = append(attemptedZones, zone)
+		}
 		if err != nil {
 			if retryableErr, ok := errors.AsType[*retryableError](err); ok {
 				errs = append(errs, retryableErr.err)
@@ -382,7 +394,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
 			// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
 			// Type:         instanceType.Name,
-			Type:         instanceType.Name,
+			Type:         lastPathSegment(instance.MachineType),
 			Location:     zone,
 			ProjectID:    p.projectID,
 			ImageID:      resolveInstanceImage(instance),
@@ -410,7 +422,7 @@ func (e *retryableError) Error() string {
 	return e.err.Error()
 }
 
-func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, capacityType string) (*compute.Instance, string, error) {
+func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, capacityType string, attemptedZones []string) (*compute.Instance, string, error) {
 	zone, err := p.selectZone(ctx, nodeClaim, instanceType, capacityType)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to select zone for instance type", "instanceType", instanceType.Name)
@@ -420,41 +432,41 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 	sourceMetadata, err := p.nodePoolTemplateProvider.GetSourceTemplateMetadata(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to get source template metadata")
-		return nil, "", &retryableError{err}
+		return nil, zone, &retryableError{err}
 	}
 
 	clusterConfig, err := p.gkeProvider.GetClusterConfig(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to fetch cluster config")
-		return nil, "", &retryableError{err}
+		return nil, zone, &retryableError{err}
 	}
 
-	instance, effectiveZone, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType)
+	instance, effectiveZone, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType, attemptedZones)
 	if err != nil {
 		if retryable {
-			return nil, "", &retryableError{err}
+			return nil, zone, &retryableError{err}
 		}
-		return nil, "", err
+		return nil, zone, err
 	}
 
 	return instance, effectiveZone, nil
 }
 
-func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string) (*compute.Instance, string, bool, error) {
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string, attemptedZones []string) (*compute.Instance, string, bool, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
-	existing, err := p.findInstanceByNodeClaim(ctx, nodeClaim)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName)
-		return nil, "", false, fmt.Errorf("failed to check if instance exists: %w", err)
-	}
-
-	if existing != nil {
-		existingZone := zoneFromURL(existing.Zone)
-		if existingZone != zone {
-			log.FromContext(ctx).Info("adopting existing instance instead of creating a duplicate in another zone",
-				"instanceName", instanceName, "existingZone", existingZone, "selectedZone", zone)
+	for _, candidate := range lo.Uniq(append([]string{zone}, attemptedZones...)) {
+		existing, exists, err := p.isInstanceExists(ctx, candidate, instanceName)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to check if instance exists", "instanceName", instanceName, "zone", candidate)
+			return nil, "", false, fmt.Errorf("failed to check if instance exists: %w", err)
 		}
-		return existing, existingZone, false, nil
+		if exists {
+			if candidate != zone {
+				log.FromContext(ctx).Info("adopting instance from an earlier attempt instead of creating a duplicate in another zone",
+					"instanceName", instanceName, "existingZone", candidate, "selectedZone", zone)
+			}
+			return existing, candidate, false, nil
+		}
 	}
 
 	instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType)

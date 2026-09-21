@@ -2094,7 +2094,7 @@ func TestConfidentialInstanceType(t *testing.T) {
 	}
 }
 
-func TestGetOrCreateInstance_AdoptsInstanceFromAnotherZoneInsteadOfDuplicating(t *testing.T) {
+func TestGetOrCreateInstance_AdoptsInstanceFromEarlierAttemptZone(t *testing.T) {
 	t.Parallel()
 
 	insertCalled := false
@@ -2104,25 +2104,31 @@ func TestGetOrCreateInstance_AdoptsInstanceFromAnotherZoneInsteadOfDuplicating(t
 			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
 			return
 		}
-		writeJSON(w, &compute.InstanceAggregatedList{Items: map[string]compute.InstancesScopedList{
-			"zones/us-central1-f": {Instances: []*compute.Instance{{
-				Name:   "karpenter-default-vzmzs",
-				Zone:   "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-f",
-				Status: InstanceStatusRunning,
-			}}},
-		}})
+		if strings.Contains(r.URL.Path, "/zones/us-central1-f/instances/") {
+			writeJSON(w, &compute.Instance{
+				Name:        "karpenter-default-vzmzs",
+				Zone:        "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-f",
+				MachineType: "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-f/machineTypes/e2-standard-16",
+				Status:      InstanceStatusRunning,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, &googleapi.Error{Code: http.StatusNotFound, Message: "not found"})
 	}))
 
 	nodeClaim := &karpv1.NodeClaim{}
 	nodeClaim.Name = "default-vzmzs"
 
-	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil, "us-central1-c", karpv1.CapacityTypeOnDemand)
+	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
+		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"})
 
 	require.NoError(t, err)
 	require.False(t, retryable)
-	require.False(t, insertCalled, "a second instance must not be created when one already exists in another zone")
+	require.False(t, insertCalled, "a second instance must not be created when an earlier attempt already made one")
 	require.NotNil(t, instance)
 	require.Equal(t, "us-central1-f", zone, "the adopted instance's real zone must be returned, not the newly selected zone")
+	require.Equal(t, "e2-standard-16", lastPathSegment(instance.MachineType))
 }
 
 func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
@@ -2135,19 +2141,18 @@ func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
 			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
 			return
 		}
-		writeJSON(w, &compute.InstanceAggregatedList{Items: map[string]compute.InstancesScopedList{
-			"zones/us-central1-c": {Instances: []*compute.Instance{{
-				Name:   "karpenter-default-sgfkv",
-				Zone:   "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-c",
-				Status: InstanceStatusRunning,
-			}}},
-		}})
+		writeJSON(w, &compute.Instance{
+			Name:   "karpenter-default-sgfkv",
+			Zone:   "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-c",
+			Status: InstanceStatusRunning,
+		})
 	}))
 
 	nodeClaim := &karpv1.NodeClaim{}
 	nodeClaim.Name = "default-sgfkv"
 
-	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil, "us-central1-c", karpv1.CapacityTypeOnDemand)
+	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
+		"us-central1-c", karpv1.CapacityTypeOnDemand, nil)
 
 	require.NoError(t, err)
 	require.False(t, retryable)
@@ -2156,10 +2161,11 @@ func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
 	require.Equal(t, "us-central1-c", zone)
 }
 
-func TestZoneFromURL(t *testing.T) {
+func TestLastPathSegment(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "us-central1-f", zoneFromURL("https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-f"))
-	require.Equal(t, "us-central1-c", zoneFromURL("us-central1-c"))
-	require.Equal(t, "", zoneFromURL(""))
+	require.Equal(t, "us-central1-f", lastPathSegment("https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-f"))
+	require.Equal(t, "e2-standard-16", lastPathSegment("zones/us-central1-f/machineTypes/e2-standard-16"))
+	require.Equal(t, "us-central1-c", lastPathSegment("us-central1-c"))
+	require.Equal(t, "", lastPathSegment(""))
 }
