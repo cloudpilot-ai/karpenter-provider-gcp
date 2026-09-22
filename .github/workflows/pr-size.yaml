@@ -1,0 +1,68 @@
+name: PR size
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pr-size-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Ensure size labels exist
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const labels = [
+              { name: "size/XS", color: "0e8a16", description: "0-9 lines changed" },
+              { name: "size/S", color: "5ebd3e", description: "10-29 lines changed" },
+              { name: "size/M", color: "fbca04", description: "30-99 lines changed" },
+              { name: "size/L", color: "fe7d37", description: "100-499 lines changed" },
+              { name: "size/XL", color: "d93f0b", description: "500-999 lines changed" },
+              { name: "size/XXL", color: "b60205", description: "1,000 or more lines changed" },
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ...label,
+                  });
+                } catch (createError) {
+                  if (createError.status !== 422) throw createError;
+                }
+              }
+            }
+
+      - name: Determine size label
+        id: size
+        uses: step-security/action-size@f21f11fd252174c4f0ee7af09a3ce79d25773bd7 # v2.2.0
+
+      - name: Remove stale size labels
+        uses: step-security/action-remove-labels@0336f915cebfb9c55d1a00317ae094db2fb74208 # v1.3.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: ${{ steps.size.outputs.stale_labels }}
+
+      - name: Add size label
+        uses: step-security/action-add-labels@7f7665088f060f0acf3619469ce85d680df45f3e # v1.1.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: ${{ steps.size.outputs.new_label }}
