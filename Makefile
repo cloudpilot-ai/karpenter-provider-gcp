@@ -29,7 +29,7 @@ help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 presubmit: toolchain verify ci ## Run all steps in the developer loop
-ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
+ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test e2e-runner-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
 	cd hack/tools && go install tool
@@ -109,6 +109,9 @@ ut-test: ## Run unit tests
 	go test -race ./pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=.
 
+e2e-runner-test: ## Run local e2e runner unit tests
+	go test -race ./hack/ci/e2e-runner/...
+
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
 # between the setup script and the test binary.
 # E2E_PROJECT_ID and E2E_LOCATION must be set explicitly — no defaults.
@@ -152,7 +155,17 @@ require-e2e-vars: ## Fail fast if required e2e variables are not set
 	@test -n "$(E2E_LOCATION)"    || (echo "ERROR: E2E_LOCATION is not set"    >&2 && exit 1)
 
 GINKGO_PROCS ?= 4
-e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
+E2E_RUNNER_ARTIFACTS ?= .pi/e2e-stage-evidence/$(E2E_PREFIX)-$(shell date -u +%Y%m%d_%H%M%S)
+E2E_RUNNER_PRESET ?= standard
+
+# Runner commands intentionally never set up or tear down infrastructure.
+e2e-plan: require-e2e-vars ## Create a local e2e runner plan
+	go run ./hack/ci/e2e-runner plan \
+		--preset=$(E2E_RUNNER_PRESET) --project=$(E2E_PROJECT_ID) --region=$(E2E_REGION) \
+		--location=$(E2E_LOCATION) --prefix=$(E2E_PREFIX) --discover-quota \
+		--output=$(E2E_RUNNER_ARTIFACTS)/plan.json
+
+e2e-run: e2e-plan ## Run a saved local e2e runner plan
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -160,7 +173,15 @@ e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	KARPENTER_NAMESPACE=$(E2E_KARPENTER_NAMESPACE) \
 	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
-	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
+	go run ./hack/ci/e2e-runner run --plan=$(E2E_RUNNER_ARTIFACTS)/plan.json \
+		--artifacts=$(E2E_RUNNER_ARTIFACTS)/raw --output=$(E2E_RUNNER_ARTIFACTS)/result.json
+
+e2e-report: ## Render a saved local e2e runner report without contacting the cluster
+	go run ./hack/ci/e2e-runner report --input=$(E2E_RUNNER_ARTIFACTS)/result.json \
+		--output=$(E2E_RUNNER_ARTIFACTS)/report.md
+
+e2e-tests: E2E_RUNNER_PRESET=standard
+e2e-tests: e2e-run ## Run all non-GPU e2e suites through the local runner
 
 FOCUS ?=
 SUITE ?=
@@ -218,7 +239,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-plan e2e-run e2e-report e2e-runner-test e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 
