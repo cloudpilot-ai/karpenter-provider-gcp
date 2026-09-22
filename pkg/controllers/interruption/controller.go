@@ -44,6 +44,8 @@ const (
 	NodeConditionReasonKubeletNotReady = "KubeletNotReady"
 	NodeConditionMessageShuttingDown   = "node is shutting down"
 
+	NodeConditionTypeGCESpotPreempting = "GCESpotPreempting"
+
 	InterruptionReason = "interruption"
 )
 
@@ -84,8 +86,13 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 			continue
 		}
 
-		condition := node.GetCondition(&currentNode, corev1.NodeReady)
-		if condition.Status != corev1.ConditionTrue && condition.Reason == NodeConditionReasonKubeletNotReady && condition.Message == NodeConditionMessageShuttingDown {
+		switch {
+		case isPreempting(&currentNode):
+			c.recorder.Publish(interruptionevents.PreemptionNoticeReceived(&currentNode)...)
+			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, true); err != nil {
+				return fmt.Errorf("cleaning node claim: %w", err)
+			}
+		case isShuttingDown(&currentNode):
 			if err := c.cleanNodeClaimByInstanceName(ctx, currentNode.Name, false); err != nil {
 				return fmt.Errorf("cleaning node claim: %w", err)
 			}
@@ -93,6 +100,17 @@ func (c *Controller) handleStoppingSpotInstances(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func isPreempting(n *corev1.Node) bool {
+	return node.GetCondition(n, NodeConditionTypeGCESpotPreempting).Status == corev1.ConditionTrue
+}
+
+func isShuttingDown(n *corev1.Node) bool {
+	condition := node.GetCondition(n, corev1.NodeReady)
+	return condition.Status != corev1.ConditionTrue &&
+		condition.Reason == NodeConditionReasonKubeletNotReady &&
+		condition.Message == NodeConditionMessageShuttingDown
 }
 
 func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceName string, markUnavailable bool) error {

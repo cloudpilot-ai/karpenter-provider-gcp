@@ -57,3 +57,6 @@ data/
 
 # google-github-actions/auth@v2 temporary credentials file
 gha-creds-*.json
+
+# Helm subchart archives fetched by 'helm dependency build' from Chart.lock
+charts/karpenter/charts/
