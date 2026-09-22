@@ -39,11 +39,15 @@ jobs:
               } catch (error) {
                 if (error.status !== 404) throw error;
 
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ...label,
-                });
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ...label,
+                  });
+                } catch (createError) {
+                  if (createError.status !== 422) throw createError;
+                }
               }
             }
 
