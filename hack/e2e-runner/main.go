@@ -17,12 +17,15 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -59,7 +62,7 @@ func selectSuites(dir, name string) ([]string, error) {
 }
 
 func main() {
-	var name, reportPath string
+	var name, reportPath, lockID string
 	cmd := &cobra.Command{
 		Use:          "e2e-runner",
 		Short:        "Run e2e suites by preset",
@@ -70,47 +73,60 @@ func main() {
 			if err != nil {
 				return err
 			}
-			args := append([]string{"run", "github.com/onsi/ginkgo/v2/ginkgo"}, ginkgoArgs...)
-			var jsonPath string
-			var metadata reportMetadata
-			if reportPath != "" {
-				if err := os.Remove(reportPath); err != nil && !os.IsNotExist(err) {
-					return err
-				}
-				metadata.Commit, metadata.ControllerCommit, err = verifyControllerCommit(cmd.Context())
-				if err != nil {
-					return err
-				}
-				dir, err := os.MkdirTemp("", "e2e-report-")
-				if err != nil {
-					return err
-				}
-				defer os.RemoveAll(dir)
-				jsonPath = filepath.Join(dir, "results.json")
-				args = append(args, "--output-dir="+dir, "--json-report=results.json")
+			client, err := newLeaseClient()
+			if err != nil {
+				return err
 			}
-			args = append(args, suites...)
-			runner := exec.CommandContext(cmd.Context(), "go", args...)
-			runner.Stdin, runner.Stdout, runner.Stderr = os.Stdin, os.Stdout, os.Stderr
-			start := time.Now()
-			runErr := runner.Run()
-			if reportPath != "" {
-				metadata.Duration = time.Since(start).Round(time.Second).String()
-				logPath := strings.TrimSuffix(reportPath, filepath.Ext(reportPath)) + ".karpenter.log"
-				if err := dumpControllerLogs(cmd.Context(), logPath, start); err != nil {
-					metadata.LogsUnavailable = true
-					fmt.Fprintf(os.Stderr, "controller logs unavailable: %v\n", err)
-				} else {
-					fmt.Fprintf(os.Stderr, "controller logs: %s\n", logPath)
+			return withLease(cmd.Context(), client, lockID, func(runCtx context.Context) error {
+				args := append([]string{"run", "github.com/onsi/ginkgo/v2/ginkgo"}, ginkgoArgs...)
+				var jsonPath string
+				var metadata reportMetadata
+				if reportPath != "" {
+					if err := os.Remove(reportPath); err != nil && !os.IsNotExist(err) {
+						return err
+					}
+					metadata.Commit, metadata.ControllerCommit, err = verifyControllerCommit(runCtx)
+					if err != nil {
+						return err
+					}
+					dir, err := os.MkdirTemp("", "e2e-report-")
+					if err != nil {
+						return err
+					}
+					defer os.RemoveAll(dir)
+					jsonPath = filepath.Join(dir, "results.json")
+					args = append(args, "--output-dir="+dir, "--json-report=results.json")
 				}
-				return errors.Join(runErr, writeReport(jsonPath, reportPath, metadata))
-			}
-			return runErr
+				args = append(args, suites...)
+				runner := exec.CommandContext(runCtx, "go", args...)
+				runner.Stdin, runner.Stdout, runner.Stderr = os.Stdin, os.Stdout, os.Stderr
+				start := time.Now()
+				runErr := runner.Run()
+				if reportPath != "" {
+					metadata.Duration = time.Since(start).Round(time.Second).String()
+					logPath := strings.TrimSuffix(reportPath, filepath.Ext(reportPath)) + ".karpenter.log"
+					if err := dumpControllerLogs(runCtx, logPath, start); err != nil {
+						metadata.LogsUnavailable = true
+						fmt.Fprintf(os.Stderr, "controller logs unavailable: %v\n", err)
+					} else {
+						fmt.Fprintf(os.Stderr, "controller logs: %s\n", logPath)
+					}
+					return errors.Join(runErr, writeReport(jsonPath, reportPath, metadata))
+				}
+				return runErr
+			})
 		},
 	}
 	cmd.Flags().StringVar(&name, "preset", "standard", "Suite preset: standard, gpu, all, provisioning")
 	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report to this path")
-	if err := cmd.Execute(); err != nil {
+	cmd.Flags().StringVar(&lockID, "lock-id", "", "Lease holder ID (required; Make defaults to username@hostname:pid-<shell PID>)")
+	if err := cmd.MarkFlagRequired("lock-id"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := cmd.ExecuteContext(ctx); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			os.Exit(exit.ExitCode())
