@@ -1,0 +1,12 @@
+### E2E Test Results
+
+{{range .Suites}}<details>
+<summary>{{.Name}} — {{.Passed}} passed, {{.Failed}} failed{{if .Skipped}}, {{.Skipped}} skipped{{end}}{{if .Pending}}, {{.Pending}} pending{{end}}</summary>
+
+| Suite | Spec | Result | Duration |
+|---|---|---|---|
+{{range .Specs}}| {{escape .Suite}} | {{escape .Name}} | {{.Result}} | {{.Duration}} |
+{{end}}
+</details>
+
+{{end}}

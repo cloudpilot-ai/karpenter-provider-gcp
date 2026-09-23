@@ -156,6 +156,7 @@ require-e2e-vars: ## Fail fast if required e2e variables are not set
 
 GINKGO_PROCS ?= 4
 E2E_PRESET ?= standard
+E2E_REPORT ?= .pi/e2e-reports/latest.md
 e2e-tests: require-e2e-vars ## Run e2e suites (E2E_PRESET=standard|gpu|all|provisioning, GINKGO_PROCS=N)
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
@@ -164,7 +165,7 @@ e2e-tests: require-e2e-vars ## Run e2e suites (E2E_PRESET=standard|gpu|all|provi
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	KARPENTER_NAMESPACE=$(E2E_KARPENTER_NAMESPACE) \
 	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
-	go run ./hack/e2e-runner --preset=$(E2E_PRESET) -- --procs=$(GINKGO_PROCS) --timeout=2h -v
+	go run ./hack/e2e-runner --preset=$(E2E_PRESET) --report=$(E2E_REPORT) -- --procs=$(GINKGO_PROCS) --timeout=2h -v
 
 FOCUS ?=
 SUITE ?=

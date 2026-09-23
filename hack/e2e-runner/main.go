@@ -56,7 +56,7 @@ func selectSuites(dir, name string) ([]string, error) {
 }
 
 func main() {
-	var name string
+	var name, reportPath string
 	cmd := &cobra.Command{
 		Use:          "e2e-runner",
 		Short:        "Run e2e suites by preset",
@@ -68,13 +68,31 @@ func main() {
 				return err
 			}
 			args := append([]string{"run", "github.com/onsi/ginkgo/v2/ginkgo"}, ginkgoArgs...)
+			var jsonPath string
+			if reportPath != "" {
+				if err := os.Remove(reportPath); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				dir, err := os.MkdirTemp("", "e2e-report-")
+				if err != nil {
+					return err
+				}
+				defer os.RemoveAll(dir)
+				jsonPath = dir + "/results.json"
+				args = append(args, "--output-dir="+dir, "--json-report=results.json")
+			}
 			args = append(args, suites...)
 			runner := exec.CommandContext(cmd.Context(), "go", args...)
 			runner.Stdin, runner.Stdout, runner.Stderr = os.Stdin, os.Stdout, os.Stderr
-			return runner.Run()
+			runErr := runner.Run()
+			if reportPath != "" {
+				return errors.Join(runErr, writeReport(jsonPath, reportPath))
+			}
+			return runErr
 		},
 	}
 	cmd.Flags().StringVar(&name, "preset", "standard", "Suite preset: standard, gpu, all, provisioning")
+	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report to this path")
 	if err := cmd.Execute(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
