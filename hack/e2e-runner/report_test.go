@@ -49,7 +49,7 @@ func TestWriteReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "reports", "result.md")
-	if err := writeReport(jsonPath, path); err != nil {
+	if err := writeReport(jsonPath, path, reportMetadata{Commit: "abc1234", ControllerCommit: "abc1234", Duration: "5s"}); err != nil {
 		t.Fatal(err)
 	}
 	output, err := os.ReadFile(path)
@@ -76,10 +76,15 @@ func TestRenderReport(t *testing.T) {
 		{SuitePath: "/repo/test/suites/gpu", SpecialSuiteFailureReasons: []string{"could not compile"}},
 	}
 	var out bytes.Buffer
-	if err := renderReport(&out, reports); err != nil {
+	if err := renderReport(&out, reports, reportMetadata{Commit: "abc1234-dirty", ControllerCommit: "abc1234", Duration: "4m30s", LogsUnavailable: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, text := range []string{
+		"<strong>Test commit:</strong> abc1234-dirty",
+		"<strong>Controller commit:</strong> abc1234",
+		"<strong>Total duration:</strong> 4m30s",
+		"resource samples unavailable",
+		"<strong>Controller logs:</strong> unavailable",
 		"<th>Suite</th><th>Result</th><th>Duration</th>",
 		"<summary>provisioning — 1 passed, 1 failed, 1 pending</summary>",
 		"<li>✅ pass · Provisioning COS / amd64 | on-demand &lt;check&gt; (1m28s)</li>",
@@ -99,5 +104,19 @@ func TestRenderReport(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "BeforeSuite") {
 		t.Errorf("setup node in report:\n%s", out.String())
+	}
+}
+
+func TestControllerResources(t *testing.T) {
+	reports := []types.Report{
+		{SpecReports: types.SpecReports{{CapturedGinkgoWriterOutput: "[resources] karpenter controller: requests cpu=100m memory=128.0MiB; latest cpu=40m memory=90.0MiB; peak cpu=200m memory=256.0MiB; samples=10\n"}}},
+		{SpecReports: types.SpecReports{{CapturedGinkgoWriterOutput: "[resources] karpenter controller: requests cpu=100m memory=128.0MiB; latest cpu=70m memory=80.0MiB; peak cpu=300m memory=192.0MiB; samples=7\n"}}},
+	}
+	want := "requests cpu=100m memory=128.0MiB; peak cpu=300m memory=256.0MiB"
+	if got := controllerResources(reports); got != want {
+		t.Fatalf("controllerResources() = %q, want %q", got, want)
+	}
+	if got := controllerResources(nil); got != "resource samples unavailable" {
+		t.Fatalf("controllerResources(nil) = %q", got)
 	}
 }

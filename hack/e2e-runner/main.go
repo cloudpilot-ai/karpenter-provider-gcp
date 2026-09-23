@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -69,8 +72,13 @@ func main() {
 			}
 			args := append([]string{"run", "github.com/onsi/ginkgo/v2/ginkgo"}, ginkgoArgs...)
 			var jsonPath string
+			var metadata reportMetadata
 			if reportPath != "" {
 				if err := os.Remove(reportPath); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				metadata.Commit, metadata.ControllerCommit, err = verifyControllerCommit(cmd.Context())
+				if err != nil {
 					return err
 				}
 				dir, err := os.MkdirTemp("", "e2e-report-")
@@ -78,15 +86,24 @@ func main() {
 					return err
 				}
 				defer os.RemoveAll(dir)
-				jsonPath = dir + "/results.json"
+				jsonPath = filepath.Join(dir, "results.json")
 				args = append(args, "--output-dir="+dir, "--json-report=results.json")
 			}
 			args = append(args, suites...)
 			runner := exec.CommandContext(cmd.Context(), "go", args...)
 			runner.Stdin, runner.Stdout, runner.Stderr = os.Stdin, os.Stdout, os.Stderr
+			start := time.Now()
 			runErr := runner.Run()
 			if reportPath != "" {
-				return errors.Join(runErr, writeReport(jsonPath, reportPath))
+				metadata.Duration = time.Since(start).Round(time.Second).String()
+				logPath := strings.TrimSuffix(reportPath, filepath.Ext(reportPath)) + ".karpenter.log"
+				if err := dumpControllerLogs(cmd.Context(), logPath, start); err != nil {
+					metadata.LogsUnavailable = true
+					fmt.Fprintf(os.Stderr, "controller logs unavailable: %v\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "controller logs: %s\n", logPath)
+				}
+				return errors.Join(runErr, writeReport(jsonPath, reportPath, metadata))
 			}
 			return runErr
 		},

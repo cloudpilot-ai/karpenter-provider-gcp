@@ -63,3 +63,4 @@ gha-creds-*.json
 charts/karpenter/charts/
 
 e2e-report.md
+e2e-report.karpenter.log

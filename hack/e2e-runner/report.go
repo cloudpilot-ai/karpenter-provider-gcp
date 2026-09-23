@@ -25,10 +25,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2/types"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 //go:embed report.gotmpl
@@ -44,7 +47,46 @@ type suiteResult struct {
 	Specs                            []specResult
 }
 
-func renderReport(w io.Writer, reports []types.Report) error {
+type reportMetadata struct {
+	Commit, ControllerCommit, Duration string
+	LogsUnavailable                    bool
+}
+
+var resourceLine = regexp.MustCompile(`\[resources\] karpenter controller: requests cpu=(\d+)m memory=([^;]+); latest cpu=\d+m memory=[^;]+; peak cpu=(\d+)m memory=([^;]+); samples=\d+`)
+
+func controllerResources(reports []types.Report) string {
+	var requestCPU, requestMemory, peakCPU, peakMemory string
+	var maxCPU, maxMemory int64
+	for _, report := range reports {
+		for _, spec := range report.SpecReports {
+			for _, match := range resourceLine.FindAllStringSubmatch(spec.CapturedGinkgoWriterOutput, -1) {
+				cpu, err := strconv.ParseInt(match[3], 10, 64)
+				if err != nil {
+					continue
+				}
+				memory, err := resource.ParseQuantity(strings.TrimSuffix(match[4], "B"))
+				if err != nil {
+					continue
+				}
+				if requestCPU == "" {
+					requestCPU, requestMemory = match[1]+"m", match[2]
+				}
+				if peakCPU == "" || cpu > maxCPU {
+					maxCPU, peakCPU = cpu, match[3]+"m"
+				}
+				if peakMemory == "" || memory.Value() > maxMemory {
+					maxMemory, peakMemory = memory.Value(), match[4]
+				}
+			}
+		}
+	}
+	if requestCPU == "" {
+		return "resource samples unavailable"
+	}
+	return fmt.Sprintf("requests cpu=%s memory=%s; peak cpu=%s memory=%s", requestCPU, requestMemory, peakCPU, peakMemory)
+}
+
+func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) error {
 	if len(reports) == 0 {
 		return fmt.Errorf("Ginkgo produced no suite results")
 	}
@@ -91,10 +133,17 @@ func renderReport(w io.Writer, reports []types.Report) error {
 	if err != nil {
 		return err
 	}
-	return tmpl.Execute(w, struct{ Suites []suiteResult }{suites})
+	return tmpl.Execute(w, struct {
+		Suites           []suiteResult
+		Commit           string
+		ControllerCommit string
+		Duration         string
+		Resources        string
+		LogsUnavailable  bool
+	}{suites, metadata.Commit, metadata.ControllerCommit, metadata.Duration, controllerResources(reports), metadata.LogsUnavailable})
 }
 
-func writeReport(jsonPath, path string) error {
+func writeReport(jsonPath, path string, metadata reportMetadata) error {
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return fmt.Errorf("reading Ginkgo JSON report: %w", err)
@@ -104,7 +153,7 @@ func writeReport(jsonPath, path string) error {
 		return fmt.Errorf("decoding Ginkgo JSON report: %w", err)
 	}
 	var output bytes.Buffer
-	if err := renderReport(&output, reports); err != nil {
+	if err := renderReport(&output, reports, metadata); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
