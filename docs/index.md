@@ -21,7 +21,7 @@ Key capabilities:
 
 ## GCP-specific features
 
-- **GCENodeClass** — a custom resource that captures all GCP-specific node configuration: image family, disk type and size, service account, network tags, Shielded VM and Confidential VM settings, kubelet configuration, and network overrides
+- **GCENodeClass** — a custom resource that captures all GCP-specific node configuration: image family, disk type and size, local SSD exposure, service account, network tags, Shielded VM and Confidential VM settings, kubelet configuration, and network overrides
 - **Bootstrap pool discovery** — Karpenter discovers and reuses an existing cluster node pool for bootstrap metadata, avoiding the need to create dedicated template pools (see [Bootstrap pool selection](bootstrap-pool.md))
 - **Direct image catalog queries** — image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu), independent of the bootstrap pool
 - **Node repair policies** — integrates with GKE's node problem detection to trigger replacement of unhealthy nodes (see [Node repair](node-repair.md))
@@ -42,6 +42,7 @@ Key capabilities:
 ## Features
 
 - [GPU nodes](gpu-nodes.md) — GPU instance types, driver version control, and device plugin scheduling
+- [Local SSDs](local-ssd.md) — attach GCE local SSDs as raw NVMe devices or kubelet ephemeral storage
 - [Image selection](image-selection.md) — select node images by GKE release channel, version pin, or raw image ID
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
 - [Spot preemption notice](spot-preemption.md) — get up to two minutes' warning before GCE reclaims a Spot VM
