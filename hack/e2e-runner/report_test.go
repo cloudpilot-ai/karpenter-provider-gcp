@@ -56,7 +56,7 @@ func TestWriteReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(output), "<td>replaces a node</td><td>✅ pass</td><td>3s</td>") ||
+	if !strings.Contains(string(output), "<li>✅ pass · replaces a node (3s)</li>") ||
 		!strings.Contains(string(output), "</details></td>\n<td>✅ pass</td><td>4s</td>") {
 		t.Fatalf("unexpected report:\n%s", output)
 	}
@@ -82,10 +82,10 @@ func TestRenderReport(t *testing.T) {
 	for _, text := range []string{
 		"<th>Suite</th><th>Result</th><th>Duration</th>",
 		"<summary>provisioning — 1 passed, 1 failed, 1 pending</summary>",
-		"<td>Provisioning COS / amd64 | on-demand &lt;check&gt;</td><td>✅ pass</td><td>1m28s</td>",
-		"<td>Provisioning COS / arm64</td><td>❌ fail</td><td>12s</td>",
+		"<li>✅ pass · Provisioning COS / amd64 | on-demand &lt;check&gt; (1m28s)</li>",
+		"<li>❌ fail · Provisioning COS / arm64 (12s)</li>",
 		"<summary>gpu — 0 passed, 1 failed</summary>",
-		"<td>Suite failed to run: could not compile</td><td>❌ fail</td><td>—</td>",
+		"<li>❌ fail · Suite failed to run: could not compile (—)</li>",
 	} {
 		if !strings.Contains(out.String(), text) {
 			t.Errorf("report missing %q:\n%s", text, out.String())
@@ -93,6 +93,9 @@ func TestRenderReport(t *testing.T) {
 	}
 	if got := strings.Count(out.String(), "<td><details>"); got != len(reports) {
 		t.Errorf("got %d suite rows, want %d", got, len(reports))
+	}
+	if got := strings.Count(out.String(), "<table>"); got != 1 {
+		t.Errorf("got %d tables, want only the suite table", got)
 	}
 	if strings.Contains(out.String(), "BeforeSuite") {
 		t.Errorf("setup node in report:\n%s", out.String())
