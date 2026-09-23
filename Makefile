@@ -137,8 +137,11 @@ e2e-setup: require-e2e-vars ## Create (or reuse) the e2e GKE cluster and support
 	E2E_LOCATION=$(E2E_LOCATION) \
 	./hack/e2e-setup.sh
 
+e2e-clean-env: require-e2e-vars ## Remove leftover e2e Kubernetes resources (preserves cluster and controller)
+	E2E_PROJECT_ID=$(E2E_PROJECT_ID) E2E_LOCATION=$(E2E_LOCATION) E2E_PREFIX=$(E2E_PREFIX) ./hack/e2e-clean-env.sh
+
 RELEASE_VERSION ?=
-e2e-deploy: require-e2e-vars ## Build and deploy karpenter; set RELEASE_VERSION=X.Y.Z to install the published chart instead
+e2e-deploy: require-e2e-vars ## Clean e2e resources, then deploy karpenter; set RELEASE_VERSION=X.Y.Z to install the published chart instead
 	$(E2E_GAC_ENV) \
 	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
 	E2E_PREFIX=$(E2E_PREFIX) \
@@ -152,7 +155,8 @@ require-e2e-vars: ## Fail fast if required e2e variables are not set
 	@test -n "$(E2E_LOCATION)"    || (echo "ERROR: E2E_LOCATION is not set"    >&2 && exit 1)
 
 GINKGO_PROCS ?= 4
-e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS=N, default 4)
+E2E_PRESET ?= standard
+e2e-tests: require-e2e-vars ## Run e2e suites (E2E_PRESET=standard|gpu|all|provisioning, GINKGO_PROCS=N)
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -160,7 +164,7 @@ e2e-tests: require-e2e-vars ## Run all e2e test suites in parallel (GINKGO_PROCS
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	KARPENTER_NAMESPACE=$(E2E_KARPENTER_NAMESPACE) \
 	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
-	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=2h -v ./test/suites/...
+	go run ./hack/e2e-runner --preset=$(E2E_PRESET) -- --procs=$(GINKGO_PROCS) --timeout=2h -v
 
 FOCUS ?=
 SUITE ?=
@@ -218,7 +222,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

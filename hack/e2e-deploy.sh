@@ -37,6 +37,8 @@ GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
+"${REPO_ROOT}/hack/e2e-clean-env.sh"
+
 log() { echo "e2e-deploy: $*" >&2; }
 
 # Common helm values regardless of mode
@@ -93,6 +95,10 @@ else
       github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
   )"
   log "Image: ${IMAGE_REF}"
+
+  cd "${REPO_ROOT}/charts/karpenter"
+  helm dependency build
+  cd ${REPO_ROOT}
 
   helm upgrade --install karpenter-crd "${REPO_ROOT}/charts/karpenter-crd" \
     --namespace karpenter-system \
