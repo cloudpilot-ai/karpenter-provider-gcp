@@ -61,3 +61,5 @@ gha-creds-*.json
 
 # Helm subchart archives fetched by 'helm dependency build' from Chart.lock
 charts/karpenter/charts/
+
+e2e-report.md

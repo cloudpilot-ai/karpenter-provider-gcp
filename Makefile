@@ -156,7 +156,7 @@ require-e2e-vars: ## Fail fast if required e2e variables are not set
 
 GINKGO_PROCS ?= 4
 E2E_PRESET ?= standard
-E2E_REPORT ?= .pi/e2e-reports/latest.md
+E2E_REPORT ?= e2e-report.md
 e2e-tests: require-e2e-vars ## Run e2e suites (E2E_PRESET=standard|gpu|all|provisioning, GINKGO_PROCS=N)
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
