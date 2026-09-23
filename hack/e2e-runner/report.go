@@ -21,11 +21,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/onsi/ginkgo/v2/types"
@@ -35,11 +35,11 @@ import (
 var reportTemplate string
 
 type specResult struct {
-	Suite, Name, Result, Duration string
+	Name, Result, Duration string
 }
 
 type suiteResult struct {
-	Name                             string
+	Name, Result, Duration           string
 	Passed, Failed, Skipped, Pending int
 	Specs                            []specResult
 }
@@ -50,12 +50,15 @@ func renderReport(w io.Writer, reports []types.Report) error {
 	}
 	var suites []suiteResult
 	for _, report := range reports {
-		suite := suiteResult{Name: filepath.Base(report.SuitePath)}
+		suite := suiteResult{Name: filepath.Base(report.SuitePath), Duration: report.RunTime.Round(time.Second).String(), Result: "✅ pass"}
+		if !report.SuiteSucceeded {
+			suite.Result = "❌ fail"
+		}
 		for _, spec := range report.SpecReports {
 			if spec.LeafNodeType != types.NodeTypeIt {
 				continue
 			}
-			row := specResult{Suite: suite.Name, Name: spec.FullText(), Duration: spec.RunTime.Round(time.Second).String()}
+			row := specResult{Name: spec.FullText(), Duration: spec.RunTime.Round(time.Second).String()}
 			switch {
 			case spec.State == types.SpecStatePassed:
 				row.Result = "✅ pass"
@@ -79,13 +82,12 @@ func renderReport(w io.Writer, reports []types.Report) error {
 			if reason == "" {
 				reason = "unknown failure"
 			}
-			suite.Specs = append(suite.Specs, specResult{Suite: suite.Name, Name: "Suite failed to run: " + reason, Result: "❌ fail", Duration: "—"})
+			suite.Specs = append(suite.Specs, specResult{Name: "Suite failed to run: " + reason, Result: "❌ fail", Duration: "—"})
 			suite.Failed++
 		}
 		suites = append(suites, suite)
 	}
-	escape := strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ").Replace
-	tmpl, err := template.New("report").Funcs(template.FuncMap{"escape": escape}).Parse(reportTemplate)
+	tmpl, err := template.New("report").Parse(reportTemplate)
 	if err != nil {
 		return err
 	}

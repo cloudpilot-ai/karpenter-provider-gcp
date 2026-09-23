@@ -1,12 +1,19 @@
 ### E2E Test Results
 
-{{range .Suites}}<details>
+<table>
+<thead><tr><th>Suite</th><th>Result</th><th>Duration</th></tr></thead>
+<tbody>
+{{range .Suites}}<tr>
+<td><details>
 <summary>{{.Name}} — {{.Passed}} passed, {{.Failed}} failed{{if .Skipped}}, {{.Skipped}} skipped{{end}}{{if .Pending}}, {{.Pending}} pending{{end}}</summary>
-
-| Suite | Spec | Result | Duration |
-|---|---|---|---|
-{{range .Specs}}| {{escape .Suite}} | {{escape .Name}} | {{.Result}} | {{.Duration}} |
-{{end}}
-</details>
-
-{{end}}
+<table>
+<thead><tr><th>Spec</th><th>Result</th><th>Duration</th></tr></thead>
+<tbody>
+{{range .Specs}}<tr><td>{{.Name}}</td><td>{{.Result}}</td><td>{{.Duration}}</td></tr>
+{{end}}</tbody>
+</table>
+</details></td>
+<td>{{.Result}}</td><td>{{.Duration}}</td>
+</tr>
+{{end}}</tbody>
+</table>
