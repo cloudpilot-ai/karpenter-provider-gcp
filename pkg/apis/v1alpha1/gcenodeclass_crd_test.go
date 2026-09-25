@@ -30,7 +30,7 @@ func crdPath() string {
 	return filepath.Join("..", "..", "..", "charts", "karpenter", "crds", "karpenter.k8s.gcp_gcenodeclasses.yaml")
 }
 
-func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	t.Helper()
 
 	raw, err := os.ReadFile(crdPath())
@@ -40,8 +40,17 @@ func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	require.NoError(t, yaml.Unmarshal(raw, &crd))
 	require.Len(t, crd.Spec.Versions, 1)
 
-	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.
-		Properties["spec"].Properties["kubeletConfiguration"]
+	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+}
+
+func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return specSchema(t).Properties["kubeletConfiguration"]
+}
+
+func hugepagesSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return specSchema(t).Properties["linuxNodeConfig"].Properties["hugepages"]
 }
 
 func TestGCENodeClassCRDAllowsMaxParallelImagePullsOfOne(t *testing.T) {
@@ -104,4 +113,13 @@ func TestGCENodeClassCRDRejectsReservedMetadataKeys(t *testing.T) {
 		require.Contains(t, crdText, `'`+key+`'`, "reserved metadata key %q must be denied by the CRD", key)
 	}
 	require.NotContains(t, crdText, `'serial-port-logging-enable'`, "non-reserved metadata keys must remain freeform")
+}
+
+func TestGCENodeClassCRDRejectsZeroHugepages(t *testing.T) {
+	for _, name := range []string{"hugepageSize2m", "hugepageSize1g"} {
+		field := hugepagesSchema(t).Properties[name]
+
+		require.NotNil(t, field.Minimum, "%s must declare a minimum", name)
+		require.Equal(t, float64(1), *field.Minimum, "%s must reject 0", name)
+	}
 }

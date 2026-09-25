@@ -66,6 +66,10 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	// +optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
+	// LinuxNodeConfig configures the Linux kernel of provisioned nodes.
+	// Mirrors GKE node pool linux_node_config.
+	// +optional
+	LinuxNodeConfig *LinuxNodeConfig `json:"linuxNodeConfig,omitempty"`
 	// Labels to be applied on GCE VM instance.
 	// +kubebuilder:validation:MaxProperties=20
 	// +kubebuilder:validation:XValidation:message="empty tag keys aren't supported",rule="self.all(k, k != '')"
@@ -387,6 +391,28 @@ type ShieldedInstanceConfig struct {
 	// EnableIntegrityMonitoring defines whether the instance has integrity monitoring enabled.
 	// +optional
 	EnableIntegrityMonitoring *bool `json:"enableIntegrityMonitoring,omitempty"`
+}
+
+// LinuxNodeConfig defines the Linux kernel options for a provisioned node.
+type LinuxNodeConfig struct {
+	// Hugepages configures the static hugepages that the node allocates at boot.
+	// Mirrors GKE node pool linux_node_config.hugepages_config.
+	// +optional
+	Hugepages *HugepagesConfig `json:"hugepages,omitempty"`
+}
+
+// HugepagesConfig defines the static hugepages that a node allocates at boot.
+// Karpenter does not add the hugepages to the instance type capacity. Use a
+// NodeOverlay to advertise the hugepages capacity to the scheduling simulation.
+type HugepagesConfig struct {
+	// HugepageSize2m is the number of 2 MiB hugepages to allocate.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	HugepageSize2m *int32 `json:"hugepageSize2m,omitempty"`
+	// HugepageSize1g is the number of 1 GiB hugepages to allocate.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	HugepageSize1g *int32 `json:"hugepageSize1g,omitempty"`
 }
 
 // GCENodeClass is the Schema for the GCENodeClass API

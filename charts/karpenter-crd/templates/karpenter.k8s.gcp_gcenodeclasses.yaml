@@ -471,6 +471,30 @@ spec:
                   rule: self.all(k, k !='karpenter.sh/nodeclaim')
                 - message: tag contains a restricted tag matching karpenter.k8s.gcp/gcenodeclass
                   rule: self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')
+              linuxNodeConfig:
+                description: |-
+                  LinuxNodeConfig configures the Linux kernel of provisioned nodes.
+                  Mirrors GKE node pool linux_node_config.
+                properties:
+                  hugepages:
+                    description: |-
+                      Hugepages configures the static hugepages that the node allocates at boot.
+                      Mirrors GKE node pool linux_node_config.hugepages_config.
+                    properties:
+                      hugepageSize1g:
+                        description: HugepageSize1g is the number of 1 GiB hugepages
+                          to allocate.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      hugepageSize2m:
+                        description: HugepageSize2m is the number of 2 MiB hugepages
+                          to allocate.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                type: object
               metadata:
                 additionalProperties:
                   type: string
