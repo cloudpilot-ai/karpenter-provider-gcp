@@ -14,19 +14,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package repair
+package environment
 
-import (
-	"testing"
+import "github.com/onsi/ginkgo/v2"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+var current *Environment
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
-)
+// RegisterSuiteLifecycle is called by the entry point of each test binary.
+// Ginkgo workers are separate processes and each has its own environment.
+func RegisterSuiteLifecycle() {
+	ginkgo.BeforeSuite(func() {
+		current = NewEnvironment()
+	})
+	ginkgo.AfterSuite(func() {
+		if current != nil {
+			current.Cleanup()
+			current = nil
+		}
+	})
+}
 
-func TestRepair(t *testing.T) {
-	RegisterFailHandler(Fail)
-	environment.RegisterSuiteLifecycle()
-	RunSpecs(t, "Repair Suite")
+func Current() *Environment {
+	if current == nil {
+		panic("e2e environment is not initialized")
+	}
+	return current
 }

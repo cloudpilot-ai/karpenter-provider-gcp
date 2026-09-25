@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package consolidation_test
+package consolidation
 
 import (
 	"context"
@@ -30,7 +30,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Consolidation", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("Consolidation", Label("suite:consolidation"), func() {
 	// Exercises the disruption controller's WhenEmptyOrUnderutilized path:
 	// provision a node, empty it by scaling to 0, and verify karpenter removes
 	// the node without the test deleting the NodePool first.

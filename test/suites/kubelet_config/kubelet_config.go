@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kubelet_config_test
+package kubelet_config
 
 import (
 	"context"
@@ -41,7 +41,10 @@ type kubeletConfigCase struct {
 	assert        func(node *corev1.Node)
 }
 
-var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)",
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)", Label("suite:kubelet_config"),
 	func(ctx SpecContext, c kubeletConfigCase) {
 		runKubeletConfigTest(ctx, c)
 	},

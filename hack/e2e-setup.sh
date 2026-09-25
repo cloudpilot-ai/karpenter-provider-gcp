@@ -300,4 +300,4 @@ E2E_LOCATION="${E2E_LOCATION}" \
 log ""
 log "Setup complete."
 log "Run tests with:"
-log "  make e2etests"
+log "  make e2e-tests"

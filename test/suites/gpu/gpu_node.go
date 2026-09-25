@@ -14,10 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package gpu_test
+package gpu
 
 import (
-	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -30,14 +29,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-// GPU tests consume real GPU quota. Run only when E2E_GPU_TESTS=true.
-var _ = Describe("GPU Node", func() {
-	BeforeEach(func() {
-		if os.Getenv("E2E_GPU_TESTS") != "true" {
-			Skip("set E2E_GPU_TESTS=true to run GPU quota tests")
-		}
-	})
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
 
+var _ = Describe("GPU Node", Label("suite:gpu"), func() {
 	// This single It covers all GPU provisioning invariants on one node to avoid
 	// spinning up multiple expensive GPU instances.
 	It("should provision a GPU node with correct taint, labels, and allocatable GPU resource", func(ctx SpecContext) {

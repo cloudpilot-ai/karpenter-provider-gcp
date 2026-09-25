@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package interruption_test
+package interruption
 
 import (
 	"context"
@@ -34,7 +34,10 @@ import (
 
 const nodeConditionTypeGCESpotPreempting = "GCESpotPreempting"
 
-var _ = Describe("Interruption", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("Interruption", Label("suite:interruption"), func() {
 	It("should replace a Spot node reporting GCESpotPreempting=True", func(ctx SpecContext) {
 		name := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeSpot, "interruption") + "-" + environment.UniqueSuffix()
 

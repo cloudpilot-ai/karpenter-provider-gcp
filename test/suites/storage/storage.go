@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package storage_test
+package storage
 
 import (
 	"context"
@@ -30,7 +30,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Disk Selection", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("Disk Selection", Label("suite:storage"), func() {
 	It("should use the machine-series default when disk category is omitted", func(ctx SpecContext) {
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "default-disk")
 		nodeClassName := prefix + "-" + environment.UniqueSuffix()
@@ -125,7 +128,7 @@ var _ = Describe("Disk Selection", func() {
 	}, SpecTimeout(15*time.Minute))
 })
 
-var _ = Describe("PDCSI Disk Type Labels", func() {
+var _ = Describe("PDCSI Disk Type Labels", Label("suite:storage"), func() {
 	It("should schedule a pod that requires a supported disk type label before the node exists", func(ctx SpecContext) {
 		prefix := "amd64-od-disk-label-sched"
 		suffix := environment.UniqueSuffix()
