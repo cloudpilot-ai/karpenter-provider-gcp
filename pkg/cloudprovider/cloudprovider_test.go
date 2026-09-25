@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -183,6 +185,58 @@ func TestMatchVariantForInstance_UnknownLabelValueFallsBack(t *testing.T) {
 	require.True(t, ok)
 	req := got.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount)
 	require.Equal(t, "0", req.Any())
+}
+
+type existingInstanceProvider struct {
+	instance.Provider
+	inst *instance.Instance
+}
+
+func (p existingInstanceProvider) Create(context.Context, *v1alpha1.GCENodeClass, *karpv1.NodeClaim, []*karpcloudprovider.InstanceType) (*instance.Instance, error) {
+	return p.inst, nil
+}
+
+func TestCreateMatchesAdoptedCountOutsideFilteredCandidates(t *testing.T) {
+	t.Parallel()
+
+	zero := variantInstanceType("n2d-standard-8", "0")
+	two := variantInstanceType("n2d-standard-8", "2")
+	for _, it := range []*karpcloudprovider.InstanceType{zero, two} {
+		it.Overhead = &karpcloudprovider.InstanceTypeOverhead{}
+		it.Offerings = karpcloudprovider.Offerings{&karpcloudprovider.Offering{Available: true, Requirements: scheduling.NewRequirements()}}
+	}
+	zero.Capacity = corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("50Gi")}
+	two.Capacity = corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("700Gi")}
+
+	nodeClass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+	claim := &karpv1.NodeClaim{Spec: karpv1.NodeClaimSpec{
+		NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"},
+		Resources:    karpv1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("80Gi")}},
+	}}
+
+	for _, tc := range []struct {
+		name, count string
+		wantError   bool
+	}{
+		{name: "count filtered by current resources", count: "0"},
+		{name: "count absent from full catalog", count: "99", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			inst := instanceWithSSDLabel("n2d-standard-8", tc.count)
+			inst.Name = "karpenter-claim"
+			provider := New(reproClient{nodeClass: nodeClass}, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{zero, two}}, existingInstanceProvider{inst: inst})
+			got, err := provider.Create(context.Background(), claim)
+			if tc.wantError {
+				require.ErrorContains(t, err, "local SSD count")
+				require.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "0", got.Labels[v1alpha1.LabelInstanceLocalSsdCount], "adoption must use the VM's count even when the current NodeClass filters its variant")
+		})
+	}
 }
 
 func TestMatchVariantForInstance_BundledSKUSingleVariant(t *testing.T) {

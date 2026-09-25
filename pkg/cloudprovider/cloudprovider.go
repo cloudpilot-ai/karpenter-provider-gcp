@@ -107,7 +107,10 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, fmt.Errorf("creating instance, %w", err)
 	}
 
-	instanceType, _ := matchVariantForInstance(instanceTypes, instance)
+	instanceType, err := c.resolveCreatedInstanceType(ctx, nodeClass, instanceTypes, instance)
+	if err != nil {
+		return nil, err
+	}
 
 	nc := c.instanceToNodeClaim(instance, instanceType)
 	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
@@ -115,6 +118,25 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
 	})
 	return nc, nil
+}
+
+func (c *CloudProvider) resolveCreatedInstanceType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType, inst *instance.Instance) (*cloudprovider.InstanceType, error) {
+	instanceType, _ := matchVariantForInstance(instanceTypes, inst)
+	count, stamped := inst.Labels[utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)]
+	if !stamped || (instanceType != nil && instanceType.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Any() == count) {
+		return instanceType, nil
+	}
+
+	// An adopted VM can outlive a NodeClass change that filtered its variant out of launch candidates.
+	allInstanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	if err != nil {
+		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving adopted instance type, %w", err), "InstanceTypeResolutionFailed", "Error resolving adopted instance type")
+	}
+	instanceType, _ = matchVariantForInstance(allInstanceTypes, inst)
+	if instanceType == nil || instanceType.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Any() != count {
+		return nil, cloudprovider.NewCreateError(fmt.Errorf("instance %s has local SSD count %q without a matching variant for %s", inst.Name, count, inst.Type), "LocalSSDCountMismatch", "Existing instance local SSD count has no matching variant")
+	}
+	return instanceType, nil
 }
 
 func (c *CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
