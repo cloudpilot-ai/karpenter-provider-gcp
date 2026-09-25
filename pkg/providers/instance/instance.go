@@ -877,6 +877,7 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	target.SetKubeEnvEntry("ZONE", zone)
 	patchKubeEnvOSDistribution(target, nodeClass)
 	patchSecondaryBootDisksKubeEnv(target, nodeClass)
+	patchHugepagesKubeEnv(target, nodeClass)
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)
 		applyNodeClassKubeletConfig(config, nodeClass.Spec.KubeletConfiguration)

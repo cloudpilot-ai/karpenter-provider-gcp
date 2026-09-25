@@ -108,6 +108,7 @@ _Appears in:_
 | `imageFamily` _string_ | ImageFamily dictates the instance template used when generating launch templates.<br />If no ImageSelectorTerms alias is specified, this field is required. |  | Enum: [Ubuntu ContainerOptimizedOS] <br />Optional: \{\} <br /> |
 | `subnetRangeName` _string_ | SubnetRangeName is the name of the subnetwork secondary IPv4 range from which<br />to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's<br />default pod secondary range (ClusterSecondaryRangeName from the cluster's IP<br />allocation policy) is used. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `kubeletConfiguration` _[KubeletConfiguration](#kubeletconfiguration)_ | KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.<br />They are a vswitch of the upstream types, recognizing not all options may be supported.<br />Wherever possible, the types and names should reflect the upstream kubelet types. |  | Optional: \{\} <br /> |
+| `linuxNodeConfig` _[LinuxNodeConfig](#linuxnodeconfig)_ | LinuxNodeConfig configures the Linux kernel of provisioned nodes.<br />Mirrors GKE node pool linux_node_config. |  | Optional: \{\} <br /> |
 | `labels` _object (keys:string, values:string)_ | Labels to be applied on GCE VM instance. |  | MaxProperties: 20 <br />Optional: \{\} <br /> |
 | `metadata` _object (keys:string, values:string)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  | Optional: \{\} <br /> |
 | `networkTags` _[NetworkTag](#networktag) array_ | NetworkTags is a list of network tags to apply to the node. |  | MaxItems: 20 <br />MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
@@ -134,6 +135,25 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `images` _[Image](#image) array_ | Image contains the current image that are available to the<br />cluster under the Image selectors. |  | Optional: \{\} <br /> |
 | `conditions` _Condition array_ | Conditions contains signals for health and readiness |  | Optional: \{\} <br /> |
+
+
+#### HugepagesConfig
+
+
+
+HugepagesConfig defines the static hugepages that a node allocates at boot.
+Karpenter does not add the hugepages to the instance type capacity. Use a
+NodeOverlay to advertise the hugepages capacity to the scheduling simulation.
+
+
+
+_Appears in:_
+- [LinuxNodeConfig](#linuxnodeconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `hugepageSize2m` _integer_ | HugepageSize2m is the number of 2 MiB hugepages to allocate. |  | Minimum: 1 <br />Optional: \{\} <br /> |
+| `hugepageSize1g` _integer_ | HugepageSize1g is the number of 1 GiB hugepages to allocate. |  | Minimum: 1 <br />Optional: \{\} <br /> |
 
 
 #### Image
@@ -219,6 +239,22 @@ _Validation:_
 _Appears in:_
 - [KubeletConfiguration](#kubeletconfiguration)
 
+
+
+#### LinuxNodeConfig
+
+
+
+LinuxNodeConfig defines the Linux kernel options for a provisioned node.
+
+
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `hugepages` _[HugepagesConfig](#hugepagesconfig)_ | Hugepages configures the static hugepages that the node allocates at boot.<br />Mirrors GKE node pool linux_node_config.hugepages_config. |  | Optional: \{\} <br /> |
 
 
 #### NetworkConfig
