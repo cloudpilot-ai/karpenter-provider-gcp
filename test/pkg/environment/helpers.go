@@ -177,6 +177,36 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithHugepages creates a GCENodeClass identical to
+// CreateNodeClass but with the given spec.linuxNodeConfig.hugepages attached.
+// hugepages is a map[string]any whose keys must match the JSON field names on
+// v1alpha1.HugepagesConfig (hugepageSize2m, hugepageSize1g).
+func (e *Environment) CreateNodeClassWithHugepages(ctx context.Context, name, imageFamily string, hugepages map[string]any) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": imageFamily + "@latest"},
+			},
+			"disks": []any{
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+			"linuxNodeConfig": map[string]any{"hugepages": hugepages},
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithFamilyChannel creates a GCENodeClass using the new
 // family+channel image selector (e.g. family=ContainerOptimizedOS, channel=stable).
 func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name, family, channel string) {
@@ -503,10 +533,62 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	e.trackNodePool(name)
 }
 
+// CreateNodeOverlay creates a NodeOverlay that adds capacity to the instance
+// types of the given NodePool in the scheduling simulation. Requires the
+// NodeOverlay feature gate on the controller.
+func (e *Environment) CreateNodeOverlay(ctx context.Context, name, nodePoolName string, capacity corev1.ResourceList) {
+	capacityObj := make(map[string]any, len(capacity))
+	for resourceName, quantity := range capacity {
+		capacityObj[string(resourceName)] = quantity.String()
+	}
+	deleteIfExists(ctx, e.DynamicClient, nodeOverlayGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.sh/v1alpha1",
+		"kind":       "NodeOverlay",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"requirements": []any{
+				map[string]any{"key": karpv1.NodePoolLabelKey, "operator": "In", "values": []any{nodePoolName}},
+			},
+			"capacity": capacityObj,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(nodeOverlayGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating NodeOverlay %s", name)
+	e.trackNodeOverlay(name)
+}
+
 // CreateDeployment creates a single-replica Deployment of the pause container
 // pinned to the given NodePool via a NodeSelector. ARM64 deployments get the
 // kubernetes.io/arch toleration required by GKE's automatic arch taint.
 func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, nodePoolName, arch string) {
+	e.createDeployment(ctx, name, appLabel, nodePoolName, arch, corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+	})
+}
+
+// CreateDeploymentWithHugepages creates a Deployment like CreateDeployment
+// whose pod requests the given hugepages resources. Kubernetes does not
+// overcommit hugepages, so the limits equal the requests.
+func (e *Environment) CreateDeploymentWithHugepages(ctx context.Context, name, appLabel, nodePoolName, arch string, hugepages corev1.ResourceList) {
+	requests := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("100m"),
+		corev1.ResourceMemory: resource.MustParse("128Mi"),
+	}
+	limits := corev1.ResourceList{
+		corev1.ResourceMemory: resource.MustParse("128Mi"),
+	}
+	for resourceName, quantity := range hugepages {
+		requests[resourceName] = quantity
+		limits[resourceName] = quantity
+	}
+	e.createDeployment(ctx, name, appLabel, nodePoolName, arch, corev1.ResourceRequirements{Requests: requests, Limits: limits})
+}
+
+func (e *Environment) createDeployment(ctx context.Context, name, appLabel, nodePoolName, arch string, resources corev1.ResourceRequirements) {
 	replicas := int32(1)
 	zero := int64(0)
 	tolerations := []corev1.Toleration{{
@@ -535,14 +617,9 @@ func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, node
 					Tolerations:                   tolerations,
 					TerminationGracePeriodSeconds: &zero,
 					Containers: []corev1.Container{{
-						Name:  "inflate",
-						Image: PauseImage,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("100m"),
-								corev1.ResourceMemory: resource.MustParse("128Mi"),
-							},
-						},
+						Name:      "inflate",
+						Image:     PauseImage,
+						Resources: resources,
 					}},
 				},
 			},
@@ -741,6 +818,14 @@ func (e *Environment) DeleteNodeClass(ctx context.Context, name string) {
 	err := e.DynamicClient.Resource(gceNodeClassGVR).Delete(ctx, name, metav1.DeleteOptions{})
 	if !apierrors.IsNotFound(err) {
 		Expect(err).NotTo(HaveOccurred(), "deleting GCENodeClass %s", name)
+	}
+}
+
+// DeleteNodeOverlay ignores 404 so callers need not check existence first.
+func (e *Environment) DeleteNodeOverlay(ctx context.Context, name string) {
+	err := e.DynamicClient.Resource(nodeOverlayGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	if !apierrors.IsNotFound(err) {
+		Expect(err).NotTo(HaveOccurred(), "deleting NodeOverlay %s", name)
 	}
 }
 
@@ -1002,6 +1087,12 @@ func podNames(pods []corev1.Pod) []string {
 func (e *Environment) WaitForNodeClassReady(ctx context.Context, name string) {
 	GinkgoWriter.Printf("[setup] waiting for GCENodeClass %s to become Ready\n", name)
 	e.waitForReadyCondition(ctx, gceNodeClassGVR, name, NodeClassReadyTimeout)
+}
+
+// WaitForNodeOverlayReady polls until the named NodeOverlay reports Ready=True,
+// which means that the controller validated it.
+func (e *Environment) WaitForNodeOverlayReady(ctx context.Context, name string) {
+	e.waitForReadyCondition(ctx, nodeOverlayGVR, name, NodeOverlayReadyTimeout)
 }
 
 // AddNodeClassMetadataEntry adds a single key/value pair to spec.metadata of the
