@@ -62,7 +62,7 @@ Key capabilities:
 - [GPU](examples/gpu.md) — GPU workloads
 - [Networking](examples/networking.md) — private nodes, custom subnetwork, pod IP range
 - [Static capacity](examples/static-capacity.md) — fixed node count with `spec.replicas`
-- [Advanced](examples/advanced.md) — kubelet config, Shielded VM, Confidential VM, metadata, secondary disk, multiple pools
+- [Advanced](examples/advanced.md) — kubelet config, static hugepages, Shielded VM, Confidential VM, metadata, secondary disk, multiple pools
 
 ## Community
 
