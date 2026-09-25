@@ -151,13 +151,17 @@ E2e tests run against a real GKE cluster. The cluster is **not** torn down betwe
 
 #### Prerequisites
 
+Run from the checkout containing the deployed controller. Export these variables (or load them from your local `.envrc` with `direnv`) before using the e2e Make targets:
+
 ```bash
 export E2E_PROJECT_ID=<gcp-project-id>
-export E2E_SA_PATH=/path/to/service-account-key.json
-export E2E_LOCATION=<zone-or-region>   # e.g. us-central1-f or us-central1
+export E2E_LOCATION=<zone-or-region>  # e.g. us-central1-f or us-central1
+export E2E_REGION=<matching-region>  # needed by setup/deploy; e.g. us-central1
+export KUBECONFIG=/path/to/your/kubeconfig
+export E2E_SA_PATH=/path/to/service-account-key.json  # omit if using application-default credentials
 ```
 
-`E2E_REGION` (default: `us-central1`) and `E2E_PREFIX` (default: `karpenter-e2e`) can be overridden if needed. `E2E_REGION` must match the region of `E2E_LOCATION` when using a zonal location.
+`E2E_PROJECT_ID` and `E2E_LOCATION` are required; Make rejects empty values. `KUBECONFIG` should point to the intended cluster (otherwise the usual kubectl default applies). With `E2E_SA_PATH`, Make sets `GOOGLE_APPLICATION_CREDENTIALS` for the tests; without it, use an authenticated `gcloud` session and application-default credentials. `E2E_REGION` defaults to `us-central1` for setup/deploy regardless of location, so set it explicitly for other regions. It is not used by `e2e-tests`.
 
 #### Required permissions
 
@@ -190,25 +194,40 @@ make e2e-deploy
 
 Builds the controller image with `ko` and runs `helm upgrade --install`.
 
-#### Run all suites
+#### Run end-to-end tests
+
+Before choosing concurrency, check available addresses, SSD, regional CPUs, and all-regions CPUs. `GINKGO_PROCS` caps **concurrent specs across the whole run**, not per feature.
 
 ```bash
-make e2e-tests
+make e2e-tests                                                 # standard: all non-GPU features
+make e2e-tests E2E_SELECTION=drift GINKGO_PROCS=1              # one feature
+make e2e-tests E2E_SELECTION=drift,storage GINKGO_PROCS=2 \
+  E2E_REPORT=.pi/drift-storage.md                               # custom ignored report
+make e2e-tests E2E_SELECTION=all GINKGO_PROCS=4                # includes GPU
 ```
 
-Runs all suites in parallel (default `GINKGO_PROCS=4`). Override with `GINKGO_PROCS=N`.
+Inputs for `make e2e-tests` (in addition to the prerequisites above):
 
-#### Run a single spec
+| Input | Default | Purpose |
+|-------|---------|---------|
+| `E2E_SELECTION` | `standard` | `standard` (non-GPU), `gpu`, `all`, `provisioning`, one feature directory, or a comma-separated list such as `drift,storage`. |
+| `GINKGO_PROCS` | `4` | Global limit on concurrently running specs; choose based on quota. |
+| `E2E_REPORT` | `e2e-report.md` | Markdown report path; the companion controller log uses the same basename with `.karpenter.log`. Keep a nonempty path to retain commit checks and reporting. |
+| `E2E_LOCK_ID` | `username@hostname:pid-<shell PID>` | Lease holder identity; override when a stable CI identity is useful. |
+| `E2E_PREFIX` | `karpenter-e2e` | Base name for the default cluster and pods range. |
+| `E2E_CLUSTER_NAME` / `E2E_PODS_RANGE` | `<prefix>-cluster` / `<prefix>-pods` | Override when testing an existing cluster with different names. |
+| `E2E_KARPENTER_NAMESPACE` / `E2E_KARPENTER_DEPLOYMENT` | `karpenter-system` / `karpenter` | Override the controller target for commit checks, logs, and the Lease namespace. |
+| `E2E_PRESET` | unset | Legacy alias for `E2E_SELECTION`; do not set both. |
 
-```bash
-make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"
-```
+`E2E_SUITES` is unsupported and rejected; `SUITE` and `FOCUS` apply only to the separate `e2e-test` target, not `e2e-tests`. Explicit GPU selections (`gpu`, `all`, or a list containing `gpu`) need enough GPU quota and capacity.
 
-Available suites: `provisioning`, `consolidation`, `drift`, `expiration`, `gc`, `scheduling`, `networking`.
+The runner verifies the deployed controller matches the test checkout, acquires a Kubernetes Lease (overlapping test runs fail fast), and writes the ignored report and controller log. It releases the Lease on normal exit or interruption; after a forced kill, the Lease expires within ten minutes. Setup, deploy, and cleanup are **not** covered by this test Lease. Inspect the report and log even when tests fail; a startup failure may leave no report.
+
+For one-spec debugging, `make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"` remains available, but it bypasses the Lease and report: do not use it on a shared cluster. Run a focused Ginkgo spec through `hack/e2e-runner` instead if locking is required.
 
 #### On-demand PR e2e
 
-Users with `write`, `maintain`, or `admin` repository permission can request on-demand e2e from a pull request comment with `/e2e`, `/e2e standard`, `/e2e gpu`, or `/e2e full`.
+The `/e2e` pull-request comment workflow is currently a placeholder; run local e2e using the commands above.
 
 #### Tear down all e2e infrastructure
 
