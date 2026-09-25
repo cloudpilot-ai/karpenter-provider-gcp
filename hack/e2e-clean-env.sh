@@ -13,7 +13,7 @@ if [[ "${current_context}" != "${expected_context}" ]]; then
 fi
 
 # NodeClaim finalizers delete their VMs; leave unrelated and legacy unlabeled resources untouched.
-for item in 'nodeclaims.karpenter.sh nodeclaims' 'nodepools.karpenter.sh nodepools' 'gcenodeclasses.karpenter.k8s.gcp gcenodeclasses'; do
+for item in 'nodeclaims.karpenter.sh nodeclaims' 'nodepools.karpenter.sh nodepools' 'nodeoverlays.karpenter.sh nodeoverlays' 'gcenodeclasses.karpenter.k8s.gcp gcenodeclasses'; do
   read -r crd resource <<< "${item}"
   installed="$(kubectl get crd "${crd}" -o name --ignore-not-found)"
   if [[ -n "${installed}" ]]; then

@@ -55,13 +55,14 @@ const (
 	TestNamespace = "karpenter-e2e-test"
 
 	// Timeouts — ordered from shortest to longest.
-	NodePoolReadyTimeout   = 3 * time.Minute         // Karpenter NodePool Ready condition
-	NodeClassReadyTimeout  = 3 * time.Minute         // GCENodeClass Ready condition
-	NodeClaimLaunchTimeout = 3 * time.Minute         // NodeClaim reaches Launched=True
-	NodeCleanupTimeout     = 3 * time.Minute         // karpenter-provisioned VM terminated after NodePool deletion
-	ControllerStartTimeout = 5 * time.Minute         // karpenter controller Deployment becomes available
-	ProvisioningTimeout    = 10 * time.Minute        // VM created, booted, registered, pod Running
-	ReplacementTimeout     = 2 * ProvisioningTimeout // node replacement (drift, expiration): drain + reprovision
+	NodePoolReadyTimeout    = 3 * time.Minute         // Karpenter NodePool Ready condition
+	NodeClassReadyTimeout   = 3 * time.Minute         // GCENodeClass Ready condition
+	NodeOverlayReadyTimeout = 3 * time.Minute         // NodeOverlay Ready condition
+	NodeClaimLaunchTimeout  = 3 * time.Minute         // NodeClaim reaches Launched=True
+	NodeCleanupTimeout      = 3 * time.Minute         // karpenter-provisioned VM terminated after NodePool deletion
+	ControllerStartTimeout  = 5 * time.Minute         // karpenter controller Deployment becomes available
+	ProvisioningTimeout     = 10 * time.Minute        // VM created, booted, registered, pod Running
+	ReplacementTimeout      = 2 * ProvisioningTimeout // node replacement (drift, expiration): drain + reprovision
 	// GPUProvisioningTimeout is longer than ProvisioningTimeout to account for
 	// GPU driver installation and NVIDIA device plugin startup before the
 	// nvidia.com/gpu resource becomes allocatable.
@@ -81,6 +82,7 @@ var (
 	nodeClaimGVR    = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
 	nodePoolGVR     = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
 	gceNodeClassGVR = schema.GroupVersionResource{Group: "karpenter.k8s.gcp", Version: "v1alpha1", Resource: "gcenodeclasses"}
+	nodeOverlayGVR  = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1alpha1", Resource: "nodeoverlays"}
 )
 
 // Environment holds shared state for a test suite run.
@@ -101,11 +103,12 @@ type Environment struct {
 	resourceSample        controllerResourceSample
 	resourceReportOnce    sync.Once
 
-	// mu guards ownedNodePools and ownedNodeClasses so Cleanup is safe when
-	// multiple Ginkgo processes share the same Environment.
-	mu               sync.Mutex
-	ownedNodePools   map[string]struct{}
-	ownedNodeClasses map[string]struct{}
+	// mu guards ownedNodePools, ownedNodeClasses, and ownedNodeOverlays so
+	// Cleanup is safe when multiple Ginkgo processes share the same Environment.
+	mu                sync.Mutex
+	ownedNodePools    map[string]struct{}
+	ownedNodeClasses  map[string]struct{}
+	ownedNodeOverlays map[string]struct{}
 }
 
 // NewEnvironment reads config from env vars, creates k8s clients, and waits
@@ -138,17 +141,18 @@ func NewEnvironment() *Environment {
 	Expect(err).NotTo(HaveOccurred(), "creating GCP compute service client")
 
 	env := &Environment{
-		ProjectID:        mustEnv("PROJECT_ID"),
-		ClusterName:      mustEnv("CLUSTER_NAME"),
-		ClusterLocation:  mustEnv("CLUSTER_LOCATION"),
-		PodsRangeName:    mustEnv("PODS_RANGE_NAME"),
-		KubeClient:       kubeClient,
-		DynamicClient:    dynamicClient,
-		MetricsClient:    metricsClient,
-		containerSvc:     containerSvc,
-		computeSvc:       computeSvc,
-		ownedNodePools:   make(map[string]struct{}),
-		ownedNodeClasses: make(map[string]struct{}),
+		ProjectID:         mustEnv("PROJECT_ID"),
+		ClusterName:       mustEnv("CLUSTER_NAME"),
+		ClusterLocation:   mustEnv("CLUSTER_LOCATION"),
+		PodsRangeName:     mustEnv("PODS_RANGE_NAME"),
+		KubeClient:        kubeClient,
+		DynamicClient:     dynamicClient,
+		MetricsClient:     metricsClient,
+		containerSvc:      containerSvc,
+		computeSvc:        computeSvc,
+		ownedNodePools:    make(map[string]struct{}),
+		ownedNodeClasses:  make(map[string]struct{}),
+		ownedNodeOverlays: make(map[string]struct{}),
 	}
 
 	// Fast-fail: verify the cluster exists at the configured location before
@@ -192,6 +196,13 @@ func (e *Environment) trackNodeClass(name string) {
 	e.ownedNodeClasses[name] = struct{}{}
 }
 
+// Must be called after successfully creating a NodeOverlay so that Cleanup deletes it.
+func (e *Environment) trackNodeOverlay(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ownedNodeOverlays[name] = struct{}{}
+}
+
 // Cleanup removes karpenter resources created by this Environment and waits
 // for their NodeClaims to drain. Scoped to owned resources so that parallel
 // suite processes do not interfere with each other.
@@ -210,20 +221,15 @@ func (e *Environment) Cleanup() {
 	for name := range e.ownedNodeClasses {
 		classes = append(classes, name)
 	}
+	overlays := make([]string, 0, len(e.ownedNodeOverlays))
+	for name := range e.ownedNodeOverlays {
+		overlays = append(overlays, name)
+	}
 	e.mu.Unlock()
 
-	for _, name := range pools {
-		err := e.DynamicClient.Resource(nodePoolGVR).Delete(deleteCtx, name, metav1.DeleteOptions{})
-		if !apierrors.IsNotFound(err) {
-			Expect(err).NotTo(HaveOccurred(), "cleanup: deleting NodePool %s", name)
-		}
-	}
-	for _, name := range classes {
-		err := e.DynamicClient.Resource(gceNodeClassGVR).Delete(deleteCtx, name, metav1.DeleteOptions{})
-		if !apierrors.IsNotFound(err) {
-			Expect(err).NotTo(HaveOccurred(), "cleanup: deleting GCENodeClass %s", name)
-		}
-	}
+	e.cleanupOwned(deleteCtx, nodePoolGVR, "NodePool", pools)
+	e.cleanupOwned(deleteCtx, gceNodeClassGVR, "GCENodeClass", classes)
+	e.cleanupOwned(deleteCtx, nodeOverlayGVR, "NodeOverlay", overlays)
 
 	if len(pools) == 0 {
 		return
@@ -247,6 +253,15 @@ func (e *Environment) Cleanup() {
 			}
 		}
 	}).WithTimeout(NodeCleanupTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+func (e *Environment) cleanupOwned(ctx context.Context, gvr schema.GroupVersionResource, kind string, names []string) {
+	for _, name := range names {
+		err := e.DynamicClient.Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
+		if !apierrors.IsNotFound(err) {
+			Expect(err).NotTo(HaveOccurred(), "cleanup: deleting %s %s", kind, name)
+		}
+	}
 }
 
 // WaitForNodeRemoval polls until the named node no longer exists. Transient

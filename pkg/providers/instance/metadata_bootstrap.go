@@ -54,6 +54,29 @@ func patchSecondaryBootDisksKubeEnv(target *metadata.InstanceMetadata, nodeClass
 	}
 }
 
+func patchHugepagesKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass) {
+	hugepages := &v1alpha1.HugepagesConfig{}
+	if nodeClass.Spec.LinuxNodeConfig != nil && nodeClass.Spec.LinuxNodeConfig.Hugepages != nil {
+		hugepages = nodeClass.Spec.LinuxNodeConfig.Hugepages
+	}
+	for _, size := range []struct {
+		key   string
+		pages *int32
+	}{
+		{key: "HUGEPAGE_2M", pages: hugepages.HugepageSize2m},
+		{key: "HUGEPAGE_1G", pages: hugepages.HugepageSize1g},
+	} {
+		if size.pages != nil {
+			target.SetKubeEnvEntry(size.key, fmt.Sprintf(`"%d"`, *size.pages))
+		} else {
+			target.UnsetKubeEnvEntry(size.key)
+		}
+	}
+	if hugepages.HugepageSize2m != nil || hugepages.HugepageSize1g != nil {
+		target.SetKubeEnvEntry("ENABLE_CONTAINERD_HUGETLB_CONTROLLER", `"true"`)
+	}
+}
+
 func applyInstanceTypeKubeReserved(config *kubeletconfig.KubeletConfiguration, instanceType *cloudprovider.InstanceType) {
 	mergeStringMap(&config.KubeReserved, map[string]string{
 		"cpu":               fmt.Sprintf("%dm", instanceType.Overhead.KubeReserved.Cpu().MilliValue()),
