@@ -54,7 +54,7 @@ Check `status.conditions`. The `ImagesReady` condition shows whether Karpenter c
 
 - **Invalid version format** — Pinned versions must match the family's format: `milestone.build.build.build` for ContainerOptimizedOS (e.g. `125.19216.104.126`), `vYYYYMMDD` for Ubuntu (e.g. `v20260416`). Invalid formats are rejected at admission.
 
-- **Version not found** — If `ImagesReady` shows `ImageResolutionFailed`, the pinned version does not exist in GCP. Verify availability using the `gcloud compute images list` commands in [Image management](image-management.md#finding-available-versions).
+- **Version not found** — If `ImagesReady` shows `ImageResolutionFailed`, the pinned version does not exist in GCP or its image is not `READY` yet. Verify availability using the `gcloud compute images list` commands in [Image management](image-management.md#finding-available-versions).
 
 - **Unsupported family** — Only `ContainerOptimizedOS` and `Ubuntu` are supported.
 
