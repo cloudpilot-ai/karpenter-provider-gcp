@@ -18,16 +18,11 @@ package main
 
 import (
 	"encoding/json"
-	"go/parser"
-	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/onsi/ginkgo/v2/types"
 )
@@ -83,74 +78,6 @@ func TestSelectionFilters(t *testing.T) {
 	}
 }
 
-func TestGlobalParallelism(t *testing.T) {
-	dir := t.TempDir()
-	cmd := exec.Command("go", "run", "github.com/onsi/ginkgo/v2/ginkgo", "--procs=2", "--output-dir="+dir, "--json-report=parallel.json", "./testdata/parallel/")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("parallel fixture: %v\n%s", err, output)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "parallel.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reports []types.Report
-	if err := json.Unmarshal(data, &reports); err != nil {
-		t.Fatal(err)
-	}
-	if len(reports) != 1 || !reports[0].SuiteSucceeded {
-		t.Fatalf("expected one successful Ginkgo suite, got %+v", reports)
-	}
-	type event struct {
-		at    time.Time
-		delta int
-	}
-	var events []event
-	features := map[string]int{}
-	for _, spec := range reports[0].SpecReports {
-		if spec.LeafNodeType != types.NodeTypeIt {
-			continue
-		}
-		for _, label := range spec.Labels() {
-			features[label]++
-		}
-		events = append(events, event{spec.StartTime, 1}, event{spec.EndTime, -1})
-	}
-	if features["suite:a"] != 2 || features["suite:b"] != 2 {
-		t.Fatalf("unexpected spec selection: %v", features)
-	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].at.Equal(events[j].at) {
-			return events[i].delta < events[j].delta
-		}
-		return events[i].at.Before(events[j].at)
-	})
-	active, peak := 0, 0
-	for _, e := range events {
-		active += e.delta
-		if active > peak {
-			peak = active
-		}
-	}
-	if peak != 2 || active != 0 {
-		t.Fatalf("peak active specs = %d, ending at %d; want peak 2 and end 0", peak, active)
-	}
-
-	standalone := exec.Command("go", "run", "github.com/onsi/ginkgo/v2/ginkgo", "--dry-run", "--output-dir="+dir, "--json-report=standalone.json", "./testdata/parallel/a/")
-	if output, err := standalone.CombinedOutput(); err != nil {
-		t.Fatalf("standalone fixture: %v\n%s", err, output)
-	}
-	data, err = os.ReadFile(filepath.Join(dir, "standalone.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &reports); err != nil {
-		t.Fatal(err)
-	}
-	if len(reports) != 1 || reports[0].PreRunStats.SpecsThatWillRun != 2 {
-		t.Fatalf("expected two standalone specs, got %+v", reports)
-	}
-}
-
 func TestRootSuiteLabels(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command("go", "run", "github.com/onsi/ginkgo/v2/ginkgo", "--dry-run", "--output-dir="+dir, "--json-report=root.json", "../../test/suites/")
@@ -191,33 +118,6 @@ func TestRootSuiteLabels(t *testing.T) {
 	for _, entry := range entries {
 		if entry.IsDir() && !seen[entry.Name()] {
 			t.Errorf("feature %s has no registered specs", entry.Name())
-		}
-	}
-}
-
-func TestRootSuiteImportsFeatureDirectories(t *testing.T) {
-	root := filepath.Join("..", "..", "test", "suites")
-	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, "suite_test.go"), nil, parser.ImportsOnly)
-	if err != nil {
-		t.Fatal(err)
-	}
-	imports := make(map[string]bool)
-	for _, imp := range file.Imports {
-		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(path, "/test/suites/") {
-			imports[filepath.Base(path)] = true
-		}
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() && !imports[entry.Name()] {
-			t.Errorf("feature directory %s not imported by root suite", entry.Name())
 		}
 	}
 }

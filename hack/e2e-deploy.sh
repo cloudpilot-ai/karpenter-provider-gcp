@@ -96,9 +96,7 @@ else
   )"
   log "Image: ${IMAGE_REF}"
 
-  cd "${REPO_ROOT}/charts/karpenter"
-  helm dependency build
-  cd ${REPO_ROOT}
+  helm dependency build "${REPO_ROOT}/charts/karpenter"
 
   helm upgrade --install karpenter-crd "${REPO_ROOT}/charts/karpenter-crd" \
     --namespace karpenter-system \
