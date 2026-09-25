@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,14 +45,70 @@ func (s *stubGKEProvider) GetServerConfig(_ context.Context) (*containerv1.Serve
 	return s.serverConfig, nil
 }
 
+func readyTestImages(images []*compute.Image) []*compute.Image {
+	for _, img := range images {
+		if img.Status == "" {
+			img.Status = "READY"
+		}
+	}
+	return images
+}
+
 // cosImageList returns a test server that always serves the given images.
 func cosImageServer(t *testing.T, images []*compute.Image) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := &compute.ImageList{Items: images}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		if !strings.HasSuffix(r.URL.Path, "/images") {
+			_ = json.NewEncoder(w).Encode(&compute.Image{Status: "READY"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(&compute.ImageList{Items: readyTestImages(images)})
 	}))
+}
+
+func TestResolveIDTerm_RejectsPendingImage(t *testing.T) {
+	name := "projects/gke-node-images/global/images/test-image"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&compute.Image{Name: "test-image", Status: "PENDING", Architecture: OSArchitectureX86})
+	}))
+	defer srv.Close()
+	p := NewDefaultProvider(buildComputeService(t, srv), nil, nil)
+	_, err := p.List(context.Background(), &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{{ID: name}},
+	}})
+	require.ErrorContains(t, err, "PENDING")
+	require.False(t, IsImageResolutionError(err))
+}
+
+func TestAliasTerm_RejectsPendingVariantAndRetries(t *testing.T) {
+	name := "gke-1351-gke1396004-cos-125-19216-104-126-c-pre"
+	pending := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/images") {
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{Items: []*compute.Image{{Name: name, Status: "READY"}}})
+			return
+		}
+		status := "READY"
+		if pending && strings.Contains(r.URL.Path, "arm64") {
+			status = "PENDING"
+		}
+		_ = json.NewEncoder(w).Encode(&compute.Image{Name: name, Status: status})
+	}))
+	defer srv.Close()
+	p := NewDefaultProvider(buildComputeService(t, srv), &fakeVersionProvider{version: "v1.35.1"}, nil)
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{{Alias: "ContainerOptimizedOS@latest"}},
+	}}
+	_, err := p.List(context.Background(), nc)
+	require.ErrorContains(t, err, "PENDING")
+	require.False(t, IsImageResolutionError(err))
+	pending = false
+	images, err := p.List(context.Background(), nc)
+	require.NoError(t, err)
+	require.Len(t, images, 3)
 }
 
 func TestDispatch_AliasTermResolvesImages(t *testing.T) {

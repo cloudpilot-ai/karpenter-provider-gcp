@@ -152,6 +152,9 @@ func (c *ContainerOptimizedOS) resolveLatestCOSImage(ctx context.Context) (strin
 // isUsableCOSImage reports whether img is a non-deprecated general-purpose amd64 COS image
 // suitable for use as a GKE node image.
 func isUsableCOSImage(img *compute.Image) bool {
+	if img.Status != "READY" {
+		return false
+	}
 	if img.Deprecated != nil {
 		switch img.Deprecated.State {
 		case "DEPRECATED", "OBSOLETE", "DELETED":
