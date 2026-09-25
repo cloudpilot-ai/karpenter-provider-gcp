@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"path"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -116,6 +117,46 @@ func TestAliasTerm_RejectsPendingVariantAndRetries(t *testing.T) {
 	images, err := p.List(context.Background(), nc)
 	require.NoError(t, err)
 	require.Len(t, images, 3)
+}
+
+func TestImageCacheSharesSuccessfulResultsAcrossNodeClasses(t *testing.T) {
+	var lists atomic.Int32
+	images := []*compute.Image{
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
+		{Name: "gke-1351-gke1396004-cos-arm64-125-19216-104-126-c-pre", Status: "READY"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-nvda", Status: "READY"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/images") {
+			lists.Add(1)
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{Items: images})
+			return
+		}
+		for _, img := range images {
+			if path.Base(r.URL.Path) == img.Name {
+				_ = json.NewEncoder(w).Encode(img)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	p := NewDefaultProvider(buildComputeService(t, srv), &fakeVersionProvider{version: "v1.35.1"}, nil)
+	for range 5 {
+		nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+			ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{{Alias: "ContainerOptimizedOS@latest"}},
+		}}
+		_, err := p.List(context.Background(), nc)
+		require.NoError(t, err)
+	}
+	require.EqualValues(t, 1, lists.Load())
+	p.cache.Flush() // Simulate expiration without sleeping.
+	_, err := p.List(context.Background(), &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{{Alias: "ContainerOptimizedOS@latest"}},
+	}})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, lists.Load())
 }
 
 func TestDispatch_AliasTermResolvesImages(t *testing.T) {

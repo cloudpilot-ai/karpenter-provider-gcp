@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	"google.golang.org/api/compute/v1"
@@ -41,6 +40,7 @@ var cosVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 type ContainerOptimizedOS struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
+	cooldown        *catalogCooldown
 }
 
 func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
@@ -90,25 +90,20 @@ func ParseGKEVersion(v string) (k8sKey, build string, ok bool) {
 	return strings.ReplaceAll(base, ".", ""), parts[1], true
 }
 
-// resolveExactBuildCOSImage fetches the COS image matching the exact GKE build
-// (filter: name=gke-{k8sKey}-gke{build}-*). Returns an error if no image is found;
-// there is no fallback — a miss should surface as ImagesReady=False.
+// resolveExactBuildCOSImage selects the COS image for one GKE build without
+// filtering on the server. A miss must not fall back to a different build.
 func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8sKey, build string) (string, error) {
-	filter := fmt.Sprintf("name=gke-%s-gke%s-*", k8sKey, build)
-
+	prefix := fmt.Sprintf("gke-%s-gke%s-", k8sKey, build)
 	var best *compute.Image
-	err := c.computeService.Images.List(cosImageProject).
-		Filter(filter).
-		Pages(ctx, func(page *compute.ImageList) error {
-			for _, img := range page.Items {
-				if isUsableCOSImage(img) && (best == nil || img.CreationTimestamp > best.CreationTimestamp) {
-					best = img
-				}
-			}
-			return nil
-		})
+	err := scanImageCatalog(ctx, c.computeService, cosImageProject, c.cooldown, func(img *compute.Image) bool {
+		if strings.HasPrefix(img.Name, prefix) && isUsableCOSImage(img) {
+			best = img
+			return true
+		}
+		return false
+	})
 	if err != nil {
-		return "", fmt.Errorf("listing COS images with filter %q: %w", filter, err)
+		return "", fmt.Errorf("listing COS images for GKE build gke%s: %w", build, err)
 	}
 	if best == nil {
 		return "", &imageResolutionError{msg: fmt.Sprintf(
@@ -118,35 +113,32 @@ func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8
 	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, best.Name), nil
 }
 
-// resolveLatestCOSImage queries the gke-node-images project for the most recent
-// non-deprecated amd64 COS GKE image matching the cluster's K8s patch version.
+// resolveLatestCOSImage selects the newest ordinary COS image for the cluster patch.
 // The arm64 and GPU variants are derived from it by resolveImages.
 func (c *ContainerOptimizedOS) resolveLatestCOSImage(ctx context.Context) (string, error) {
 	filter := c.buildImageFilter(ctx)
-
-	var candidates []*compute.Image
-	err := c.computeService.Images.List(cosImageProject).
-		Filter(filter).
-		Pages(ctx, func(page *compute.ImageList) error {
-			for _, img := range page.Items {
-				if isUsableCOSImage(img) {
-					candidates = append(candidates, img)
-				}
-			}
-			return nil
-		})
+	var best *compute.Image
+	err := scanImageCatalog(ctx, c.computeService, cosImageProject, c.cooldown, func(img *compute.Image) bool {
+		if matchesCOSNameFilter(img.Name, filter) && isUsableCOSImage(img) {
+			best = img
+			return true
+		}
+		return false
+	})
 	if err != nil {
 		return "", fmt.Errorf("listing COS GKE images in %s: %w", cosImageProject, err)
 	}
-	if len(candidates) == 0 {
+	if best == nil {
 		return "", fmt.Errorf("no non-deprecated COS amd64 image found in %s (filter: %s)", cosImageProject, filter)
 	}
+	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, best.Name), nil
+}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].CreationTimestamp > candidates[j].CreationTimestamp
-	})
-	img := candidates[0]
-	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, img.Name), nil
+func matchesCOSNameFilter(name, filter string) bool {
+	if filter == `name=gke-*-cos-*-c-pre` {
+		return strings.HasPrefix(name, "gke-") && strings.Contains(name, "-cos-") && strings.HasSuffix(name, "-c-pre")
+	}
+	return strings.HasPrefix(name, strings.TrimSuffix(strings.TrimPrefix(filter, "name="), "*"))
 }
 
 // isUsableCOSImage reports whether img is a non-deprecated general-purpose amd64 COS image
@@ -172,10 +164,8 @@ func isUsableCOSImage(img *compute.Image) bool {
 	return true
 }
 
-// buildImageFilter returns a GCP Images.List filter string scoped to the cluster's
-// K8s patch version (e.g. "name=gke-1351-*"). Falls back to "name=gke-*-cos-*-c-pre"
-// if the version provider is unavailable. Uses = (prefix match) not : (has-word), mirroring
-// the Ubuntu filter format which is confirmed to work with the GCP Compute REST API.
+// buildImageFilter describes the name scope to apply locally for the cluster's
+// K8s patch version. It falls back to the broad GKE COS scope when unavailable.
 func (c *ContainerOptimizedOS) buildImageFilter(ctx context.Context) string {
 	if c.versionProvider == nil {
 		return `name=gke-*-cos-*-c-pre`

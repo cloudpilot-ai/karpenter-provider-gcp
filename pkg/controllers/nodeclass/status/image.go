@@ -39,6 +39,9 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 	images, err := i.imageProvider.List(ctx, nodeClass)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "listing images")
+		if delay, limited := imagefamily.CatalogRateLimitRetryAfter(err); limited {
+			return reconcile.Result{RequeueAfter: max(delay, time.Second)}, nil
+		}
 		if imagefamily.IsImageResolutionError(err) {
 			msg := err.Error()
 			if len([]rune(msg)) > 256 {
