@@ -38,7 +38,7 @@ esac
 	}
 	logPath := filepath.Join(dir, "commands")
 	cmd := exec.Command("bash", "../e2e-clean-env.sh")
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "COMMAND_LOG="+logPath, "E2E_PROJECT_ID=project", "E2E_LOCATION=us-central1")
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "COMMAND_LOG="+logPath, "E2E_PROJECT_ID=project", "E2E_LOCATION=us-central1", "E2E_PREFIX=karpenter-e2e")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("cleanup: %v\n%s", err, out)
 	}
