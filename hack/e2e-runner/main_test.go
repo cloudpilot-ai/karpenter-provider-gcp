@@ -17,15 +17,71 @@ limitations under the License.
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/onsi/ginkgo/v2/types"
 )
+
+func TestCancelStopsSubprocesses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", "sleep 30 & echo $!; wait")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- runIsolated(cmd) }()
+	line, err := bufio.NewReader(out).ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading child PID: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		if err == nil {
+			t.Fatal("canceled command succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("command did not stop after cancellation")
+	}
+	state, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "state=").Output()
+	if err == nil && !strings.HasPrefix(strings.TrimSpace(string(state)), "Z") {
+		t.Fatalf("child process %d still running: %s", pid, state)
+	}
+}
+
+func TestLockID(t *testing.T) {
+	if got, err := resolveLockID("ci-run"); err != nil || got != "ci-run" {
+		t.Fatalf("override = %q, %v", got, err)
+	}
+
+	got, err := resolveLockID("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := "@" + hostname + ":pid-" + strconv.Itoa(os.Getpid())
+	if !strings.HasSuffix(got, suffix) || len(got) <= len(suffix) {
+		t.Fatalf("default lock ID %q does not match username%s", got, suffix)
+	}
+}
 
 func TestSelectionFilters(t *testing.T) {
 	for _, tc := range []struct {

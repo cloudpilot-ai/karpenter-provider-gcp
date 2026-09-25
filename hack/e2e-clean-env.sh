@@ -12,12 +12,12 @@ if [[ "${current_context}" != "${expected_context}" ]]; then
   exit 1
 fi
 
-# NodeClaim finalizers delete their VMs; do not bypass them or delete GCE resources directly.
+# NodeClaim finalizers delete their VMs; leave unrelated and legacy unlabeled resources untouched.
 for item in 'nodeclaims.karpenter.sh nodeclaims' 'nodepools.karpenter.sh nodepools' 'gcenodeclasses.karpenter.k8s.gcp gcenodeclasses'; do
   read -r crd resource <<< "${item}"
   installed="$(kubectl get crd "${crd}" -o name --ignore-not-found)"
   if [[ -n "${installed}" ]]; then
-    kubectl delete "${resource}" --all --ignore-not-found --wait=true --timeout=5m
+    kubectl delete "${resource}" --selector=karpenter-e2e/owned=true --ignore-not-found --wait=true --timeout=5m
   fi
 done
 kubectl delete namespace karpenter-e2e-test --ignore-not-found --wait=true --timeout=5m

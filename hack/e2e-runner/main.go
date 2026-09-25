@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -71,6 +72,27 @@ func selectFilter(dir, selection string) (string, error) {
 	return strings.Join(filters, " || "), nil
 }
 
+func runIsolated(cmd *exec.Cmd) error {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	return cmd.Run()
+}
+
+func resolveLockID(override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	current, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("reading current user: %w", err)
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("reading hostname: %w", err)
+	}
+	return fmt.Sprintf("%s@%s:pid-%d", current.Username, hostname, os.Getpid()), nil
+}
+
 func main() {
 	var selection, preset, reportPath, lockID string
 	cmd := &cobra.Command{
@@ -89,11 +111,15 @@ func main() {
 			if err != nil {
 				return err
 			}
+			holder, err := resolveLockID(lockID)
+			if err != nil {
+				return err
+			}
 			client, err := newLeaseClient()
 			if err != nil {
 				return err
 			}
-			return withLease(cmd.Context(), client, lockID, func(runCtx context.Context) error {
+			return withLease(cmd.Context(), client, holder, func(runCtx context.Context) error {
 				args := append([]string{"run", "github.com/onsi/ginkgo/v2/ginkgo"}, ginkgoArgs...)
 				if filter != "" {
 					args = append(args, "--label-filter="+filter)
@@ -120,13 +146,16 @@ func main() {
 				runner := exec.CommandContext(runCtx, "go", args...)
 				runner.Stdin, runner.Stdout, runner.Stderr = os.Stdin, os.Stdout, os.Stderr
 				start := time.Now()
-				runErr := runner.Run()
+				runErr := runIsolated(runner)
 				if reportPath != "" {
 					metadata.Duration = time.Since(start).Round(time.Second).String()
 					logPath := strings.TrimSuffix(reportPath, filepath.Ext(reportPath)) + ".karpenter.log"
-					if err := dumpControllerLogs(runCtx, logPath, start); err != nil {
+					logCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+					logErr := dumpControllerLogs(logCtx, logPath, start)
+					cancel()
+					if logErr != nil {
 						metadata.LogsUnavailable = true
-						fmt.Fprintf(os.Stderr, "controller logs unavailable: %v\n", err)
+						fmt.Fprintf(os.Stderr, "controller logs unavailable: %v\n", logErr)
 					} else {
 						fmt.Fprintf(os.Stderr, "controller logs: %s\n", logPath)
 					}
@@ -139,11 +168,7 @@ func main() {
 	cmd.Flags().StringVar(&selection, "selection", "standard", "Preset (standard, gpu, all, provisioning) or comma-separated feature directories")
 	cmd.Flags().StringVar(&preset, "preset", "", "Deprecated alias for --selection")
 	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report to this path")
-	cmd.Flags().StringVar(&lockID, "lock-id", "", "Lease holder ID (required; Make defaults to username@hostname:pid-<shell PID>)")
-	if err := cmd.MarkFlagRequired("lock-id"); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	cmd.Flags().StringVar(&lockID, "lock-id", "", "Lease holder ID (default: username@hostname:pid-<runner PID>)")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := cmd.ExecuteContext(ctx); err != nil {

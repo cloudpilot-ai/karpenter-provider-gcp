@@ -192,7 +192,7 @@ Cloud NAT is required for the `networking` suite: nodes provisioned with `enable
 make e2e-deploy
 ```
 
-Builds the controller image with `ko` and runs `helm upgrade --install`.
+Builds the controller image with `ko` and runs `helm upgrade --install`. Before deploying, it removes only resources labeled `karpenter-e2e/owned=true` and the dedicated test namespace; inspect legacy unlabeled leftovers manually.
 
 #### Run end-to-end tests
 
@@ -213,13 +213,13 @@ Inputs for `make e2e-tests` (in addition to the prerequisites above):
 | `E2E_SELECTION` | `standard` | `standard` (non-GPU), `gpu`, `all`, `provisioning`, one feature directory, or a comma-separated list such as `drift,storage`. |
 | `GINKGO_PROCS` | `4` | Global limit on concurrently running specs; choose based on quota. |
 | `E2E_REPORT` | `e2e-report.md` | Markdown report path; the companion controller log uses the same basename with `.karpenter.log`. Keep a nonempty path to retain commit checks and reporting. |
-| `E2E_LOCK_ID` | `username@hostname:pid-<shell PID>` | Lease holder identity; override when a stable CI identity is useful. |
+| `E2E_LOCK_ID` | `username@hostname:pid-<runner PID>` | Lease holder identity; override when a stable CI identity is useful. |
 | `E2E_PREFIX` | `karpenter-e2e` | Base name for the default cluster and pods range. |
 | `E2E_CLUSTER_NAME` / `E2E_PODS_RANGE` | `<prefix>-cluster` / `<prefix>-pods` | Override when testing an existing cluster with different names. |
 | `E2E_KARPENTER_NAMESPACE` / `E2E_KARPENTER_DEPLOYMENT` | `karpenter-system` / `karpenter` | Override the controller target for commit checks, logs, and the Lease namespace. |
 | `E2E_PRESET` | unset | Legacy alias for `E2E_SELECTION`; do not set both. |
 
-`E2E_SUITES` is unsupported and rejected; `SUITE` and `FOCUS` apply only to the separate `e2e-test` target, not `e2e-tests`. Explicit GPU selections (`gpu`, `all`, or a list containing `gpu`) need enough GPU quota and capacity.
+`SUITE` and `FOCUS` apply only to the separate `e2e-test` target, not `e2e-tests`. Explicit GPU selections (`gpu`, `all`, or a list containing `gpu`) need enough GPU quota and capacity.
 
 The runner verifies the deployed controller matches the test checkout, acquires a Kubernetes Lease (overlapping test runs fail fast), and writes the ignored report and controller log. It releases the Lease on normal exit or interruption; after a forced kill, the Lease expires within ten minutes. Setup, deploy, and cleanup are **not** covered by this test Lease. Inspect the report and log even when tests fail; a startup failure may leave no report.
 

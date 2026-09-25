@@ -53,7 +53,7 @@ type reportMetadata struct {
 	LogsUnavailable                    bool
 }
 
-var resourceLine = regexp.MustCompile(`\[resources\] karpenter controller: requests cpu=(\d+)m memory=([^;]+); latest cpu=\d+m memory=[^;]+; peak cpu=(\d+)m memory=([^;]+); samples=\d+`)
+var resourceLine = regexp.MustCompile(`\[resources\] karpenter controller: requests cpu=(\d+)m memory=([^;]+); (?:latest cpu=\d+m memory=[^;]+; peak cpu=(\d+)m memory=([^;]+); samples=\d+|no usage samples available)`)
 
 func controllerResources(reports []types.Report) string {
 	var requestCPU, requestMemory, peakCPU, peakMemory string
@@ -61,6 +61,12 @@ func controllerResources(reports []types.Report) string {
 	for _, report := range reports {
 		for _, spec := range report.SpecReports {
 			for _, match := range resourceLine.FindAllStringSubmatch(spec.CapturedGinkgoWriterOutput, -1) {
+				if requestCPU == "" {
+					requestCPU, requestMemory = match[1]+"m", match[2]
+				}
+				if match[3] == "" {
+					continue
+				}
 				cpu, err := strconv.ParseInt(match[3], 10, 64)
 				if err != nil {
 					continue
@@ -68,9 +74,6 @@ func controllerResources(reports []types.Report) string {
 				memory, err := resource.ParseQuantity(strings.TrimSuffix(match[4], "B"))
 				if err != nil {
 					continue
-				}
-				if requestCPU == "" {
-					requestCPU, requestMemory = match[1]+"m", match[2]
 				}
 				if peakCPU == "" || cpu > maxCPU {
 					maxCPU, peakCPU = cpu, match[3]+"m"
@@ -83,6 +86,9 @@ func controllerResources(reports []types.Report) string {
 	}
 	if requestCPU == "" {
 		return "resource samples unavailable"
+	}
+	if peakCPU == "" {
+		return fmt.Sprintf("requests cpu=%s memory=%s; usage samples unavailable", requestCPU, requestMemory)
 	}
 	return fmt.Sprintf("requests cpu=%s memory=%s; peak cpu=%s memory=%s", requestCPU, requestMemory, peakCPU, peakMemory)
 }
@@ -148,7 +154,7 @@ func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) 
 				}
 				bounds[name] = span
 				suite.Duration = span.end.Sub(span.start).Round(time.Second).String()
-			} else {
+			} else if bounds[name].start.IsZero() {
 				durations[name] += spec.RunTime
 				suite.Duration = durations[name].Round(time.Second).String()
 			}

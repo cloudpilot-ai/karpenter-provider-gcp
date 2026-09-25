@@ -48,6 +48,8 @@ import (
 )
 
 const (
+	e2eOwnerLabel = "karpenter-e2e/owned"
+
 	// DefaultE2EDiskGiB is the boot disk size for test nodes; 30 GiB meets the
 	// minimum required by ContainerOptimizedOS while keeping costs low.
 	DefaultE2EDiskGiB = 30
@@ -125,7 +127,7 @@ func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, di
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
@@ -158,7 +160,7 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
@@ -186,7 +188,7 @@ func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"family": family, "channel": channel},
@@ -213,7 +215,7 @@ func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"family": family, "version": version},
@@ -237,7 +239,7 @@ func (e *Environment) CreateNodeClassWithConfidentialType(ctx context.Context, n
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"confidentialInstanceType": confidentialType,
 			"imageSelectorTerms": []any{
@@ -262,7 +264,7 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
@@ -288,7 +290,7 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name,
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"autoGPUTaint":     true,
 			"gpuDriverVersion": gpuDriverVersion,
@@ -482,7 +484,7 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",
 		"kind":       "NodePool",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"weight": int64(DefaultNodePoolWeight),
 			"disruption": map[string]any{
@@ -490,7 +492,10 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 				"consolidationPolicy": consolidationPolicy,
 				"budgets":             budgets,
 			},
-			"template": map[string]any{"spec": templateSpec},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{e2eOwnerLabel: "true"}},
+				"spec":     templateSpec,
+			},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(nodePoolGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -1029,7 +1034,7 @@ func (e *Environment) CreateNodeClassWithAlias(ctx context.Context, name, alias 
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": alias},
@@ -1057,7 +1062,7 @@ func (e *Environment) CreateNodeClassWithImageID(ctx context.Context, name, imag
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageFamily": imageFamily,
 			"imageSelectorTerms": []any{

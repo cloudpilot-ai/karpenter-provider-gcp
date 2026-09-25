@@ -158,10 +158,9 @@ GINKGO_PROCS ?= 4
 E2E_SELECTION ?=
 # Legacy alias for E2E_SELECTION.
 E2E_PRESET ?=
-E2E_LOCK_ID ?= $(shell id -un)@$(shell hostname):pid-$$$$
+E2E_LOCK_ID ?=
 E2E_REPORT ?= e2e-report.md
 e2e-tests: require-e2e-vars ## Run selected features (E2E_SELECTION=standard|gpu|all|provisioning|drift,storage, GINKGO_PROCS=N)
-	@if [ -n "$(E2E_SUITES)" ]; then echo "ERROR: E2E_SUITES is unsupported; use E2E_SELECTION" >&2; exit 1; fi
 	@if [ -n "$(E2E_SELECTION)" ] && [ -n "$(E2E_PRESET)" ]; then echo "ERROR: set E2E_SELECTION or E2E_PRESET, not both" >&2; exit 1; fi
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
@@ -170,7 +169,7 @@ e2e-tests: require-e2e-vars ## Run selected features (E2E_SELECTION=standard|gpu
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	KARPENTER_NAMESPACE=$(E2E_KARPENTER_NAMESPACE) \
 	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
-	go run ./hack/e2e-runner --selection="$(or $(E2E_SELECTION),$(E2E_PRESET),standard)" --report=$(E2E_REPORT) --lock-id=$(E2E_LOCK_ID) -- --procs=$(GINKGO_PROCS) --timeout=2h -v
+	go run ./hack/e2e-runner --selection="$(or $(E2E_SELECTION),$(E2E_PRESET),standard)" --report=$(E2E_REPORT) --lock-id="$(E2E_LOCK_ID)" -- --procs=$(GINKGO_PROCS) --timeout=2h -v
 
 FOCUS ?=
 SUITE ?=

@@ -140,6 +140,7 @@ func TestRenderFeatureWallTime(t *testing.T) {
 	report := types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{
 		{LeafNodeType: types.NodeTypeIt, ContainerHierarchyLabels: [][]string{{"suite:provisioning"}}, State: types.SpecStatePassed, StartTime: start, EndTime: start.Add(4 * time.Second), RunTime: 4 * time.Second},
 		{LeafNodeType: types.NodeTypeIt, ContainerHierarchyLabels: [][]string{{"suite:provisioning"}}, State: types.SpecStatePassed, StartTime: start.Add(time.Second), EndTime: start.Add(5 * time.Second), RunTime: 4 * time.Second},
+		{LeafNodeType: types.NodeTypeIt, ContainerHierarchyLabels: [][]string{{"suite:provisioning"}}, State: types.SpecStatePending},
 	}}
 	var out bytes.Buffer
 	if err := renderReport(&out, []types.Report{report}, reportMetadata{}); err != nil {
@@ -157,6 +158,14 @@ func TestRenderSuiteSetupFailure(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Suite failed to run: BeforeSuite failed") {
 		t.Fatalf("suite failure missing from report:\n%s", out.String())
+	}
+}
+
+func TestControllerResourcesWithoutSamples(t *testing.T) {
+	reports := []types.Report{{SpecReports: types.SpecReports{{CapturedGinkgoWriterOutput: "[resources] karpenter controller: requests cpu=100m memory=128.0MiB; no usage samples available\n"}}}}
+	want := "requests cpu=100m memory=128.0MiB; usage samples unavailable"
+	if got := controllerResources(reports); got != want {
+		t.Fatalf("controllerResources() = %q, want %q", got, want)
 	}
 }
 
