@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package repair
+package parallel
 
 import (
 	"testing"
@@ -22,11 +22,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
+	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/hack/e2e-runner/testdata/parallel/a"
+	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/hack/e2e-runner/testdata/parallel/b"
 )
 
-func TestRepair(t *testing.T) {
+func TestParallel(t *testing.T) {
 	RegisterFailHandler(Fail)
-	environment.RegisterSuiteLifecycle()
-	RunSpecs(t, "Repair Suite")
+	RunSpecs(t, "Parallel feature fixture")
 }

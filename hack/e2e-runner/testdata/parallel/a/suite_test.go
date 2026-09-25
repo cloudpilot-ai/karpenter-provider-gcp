@@ -14,19 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package repair
+package a
 
 import (
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-func TestRepair(t *testing.T) {
+func TestA(t *testing.T) {
 	RegisterFailHandler(Fail)
-	environment.RegisterSuiteLifecycle()
-	RunSpecs(t, "Repair Suite")
+	RunSpecs(t, "A standalone fixture")
 }

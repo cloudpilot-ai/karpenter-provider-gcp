@@ -14,10 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package repair_test
+package repair
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -38,7 +39,11 @@ import (
 // then has the remaining ProvisioningTimeout to boot the replacement.
 const nodeRepairTimeout = 3 * time.Minute
 
-var _ = Describe("NodeRepair", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("NodeRepair", Label("suite:repair"), func() {
+	BeforeEach(requireNodeRepairEnabled)
 	It("should replace a node whose KernelDeadlock condition has been True beyond the toleration",
 		func(ctx SpecContext) {
 			runRepairTest(ctx, environment.TestCase{
@@ -49,6 +54,23 @@ var _ = Describe("NodeRepair", func() {
 			})
 		}, SpecTimeout(nodeRepairTimeout+environment.ProvisioningTimeout))
 })
+
+// Fail before provisioning when node repair is not enabled in the controller.
+func requireNodeRepairEnabled() {
+	dep, err := env.KubeClient.AppsV1().Deployments(environment.KarpenterNamespace).
+		Get(context.Background(), environment.KarpenterDeployment, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "failed to get karpenter deployment")
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == "FEATURE_GATES" {
+				Expect(strings.Contains(e.Value, "NodeRepair=true")).To(BeTrue(),
+					"NodeRepair=true must be set in FEATURE_GATES; got %q — redeploy with --set controller.featureGates.nodeRepair=true", e.Value)
+				return
+			}
+		}
+	}
+	Fail("FEATURE_GATES env var not found in karpenter deployment — is the controller deployed?")
+}
 
 func runRepairTest(ctx context.Context, tc environment.TestCase) {
 	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "repair")

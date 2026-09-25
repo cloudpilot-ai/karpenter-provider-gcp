@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package expiration_test
+package expiration
 
 import (
 	"context"
@@ -29,7 +29,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Expiration", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("Expiration", Label("suite:expiration"), func() {
 	// Expiration test: set expireAfter on the NodePool so nodes are expired as
 	// soon as they register (1m < typical provisioning time ~5-7m), then verify
 	// that karpenter replaces the node with a fresh one and the pod migrates.

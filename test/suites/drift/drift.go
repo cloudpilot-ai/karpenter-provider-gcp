@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drift_test
+package drift
 
 import (
 	"context"
@@ -30,7 +30,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Drift", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("Drift", Label("suite:drift"), func() {
 	// Requirement drift: provision a node, then update the NodePool to exclude the
 	// running instance type. Karpenter detects requirement drift and replaces
 	// the node with one of the remaining allowed types.

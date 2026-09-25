@@ -155,10 +155,14 @@ require-e2e-vars: ## Fail fast if required e2e variables are not set
 	@test -n "$(E2E_LOCATION)"    || (echo "ERROR: E2E_LOCATION is not set"    >&2 && exit 1)
 
 GINKGO_PROCS ?= 4
-E2E_PRESET ?= standard
+E2E_SELECTION ?=
+# Legacy alias for E2E_SELECTION.
+E2E_PRESET ?=
 E2E_LOCK_ID ?= $(shell id -un)@$(shell hostname):pid-$$$$
 E2E_REPORT ?= e2e-report.md
-e2e-tests: require-e2e-vars ## Run e2e suites (E2E_PRESET=standard|gpu|all|provisioning, GINKGO_PROCS=N)
+e2e-tests: require-e2e-vars ## Run selected features (E2E_SELECTION=standard|gpu|all|provisioning|drift,storage, GINKGO_PROCS=N)
+	@if [ -n "$(E2E_SUITES)" ]; then echo "ERROR: E2E_SUITES is unsupported; use E2E_SELECTION" >&2; exit 1; fi
+	@if [ -n "$(E2E_SELECTION)" ] && [ -n "$(E2E_PRESET)" ]; then echo "ERROR: set E2E_SELECTION or E2E_PRESET, not both" >&2; exit 1; fi
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -166,11 +170,11 @@ e2e-tests: require-e2e-vars ## Run e2e suites (E2E_PRESET=standard|gpu|all|provi
 	PODS_RANGE_NAME=$(E2E_PODS_RANGE) \
 	KARPENTER_NAMESPACE=$(E2E_KARPENTER_NAMESPACE) \
 	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
-	go run ./hack/e2e-runner --preset=$(E2E_PRESET) --report=$(E2E_REPORT) --lock-id=$(E2E_LOCK_ID) -- --procs=$(GINKGO_PROCS) --timeout=2h -v
+	go run ./hack/e2e-runner --selection="$(or $(E2E_SELECTION),$(E2E_PRESET),standard)" --report=$(E2E_REPORT) --lock-id=$(E2E_LOCK_ID) -- --procs=$(GINKGO_PROCS) --timeout=2h -v
 
 FOCUS ?=
 SUITE ?=
-e2e-test: require-e2e-vars ## Run a single e2e suite or focused spec (SUITE=<name>, FOCUS="<substring>", GINKGO_PROCS=N)
+e2e-test: require-e2e-vars ## Run a feature directory or focused spec (SUITE=<name>, FOCUS="<substring>", GINKGO_PROCS=N)
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -180,7 +184,8 @@ e2e-test: require-e2e-vars ## Run a single e2e suite or focused spec (SUITE=<nam
 	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
 	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=30m -v \
 	$(if $(FOCUS),--focus="$(FOCUS)",) \
-	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/...)
+	$(if $(SUITE),,--label-filter='!suite:gpu') \
+	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/)
 
 e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
 	$(E2E_GAC_ENV) \

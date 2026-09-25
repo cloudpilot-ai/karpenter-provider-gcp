@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package provisioning_test
+package provisioning
 
 import (
 	"strings"
@@ -28,7 +28,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = DescribeTable("Provisioning",
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = DescribeTable("Provisioning", Label("suite:provisioning"),
 	func(ctx SpecContext, tc environment.TestCase) {
 		runProvisioningTest(ctx, tc)
 	},
@@ -88,7 +91,7 @@ var _ = DescribeTable("Provisioning",
 	}, SpecTimeout(15*time.Minute)),
 )
 
-var _ = Describe("Image Pinning", func() {
+var _ = Describe("Image Pinning", Label("suite:provisioning"), func() {
 	It("should provision a node with a pinned ContainerOptimizedOS alias", func(ctx SpecContext) {
 		imageURL := env.ResolveCurrentCOSImage(ctx)
 		m := cosVersionFromImageRe.FindStringSubmatch(imageURL)

@@ -107,6 +107,59 @@ func TestRenderReport(t *testing.T) {
 	}
 }
 
+func TestRenderUnifiedSuite(t *testing.T) {
+	report := types.Report{
+		SuitePath:      "/repo/test/suites",
+		SuiteSucceeded: false,
+		SpecReports: types.SpecReports{
+			{LeafNodeType: types.NodeTypeIt, ContainerHierarchyLabels: [][]string{{"suite:provisioning"}}, LeafNodeText: "provisions a node", State: types.SpecStatePassed, RunTime: 4 * time.Second},
+			{LeafNodeType: types.NodeTypeIt, ContainerHierarchyLabels: [][]string{{"suite:storage"}}, LeafNodeText: "attaches a disk", State: types.SpecStateFailed, RunTime: 2 * time.Second},
+		},
+	}
+	var out bytes.Buffer
+	if err := renderReport(&out, []types.Report{report}, reportMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{
+		"<summary>provisioning — 1 passed, 0 failed</summary>",
+		"<summary>storage — 0 passed, 1 failed</summary>",
+		"<li>✅ pass · provisions a node (4s)</li>",
+		"<li>❌ fail · attaches a disk (2s)</li>",
+	} {
+		if !strings.Contains(out.String(), text) {
+			t.Errorf("report missing %q:\n%s", text, out.String())
+		}
+	}
+	if got := strings.Count(out.String(), "<td><details>"); got != 2 {
+		t.Errorf("got %d rows, want two feature rows", got)
+	}
+}
+
+func TestRenderFeatureWallTime(t *testing.T) {
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	report := types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{
+		{LeafNodeType: types.NodeTypeIt, ContainerHierarchyLabels: [][]string{{"suite:provisioning"}}, State: types.SpecStatePassed, StartTime: start, EndTime: start.Add(4 * time.Second), RunTime: 4 * time.Second},
+		{LeafNodeType: types.NodeTypeIt, ContainerHierarchyLabels: [][]string{{"suite:provisioning"}}, State: types.SpecStatePassed, StartTime: start.Add(time.Second), EndTime: start.Add(5 * time.Second), RunTime: 4 * time.Second},
+	}}
+	var out bytes.Buffer
+	if err := renderReport(&out, []types.Report{report}, reportMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "<td>✅ pass</td><td>5s</td>") {
+		t.Fatalf("feature duration should span overlapping specs:\n%s", out.String())
+	}
+}
+
+func TestRenderSuiteSetupFailure(t *testing.T) {
+	var out bytes.Buffer
+	if err := renderReport(&out, []types.Report{{SuitePath: "/repo/test/suites", SpecialSuiteFailureReasons: []string{"BeforeSuite failed"}}}, reportMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Suite failed to run: BeforeSuite failed") {
+		t.Fatalf("suite failure missing from report:\n%s", out.String())
+	}
+}
+
 func TestControllerResources(t *testing.T) {
 	reports := []types.Report{
 		{SpecReports: types.SpecReports{{CapturedGinkgoWriterOutput: "[resources] karpenter controller: requests cpu=100m memory=128.0MiB; latest cpu=40m memory=90.0MiB; peak cpu=200m memory=256.0MiB; samples=10\n"}}},

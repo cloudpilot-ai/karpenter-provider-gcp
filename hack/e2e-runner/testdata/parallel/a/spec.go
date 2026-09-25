@@ -14,19 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package repair
+package a
 
 import (
-	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-func TestRepair(t *testing.T) {
-	RegisterFailHandler(Fail)
-	environment.RegisterSuiteLifecycle()
-	RunSpecs(t, "Repair Suite")
-}
+var _ = Describe("A", Label("suite:a"), func() {
+	It("first", func() { time.Sleep(200 * time.Millisecond) })
+	It("second", func() { time.Sleep(200 * time.Millisecond) })
+})

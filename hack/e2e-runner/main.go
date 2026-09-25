@@ -31,45 +31,61 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Presets filter discovered suites, so new suites join standard and all automatically.
-var presets = map[string]func(string) bool{
-	"standard":     func(name string) bool { return name != "gpu" },
-	"gpu":          func(name string) bool { return name == "gpu" },
-	"all":          func(string) bool { return true },
-	"provisioning": func(name string) bool { return name == "provisioning" },
+var presets = map[string]string{
+	"standard":     "!suite:gpu",
+	"gpu":          "suite:gpu",
+	"all":          "",
+	"provisioning": "suite:provisioning",
 }
 
-func selectSuites(dir, name string) ([]string, error) {
-	selected, ok := presets[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown e2e preset %q (choose standard, gpu, all, or provisioning)", name)
+func selectFilter(dir, selection string) (string, error) {
+	selection = strings.TrimSpace(selection)
+	if selection == "" {
+		return "", fmt.Errorf("e2e selection must not be empty")
 	}
-
+	if filter, ok := presets[selection]; ok {
+		return filter, nil
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	var suites []string
+	features := make(map[string]bool, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() && selected(entry.Name()) {
-			suites = append(suites, "./test/suites/"+entry.Name()+"/")
+		if entry.IsDir() {
+			features[entry.Name()] = true
 		}
 	}
-	if len(suites) == 0 {
-		return nil, fmt.Errorf("no e2e suites found for preset %q in %s", name, dir)
+	var filters []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(selection, ",") {
+		name := strings.TrimSpace(part)
+		if !features[name] {
+			return "", fmt.Errorf("unknown e2e feature %q in selection %q (use a preset or feature directory names)", name, selection)
+		}
+		if !seen[name] {
+			filters = append(filters, "suite:"+name)
+			seen[name] = true
+		}
 	}
-	return suites, nil
+	return strings.Join(filters, " || "), nil
 }
 
 func main() {
-	var name, reportPath, lockID string
+	var selection, preset, reportPath, lockID string
 	cmd := &cobra.Command{
 		Use:          "e2e-runner",
-		Short:        "Run e2e suites by preset",
+		Short:        "Run e2e features by preset or directory name",
 		Args:         cobra.ArbitraryArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, ginkgoArgs []string) error {
-			suites, err := selectSuites("test/suites", name)
+			if cmd.Flags().Changed("preset") {
+				if cmd.Flags().Changed("selection") {
+					return fmt.Errorf("--selection and --preset cannot be used together")
+				}
+				selection = preset
+			}
+			filter, err := selectFilter("test/suites", selection)
 			if err != nil {
 				return err
 			}
@@ -79,6 +95,9 @@ func main() {
 			}
 			return withLease(cmd.Context(), client, lockID, func(runCtx context.Context) error {
 				args := append([]string{"run", "github.com/onsi/ginkgo/v2/ginkgo"}, ginkgoArgs...)
+				if filter != "" {
+					args = append(args, "--label-filter="+filter)
+				}
 				var jsonPath string
 				var metadata reportMetadata
 				if reportPath != "" {
@@ -97,7 +116,7 @@ func main() {
 					jsonPath = filepath.Join(dir, "results.json")
 					args = append(args, "--output-dir="+dir, "--json-report=results.json")
 				}
-				args = append(args, suites...)
+				args = append(args, "./test/suites/")
 				runner := exec.CommandContext(runCtx, "go", args...)
 				runner.Stdin, runner.Stdout, runner.Stderr = os.Stdin, os.Stdout, os.Stderr
 				start := time.Now()
@@ -117,7 +136,8 @@ func main() {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&name, "preset", "standard", "Suite preset: standard, gpu, all, provisioning")
+	cmd.Flags().StringVar(&selection, "selection", "standard", "Preset (standard, gpu, all, provisioning) or comma-separated feature directories")
+	cmd.Flags().StringVar(&preset, "preset", "", "Deprecated alias for --selection")
 	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report to this path")
 	cmd.Flags().StringVar(&lockID, "lock-id", "", "Lease holder ID (required; Make defaults to username@hostname:pid-<shell PID>)")
 	if err := cmd.MarkFlagRequired("lock-id"); err != nil {

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package networking_test
+package networking
 
 import (
 	"time"
@@ -25,7 +25,10 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Networking", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("Networking", Label("suite:networking"), func() {
 	It("should provision a node with no external IP when enableExternalIPAccess is false", func(ctx SpecContext) {
 		runPrivateNodeTest(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,

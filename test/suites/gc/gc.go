@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package gc_test
+package gc
 
 import (
 	"context"
@@ -35,7 +35,10 @@ import (
 // two full cycles plus VM deletion time as a comfortable margin.
 const gcTimeout = 6 * time.Minute
 
-var _ = Describe("GarbageCollection", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("GarbageCollection", Label("suite:gc"), func() {
 	It("should delete an orphaned VM after its NodeClaim is force-removed", func(ctx SpecContext) {
 		runGCTest(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,

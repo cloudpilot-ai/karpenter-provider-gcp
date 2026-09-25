@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package channelimageselection_test
+package channelimageselection
 
 import (
 	"context"
@@ -38,7 +38,10 @@ type familyChannelTestCase struct {
 	version string // set for version tests
 }
 
-var _ = DescribeTable("ChannelImageSelection",
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = DescribeTable("ChannelImageSelection", Label("suite:channel-image-selection"),
 	func(ctx SpecContext, tc familyChannelTestCase) {
 		runChannelImageSelectionTest(ctx, tc)
 	},

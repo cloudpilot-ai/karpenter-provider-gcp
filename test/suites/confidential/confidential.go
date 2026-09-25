@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package confidential_test
+package confidential
 
 import (
 	"context"
@@ -62,7 +62,10 @@ func enabledConfidentialTypes() []string {
 	return out
 }
 
-var _ = Describe("Confidential", func() {
+var env *environment.Environment
+var _ = BeforeEach(func() { env = environment.Current() })
+
+var _ = Describe("Confidential", Label("suite:confidential"), func() {
 	for _, confidentialType := range enabledConfidentialTypes() {
 		tc, ok := confidentialCases[confidentialType]
 		if !ok {

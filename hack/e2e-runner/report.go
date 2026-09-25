@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -91,15 +92,30 @@ func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) 
 		return fmt.Errorf("Ginkgo produced no suite results")
 	}
 	var suites []suiteResult
+	indices := map[string]int{}
+	durations := map[string]time.Duration{}
+	bounds := map[string]struct{ start, end time.Time }{}
 	for _, report := range reports {
-		suite := suiteResult{Name: filepath.Base(report.SuitePath), Duration: report.RunTime.Round(time.Second).String(), Result: "✅ pass"}
-		if !report.SuiteSucceeded {
-			suite.Result = "❌ fail"
-		}
+		fallback := filepath.Base(report.SuitePath)
+		failedSpecs := 0
 		for _, spec := range report.SpecReports {
 			if spec.LeafNodeType != types.NodeTypeIt {
 				continue
 			}
+			name := fallback
+			for _, label := range spec.Labels() {
+				if feature, ok := strings.CutPrefix(label, "suite:"); ok {
+					name = feature
+					break
+				}
+			}
+			idx, exists := indices[name]
+			if !exists {
+				idx = len(suites)
+				indices[name] = idx
+				suites = append(suites, suiteResult{Name: name, Result: "✅ pass"})
+			}
+			suite := &suites[idx]
 			row := specResult{Name: spec.FullText(), Duration: spec.RunTime.Round(time.Second).String()}
 			switch {
 			case spec.State == types.SpecStatePassed:
@@ -108,6 +124,8 @@ func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) 
 			case spec.State.Is(types.SpecStateFailureStates):
 				row.Result = "❌ fail"
 				suite.Failed++
+				failedSpecs++
+				suite.Result = "❌ fail"
 			case spec.State == types.SpecStateSkipped:
 				row.Result = "⏭ skipped"
 				suite.Skipped++
@@ -118,17 +136,41 @@ func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) 
 				continue
 			}
 			suite.Specs = append(suite.Specs, row)
+			if name == fallback {
+				suite.Duration = report.RunTime.Round(time.Second).String()
+			} else if !spec.StartTime.IsZero() && !spec.EndTime.IsZero() {
+				span := bounds[name]
+				if span.start.IsZero() || spec.StartTime.Before(span.start) {
+					span.start = spec.StartTime
+				}
+				if spec.EndTime.After(span.end) {
+					span.end = spec.EndTime
+				}
+				bounds[name] = span
+				suite.Duration = span.end.Sub(span.start).Round(time.Second).String()
+			} else {
+				durations[name] += spec.RunTime
+				suite.Duration = durations[name].Round(time.Second).String()
+			}
 		}
-		if !report.SuiteSucceeded && suite.Failed == 0 {
+		if !report.SuiteSucceeded && failedSpecs == 0 {
+			idx, exists := indices[fallback]
+			if !exists {
+				idx = len(suites)
+				indices[fallback] = idx
+				suites = append(suites, suiteResult{Name: fallback, Duration: report.RunTime.Round(time.Second).String()})
+			}
 			reason := strings.Join(report.SpecialSuiteFailureReasons, "; ")
 			if reason == "" {
 				reason = "unknown failure"
 			}
+			suite := &suites[idx]
+			suite.Result = "❌ fail"
 			suite.Specs = append(suite.Specs, specResult{Name: "Suite failed to run: " + reason, Result: "❌ fail", Duration: "—"})
 			suite.Failed++
 		}
-		suites = append(suites, suite)
 	}
+	sort.Slice(suites, func(i, j int) bool { return suites[i].Name < suites[j].Name })
 	tmpl, err := template.New("report").Parse(reportTemplate)
 	if err != nil {
 		return err
