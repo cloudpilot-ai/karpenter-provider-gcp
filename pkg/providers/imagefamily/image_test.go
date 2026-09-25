@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"strings"
 	"testing"
 
@@ -54,16 +55,22 @@ func readyTestImages(images []*compute.Image) []*compute.Image {
 	return images
 }
 
-// cosImageList returns a test server that always serves the given images.
+// cosImageServer serves catalog images and returns their actual status on Get.
 func cosImageServer(t *testing.T, images []*compute.Image) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if !strings.HasSuffix(r.URL.Path, "/images") {
-			_ = json.NewEncoder(w).Encode(&compute.Image{Status: "READY"})
+		if strings.HasSuffix(r.URL.Path, "/images") {
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{Items: images})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(&compute.ImageList{Items: readyTestImages(images)})
+		for _, img := range images {
+			if img.Name == path.Base(r.URL.Path) {
+				_ = json.NewEncoder(w).Encode(img)
+				return
+			}
+		}
+		http.Error(w, "image not found", http.StatusNotFound)
 	}))
 }
 
@@ -113,7 +120,9 @@ func TestAliasTerm_RejectsPendingVariantAndRetries(t *testing.T) {
 
 func TestDispatch_AliasTermResolvesImages(t *testing.T) {
 	images := []*compute.Image{
-		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
+		{Name: "gke-1351-gke1396004-cos-arm64-125-19216-104-126-c-pre", Status: "READY"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-nvda", Status: "READY"},
 	}
 	srv := cosImageServer(t, images)
 	defer srv.Close()
@@ -126,12 +135,14 @@ func TestDispatch_AliasTermResolvesImages(t *testing.T) {
 
 	imgs, err := p.List(context.Background(), nc)
 	require.NoError(t, err)
-	require.NotEmpty(t, imgs)
+	require.Len(t, imgs, 3)
 }
 
 func TestDispatch_FamilyVersionLatest_ResolvesImages(t *testing.T) {
 	images := []*compute.Image{
-		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
+		{Name: "gke-1351-gke1396004-cos-arm64-125-19216-104-126-c-pre", Status: "READY"},
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-nvda", Status: "READY"},
 	}
 	srv := cosImageServer(t, images)
 	defer srv.Close()
@@ -144,12 +155,14 @@ func TestDispatch_FamilyVersionLatest_ResolvesImages(t *testing.T) {
 
 	imgs, err := p.List(context.Background(), nc)
 	require.NoError(t, err)
-	require.NotEmpty(t, imgs)
+	require.Len(t, imgs, 3)
 }
 
 func TestDispatch_FamilyChannel_CallsGetServerConfig(t *testing.T) {
 	images := []*compute.Image{
-		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
+		{Name: "gke-1346-gke1068000-cos-arm64-125-19216-220-72-c-pre", Status: "READY"},
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-nvda", Status: "READY"},
 	}
 	srv := cosImageServer(t, images)
 	defer srv.Close()
@@ -169,12 +182,14 @@ func TestDispatch_FamilyChannel_CallsGetServerConfig(t *testing.T) {
 
 	imgs, err := p.List(context.Background(), nc)
 	require.NoError(t, err)
-	require.NotEmpty(t, imgs)
+	require.Len(t, imgs, 3)
 }
 
 func TestDispatch_ChannelCluster_UsesClusterChannel(t *testing.T) {
 	images := []*compute.Image{
-		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
+		{Name: "gke-1346-gke1068000-cos-arm64-125-19216-220-72-c-pre", Status: "READY"},
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-nvda", Status: "READY"},
 	}
 	srv := cosImageServer(t, images)
 	defer srv.Close()
@@ -197,7 +212,7 @@ func TestDispatch_ChannelCluster_UsesClusterChannel(t *testing.T) {
 
 	imgs, err := p.List(context.Background(), nc)
 	require.NoError(t, err)
-	require.NotEmpty(t, imgs)
+	require.Len(t, imgs, 3)
 }
 
 func TestDispatch_ChannelCluster_UnspecifiedCluster_ReturnsError(t *testing.T) {
