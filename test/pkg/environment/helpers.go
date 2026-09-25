@@ -1098,6 +1098,50 @@ func (e *Environment) NodeClassSourceImages(ctx context.Context, name string) []
 	return out
 }
 
+func usableImage(img *compute.Image) bool {
+	if img.Status != "READY" {
+		return false
+	}
+	if img.Deprecated == nil {
+		return true
+	}
+	switch img.Deprecated.State {
+	case "DEPRECATED", "OBSOLETE", "DELETED":
+		return false
+	default:
+		return true
+	}
+}
+
+// newestImage reads only the metadata needed to select an image and stops at
+// the first match in creation-time order.
+func newestImage(ctx context.Context, service *compute.Service, project string, matches func(*compute.Image) bool) (*compute.Image, error) {
+	pageToken := ""
+	for {
+		call := service.Images.List(project).OrderBy("creationTimestamp desc").
+			Fields(googleapi.Field("nextPageToken,items(name,creationTimestamp,status,deprecated/state)"))
+		if pageToken != "" {
+			call.PageToken(pageToken)
+		}
+		page, err := call.Context(ctx).Do()
+		if err != nil {
+			return nil, err
+		}
+		for _, img := range page.Items {
+			if !usableImage(img) {
+				continue
+			}
+			if matches(img) {
+				return img, nil
+			}
+		}
+		if page.NextPageToken == "" {
+			return nil, nil
+		}
+		pageToken = page.NextPageToken
+	}
+}
+
 // ResolveCurrentCOSImage queries the gke-node-images project for the most
 // recent non-deprecated amd64 COS GKE image matching the cluster's K8s patch
 // version and returns its full resource URL.
@@ -1112,35 +1156,18 @@ func (e *Environment) ResolveCurrentCOSImage(ctx context.Context) string {
 	Expect(len(parts)).To(BeNumerically(">=", 3),
 		"unexpected server version format: %s", serverVer.GitVersion)
 
-	filter := fmt.Sprintf("name=gke-%s%s%s-*", parts[0], parts[1], parts[2])
-
-	var best *compute.Image
-	listErr := e.computeSvc.Images.List("gke-node-images").
-		Filter(filter).
-		Pages(ctx, func(page *compute.ImageList) error {
-			for _, img := range page.Items {
-				if img.Deprecated != nil {
-					switch img.Deprecated.State {
-					case "DEPRECATED", "OBSOLETE", "DELETED":
-						continue
-					}
-				}
-				skip := false
-				for _, substr := range []string{"arm64", "kmod", "nvda", "gvisor", "-test", "cgpv1"} {
-					if strings.Contains(img.Name, substr) {
-						skip = true
-						break
-					}
-				}
-				if skip {
-					continue
-				}
-				if best == nil || img.CreationTimestamp > best.CreationTimestamp {
-					best = img
-				}
+	prefix := fmt.Sprintf("gke-%s%s%s-", parts[0], parts[1], parts[2])
+	best, listErr := newestImage(ctx, e.computeSvc, "gke-node-images", func(img *compute.Image) bool {
+		if !strings.HasPrefix(img.Name, prefix) {
+			return false
+		}
+		for _, substr := range []string{"arm64", "kmod", "nvda", "gvisor", "-test", "cgpv1"} {
+			if strings.Contains(img.Name, substr) {
+				return false
 			}
-			return nil
-		})
+		}
+		return true
+	})
 	Expect(listErr).NotTo(HaveOccurred(), "listing COS images in gke-node-images")
 	Expect(best).NotTo(BeNil(), "no COS image found for K8s version %s", serverVer.GitVersion)
 	return fmt.Sprintf("projects/gke-node-images/global/images/%s", best.Name)
@@ -1160,38 +1187,18 @@ func (e *Environment) ResolveCurrentUbuntuVersion(ctx context.Context) string {
 	Expect(len(parts)).To(BeNumerically(">=", 2),
 		"unexpected server version format: %s", serverVer.GitVersion)
 
-	filter := fmt.Sprintf("name=ubuntu-gke-2404-%s-%s*", parts[0], parts[1])
-
-	var best *compute.Image
-	listErr := e.computeSvc.Images.List("ubuntu-os-gke-cloud").
-		Filter(filter).
-		Pages(ctx, func(page *compute.ImageList) error {
-			for _, img := range page.Items {
-				if img.Deprecated != nil {
-					switch img.Deprecated.State {
-					case "DEPRECATED", "OBSOLETE", "DELETED":
-						continue
-					}
-				}
-				if !strings.Contains(img.Name, "-amd64-") {
-					continue
-				}
-				skip := false
-				for _, substr := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test"} {
-					if strings.Contains(img.Name, substr) {
-						skip = true
-						break
-					}
-				}
-				if skip {
-					continue
-				}
-				if best == nil || img.CreationTimestamp > best.CreationTimestamp {
-					best = img
-				}
+	prefix := fmt.Sprintf("ubuntu-gke-2404-%s-%s", parts[0], parts[1])
+	best, listErr := newestImage(ctx, e.computeSvc, "ubuntu-os-gke-cloud", func(img *compute.Image) bool {
+		if !strings.HasPrefix(img.Name, prefix) || !strings.Contains(img.Name, "-amd64-") {
+			return false
+		}
+		for _, substr := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test"} {
+			if strings.Contains(img.Name, substr) {
+				return false
 			}
-			return nil
-		})
+		}
+		return true
+	})
 	Expect(listErr).NotTo(HaveOccurred(), "listing Ubuntu images in ubuntu-os-gke-cloud")
 	Expect(best).NotTo(BeNil(), "no Ubuntu image found for K8s version %s", serverVer.GitVersion)
 
