@@ -37,7 +37,7 @@ type fixedVersion struct{}
 func (fixedVersion) Get(context.Context) (string, error) { return "v1.35.1", nil }
 func (fixedVersion) Inject(string)                       {}
 
-func TestImageReconcileCatalogQuotaPreservesStatus(t *testing.T) {
+func TestImageReconcileCatalogQuotaInvalidatesReadiness(t *testing.T) {
 	for _, reason := range []string{"RATE_LIMIT_EXCEEDED", "forbidden"} {
 		t.Run(reason, func(t *testing.T) {
 			calls := 0
@@ -70,7 +70,11 @@ func TestImageReconcileCatalogQuotaPreservesStatus(t *testing.T) {
 				require.Equal(t, 1, calls, "watch-triggered reconcile must honor cooldown")
 			}
 			require.Equal(t, "previous-image", nc.Status.Images[0].SourceImage)
-			require.True(t, nc.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady))
+			if reason == "RATE_LIMIT_EXCEEDED" {
+				require.True(t, nc.StatusConditions().Get(v1alpha1.ConditionTypeImagesReady).IsFalse())
+			} else {
+				require.True(t, nc.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady))
+			}
 		})
 	}
 }

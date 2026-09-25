@@ -40,6 +40,7 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "listing images")
 		if delay, limited := imagefamily.CatalogRateLimitRetryAfter(err); limited {
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageResolutionRateLimited", "GCE image catalog rate-limited; retry scheduled")
 			return reconcile.Result{RequeueAfter: max(delay, time.Second)}, nil
 		}
 		if imagefamily.IsImageResolutionError(err) {
