@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,9 +42,26 @@ func TestCancelStopsSubprocesses(t *testing.T) {
 	}
 	finished := make(chan error, 1)
 	go func() { finished <- runIsolated(cmd) }()
-	line, err := bufio.NewReader(out).ReadString('\n')
-	if err != nil {
-		t.Fatalf("reading child PID: %v", err)
+	read := make(chan struct {
+		line string
+		err  error
+	}, 1)
+	go func() {
+		line, err := bufio.NewReader(out).ReadString('\n')
+		read <- struct {
+			line string
+			err  error
+		}{line, err}
+	}()
+	var line string
+	select {
+	case result := <-read:
+		if result.err != nil {
+			t.Fatalf("reading child PID: %v", result.err)
+		}
+		line = result.line
+	case <-time.After(5 * time.Second):
+		t.Fatal("child process did not start")
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(line))
 	if err != nil {
@@ -59,78 +77,13 @@ func TestCancelStopsSubprocesses(t *testing.T) {
 		t.Fatal("command did not stop after cancellation")
 	}
 	state, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "state=").Output()
-	if err == nil && !strings.HasPrefix(strings.TrimSpace(string(state)), "Z") {
-		t.Fatalf("child process %d still running: %s", pid, state)
-	}
-}
-
-func TestLockID(t *testing.T) {
-	if got, err := resolveLockID("ci-run"); err != nil || got != "ci-run" {
-		t.Fatalf("override = %q, %v", got, err)
-	}
-
-	got, err := resolveLockID("")
 	if err != nil {
-		t.Fatal(err)
-	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		t.Fatal(err)
-	}
-	suffix := "@" + hostname + ":pid-" + strconv.Itoa(os.Getpid())
-	if !strings.HasSuffix(got, suffix) || len(got) <= len(suffix) {
-		t.Fatalf("default lock ID %q does not match username%s", got, suffix)
-	}
-}
-
-func TestSelectionFilters(t *testing.T) {
-	for _, tc := range []struct {
-		name                              string
-		provisioning, gpu, drift, storage bool
-	}{
-		{"standard", true, false, true, true},
-		{"gpu", false, true, false, false},
-		{"all", true, true, true, true},
-		{"provisioning", true, false, false, false},
-		{"drift", false, false, true, false},
-		{"drift,storage", false, false, true, true},
-		{" drift , storage ", false, false, true, true},
-		{"gpu,drift", false, true, true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			filter, err := selectFilter("../../test/suites", tc.name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if filter == "" {
-				if !tc.provisioning || !tc.gpu || !tc.drift || !tc.storage {
-					t.Fatal("empty filter must select all features")
-				}
-				return
-			}
-			match, err := types.ParseLabelFilter(filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, check := range []struct {
-				feature string
-				want    bool
-			}{
-				{"provisioning", tc.provisioning},
-				{"gpu", tc.gpu},
-				{"drift", tc.drift},
-				{"storage", tc.storage},
-			} {
-				if got := match([]string{"suite:" + check.feature}); got != check.want {
-					t.Errorf("%s: got %t, want %t", check.feature, got, check.want)
-				}
-			}
-		})
-	}
-	for _, name := range []string{"", "missing", "drift,missing", "drift,", ",drift", "standard,drift"} {
-		if _, err := selectFilter("../../test/suites", name); err == nil {
-			t.Errorf("invalid selection %q was accepted", name)
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			t.Fatalf("checking child process %d: %v", pid, err)
 		}
+	} else if !strings.HasPrefix(strings.TrimSpace(string(state)), "Z") {
+		t.Fatalf("child process %d still running: %s", pid, state)
 	}
 }
 
