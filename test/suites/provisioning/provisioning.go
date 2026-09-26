@@ -33,7 +33,7 @@ var _ = BeforeEach(func() { env = environment.Current() })
 
 var _ = DescribeTable("Provisioning", Label("suite:provisioning"),
 	func(ctx SpecContext, tc environment.TestCase) {
-		runProvisioningTest(ctx, tc)
+		env.RunProvisioningTest(ctx, tc)
 	},
 	// ContainerOptimizedOS
 	Entry("COS / amd64 / on-demand", environment.TestCase{

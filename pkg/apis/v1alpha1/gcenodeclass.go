@@ -112,6 +112,10 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:default=default
 	// +optional
 	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
+	// LocalSsdMode exposes local SSDs as raw devices or kubelet ephemeral storage.
+	// +kubebuilder:default=RawBlock
+	// +optional
+	LocalSsdMode LocalSSDMode `json:"localSsdMode,omitempty"`
 	// PreemptionNoticeDuration is how long before shutdown GCE flips the
 	// instance/preempted metadata key on a Spot VM. Unset (the default) gives no advance
 	// notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.
@@ -126,6 +130,17 @@ type GCENodeClassSpec struct {
 	// +optional
 	PreemptionNoticeDuration *metav1.Duration `json:"preemptionNoticeDuration,omitempty"`
 }
+
+// LocalSSDMode controls how local SSDs are exposed to workloads.
+// +kubebuilder:validation:Enum=RawBlock;Ephemeral
+type LocalSSDMode string
+
+const (
+	// LocalSSDModeRawBlock leaves local SSDs unformatted.
+	LocalSSDModeRawBlock LocalSSDMode = "RawBlock"
+	// LocalSSDModeEphemeral uses local SSDs for kubelet ephemeral storage.
+	LocalSSDModeEphemeral LocalSSDMode = "Ephemeral"
+)
 
 // NetworkConfig holds network settings for provisioned nodes.
 // The shape mirrors the Terraform google_container_node_pool network_config block
@@ -361,7 +376,7 @@ type Disk struct {
 }
 
 // DiskCategory represents a disk category type
-// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
+// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;pd-balanced;pd-extreme;pd-ssd;pd-standard
 type DiskCategory string
 
 // SecondaryBootDiskMode is the mode of the secondary boot disk.
@@ -410,7 +425,7 @@ const (
 	// 1. A field changes its default value for an existing field that is already hashed
 	// 2. A field is added to the hash calculation with an already-set value
 	// 3. A field is removed from the hash calculations
-	GCENodeClassHashVersion = "v4"
+	GCENodeClassHashVersion = "v5"
 )
 
 func (in *GCENodeClass) Hash() string {

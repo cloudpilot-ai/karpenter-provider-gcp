@@ -85,7 +85,6 @@ spec:
                       - hyperdisk-extreme
                       - hyperdisk-ml
                       - hyperdisk-throughput
-                      - local-ssd
                       - pd-balanced
                       - pd-extreme
                       - pd-ssd
@@ -468,6 +467,14 @@ spec:
                   rule: self.all(k, k !='karpenter.sh/nodeclaim')
                 - message: tag contains a restricted tag matching karpenter.k8s.gcp/gcenodeclass
                   rule: self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')
+              localSsdMode:
+                default: RawBlock
+                description: LocalSsdMode exposes local SSDs as raw devices or kubelet
+                  ephemeral storage.
+                enum:
+                - RawBlock
+                - Ephemeral
+                type: string
               metadata:
                 additionalProperties:
                   type: string

@@ -51,6 +51,7 @@ HELM_COMMON_ARGS=(
   --set controller.settings.clusterLocation="${E2E_LOCATION}"
   --set controller.featureGates.spotToSpotConsolidation=true
   --set controller.featureGates.nodeRepair=true
+  --set controller.featureGates.staticCapacity=true
   --set "serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=${GSA_EMAIL}"
   --set controller.replicaCount=1
   --set credentials.enabled=false

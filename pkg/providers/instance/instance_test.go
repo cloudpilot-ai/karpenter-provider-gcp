@@ -23,12 +23,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
@@ -281,7 +284,7 @@ func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	patched, err := p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false)
+	patched, err := p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false, 0)
 	require.NoError(t, err)
 
 	computeMetadata, err := patched.ToComputeMetadata()
@@ -755,7 +758,7 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-ssd", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -769,7 +772,7 @@ func TestRenderDiskProperties_OmitsEmptyDiskCategory(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -782,7 +785,7 @@ func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-extreme", ptr.To(int64(5000)), nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -796,7 +799,7 @@ func TestRenderDiskProperties_SetsProvisionedThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-throughput", nil, ptr.To(int64(500)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -810,12 +813,74 @@ func TestRenderDiskProperties_SetsBothIOPSAndThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-balanced", ptr.To(int64(10000)), ptr.To(int64(400)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
 	require.Equal(t, int64(10000), disks[0].InitializeParams.ProvisionedIops)
 	require.Equal(t, int64(400), disks[0].InitializeParams.ProvisionedThroughput)
+}
+
+func countScratch(disks []*compute.AttachedDisk) int {
+	n := 0
+	for _, d := range disks {
+		if d.Type == "SCRATCH" && d.Interface == "NVME" &&
+			d.InitializeParams != nil && d.InitializeParams.DiskSizeGb == 0 &&
+			strings.HasSuffix(d.InitializeParams.DiskType, "/diskTypes/local-ssd") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestRenderDiskProperties_SsdCountEmitsScratchDisks(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name             string
+		instanceTypeName string
+		ssdCount         int
+		legacyEntries    int
+		wantScratchCount int
+	}{
+		{name: "no SSDs at all", instanceTypeName: "n2d-standard-8", ssdCount: 0, legacyEntries: 0, wantScratchCount: 0},
+		{name: "configurable family ssdCount=2", instanceTypeName: "n2d-standard-8", ssdCount: 2, legacyEntries: 0, wantScratchCount: 2},
+		{name: "ssdCount=0 with 2 legacy entries → still 0 (legacy ignored)", instanceTypeName: "n2d-standard-8", ssdCount: 0, legacyEntries: 2, wantScratchCount: 0},
+		{name: "ssdCount=3 with 1 legacy entry → 3 (legacy ignored)", instanceTypeName: "n2d-standard-8", ssdCount: 3, legacyEntries: 1, wantScratchCount: 3},
+		{name: "bundled SKU never gets explicit SCRATCH", instanceTypeName: "z3-highmem-88-highlssd", ssdCount: 12, legacyEntries: 0, wantScratchCount: 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			nc := &v1alpha1.GCENodeClass{
+				Spec: v1alpha1.GCENodeClassSpec{
+					Disks: []v1alpha1.Disk{
+						{Boot: true, SizeGiB: 50, Category: "pd-balanced"},
+					},
+				},
+				Status: v1alpha1.GCENodeClassStatus{
+					Images: []v1alpha1.Image{{
+						SourceImage: "projects/my-project/global/images/my-image",
+						Requirements: []corev1.NodeSelectorRequirement{{
+							Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"},
+						}},
+					}},
+				},
+			}
+			for i := 0; i < tc.legacyEntries; i++ {
+				nc.Spec.Disks = append(nc.Spec.Disks, v1alpha1.Disk{Category: "local-ssd"})
+			}
+
+			it := amd64InstanceType()
+			it.Name = tc.instanceTypeName
+			p := &DefaultProvider{projectID: "my-project"}
+			disks, err := p.renderDiskProperties(it, nc, "us-central1-a", tc.ssdCount)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantScratchCount, countScratch(disks),
+				"expected %d SCRATCH local-SSD disks", tc.wantScratchCount)
+		})
+	}
 }
 
 func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testing.T) {
@@ -854,7 +919,7 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 		},
 	}
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a")
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 2)
@@ -1297,6 +1362,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
+		nil, 0,
 	)
 	require.NoError(t, err)
 
@@ -1373,6 +1439,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -1427,6 +1494,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -1532,6 +1600,7 @@ func TestBuildInstance_SortsMetadataAfterAllPatches(t *testing.T) {
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-sort-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 	require.NoError(t, err)
 
@@ -1573,6 +1642,7 @@ func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-disk-label-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -1598,6 +1668,7 @@ func TestBuildInstance_RebuildsGCELabelsWithoutTemplateIdentityLabelInheritance(
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-identity-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -1640,6 +1711,7 @@ func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
 				makeCluster("net", "subnet", "pods", false),
 				"us-central1-a", "karpenter-gpu-test",
 				karpv1.CapacityTypeOnDemand,
+				nil, 0,
 			)
 			require.NoError(t, err)
 			kl := kubeLabelsFrom(t, instance)
@@ -1686,6 +1758,7 @@ func TestBuildInstance_GPUDriverVersionNotInjectedForNonGPU(t *testing.T) {
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -1707,6 +1780,7 @@ func TestBuildInstance_GPUDriverVersionOverridesTemplate(t *testing.T) {
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -1743,6 +1817,7 @@ func TestBuildInstance_NodePoolLabelDoesNotOverrideGPUDriverAtBootTime(t *testin
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -1770,11 +1845,26 @@ func TestSetupInstanceLabels_StampsClusterLocation(t *testing.T) {
 	p := &DefaultProvider{clusterName: "my-cluster", clusterLocation: "us-central1-f"}
 	inst, nodeClaim, nodeClass := instanceLabelsFixture()
 
-	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 0)
 
 	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
 	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
 		"cluster location must be stamped on the instance label %q", locationKey)
+}
+
+func TestSetupInstanceLabels_StampsLocalSSDCount(t *testing.T) {
+	t.Parallel()
+
+	countKey := utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)
+	for _, count := range []int{0, 4} {
+		p := &DefaultProvider{clusterName: "my-cluster", clusterLocation: "us-central1-f"}
+		inst, nodeClaim, nodeClass := instanceLabelsFixture()
+
+		p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", count)
+
+		require.Equal(t, strconv.Itoa(count), inst.Labels[countKey],
+			"local-SSD count %d must be stamped on the instance label %q", count, countKey)
+	}
 }
 
 func TestBuildInstance_DoesNotCopyKubernetesSchedulingLabelsToGCELabels(t *testing.T) {
@@ -1800,6 +1890,7 @@ func TestBuildInstance_DoesNotCopyKubernetesSchedulingLabelsToGCELabels(t *testi
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-f", "karpenter-no-label-leak",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -1819,7 +1910,7 @@ func TestSetupInstanceLabels_ClusterNameNotOverwrittenByRequirements(t *testing.
 
 	p := &DefaultProvider{clusterName: "real-cluster", clusterLocation: "us-central1-f"}
 	inst, nodeClaim, nodeClass := instanceLabelsFixture()
-	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 0)
 
 	nameKey := utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)
 	require.Equal(t, "real-cluster", inst.Labels[nameKey],
@@ -1831,7 +1922,7 @@ func TestSetupInstanceLabels_ClusterLocationNotOverwrittenByRequirements(t *test
 
 	p := &DefaultProvider{clusterName: "my-cluster", clusterLocation: "us-central1-f"}
 	inst, nodeClaim, nodeClass := instanceLabelsFixture()
-	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	p.setupInstanceLabels(inst, nodeClaim, nodeClass, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 0)
 
 	locationKey := utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)
 	require.Equal(t, "us-central1-f", inst.Labels[locationKey],
@@ -2056,6 +2147,343 @@ func TestSetupServiceAccounts_ErrorWhenNoSAAvailable(t *testing.T) {
 	require.Contains(t, err.Error(), "no service account available")
 }
 
+func machineTypeWithBundledSSDs(count int32) *computepb.MachineType {
+	if count == 0 {
+		return &computepb.MachineType{}
+	}
+	return &computepb.MachineType{
+		BundledLocalSsds: &computepb.BundledLocalSsds{
+			PartitionCount: ptr.To(count),
+		},
+	}
+}
+
+func TestOnHostMaintenancePolicy(t *testing.T) {
+	t.Parallel()
+
+	newIT := func(name string, gpu bool) *cloudprovider.InstanceType {
+		gpuReq := scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist)
+		if gpu {
+			gpuReq = scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1")
+		}
+		return &cloudprovider.InstanceType{Name: name, Requirements: scheduling.NewRequirements(gpuReq)}
+	}
+
+	cases := []struct {
+		name         string
+		instanceType *cloudprovider.InstanceType
+		capacityType string
+		mt           *computepb.MachineType
+		want         string
+	}{
+		{
+			"z3 non-metal lssd ≤18 TiB on-demand requires MIGRATE",
+			newIT("z3-highmem-22-standardlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(2), "MIGRATE",
+		},
+		{
+			"z3 non-metal lssd spot keeps TERMINATE (spot wins)",
+			newIT("z3-highmem-22-standardlssd", false), karpv1.CapacityTypeSpot, machineTypeWithBundledSSDs(2), "TERMINATE",
+		},
+		{
+			"z3-highmem-88-highlssd 12 partitions = 35 TiB requires TERMINATE",
+			newIT("z3-highmem-88-highlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(12), "TERMINATE",
+		},
+		{
+			"z3-highmem-176-standardlssd 12 partitions = 35 TiB requires TERMINATE",
+			newIT("z3-highmem-176-standardlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(12), "TERMINATE",
+		},
+		{
+			"z3 non-metal 6 partitions = 17.58 TiB stays MIGRATE (under 18 TiB)",
+			newIT("z3-highmem-88-standardlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(6), "MIGRATE",
+		},
+		{
+			"z3 non-metal cache miss (mt nil) falls back to MIGRATE",
+			newIT("z3-highmem-88-highlssd", false), karpv1.CapacityTypeOnDemand, nil, "MIGRATE",
+		},
+		{
+			"z3 highlssd-metal on-demand: bare metal explicit TERMINATE",
+			newIT("z3-highmem-192-highlssd-metal", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(12), "TERMINATE",
+		},
+		{
+			"c4 lssd-metal on-demand: bare metal explicit TERMINATE",
+			newIT("c4-standard-288-lssd-metal", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(6), "TERMINATE",
+		},
+		{
+			"h4d-highmem-192-lssd on-demand: HPC, no live migration → TERMINATE",
+			newIT("h4d-highmem-192-lssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(10), "TERMINATE",
+		},
+		{
+			"h4d-standard-192 (no -lssd) on-demand: HPC, no live migration → TERMINATE",
+			newIT("h4d-standard-192", false), karpv1.CapacityTypeOnDemand, nil, "TERMINATE",
+		},
+		{
+			"GPU on-demand returns TERMINATE",
+			newIT("a2-highgpu-1g", true), karpv1.CapacityTypeOnDemand, nil, "TERMINATE",
+		},
+		{
+			"n2d on-demand falls through",
+			newIT("n2d-standard-4", false), karpv1.CapacityTypeOnDemand, nil, "",
+		},
+		{
+			"n2d spot returns TERMINATE",
+			newIT("n2d-standard-4", false), karpv1.CapacityTypeSpot, nil, "TERMINATE",
+		},
+		{
+			"c4d-lssd on-demand falls through (GCE accepts MIGRATE or TERMINATE)",
+			newIT("c4d-standard-8-lssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(2), "",
+		},
+		{
+			"c4a-lssd on-demand falls through (GCE accepts MIGRATE or TERMINATE)",
+			newIT("c4a-standard-8-lssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(2), "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, onHostMaintenancePolicy(tc.instanceType, tc.capacityType, tc.mt))
+		})
+	}
+}
+
+func makeVariant(name string, odPrice float64, ssdCount int, ephemeralGiB int64) *cloudprovider.InstanceType {
+	reqs := scheduling.NewRequirements(
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, name),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceLocalSsdCount, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", ssdCount)),
+	)
+	offering := &cloudprovider.Offering{
+		Available: true,
+		Price:     odPrice,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"),
+		),
+	}
+	cap := corev1.ResourceList{}
+	if ephemeralGiB > 0 {
+		cap[corev1.ResourceEphemeralStorage] = *resource.NewQuantity(ephemeralGiB*1024*1024*1024, resource.BinarySI)
+	}
+	return &cloudprovider.InstanceType{
+		Name:         name,
+		Requirements: reqs,
+		Offerings:    cloudprovider.Offerings{offering},
+		Capacity:     cap,
+	}
+}
+
+func orderedVariantSSDCounts(its []*cloudprovider.InstanceType) []int {
+	out := make([]int, len(its))
+	for i, it := range its {
+		out[i] = variantSSDCount(it)
+	}
+	return out
+}
+
+func TestVariantSSDCount(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		it   *cloudprovider.InstanceType
+		want int
+	}{
+		{
+			name: "count=0 variant",
+			it:   makeVariant("n2d-standard-8", 1.0, 0, 0),
+			want: 0,
+		},
+		{
+			name: "count=4 variant",
+			it:   makeVariant("n2d-standard-8", 1.0, 4, 0),
+			want: 4,
+		},
+		{
+			name: "count=24 variant",
+			it:   makeVariant("n2d-standard-8", 1.0, 24, 0),
+			want: 24,
+		},
+		{
+			name: "no requirement → 0",
+			it: &cloudprovider.InstanceType{
+				Name: "e2-medium",
+				Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "e2-medium"),
+				),
+			},
+			want: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, variantSSDCount(tc.it))
+		})
+	}
+}
+
+func TestInstanceTypesForLaunch(t *testing.T) {
+	t.Parallel()
+
+	configurable := func(counts ...int) []*cloudprovider.InstanceType {
+		return lo.Map(counts, func(count int, _ int) *cloudprovider.InstanceType {
+			return makeVariant("n2d-standard-8", 1.0, count, 0)
+		})
+	}
+	bundled := makeVariant("c4-standard-4-lssd", 2.0, 1, 0)
+	ordinary := makeVariant("e2-standard-4", 0.5, 0, 0)
+	nodeClaim := func(requirement *karpv1.NodeSelectorRequirementWithMinValues) *karpv1.NodeClaim {
+		claim := &karpv1.NodeClaim{}
+		if requirement != nil {
+			claim.Spec.Requirements = []karpv1.NodeSelectorRequirementWithMinValues{*requirement}
+		}
+		return claim
+	}
+	countReq := func(operator corev1.NodeSelectorOperator, values ...string) *karpv1.NodeSelectorRequirementWithMinValues {
+		return &karpv1.NodeSelectorRequirementWithMinValues{Key: v1alpha1.LabelInstanceLocalSsdCount, Operator: operator, Values: values}
+	}
+	ids := func(instanceTypes []*cloudprovider.InstanceType) []string {
+		return lo.Map(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) string {
+			return fmt.Sprintf("%s:%d", instanceType.Name, variantSSDCount(instanceType))
+		})
+	}
+
+	cases := []struct {
+		name     string
+		claim    *karpv1.NodeClaim
+		input    []*cloudprovider.InstanceType
+		want     []string
+		rejected bool
+	}{
+		{name: "absent count defaults configurable family to zero", claim: nodeClaim(nil), input: append(configurable(0, 2, 4), bundled, ordinary), want: []string{"n2d-standard-8:0", "c4-standard-4-lssd:1", "e2-standard-4:0"}, rejected: true},
+		{name: "explicit zero", claim: nodeClaim(countReq(corev1.NodeSelectorOpIn, "0")), input: append(configurable(0), ordinary), want: []string{"n2d-standard-8:0", "e2-standard-4:0"}},
+		{name: "exact positive count", claim: nodeClaim(countReq(corev1.NodeSelectorOpIn, "4")), input: configurable(4), want: []string{"n2d-standard-8:4"}},
+		{name: "broad greater-than keeps bundled fallback", claim: nodeClaim(countReq(corev1.NodeSelectorOpGt, "0")), input: append(configurable(2, 4), bundled), want: []string{"c4-standard-4-lssd:1"}, rejected: true},
+		{name: "positive-only multi value rejects configurable rows", claim: nodeClaim(countReq(corev1.NodeSelectorOpIn, "2", "4")), input: configurable(2, 4), want: []string{}, rejected: true},
+		{name: "multi value including zero rejects configurable rows", claim: nodeClaim(countReq(corev1.NodeSelectorOpIn, "0", "2", "4")), input: configurable(0, 2, 4), want: []string{}, rejected: true},
+		{name: "exists rejects configurable rows", claim: nodeClaim(countReq(corev1.NodeSelectorOpExists)), input: configurable(0, 2, 4), want: []string{}, rejected: true},
+		{name: "static broad count rejects configurable rows", claim: nodeClaim(countReq(corev1.NodeSelectorOpGt, "0")), input: configurable(2, 4), want: []string{}, rejected: true},
+		{name: "invalid singleton rejects configurable rows", claim: nodeClaim(countReq(corev1.NodeSelectorOpIn, "invalid")), input: configurable(0, 2, 4), want: []string{}, rejected: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, rejected := instanceTypesForLaunch(tc.claim, tc.input)
+			require.Equal(t, tc.want, ids(got))
+			require.Equal(t, tc.rejected, rejected)
+		})
+	}
+}
+
+func TestValidateLaunchInstanceTypes_ClassifiesAmbiguousCountForImmediateDeletion(t *testing.T) {
+	t.Parallel()
+
+	_, err := validateLaunchInstanceTypes(nil, true)
+	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
+	require.Contains(t, err.Error(), v1alpha1.LabelInstanceLocalSsdCount)
+	require.Contains(t, err.Error(), "count=0 variant that fits the request")
+}
+
+func TestInstanceTypesForLaunch_RecomputesCapacityTypeAfterFiltering(t *testing.T) {
+	t.Parallel()
+
+	configurableSpot := makeVariant("n2d-standard-8", 1.0, 2, 0)
+	configurableSpot.Offerings[0].Requirements = scheduling.NewRequirements(
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeSpot),
+		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"),
+	)
+	bundledOnDemand := makeVariant("c4-standard-4-lssd", 2.0, 1, 0)
+	claim := &karpv1.NodeClaim{Spec: karpv1.NodeClaimSpec{Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
+		{Key: v1alpha1.LabelInstanceLocalSsdCount, Operator: corev1.NodeSelectorOpGt, Values: []string{"0"}},
+		{Key: karpv1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand}},
+	}}}
+
+	provider := &DefaultProvider{}
+	require.Equal(t, karpv1.CapacityTypeSpot, provider.getCapacityType(claim, []*cloudprovider.InstanceType{configurableSpot, bundledOnDemand}))
+	launch, rejected := instanceTypesForLaunch(claim, []*cloudprovider.InstanceType{configurableSpot, bundledOnDemand})
+	require.True(t, rejected)
+	require.Equal(t, []*cloudprovider.InstanceType{bundledOnDemand}, launch)
+	require.Equal(t, karpv1.CapacityTypeOnDemand, provider.getCapacityType(claim, launch), "removed configurable spot rows must not force a bundled fallback onto spot")
+}
+
+func TestOrderInstanceTypesByPrice_Case1_NoCountSelector(t *testing.T) {
+	t.Parallel()
+
+	requirements := scheduling.NewRequirements(
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "n2d-standard-8"),
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+	)
+
+	for _, perm := range [][]int{
+		{4, 0, 16, 2, 24, 1, 8},
+		{24, 16, 8, 4, 2, 1, 0},
+		{0, 1, 2, 4, 8, 16, 24},
+	} {
+		var in []*cloudprovider.InstanceType
+		for _, c := range perm {
+			in = append(in, makeVariant("n2d-standard-8", 1.0, c, 0))
+		}
+		got := orderedVariantSSDCounts(orderInstanceTypesByPrice(in, requirements))
+		require.Equal(t, []int{0, 1, 2, 4, 8, 16, 24}, got,
+			"variant order should be deterministic ascending regardless of input permutation %v", perm)
+	}
+}
+
+func TestOrderInstanceTypesByPrice_Case2_CountSelector(t *testing.T) {
+	t.Parallel()
+
+	requirements := scheduling.NewRequirements(
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "n2d-standard-8"),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceLocalSsdCount, corev1.NodeSelectorOpIn, "4"),
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+	)
+	in := []*cloudprovider.InstanceType{makeVariant("n2d-standard-8", 1.0, 4, 0)}
+	got := orderedVariantSSDCounts(orderInstanceTypesByPrice(in, requirements))
+	require.Equal(t, []int{4}, got)
+}
+
+func TestOrderInstanceTypesByPrice_Case3_EphemeralCapacity(t *testing.T) {
+	t.Parallel()
+
+	requirements := scheduling.NewRequirements(
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "n2d-standard-8"),
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+	)
+
+	in := []*cloudprovider.InstanceType{
+		makeVariant("n2d-standard-8", 1.0, 24, 24*375),
+		makeVariant("n2d-standard-8", 1.0, 4, 4*375),
+		makeVariant("n2d-standard-8", 1.0, 8, 8*375),
+		makeVariant("n2d-standard-8", 1.0, 2, 2*375),
+		makeVariant("n2d-standard-8", 1.0, 16, 16*375),
+	}
+	got := orderedVariantSSDCounts(orderInstanceTypesByPrice(in, requirements))
+	require.Equal(t, []int{2, 4, 8, 16, 24}, got,
+		"same-name variants must retain deterministic count ordering")
+}
+
+func TestOrderInstanceTypesByPrice_DistinctMachineTypes(t *testing.T) {
+	t.Parallel()
+
+	requirements := scheduling.NewRequirements(
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+	)
+	in := []*cloudprovider.InstanceType{
+		makeVariant("n2d-standard-8", 2.0, 4, 0),
+		makeVariant("n2-standard-4", 1.0, 0, 0),
+		makeVariant("n2-standard-4", 1.0, 2, 0),
+		makeVariant("n2d-standard-8", 2.0, 0, 0),
+	}
+	got := orderInstanceTypesByPrice(in, requirements)
+	names := make([]string, len(got))
+	counts := make([]int, len(got))
+	for i, it := range got {
+		names[i] = it.Name
+		counts[i] = variantSSDCount(it)
+	}
+	require.Equal(t, []string{"n2-standard-4", "n2-standard-4", "n2d-standard-8", "n2d-standard-8"}, names)
+	require.Equal(t, []int{0, 2, 0, 4}, counts)
+}
+
 // makeNonGPUIT returns a minimal on-demand instance type with no GPU requirements,
 // suitable for testing Confidential VM wiring without triggering the GPU TERMINATE override.
 func makeNonGPUIT() *cloudprovider.InstanceType {
@@ -2068,6 +2496,7 @@ func makeNonGPUIT() *cloudprovider.InstanceType {
 		},
 		Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist),
 		),
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
@@ -2087,6 +2516,7 @@ func buildConfidentialInstance(t *testing.T, nc *v1alpha1.GCENodeClass) *compute
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-confidential-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 	require.NoError(t, err)
 	return instance
@@ -2157,7 +2587,7 @@ func TestGetOrCreateInstance_AdoptsInstanceFromEarlierAttemptZone(t *testing.T) 
 	nodeClaim.Name = "default-vzmzs"
 
 	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
-		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"})
+		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"}, nil, 0)
 
 	require.NoError(t, err)
 	require.False(t, retryable)
@@ -2188,7 +2618,7 @@ func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
 	nodeClaim.Name = "default-sgfkv"
 
 	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
-		"us-central1-c", karpv1.CapacityTypeOnDemand, nil)
+		"us-central1-c", karpv1.CapacityTypeOnDemand, nil, nil, 0)
 
 	require.NoError(t, err)
 	require.False(t, retryable)
@@ -2204,4 +2634,94 @@ func TestLastPathSegment(t *testing.T) {
 	require.Equal(t, "e2-standard-16", lastPathSegment("zones/us-central1-f/machineTypes/e2-standard-16"))
 	require.Equal(t, "us-central1-c", lastPathSegment("us-central1-c"))
 	require.Equal(t, "", lastPathSegment(""))
+}
+
+func TestPatchLocalSSDMetadata(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name          string
+		mode          v1alpha1.LocalSSDMode
+		count         int
+		sourceKubeEnv string
+		wantEnv       []string
+		wantNotEnv    []string
+		wantLabels    []string
+		wantNotLabels []string
+	}{
+		{
+			name:          "RawBlock count 4",
+			mode:          v1alpha1.LocalSSDModeRawBlock,
+			count:         4,
+			wantEnv:       []string{"NODE_LOCAL_NVME_SSD_BLOCK_EXT: 4,nvme,block"},
+			wantNotEnv:    []string{"NODE_EPHEMERAL_STORAGE_LOCAL_SSD"},
+			wantLabels:    []string{"cloud.google.com/gke-local-nvme-ssd=true"},
+			wantNotLabels: []string{"cloud.google.com/gke-ephemeral-storage-local-ssd"},
+		},
+		{
+			name:          "empty mode defaults to RawBlock",
+			mode:          "",
+			count:         2,
+			wantEnv:       []string{"NODE_LOCAL_NVME_SSD_BLOCK_EXT: 2,nvme,block"},
+			wantLabels:    []string{"cloud.google.com/gke-local-nvme-ssd=true"},
+			wantNotLabels: []string{"cloud.google.com/gke-ephemeral-storage-local-ssd"},
+		},
+		{
+			name:          "Ephemeral drops inherited EXT key",
+			mode:          v1alpha1.LocalSSDModeEphemeral,
+			count:         2,
+			sourceKubeEnv: "NODE_LOCAL_NVME_SSD_BLOCK_EXT: 8,nvme,block\n",
+			wantEnv:       []string{"NODE_EPHEMERAL_STORAGE_LOCAL_SSD: true"},
+			wantNotEnv:    []string{"NODE_LOCAL_NVME_SSD_BLOCK_EXT"},
+			wantLabels:    []string{"cloud.google.com/gke-ephemeral-storage-local-ssd=true"},
+			wantNotLabels: []string{"cloud.google.com/gke-local-nvme-ssd"},
+		},
+		{
+			name:          "count 0 is a no-op",
+			mode:          v1alpha1.LocalSSDModeRawBlock,
+			count:         0,
+			wantNotEnv:    []string{"NODE_LOCAL_NVME_SSD_BLOCK_EXT", "NODE_EPHEMERAL_STORAGE_LOCAL_SSD"},
+			wantNotLabels: []string{"cloud.google.com/gke-local-nvme-ssd", "cloud.google.com/gke-ephemeral-storage-local-ssd"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			source := computeMetadataValues(map[string]string{
+				metadata.KubeEnvKey:    tc.sourceKubeEnv,
+				metadata.KubeLabelsKey: "",
+			})
+			target, err := metadata.FromSourceTemplate(source)
+			require.NoError(t, err)
+
+			nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{LocalSsdMode: tc.mode}}
+			patchLocalSSDMetadata(target, nc, tc.count)
+
+			rendered, err := target.ToComputeMetadata()
+			require.NoError(t, err)
+			var kubeEnv, kubeLabels string
+			for _, item := range rendered.Items {
+				switch item.Key {
+				case metadata.KubeEnvKey:
+					kubeEnv = ptr.Deref(item.Value, "")
+				case metadata.KubeLabelsKey:
+					kubeLabels = ptr.Deref(item.Value, "")
+				}
+			}
+			for _, want := range tc.wantEnv {
+				require.Contains(t, kubeEnv, want)
+			}
+			for _, notWant := range tc.wantNotEnv {
+				require.NotContains(t, kubeEnv, notWant)
+			}
+			for _, want := range tc.wantLabels {
+				require.Contains(t, kubeLabels, want)
+			}
+			for _, notWant := range tc.wantNotLabels {
+				require.NotContains(t, kubeLabels, notWant)
+			}
+		})
+	}
 }
