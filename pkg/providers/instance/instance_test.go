@@ -130,6 +130,16 @@ func TestExtractInsertInsufficientCapacityDetailsMatchesReason(t *testing.T) {
 	}, details)
 }
 
+func TestMachineTypeUnsupportedIsInsufficientCapacity(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isInsufficientCapacityError(&compute.OperationErrorErrors{Code: "MACHINE_TYPE_UNSUPPORTED"}))
+	_, ok := extractInsertInsufficientCapacityDetails(&googleapi.Error{
+		Errors: []googleapi.ErrorItem{{Reason: "MACHINE_TYPE_UNSUPPORTED"}},
+	})
+	require.True(t, ok)
+}
+
 func TestExtractInsertInsufficientCapacityDetailsRequiresStructuredReason(t *testing.T) {
 	t.Parallel()
 
@@ -1102,15 +1112,51 @@ func TestSetupScheduling(t *testing.T) {
 
 	t.Run("spot sets termination action", func(t *testing.T) {
 		t.Parallel()
-		sched := setupScheduling(karpv1.CapacityTypeSpot)
+		sched := setupScheduling(karpv1.CapacityTypeSpot, &v1alpha1.GCENodeClass{})
 		require.Equal(t, instanceTerminationActionDelete, sched.InstanceTerminationAction)
 	})
 
 	t.Run("on-demand leaves termination action empty", func(t *testing.T) {
 		t.Parallel()
-		sched := setupScheduling(karpv1.CapacityTypeOnDemand)
+		sched := setupScheduling(karpv1.CapacityTypeOnDemand, &v1alpha1.GCENodeClass{})
 		require.Empty(t, sched.InstanceTerminationAction)
 	})
+}
+
+func TestSetupSchedulingPreemptionNoticeDuration(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name            string
+		capacityType    string
+		noticeDuration  *metav1.Duration
+		expectedSeconds int64
+	}{
+		{name: "spot unset leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot},
+		{name: "spot zero leaves notice duration nil", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 0}},
+		{name: "spot 120s sets a two-minute notice", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 120 * time.Second}, expectedSeconds: 120},
+		{name: "spot 2m sets the same notice as 120s", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 2 * time.Minute}, expectedSeconds: 120},
+		{name: "spot 90s is passed through unrounded", capacityType: karpv1.CapacityTypeSpot, noticeDuration: &metav1.Duration{Duration: 90 * time.Second}, expectedSeconds: 90},
+		{name: "on-demand ignores notice duration", capacityType: karpv1.CapacityTypeOnDemand, noticeDuration: &metav1.Duration{Duration: 120 * time.Second}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.PreemptionNoticeDuration = tc.noticeDuration
+
+			sched := setupScheduling(tc.capacityType, nc)
+
+			if tc.expectedSeconds == 0 {
+				require.Nil(t, sched.PreemptionNoticeDuration)
+				return
+			}
+			require.NotNil(t, sched.PreemptionNoticeDuration)
+			require.Equal(t, tc.expectedSeconds, sched.PreemptionNoticeDuration.Seconds)
+		})
+	}
 }
 
 func spotOrOnDemandNodeClaim() *karpv1.NodeClaim {
@@ -2082,4 +2128,80 @@ func TestConfidentialInstanceType(t *testing.T) {
 			require.Equal(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
 		})
 	}
+}
+
+func TestGetOrCreateInstance_AdoptsInstanceFromEarlierAttemptZone(t *testing.T) {
+	t.Parallel()
+
+	insertCalled := false
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			insertCalled = true
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			return
+		}
+		if strings.Contains(r.URL.Path, "/zones/us-central1-f/instances/") {
+			writeJSON(w, &compute.Instance{
+				Name:        "karpenter-default-vzmzs",
+				Zone:        "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-f",
+				MachineType: "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-f/machineTypes/e2-standard-16",
+				Status:      InstanceStatusRunning,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(w, &googleapi.Error{Code: http.StatusNotFound, Message: "not found"})
+	}))
+
+	nodeClaim := &karpv1.NodeClaim{}
+	nodeClaim.Name = "default-vzmzs"
+
+	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
+		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"})
+
+	require.NoError(t, err)
+	require.False(t, retryable)
+	require.False(t, insertCalled, "a second instance must not be created when an earlier attempt already made one")
+	require.NotNil(t, instance)
+	require.Equal(t, "us-central1-f", zone, "the adopted instance's real zone must be returned, not the newly selected zone")
+	require.Equal(t, "e2-standard-16", lastPathSegment(instance.MachineType))
+}
+
+func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
+	t.Parallel()
+
+	insertCalled := false
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			insertCalled = true
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			return
+		}
+		writeJSON(w, &compute.Instance{
+			Name:   "karpenter-default-sgfkv",
+			Zone:   "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-c",
+			Status: InstanceStatusRunning,
+		})
+	}))
+
+	nodeClaim := &karpv1.NodeClaim{}
+	nodeClaim.Name = "default-sgfkv"
+
+	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
+		"us-central1-c", karpv1.CapacityTypeOnDemand, nil)
+
+	require.NoError(t, err)
+	require.False(t, retryable)
+	require.False(t, insertCalled)
+	require.NotNil(t, instance)
+	require.Equal(t, "us-central1-c", zone)
+}
+
+func TestLastPathSegment(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "us-central1-f", lastPathSegment("https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-f"))
+	require.Equal(t, "e2-standard-16", lastPathSegment("zones/us-central1-f/machineTypes/e2-standard-16"))
+	require.Equal(t, "us-central1-c", lastPathSegment("us-central1-c"))
+	require.Equal(t, "", lastPathSegment(""))
 }

@@ -8,12 +8,14 @@ For an overview of selection modes (channel tracking, version pin, raw image ID)
 
 ## Finding Available Versions
 
+Karpenter only selects images whose GCE status is `READY`. The commands below apply the same filter, so an image that GCP is still publishing doesn't appear until you can use it.
+
 **ContainerOptimizedOS** — replace `1351` with your K8s version digits (e.g. 1.35.1 → 1351):
 
 ```bash
 gcloud compute images list \
   --project=gke-node-images \
-  --filter="name~'^gke-1351-.*-cos-[0-9].*-c-pre$' AND NOT deprecated:*" \
+  --filter="name~'^gke-1351-.*-cos-[0-9].*-c-pre$' AND NOT deprecated:* AND status=READY" \
   --format="value(name)" \
   | sed 's/.*-cos-\([0-9][0-9]*-[0-9][0-9]*-[0-9][0-9]*-[0-9][0-9]*\)-c-pre/\1/' \
   | tr '-' '.' | sort -u
@@ -31,7 +33,7 @@ Sample output:
 ```bash
 gcloud compute images list \
   --project=ubuntu-os-gke-cloud \
-  --filter="name~'^ubuntu-gke-2404-1-35-amd64-v[0-9]+[a-z]?$' AND NOT deprecated:*" \
+  --filter="name~'^ubuntu-gke-2404-1-35-amd64-v[0-9]+[a-z]?$' AND NOT deprecated:* AND status=READY" \
   --format="value(name)" \
   | grep -oE 'v[0-9]+[a-z]?$' | sort -u
 ```
@@ -48,7 +50,7 @@ For arm64, change the arch token in the filter (`amd64` → `arm64`):
 ```bash
 gcloud compute images list \
   --project=ubuntu-os-gke-cloud \
-  --filter="name~'^ubuntu-gke-2404-1-35-arm64-v[0-9]+[a-z]?$' AND NOT deprecated:*" \
+  --filter="name~'^ubuntu-gke-2404-1-35-arm64-v[0-9]+[a-z]?$' AND NOT deprecated:* AND status=READY" \
   --format="value(name)" \
   | grep -oE 'v[0-9]+[a-z]?$' | sort -u
 ```

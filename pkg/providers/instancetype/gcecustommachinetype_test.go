@@ -140,7 +140,7 @@ func TestListSchedulesOntoRegisteredCustomMachineType(t *testing.T) {
 	// without a live machineTypesClient for the (here empty) aggregated-list side.
 	customTypes, customPrices, err := p.listCustomMachineTypes(ctx)
 	require.NoError(t, err)
-	p.instanceTypesInfo = customTypes
+	p.instanceTypesByName = indexInstanceTypesByName(customTypes)
 	p.customMachineTypePrices = customPrices
 	for _, mt := range customTypes {
 		zone := lo.FromPtr(mt.Zone)

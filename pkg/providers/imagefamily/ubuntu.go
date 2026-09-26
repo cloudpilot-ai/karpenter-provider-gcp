@@ -169,23 +169,23 @@ func ubuntuImageDeprecated(img *compute.Image) bool {
 
 // isUsableUbuntuImage reports whether img is a non-deprecated, clean amd64 ubuntu-gke-2404 image.
 func isUsableUbuntuImage(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2404AMD64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2404AMD64Re.MatchString(img.Name)
 }
 
 // isUsableUbuntuArm64Image reports whether img is a non-deprecated, clean arm64 ubuntu-gke-2404 image.
 func isUsableUbuntuArm64Image(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2404ARM64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2404ARM64Re.MatchString(img.Name)
 }
 
 // isUsableUbuntu2204Image reports whether img is a non-deprecated, clean amd64 ubuntu-gke-2204 image
 // (the 2204 series carries no arch token for amd64).
 func isUsableUbuntu2204Image(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2204AMD64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2204AMD64Re.MatchString(img.Name)
 }
 
 // isUsableUbuntu2204Arm64Image reports whether img is a non-deprecated, clean arm64 ubuntu-gke-2204 image.
 func isUsableUbuntu2204Arm64Image(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2204ARM64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2204ARM64Re.MatchString(img.Name)
 }
 
 // buildImageFilter returns a GCP Images.List filter scoped to the cluster's K8s minor version.

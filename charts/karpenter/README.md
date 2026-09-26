@@ -93,7 +93,8 @@ serviceMonitor:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| additionalAnnotations | object | `{}` | Additional annotations to add into metadata. |
+| additionalAnnotations | object | `{}` | Additional annotations to add into metadata for templated resources (excludes CRDs). |
+| additionalLabels | object | `{}` | Additional labels to add into metadata for templated resources (excludes CRDs). Labels that the chart adds by default will not be overridden by these additional labels. |
 | controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].labelSelector.matchLabels."app.kubernetes.io/name" | string | `"karpenter"` |  |
 | controller.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey | string | `"kubernetes.io/hostname"` |  |
 | controller.disableControllerWarmup | bool | `true` | disableControllerWarmup controls whether controller sources (watches/informers) start before leader election is won. Set to false to enable warmup, which pre-populates caches and improves leader failover time. Default true matches karpenter-core default (warmup disabled). |
@@ -128,6 +129,7 @@ serviceMonitor:
 | controller.strategy.rollingUpdate.maxUnavailable | int | `1` |  |
 | controller.terminationGracePeriodSeconds | int | `30` |  |
 | controller.tolerations | list | `[]` |  |
+| controller.topologySpreadConstraints | list | `[]` |  |
 | credentials | object | `{"enabled":true,"secretKey":"key.json","secretName":""}` | GCP credentials configuration |
 | credentials.enabled | bool | `true` | Enable or disable the use of GCP credentials secret Set to true if you want to use a Kubernetes secret for GCP authentication Set to false to rely on other authentication methods (e.g., Workload Identity, instance metadata) |
 | credentials.secretKey | string | `"key.json"` | Key within the secret that contains the service account JSON |
@@ -138,6 +140,14 @@ serviceMonitor:
 | logLevel | string | `"info"` | Global log level, defaults to 'info' |
 | logOutputPaths | list | `["stdout"]` | Log outputPaths - defaults to stdout only |
 | nameOverride | string | `""` |  |
+| node-problem-detector | object | `{"enabled":false,"hostNetwork":true,"nodeSelector":{"karpenter.sh/capacity-type":"spot"},"resources":{"limits":{"memory":"64Mi"},"requests":{"cpu":"10m","memory":"32Mi"}},"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"privileged":false,"readOnlyRootFilesystem":true},"tolerations":[{"operator":"Exists"}],"volume":{"localtime":{"enabled":false}}}` | Optional node-problem-detector deployment that watches the GCE metadata server for Spot preemption notices and sets the GCESpotPreempting node condition, which Karpenter's interruption controller reacts to. Pair it with `GCENodeClass.spec.preemptionNoticeDuration: 120s` for a two-minute drain window. See docs/spot-preemption.md. |
+| node-problem-detector.enabled | bool | `false` | Deploy node-problem-detector with the Spot preemption plugin. Off by default: GKE Standard node pools already run their own node-problem-detector, so enabling this adds a second one. It only lands on nodes matching `nodeSelector`. |
+| node-problem-detector.hostNetwork | bool | `true` | Required. The plugin reads the metadata server directly, which pods cannot do through the GKE metadata server. |
+| node-problem-detector.nodeSelector | object | `{"karpenter.sh/capacity-type":"spot"}` | Only Spot nodes need the detector; on-demand instances are never preempted. |
+| node-problem-detector.resources | object | `{"limits":{"memory":"64Mi"},"requests":{"cpu":"10m","memory":"32Mi"}}` | Resource requests and limits for the detector. |
+| node-problem-detector.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"privileged":false,"readOnlyRootFilesystem":true}` | The plugin only needs network access, so drop the chart's default privileged pod. |
+| node-problem-detector.tolerations | list | `[{"operator":"Exists"}]` | Tolerate every taint so the detector reaches Spot nodes regardless of workload taints. |
+| node-problem-detector.volume | object | `{"localtime":{"enabled":false}}` | Not needed by the preemption plugin. |
 | podAnnotations | object | `{}` |  |
 | podDisruptionBudget.maxUnavailable | integer or string | `nil` | Maximum number of unavailable pods. When set, takes precedence over minAvailable. |
 | podDisruptionBudget.minAvailable | int | `1` | Minimum number of available pods. Used when maxUnavailable is not set. |

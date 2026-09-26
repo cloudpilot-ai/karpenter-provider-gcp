@@ -23,8 +23,8 @@ package v1alpha1
 
 import (
 	status "github.com/awslabs/operatorpkg/status"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -333,6 +333,11 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 		*out = new(NetworkConfig)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.PreemptionNoticeDuration != nil {
+		in, out := &in.PreemptionNoticeDuration, &out.PreemptionNoticeDuration
+		*out = new(v1.Duration)
+		**out = **in
+	}
 	return
 }
 
@@ -381,7 +386,7 @@ func (in *Image) DeepCopyInto(out *Image) {
 	*out = *in
 	if in.Requirements != nil {
 		in, out := &in.Requirements, &out.Requirements
-		*out = make([]v1.NodeSelectorRequirement, len(*in))
+		*out = make([]corev1.NodeSelectorRequirement, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -463,7 +468,7 @@ func (in *KubeletConfiguration) DeepCopyInto(out *KubeletConfiguration) {
 	}
 	if in.EvictionSoftGracePeriod != nil {
 		in, out := &in.EvictionSoftGracePeriod, &out.EvictionSoftGracePeriod
-		*out = make(map[string]metav1.Duration, len(*in))
+		*out = make(map[string]v1.Duration, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
 		}

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -47,6 +48,8 @@ import (
 )
 
 const (
+	e2eOwnerLabel = "karpenter-e2e/owned"
+
 	// DefaultE2EDiskGiB is the boot disk size for test nodes; 30 GiB meets the
 	// minimum required by ContainerOptimizedOS while keeping costs low.
 	DefaultE2EDiskGiB = 30
@@ -103,22 +106,33 @@ func TestPrefix(arch, capacityType string, parts ...string) string {
 // with the same name already exists (leftover from a previous run), it is deleted first.
 // Ubuntu requires a 50 GiB boot disk; all other families use DefaultE2EDiskGiB.
 func (e *Environment) CreateNodeClass(ctx context.Context, name, imageFamily string) {
+	e.createNodeClass(ctx, name, imageFamily, "")
+}
+
+// CreateNodeClassWithDiskCategory creates a GCENodeClass with an explicit boot disk category.
+func (e *Environment) CreateNodeClassWithDiskCategory(ctx context.Context, name, imageFamily, diskCategory string) {
+	e.createNodeClass(ctx, name, imageFamily, diskCategory)
+}
+
+func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, diskCategory string) {
 	diskGiB := int64(DefaultE2EDiskGiB)
 	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
 		diskGiB = 50 // ubuntu-gke images require more space than COS
+	}
+	disk := map[string]any{"sizeGiB": diskGiB, "boot": true}
+	if diskCategory != "" {
+		disk["category"] = diskCategory
 	}
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
 			},
-			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
-			},
+			"disks":           []any{disk},
 			"subnetRangeName": e.PodsRangeName,
 		},
 	}}
@@ -146,13 +160,13 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName":      e.PodsRangeName,
 			"kubeletConfiguration": kubeletConfig,
@@ -174,13 +188,13 @@ func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"family": family, "channel": channel},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -201,13 +215,13 @@ func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"family": family, "version": version},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -225,14 +239,14 @@ func (e *Environment) CreateNodeClassWithConfidentialType(ctx context.Context, n
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"confidentialInstanceType": confidentialType,
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -250,13 +264,13 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 			"networkConfig": map[string]any{
@@ -276,7 +290,7 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name,
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"autoGPUTaint":     true,
 			"gpuDriverVersion": gpuDriverVersion,
@@ -284,7 +298,7 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name,
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -358,6 +372,35 @@ func (e *Environment) GetGCEInstance(ctx context.Context, providerID string) (*c
 		return nil, err
 	}
 	return e.computeSvc.Instances.Get(project, zone, name).Context(ctx).Do()
+}
+
+// GetGCEBootDiskType returns the short disk type name for an instance's boot disk.
+func (e *Environment) GetGCEBootDiskType(ctx context.Context, providerID string) (string, error) {
+	project, zone, _, err := parseProviderID(providerID)
+	if err != nil {
+		return "", err
+	}
+	instance, err := e.GetGCEInstance(ctx, providerID)
+	if err != nil {
+		return "", fmt.Errorf("getting instance: %w", err)
+	}
+	for _, attachedDisk := range instance.Disks {
+		if !attachedDisk.Boot {
+			continue
+		}
+		if attachedDisk.Source == "" {
+			return "", fmt.Errorf("instance %q boot disk has no source", instance.Name)
+		}
+		disk, err := e.computeSvc.Disks.Get(project, zone, path.Base(attachedDisk.Source)).Context(ctx).Do()
+		if err != nil {
+			return "", fmt.Errorf("getting instance %q boot disk: %w", instance.Name, err)
+		}
+		if disk.Type == "" {
+			return "", fmt.Errorf("instance %q boot disk has no type", instance.Name)
+		}
+		return path.Base(disk.Type), nil
+	}
+	return "", fmt.Errorf("instance %q has no boot disk", instance.Name)
 }
 
 // CreateNodePool creates a NodePool with the given requirements and the default
@@ -441,7 +484,7 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",
 		"kind":       "NodePool",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"weight": int64(DefaultNodePoolWeight),
 			"disruption": map[string]any{
@@ -449,7 +492,10 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 				"consolidationPolicy": consolidationPolicy,
 				"budgets":             budgets,
 			},
-			"template": map[string]any{"spec": templateSpec},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{e2eOwnerLabel: "true"}},
+				"spec":     templateSpec,
+			},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(nodePoolGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -988,13 +1034,13 @@ func (e *Environment) CreateNodeClassWithAlias(ctx context.Context, name, alias 
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": alias},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},
@@ -1016,14 +1062,14 @@ func (e *Environment) CreateNodeClassWithImageID(ctx context.Context, name, imag
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageFamily": imageFamily,
 			"imageSelectorTerms": []any{
 				map[string]any{"id": imageID},
 			},
 			"disks": []any{
-				map[string]any{"category": "pd-balanced", "sizeGiB": diskGiB, "boot": true},
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
 			"subnetRangeName": e.PodsRangeName,
 		},

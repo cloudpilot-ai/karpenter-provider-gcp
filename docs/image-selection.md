@@ -27,6 +27,8 @@ Each term in `imageSelectorTerms` must use exactly one of three selection modes:
 | Version pin       | `family` + `version` | Fixed image. Nodes never drift from image changes.                                              |
 | Raw image ID      | `id`                 | Explicit GCE image URL. Nodes never drift from image changes.                                   |
 
+Karpenter only uses GCE images whose status is `READY`, so a newly published image can't start a node replacement before GCP finishes publishing it. `version: latest` selects the newest `READY` image and skips images that are still `PENDING`. For channel, version pin, and raw image ID terms, Karpenter waits until the matching image is `READY`. Until then, it keeps the images already recorded in the GCENodeClass status and retries resolution. Depending on the term, the `ImagesReady` condition reports `ImageResolutionFailed`, or the controller logs an `image <name> is not ready (status: PENDING)` error.
+
 ### Channel reference (live)
 
 Track a GKE release channel for Container-Optimized OS:

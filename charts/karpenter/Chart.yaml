@@ -23,6 +23,12 @@ version: 0.0.0
 # It is recommended to use it with quotes.
 appVersion: "0.0.0"
 
+dependencies:
+  - name: node-problem-detector
+    version: "2.4.1"
+    repository: oci://ghcr.io/deliveryhero/helm-charts
+    condition: node-problem-detector.enabled
+
 annotations:
   artifacthub.io/links: |
     - name: source
