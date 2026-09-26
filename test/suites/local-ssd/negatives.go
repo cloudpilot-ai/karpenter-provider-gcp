@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package localssd_test
+package localssd
 
 import (
 	"context"
@@ -28,7 +28,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Local-SSD failure modes", func() {
+var _ = Describe("Local-SSD failure modes", Label("suite:local-ssd"), func() {
 	It("leaves the pod Pending when the pinned SSD-count mismatches a bundled SKU", func(ctx SpecContext) {
 		name := newLocalSSDPool(ctx, environment.TestCase{
 			CapacityType:     karpv1.CapacityTypeOnDemand,

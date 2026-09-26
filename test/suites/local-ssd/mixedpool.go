@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package localssd_test
+package localssd
 
 import (
 	"context"
@@ -31,7 +31,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Mixed local-SSD pool", func() {
+var _ = Describe("Mixed local-SSD pool", Label("suite:local-ssd"), func() {
 	It("pd-balanced pool serves exact SSD counts including explicit zero", func(ctx SpecContext) {
 		pool := newLocalSSDPool(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
