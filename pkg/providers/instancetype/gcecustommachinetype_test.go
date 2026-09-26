@@ -118,7 +118,7 @@ func TestListCustomMachineTypesSkipsUnparsablePrice(t *testing.T) {
 }
 
 // TestListSchedulesOntoRegisteredCustomMachineType is an end-to-end regression test for issue
-// #144 under the CRD-based design (proposals/0007): a registered, Ready GCECustomMachineType
+// #144 under the CRD-based design (proposals/0009): a registered, Ready GCECustomMachineType
 // must be schedulable via List(), priced from its own registration rather than the regular
 // pricing provider, and matchable by ordinary CPU/memory requirements - not only by an exact
 // instance-type name - since it now joins the catalog like any predefined shape.

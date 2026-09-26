@@ -19,7 +19,7 @@ limitations under the License.
 // machineTypes.aggregatedList API (used to populate the regular instance type catalog) never
 // returns custom shapes since it does not enumerate the space of valid custom configurations;
 // machineTypes.get, unlike the aggregated list, does resolve a specific valid custom shape on
-// demand. See proposals/0007-custom-machine-type-catalog.md.
+// demand. See proposals/0009-custom-machine-type-catalog.md.
 package gcecustommachinetype
 
 import (

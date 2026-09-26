@@ -93,7 +93,7 @@ type DefaultProvider struct {
 	// customMachineTypePrices holds the operator-supplied prices for Ready
 	// v1alpha1.GCECustomMachineType registrations, keyed by their real GCE machine type name.
 	// GCP does not publish prices for custom shapes, so these come from the registration
-	// itself rather than the regular pricing provider. See proposals/0007.
+	// itself rather than the regular pricing provider. See proposals/0009.
 	customMachineTypePrices map[string]customMachineTypePrice
 
 	unavailableOfferings *unavailableofferings.UnavailableOfferings
@@ -247,7 +247,7 @@ func (p *DefaultProvider) createOfferings(_ context.Context, mt *computepb.Machi
 		if custom, ok := p.customMachineTypePrices[instanceType]; ok {
 			// A registered GCE custom machine type: GCP does not publish a price for it, so
 			// the operator-supplied price on its GCECustomMachineType registration is
-			// authoritative, not the regular pricing provider. See proposals/0007.
+			// authoritative, not the regular pricing provider. See proposals/0009.
 			odPrice, odOK = custom.onDemand, true
 			spotPrice, spotOK = custom.spot, true
 		}
@@ -390,7 +390,7 @@ type customMachineTypePrice struct {
 // confirmed the shape available in (matching machineTypes.aggregatedList's own
 // one-entry-per-zone shape), so the rest of this provider treats a registered custom shape
 // exactly like a predefined one. Pricing for these names comes from the registration itself,
-// since GCP does not publish custom-shape prices. See proposals/0007.
+// since GCP does not publish custom-shape prices. See proposals/0009.
 func (p *DefaultProvider) listCustomMachineTypes(ctx context.Context) ([]*computepb.MachineType, map[string]customMachineTypePrice, error) {
 	list := &v1alpha1.GCECustomMachineTypeList{}
 	if err := p.kubeClient.List(ctx, list); err != nil {

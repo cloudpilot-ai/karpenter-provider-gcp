@@ -38,7 +38,7 @@ type GCECustomMachineTypeSpec struct {
 	MachineType string `json:"machineType"`
 	// Prices are the hourly prices Karpenter uses for scheduling and consolidation decisions.
 	// GCP does not publish prices for custom shapes (unlike predefined ones), so they must be
-	// supplied explicitly until the pricing provider can compute them (see proposals/0007).
+	// supplied explicitly until the pricing provider can compute them (see proposals/0009).
 	// +required
 	Prices GCECustomMachineTypePrices `json:"prices"`
 }
@@ -79,7 +79,7 @@ type GCECustomMachineTypeStatus struct {
 
 // GCECustomMachineType registers a GCE custom machine type so the instance type provider can
 // discover it, price it, and make it available for scheduling like any predefined shape. See
-// proposals/0007-custom-machine-type-catalog.md.
+// proposals/0009-custom-machine-type-catalog.md.
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:path=gcecustommachinetypes,scope=Cluster,categories=karpenter,shortName={gcecmt,gcecmts}
 // +kubebuilder:printcolumn:name="MachineType",type="string",JSONPath=".spec.machineType",description=""
