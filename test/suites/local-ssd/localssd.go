@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package localssd_test
+package localssd
 
 import (
 	"os"
@@ -29,7 +29,12 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = DescribeTable("Local SSD",
+var (
+	env *environment.Environment
+	_   = BeforeEach(func() { env = environment.Current() })
+)
+
+var _ = DescribeTable("Local SSD", Label("suite:local-ssd"),
 	func(ctx SpecContext, tc environment.TestCase) {
 		if slices.Contains(tc.Families, "z3") && os.Getenv("E2E_Z3_TESTS") != "true" {
 			Skip("set E2E_Z3_TESTS=true to run z3 capacity-constrained tests")
