@@ -57,8 +57,8 @@ type Operator struct {
 	PricingProvider           pricing.Provider
 	InstanceTypeProvider      instancetype.Provider
 	InstanceProvider          instance.Provider
-	ComputeService            *compute.Service
-	ProjectID                 string
+	GKEProvider               gke.Provider
+	AuthOptions               *auth.Credential
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -143,7 +143,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		versionProvider,
 		unavailableOfferingsCache,
 	)
-	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache)
+	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache, operator.GetClient())
 
 	return ctx, &Operator{
 		Operator:                  operator,
@@ -153,8 +153,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		PricingProvider:           pricingProvider,
 		InstanceTypeProvider:      instanceTypeProvider,
 		InstanceProvider:          instanceProvider,
-		ComputeService:            computeService,
-		ProjectID:                 projectID,
+		GKEProvider:               gkeProvider,
+		AuthOptions:               &auth,
 	}
 }
 

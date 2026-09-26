@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,12 +30,14 @@ import (
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"google.golang.org/api/iterator"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -64,7 +67,7 @@ type ZoneData struct {
 
 type Provider interface {
 	LivenessProbe(*http.Request) error
-	List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, requestedInstanceTypes []string) ([]*cloudprovider.InstanceType, error)
+	List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error)
 	UpdateInstanceTypes(ctx context.Context) error
 	UpdateInstanceTypeOfferings(ctx context.Context) error
 }
@@ -74,6 +77,7 @@ type DefaultProvider struct {
 	machineTypesClient *compute.MachineTypesClient
 	pricingProvider    pricing.Provider
 	gkeProvider        gke.Provider
+	kubeClient         client.Client
 
 	// We assume that all instance types with spot are available in all zones.
 	// Reference: https://cloud.google.com/compute/docs/instances/provisioning-models
@@ -84,19 +88,16 @@ type DefaultProvider struct {
 	instanceTypesSeqNum    uint64
 	cm                     *pretty.ChangeMonitor
 
+	// customMachineTypePrices holds the operator-supplied prices for Ready
+	// v1alpha1.GCECustomMachineType registrations, keyed by their real GCE machine type name.
+	// GCP does not publish prices for custom shapes, so these come from the registration
+	// itself rather than the regular pricing provider. See proposals/0007.
+	customMachineTypePrices map[string]customMachineTypePrice
+
 	unavailableOfferings *unavailableofferings.UnavailableOfferings
 
 	staticInstanceTypesCache   *cache.Cache
 	muStaticInstanceTypesCache sync.Mutex
-
-	// customMachineTypesCache holds GCE custom machine types (e.g. n2-custom-8-24576)
-	// resolved via a direct machineTypes.get lookup, keyed by instance type name. These
-	// never appear in the machineTypes.aggregatedList catalog (see resolveCustomMachineTypes),
-	// so they are looked up on demand instead of during the periodic catalog refresh.
-	customMachineTypesCache *cache.Cache
-	// getMachineType defaults to getMachineTypeFromAPI; overridable in tests so the custom
-	// machine type resolution path can be exercised without a live GCP client.
-	getMachineType func(ctx context.Context, zone, name string) (*computepb.MachineType, error)
 }
 
 type staticInstanceType struct {
@@ -105,26 +106,24 @@ type staticInstanceType struct {
 }
 
 func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, pricingProvider pricing.Provider,
-	gkeProvider gke.Provider, unavailableOfferingsCache *unavailableofferings.UnavailableOfferings) *DefaultProvider {
+	gkeProvider gke.Provider, unavailableOfferingsCache *unavailableofferings.UnavailableOfferings, kubeClient client.Client) *DefaultProvider {
 	machineTypesClient, err := compute.NewMachineTypesRESTClient(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create default provider for node pool template")
 		os.Exit(1)
 	}
-	p := &DefaultProvider{
+	return &DefaultProvider{
 		authOptions:              authOptions,
 		machineTypesClient:       machineTypesClient,
 		pricingProvider:          pricingProvider,
 		gkeProvider:              gkeProvider,
+		kubeClient:               kubeClient,
 		staticInstanceTypesCache: cache.New(StaticInstanceTypesCacheTTL, staticInstanceTypesCacheCleanup),
 		instanceTypesOfferings:   make(map[string]sets.Set[string]),
 		unavailableOfferings:     unavailableOfferingsCache,
 		cm:                       pretty.NewChangeMonitor(),
 		instanceTypesSeqNum:      0,
-		customMachineTypesCache:  cache.New(customMachineTypeCacheTTL, staticInstanceTypesCacheCleanup),
 	}
-	p.getMachineType = p.getMachineTypeFromAPI
-	return p
 }
 
 func (p *DefaultProvider) LivenessProbe(req *http.Request) error {
@@ -139,7 +138,7 @@ func (p *DefaultProvider) validateState() error {
 	return nil
 }
 
-func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, requestedInstanceTypes []string) ([]*cloudprovider.InstanceType, error) {
+func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
 	p.muInstanceTypesInfo.RLock()
 	defer p.muInstanceTypesInfo.RUnlock()
 
@@ -157,17 +156,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		return nil, err
 	}
 
-	customMachineTypes, customOfferings := resolveCustomMachineTypes(
-		ctx, requestedInstanceTypes, zones, p.instanceTypesInfo, p.customMachineTypesCache, p.getMachineType)
-	for _, mt := range customMachineTypes {
-		it := NewStaticInstanceType(ctx, mt, nodeClass)
-		if it == nil {
-			continue
-		}
-		staticInstanceTypes = append(staticInstanceTypes, staticInstanceType{machineType: mt, instanceType: it})
-	}
-
-	return p.injectOfferings(ctx, staticInstanceTypes, zones, customOfferings), nil
+	return p.injectOfferings(ctx, staticInstanceTypes, zones), nil
 }
 
 func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]staticInstanceType, error) {
@@ -202,11 +191,11 @@ func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass 
 	return instanceTypes, nil
 }
 
-func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTypes []staticInstanceType, zones []string, customOfferings map[string]sets.Set[string]) []*cloudprovider.InstanceType {
+func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTypes []staticInstanceType, zones []string) []*cloudprovider.InstanceType {
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for _, cached := range staticInstanceTypes {
 		instanceType := cached.instanceType.Name
-		zoneData := p.buildZoneData(instanceType, zones, customOfferings)
+		zoneData := p.buildZoneData(instanceType, zones)
 		offerings := p.createOfferings(ctx, cached.machineType, zoneData)
 		if len(offerings) == 0 {
 			continue
@@ -221,14 +210,9 @@ func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTyp
 }
 
 // buildZoneData checks zonal availability from cached offerings while keeping spot
-// availability enabled for all zones per GCP spot provisioning behavior. customOfferings
-// carries zone availability for machine types resolved outside the catalog refresh (see
-// resolveCustomMachineTypes) and is consulted when the type isn't in the regular catalog.
-func (p *DefaultProvider) buildZoneData(instanceType string, zones []string, customOfferings map[string]sets.Set[string]) []ZoneData {
+// availability enabled for all zones per GCP spot provisioning behavior.
+func (p *DefaultProvider) buildZoneData(instanceType string, zones []string) []ZoneData {
 	ofs, ok := p.instanceTypesOfferings[instanceType]
-	if !ok {
-		ofs, ok = customOfferings[instanceType]
-	}
 	return lo.Map(zones, func(zoneID string, _ int) ZoneData {
 		ret := ZoneData{ID: zoneID, Available: true, SpotAvailable: true}
 		if !ok || !ofs.Has(zoneID) {
@@ -257,14 +241,12 @@ func (p *DefaultProvider) createOfferings(_ context.Context, mt *computepb.Machi
 
 		odPrice, odOK := p.pricingProvider.OnDemandPrice(instanceType)
 		spotPrice, spotOK := p.pricingProvider.SpotPrice(instanceType, zone.ID)
-		if !odOK && isCustomMachineTypeName(instanceType) {
-			// Custom machine types have no published price of their own (GCP doesn't
-			// publish prices for arbitrary custom shapes); derive on-demand from the
-			// family's predefined shapes, and derive spot from the standard fallback
-			// ratio since there's no published spot price to fall back to either.
-			if odPrice, odOK = p.deriveCustomPrice(mt); odOK {
-				spotPrice, spotOK = odPrice*pricing.SpotFallbackRatio, true
-			}
+		if custom, ok := p.customMachineTypePrices[instanceType]; ok {
+			// A registered GCE custom machine type: GCP does not publish a price for it, so
+			// the operator-supplied price on its GCECustomMachineType registration is
+			// authoritative, not the regular pricing provider. See proposals/0007.
+			odPrice, odOK = custom.onDemand, true
+			spotPrice, spotOK = custom.spot, true
 		}
 
 		if odOK {
@@ -305,6 +287,11 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	if err != nil {
 		return fmt.Errorf("getting instance type offerings: %w", err)
 	}
+	customTypes, _, err := p.listCustomMachineTypes(ctx)
+	if err != nil {
+		return fmt.Errorf("getting custom machine type offerings: %w", err)
+	}
+	types = append(types, customTypes...)
 
 	newInstanceTypesOfferings := make(map[string]sets.Set[string])
 	for _, mt := range types {
@@ -335,11 +322,18 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("getting instance types: %w", err)
 	}
+	customTypes, customPrices, err := p.listCustomMachineTypes(ctx)
+	if err != nil {
+		return fmt.Errorf("getting custom machine types: %w", err)
+	}
+	types = append(types, customTypes...)
+
 	if p.cm.HasChanged("instance-types", types) {
 		atomic.AddUint64(&p.instanceTypesSeqNum, 1)
 		p.staticInstanceTypesCache.Flush()
 	}
 	p.instanceTypesInfo = types
+	p.customMachineTypePrices = customPrices
 
 	return nil
 }
@@ -370,14 +364,53 @@ func (p *DefaultProvider) getInstanceTypes(ctx context.Context) ([]*computepb.Ma
 	return vmTypes, nil
 }
 
-// getMachineTypeFromAPI looks up a single machine type by exact name in a zone via
-// machineTypes.get. Unlike machineTypes.aggregatedList, this succeeds for valid GCE custom
-// machine types (e.g. n2-custom-8-24576) even though they are never enumerated by the list
-// API. See resolveCustomMachineTypes for why this is needed.
-func (p *DefaultProvider) getMachineTypeFromAPI(ctx context.Context, zone, name string) (*computepb.MachineType, error) {
-	return p.machineTypesClient.Get(ctx, &computepb.GetMachineTypeRequest{
-		Project:     p.authOptions.ProjectID,
-		Zone:        zone,
-		MachineType: name,
-	})
+// customMachineTypePrice is the operator-supplied price for a registered
+// v1alpha1.GCECustomMachineType, since GCP does not publish one.
+type customMachineTypePrice struct {
+	onDemand float64
+	spot     float64
+}
+
+// listCustomMachineTypes merges Ready v1alpha1.GCECustomMachineType registrations into the
+// catalog, synthesizing one machineType entry per zone the gcecustommachinetype controller
+// confirmed the shape available in (matching machineTypes.aggregatedList's own
+// one-entry-per-zone shape), so the rest of this provider treats a registered custom shape
+// exactly like a predefined one. Pricing for these names comes from the registration itself,
+// since GCP does not publish custom-shape prices. See proposals/0007.
+func (p *DefaultProvider) listCustomMachineTypes(ctx context.Context) ([]*computepb.MachineType, map[string]customMachineTypePrice, error) {
+	list := &v1alpha1.GCECustomMachineTypeList{}
+	if err := p.kubeClient.List(ctx, list); err != nil {
+		return nil, nil, fmt.Errorf("listing GCECustomMachineTypes: %w", err)
+	}
+
+	var machineTypes []*computepb.MachineType
+	prices := make(map[string]customMachineTypePrice)
+	for i := range list.Items {
+		obj := &list.Items[i]
+		if !obj.StatusConditions().Get(status.ConditionReady).IsTrue() {
+			continue
+		}
+
+		onDemand, err := strconv.ParseFloat(obj.Spec.Prices.OnDemand, 64)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "invalid onDemand price on GCECustomMachineType, skipping", "name", obj.Name)
+			continue
+		}
+		spot, err := strconv.ParseFloat(obj.Spec.Prices.Spot, 64)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "invalid spot price on GCECustomMachineType, skipping", "name", obj.Name)
+			continue
+		}
+
+		for _, zone := range obj.Status.Zones {
+			machineTypes = append(machineTypes, &computepb.MachineType{
+				Name:      lo.ToPtr(obj.Spec.MachineType),
+				GuestCpus: lo.ToPtr(obj.Status.GuestCpus),
+				MemoryMb:  lo.ToPtr(obj.Status.MemoryMb),
+				Zone:      lo.ToPtr(zone),
+			})
+		}
+		prices[obj.Spec.MachineType] = customMachineTypePrice{onDemand: onDemand, spot: spot}
+	}
+	return machineTypes, prices, nil
 }
