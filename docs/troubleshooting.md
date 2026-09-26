@@ -74,9 +74,32 @@ See [Image management](image-management.md) for version pinning options and form
 
 ## Custom machine types not discovered
 
-Karpenter discovers instance types by querying the GCP `machineTypes.aggregatedList` API, which returns only predefined catalog types. Custom machine types (e.g. `n2-custom-8-24576`) are not returned by this API and are therefore not available for scheduling via standard `karpenter.sh/instance-type` label requirements.
+Karpenter discovers most instance types by querying the GCP `machineTypes.aggregatedList` API, which returns only predefined catalog types. Custom machine types (e.g. `n2-custom-8-24576`) are never returned by this API, even when instances using that exact shape already exist in the project.
 
-This is a known limitation tracked in [GitHub issue #245](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/245).
+To make a custom machine type schedulable, register it with a `GCECustomMachineType` object. GCP does not publish a price for custom shapes, so an on-demand and Spot price must be supplied explicitly:
+
+```yaml
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCECustomMachineType
+metadata:
+  name: n2-custom-8-24576
+spec:
+  machineType: n2-custom-8-24576
+  prices:
+    onDemand: "0.40"
+    spot: "0.12"
+```
+
+A dedicated controller resolves the shape's vCPU/memory and per-zone availability via the GCP `machineTypes.get` API (which, unlike the aggregated list, does support custom shapes) and reports it on `status`:
+
+```sh
+kubectl get gcecustommachinetype n2-custom-8-24576
+kubectl describe gcecustommachinetype n2-custom-8-24576
+```
+
+Check the `Ready` condition if it doesn't show up as schedulable — `Ready=False` with reason `MachineTypeNotFound` means the named shape is invalid for its family, or the family doesn't support custom shapes in any zone available to the cluster.
+
+Once `Ready=True`, the registered shape joins the regular instance type catalog: it's schedulable via an exact `node.kubernetes.io/instance-type` requirement, or via ordinary CPU/memory requirements, exactly like a predefined type.
 
 ---
 

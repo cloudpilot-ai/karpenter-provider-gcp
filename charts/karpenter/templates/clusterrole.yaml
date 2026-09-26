@@ -30,7 +30,7 @@ metadata:
 rules:
   # Read
   - apiGroups: ["karpenter.k8s.gcp"]
-    resources: ["gcenodeclasses"]
+    resources: ["gcenodeclasses", "gcecustommachinetypes"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [ "karpenter.sh" ]
     resources: [ "nodepools", "nodepools/status", "nodeclaims", "nodeclaims/status", "nodeoverlays", "nodeoverlays/status" ]
@@ -44,6 +44,9 @@ rules:
   # Write
   - apiGroups: ["karpenter.k8s.gcp"]
     resources: ["gcenodeclasses", "gcenodeclasses/status"]
+    verbs: ["patch", "update"]
+  - apiGroups: ["karpenter.k8s.gcp"]
+    resources: ["gcecustommachinetypes/status"]
     verbs: ["patch", "update"]
   - apiGroups: [ "karpenter.sh" ]
     resources: [ "nodeclaims", "nodeclaims/status" ]

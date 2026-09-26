@@ -26,8 +26,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/events"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/csr"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/gcecustommachinetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption"
 	nodeclaimgc "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclasshash "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/hash"
@@ -38,6 +40,7 @@ import (
 	controllerspricing "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/telemetry"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	providerinstancetype "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	providernodepooltemplate "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
@@ -57,6 +60,8 @@ func NewController(
 	instanceTypeProvider providerinstancetype.Provider,
 	cloudProvider *cloudprovider.CloudProvider,
 	pricingProvider pricing.Provider,
+	authOptions *auth.Credential,
+	gkeProvider gke.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider),
@@ -67,6 +72,7 @@ func NewController(
 		csr.NewController(kubernetesInterface),
 		controllerspricing.NewController(pricingProvider),
 		nodeclaimgc.NewController(kubeClient, cloudProvider),
+		gcecustommachinetype.NewController(kubeClient, authOptions, gkeProvider),
 	}
 
 	if options.FromContext(ctx).Interruption {

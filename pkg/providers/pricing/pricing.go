@@ -48,6 +48,10 @@ type PricingClient interface {
 	FetchRegionPrices(ctx context.Context, region string) (instanceprice.Prices, error)
 }
 
+// SpotFallbackRatio is applied to the on-demand price when no spot price is known for an
+// instance type, e.g. for GCE custom machine types which have no published spot rate.
+const SpotFallbackRatio = 0.4
+
 type pricesStorage = map[string]float64
 
 // initialPricesFile matches the price_validate computed.json / update-pricing CI
@@ -133,7 +137,7 @@ func (p *DefaultProvider) SpotPrice(instanceType string, _ string) (float64, boo
 		return price, true
 	}
 	if odPrice, ok := p.onDemandPrices[instanceType]; ok {
-		return odPrice * 0.4, true
+		return odPrice * SpotFallbackRatio, true
 	}
 	return 0, false
 }
