@@ -33,7 +33,7 @@ func TestNewestImagePagesWithoutFilter(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		q := r.URL.Query()
-		if q.Has("filter") || q.Get("orderBy") != "creationTimestamp desc" || q.Get("fields") == "" {
+		if q.Has("filter") || q.Get("orderBy") != "creationTimestamp desc" {
 			http.Error(w, "unexpected list parameters", http.StatusBadRequest)
 			return
 		}

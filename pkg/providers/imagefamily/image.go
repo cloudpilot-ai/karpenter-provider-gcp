@@ -74,7 +74,7 @@ type DefaultProvider struct {
 // NewDefaultProvider creates the image provider. gkeProvider is used for channel-based
 // resolution; pass a no-op implementation if channel: terms are not needed.
 func NewDefaultProvider(computeService *compute.Service, versionProvider versionprovider.Provider, gkeProvider gke.Provider) *DefaultProvider {
-	cooldown := &catalogCooldown{now: time.Now}
+	cooldown := &imageListCooldown{now: time.Now}
 	cos := &ContainerOptimizedOS{computeService: computeService, versionProvider: versionProvider, cooldown: cooldown}
 	ubuntu2404 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, cooldown: cooldown, release: "2404"}
 	ubuntu2204 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, cooldown: cooldown, release: "2204"}

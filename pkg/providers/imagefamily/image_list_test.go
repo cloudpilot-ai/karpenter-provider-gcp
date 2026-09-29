@@ -35,7 +35,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
-func TestCatalogQuotaCooldownAcrossSelectors(t *testing.T) {
+func TestImageListQuotaCooldownAcrossSelectors(t *testing.T) {
 	now := time.Now()
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,14 +66,14 @@ func TestCatalogQuotaCooldownAcrossSelectors(t *testing.T) {
 	_, err := p.List(context.Background(), alias)
 	var apiErr *googleapi.Error
 	require.ErrorAs(t, err, &apiErr)
-	delay, limited := CatalogRateLimitRetryAfter(err)
+	delay, limited := ImageListRateLimitRetryAfter(err)
 	require.True(t, limited)
 	require.GreaterOrEqual(t, delay, time.Minute)
 	require.Less(t, delay, time.Minute+10*time.Second)
 
 	_, err = p.List(context.Background(), family)
 	require.Error(t, err)
-	_, limited = CatalogRateLimitRetryAfter(err)
+	_, limited = ImageListRateLimitRetryAfter(err)
 	require.True(t, limited)
 	require.Equal(t, 1, calls, "another selector must not call the API during cooldown")
 	_, err = p.List(context.Background(), &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
@@ -87,9 +87,9 @@ func TestCatalogQuotaCooldownAcrossSelectors(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
-func TestCatalogRateLimitClassification(t *testing.T) {
+func TestImageListRateLimitClassification(t *testing.T) {
 	for _, reason := range []string{"rateLimitExceeded", "RATE_LIMIT_EXCEEDED"} {
-		require.True(t, isCatalogQuotaError(&googleapi.Error{Code: 403, Errors: []googleapi.ErrorItem{{Reason: reason}}}))
+		require.True(t, isImageListQuotaError(&googleapi.Error{Code: 403, Errors: []googleapi.ErrorItem{{Reason: reason}}}))
 	}
 	for _, err := range []error{
 		&googleapi.Error{Code: 403, Message: "RATE_LIMIT_EXCEEDED"},
@@ -97,11 +97,11 @@ func TestCatalogRateLimitClassification(t *testing.T) {
 		&googleapi.Error{Code: 500, Errors: []googleapi.ErrorItem{{Reason: "RATE_LIMIT_EXCEEDED"}}},
 		errors.New("RATE_LIMIT_EXCEEDED"),
 	} {
-		require.False(t, isCatalogQuotaError(err))
+		require.False(t, isImageListQuotaError(err))
 	}
 }
 
-func BenchmarkScanImageCatalog(b *testing.B) {
+func BenchmarkScanImages(b *testing.B) {
 	const pages = 20
 	const pageSize = 500
 	images := make([][]*compute.Image, pages)
@@ -136,7 +136,7 @@ func BenchmarkScanImageCatalog(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				err := scanImageCatalog(context.Background(), service, cosImageProject, nil, func(img *compute.Image) bool {
+				err := scanImages(context.Background(), service, cosImageProject, nil, func(img *compute.Image) bool {
 					return tc.stop && img.Name == "matching-image"
 				})
 				if err != nil {
@@ -147,7 +147,7 @@ func BenchmarkScanImageCatalog(b *testing.B) {
 	}
 }
 
-func TestScanImageCatalogReturnsLaterPageError(t *testing.T) {
+func TestScanImagesReturnsLaterPageError(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -158,7 +158,7 @@ func TestScanImageCatalogReturnsLaterPageError(t *testing.T) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
-	err := scanImageCatalog(context.Background(), buildComputeService(t, srv), cosImageProject, nil, func(*compute.Image) bool { return false })
+	err := scanImages(context.Background(), buildComputeService(t, srv), cosImageProject, nil, func(*compute.Image) bool { return false })
 	require.Error(t, err)
 	require.Equal(t, 2, calls)
 }

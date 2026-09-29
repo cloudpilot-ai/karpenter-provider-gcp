@@ -29,24 +29,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type catalogRateLimitError struct {
+type imageListRateLimitError struct {
 	cause      error
 	retryAfter time.Duration
 }
 
-func (e *catalogRateLimitError) Error() string { return e.cause.Error() }
-func (e *catalogRateLimitError) Unwrap() error { return e.cause }
+func (e *imageListRateLimitError) Error() string { return e.cause.Error() }
+func (e *imageListRateLimitError) Unwrap() error { return e.cause }
 
-// CatalogRateLimitRetryAfter reports only structured catalog-list quota errors.
-func CatalogRateLimitRetryAfter(err error) (time.Duration, bool) {
-	var quotaErr *catalogRateLimitError
+// ImageListRateLimitRetryAfter reports only structured image-list quota errors.
+func ImageListRateLimitRetryAfter(err error) (time.Duration, bool) {
+	var quotaErr *imageListRateLimitError
 	if !errors.As(err, &quotaErr) {
 		return 0, false
 	}
 	return quotaErr.retryAfter, true
 }
 
-func isCatalogQuotaError(err error) bool {
+func isImageListQuotaError(err error) bool {
 	var apiErr *googleapi.Error
 	if !errors.As(err, &apiErr) || apiErr.Code != 403 {
 		return false
@@ -59,14 +59,14 @@ func isCatalogQuotaError(err error) bool {
 	return false
 }
 
-// catalogCooldown gates subsequent catalog scans across selector variants within one process.
-type catalogCooldown struct {
+// imageListCooldown gates subsequent image lists across selector variants within one process.
+type imageListCooldown struct {
 	sync.Mutex
 	until map[string]time.Time
 	now   func() time.Time
 }
 
-func (c *catalogCooldown) remaining(project string) time.Duration {
+func (c *imageListCooldown) remaining(project string) time.Duration {
 	c.Lock()
 	defer c.Unlock()
 	now := c.now()
@@ -76,7 +76,7 @@ func (c *catalogCooldown) remaining(project string) time.Duration {
 	return 0
 }
 
-func (c *catalogCooldown) rateLimited(project string) time.Duration {
+func (c *imageListCooldown) rateLimited(project string) time.Duration {
 	c.Lock()
 	defer c.Unlock()
 	// Allow the quota bucket to refill; jitter prevents synchronized replicas.
@@ -88,19 +88,19 @@ func (c *catalogCooldown) rateLimited(project string) time.Duration {
 	return delay
 }
 
-// scanImageCatalog visits images newest first and stops when visit returns true.
+// scanImages visits images newest first and stops when visit returns true.
 // Only the current page is retained; the quota-costly server-side filter is not used.
-func scanImageCatalog(ctx context.Context, service *compute.Service, project string, cooldown *catalogCooldown, visit func(*compute.Image) bool) error {
+func scanImages(ctx context.Context, service *compute.Service, project string, cooldown *imageListCooldown, visit func(*compute.Image) bool) error {
 	if cooldown != nil {
 		if remaining := cooldown.remaining(project); remaining > 0 {
-			return &catalogRateLimitError{cause: errors.New("image catalog rate limit cooldown"), retryAfter: remaining}
+			return &imageListRateLimitError{cause: errors.New("image list rate limit cooldown"), retryAfter: remaining}
 		}
 	}
 	start := time.Now()
 	pages := 0
 	earlyStop := false
 	defer func() {
-		log.FromContext(ctx).V(1).Info("scanned image catalog", "project", project, "pages", pages, "earlyStop", earlyStop, "duration", time.Since(start))
+		log.FromContext(ctx).V(1).Info("scanned images", "project", project, "pages", pages, "earlyStop", earlyStop, "duration", time.Since(start))
 	}()
 
 	pageToken := ""
@@ -113,12 +113,12 @@ func scanImageCatalog(ctx context.Context, service *compute.Service, project str
 		}
 		page, err := call.Context(ctx).Do()
 		if err != nil {
-			if isCatalogQuotaError(err) {
+			if isImageListQuotaError(err) {
 				delay := time.Minute
 				if cooldown != nil {
 					delay = cooldown.rateLimited(project)
 				}
-				return &catalogRateLimitError{cause: err, retryAfter: delay}
+				return &imageListRateLimitError{cause: err, retryAfter: delay}
 			}
 			return err
 		}

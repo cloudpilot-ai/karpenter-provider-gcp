@@ -37,7 +37,7 @@ type fixedVersion struct{}
 func (fixedVersion) Get(context.Context) (string, error) { return "v1.35.1", nil }
 func (fixedVersion) Inject(string)                       {}
 
-func TestImageReconcileCatalogQuotaInvalidatesReadiness(t *testing.T) {
+func TestImageReconcileListQuotaInvalidatesReadiness(t *testing.T) {
 	for _, reason := range []string{"RATE_LIMIT_EXCEEDED", "forbidden"} {
 		t.Run(reason, func(t *testing.T) {
 			calls := 0

@@ -52,7 +52,7 @@ var (
 type Ubuntu struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
-	cooldown        *catalogCooldown
+	cooldown        *imageListCooldown
 	release         string // "2404" or "2204"
 }
 
@@ -71,7 +71,7 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 
 	images, err := u.listImages(ctx, version)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to resolve Ubuntu GKE image from catalog")
+		log.FromContext(ctx).Error(err, "failed to resolve Ubuntu GKE image from image project")
 		return Images{}, err
 	}
 
@@ -97,7 +97,7 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 func (u *Ubuntu) listImages(ctx context.Context, version string) ([]*compute.Image, error) {
 	prefix := strings.TrimSuffix(strings.TrimPrefix(u.buildImageFilter(ctx), "name="), "*")
 	best := make(map[string]*compute.Image, len(ubuntuArchitectures))
-	err := scanImageCatalog(ctx, u.computeService, ubuntuGKEImageProject, u.cooldown, func(img *compute.Image) bool {
+	err := scanImages(ctx, u.computeService, ubuntuGKEImageProject, u.cooldown, func(img *compute.Image) bool {
 		if !strings.HasPrefix(img.Name, prefix) || (version != "latest" && !strings.HasSuffix(img.Name, "-"+version)) {
 			return false
 		}
