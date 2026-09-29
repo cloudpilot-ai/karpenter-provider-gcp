@@ -1213,6 +1213,7 @@ sigs.k8s.io/karpenter/pkg/apis/v1
 sigs.k8s.io/karpenter/pkg/apis/v1alpha1
 sigs.k8s.io/karpenter/pkg/cloudprovider
 sigs.k8s.io/karpenter/pkg/cloudprovider/metrics
+sigs.k8s.io/karpenter/pkg/cloudprovider/overlay
 sigs.k8s.io/karpenter/pkg/controllers
 sigs.k8s.io/karpenter/pkg/controllers/capacitybuffer
 sigs.k8s.io/karpenter/pkg/controllers/disruption
