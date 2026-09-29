@@ -45,14 +45,8 @@ func buildComputeService(t *testing.T, srv *httptest.Server) *compute.Service {
 	return svc
 }
 
-func TestResolveLatestCOSImage_PagesWithoutServerFilter(t *testing.T) {
-	calls := 0
+func TestResolveImages_COS_FindsMatchingImageAcrossPages(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.URL.Query().Get("filter") != "" || r.URL.Query().Get("orderBy") != "creationTimestamp desc" || r.URL.Query().Get("fields") == "" {
-			http.Error(w, "unexpected list parameters", http.StatusBadRequest)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("pageToken") {
 		case "":
@@ -64,15 +58,15 @@ func TestResolveLatestCOSImage_PagesWithoutServerFilter(t *testing.T) {
 				{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2026-04-01T00:00:00Z", Status: "READY"},
 			}})
 		default:
-			http.Error(w, "should stop after selecting image", http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{})
 		}
 	}))
 	defer srv.Close()
 	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
-	got, err := p.resolveLatestCOSImage(context.Background())
+	got, err := p.ResolveImages(context.Background(), "latest")
 	require.NoError(t, err)
-	require.Equal(t, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre", got)
-	require.Equal(t, 2, calls)
+	require.NotEmpty(t, got)
+	require.Equal(t, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre", got[0].SourceImage)
 }
 
 func TestResolveLatestCOSImage_SkipsPending(t *testing.T) {

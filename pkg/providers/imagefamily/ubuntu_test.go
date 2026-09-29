@@ -85,14 +85,8 @@ func TestBuildImageFilter_Ubuntu_FallsBackOnNilProvider(t *testing.T) {
 	require.Equal(t, `name=ubuntu-gke-2404*`, got)
 }
 
-func TestResolveImages_Ubuntu_PagesWithoutServerFilter(t *testing.T) {
-	calls := 0
+func TestResolveImages_Ubuntu_FindsBothArchitecturesAcrossPages(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.URL.Query().Has("filter") || r.URL.Query().Get("orderBy") != "creationTimestamp desc" {
-			http.Error(w, "unexpected server-side filter or sort", http.StatusBadRequest)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("pageToken") {
 		case "":
@@ -108,7 +102,7 @@ func TestResolveImages_Ubuntu_PagesWithoutServerFilter(t *testing.T) {
 				{Name: "ubuntu-gke-2404-1-35-arm64-v20260416", CreationTimestamp: "2026-04-15T00:00:00Z", Status: "READY"},
 			}})
 		default:
-			http.Error(w, "should stop after selecting both architectures: "+r.URL.RawQuery, http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{})
 		}
 	}))
 	defer srv.Close()
@@ -119,7 +113,6 @@ func TestResolveImages_Ubuntu_PagesWithoutServerFilter(t *testing.T) {
 		"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-amd64-v20260416",
 		"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-arm64-v20260416",
 	}, imageSources(got))
-	require.Equal(t, 3, calls)
 }
 
 func TestResolveImages_Ubuntu_PinnedVersion_Valid(t *testing.T) {

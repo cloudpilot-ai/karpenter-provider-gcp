@@ -147,6 +147,39 @@ func BenchmarkScanImages(b *testing.B) {
 	}
 }
 
+func TestScanImagesPagesWithoutServerFilter(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Has("filter") || r.URL.Query().Get("orderBy") != "creationTimestamp desc" {
+			http.Error(w, "unexpected image list parameters", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "next", Items: []*compute.Image{{Name: "unrelated"}}})
+		case "next":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "unused", Items: []*compute.Image{{Name: "matching"}}})
+		default:
+			http.Error(w, "scan should stop at match", http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	var found string
+	err := scanImages(context.Background(), buildComputeService(t, srv), cosImageProject, nil, func(img *compute.Image) bool {
+		if img.Name == "matching" {
+			found = img.Name
+			return true
+		}
+		return false
+	})
+	require.NoError(t, err)
+	require.Equal(t, "matching", found)
+	require.Equal(t, 2, calls)
+}
+
 func TestScanImagesReturnsLaterPageError(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
