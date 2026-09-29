@@ -85,6 +85,36 @@ func TestBuildImageFilter_Ubuntu_FallsBackOnNilProvider(t *testing.T) {
 	require.Equal(t, `name=ubuntu-gke-2404*`, got)
 }
 
+func TestResolveImages_Ubuntu_FindsBothArchitecturesAcrossPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "second", Items: []*compute.Image{
+				{Name: "ubuntu-gke-2404-1-34-amd64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z"},
+			}})
+		case "second":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "third", Items: []*compute.Image{
+				{Name: "ubuntu-gke-2404-1-35-amd64-v20260416", CreationTimestamp: "2026-04-16T00:00:00Z", Status: "READY"},
+			}})
+		case "third":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "fourth", Items: []*compute.Image{
+				{Name: "ubuntu-gke-2404-1-35-arm64-v20260416", CreationTimestamp: "2026-04-15T00:00:00Z", Status: "READY"},
+			}})
+		default:
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{})
+		}
+	}))
+	defer srv.Close()
+	p := &Ubuntu{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}, release: "2404"}
+	got, err := p.ResolveImages(context.Background(), "latest")
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-amd64-v20260416",
+		"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-arm64-v20260416",
+	}, imageSources(got))
+}
+
 func TestResolveImages_Ubuntu_PinnedVersion_Valid(t *testing.T) {
 	images := []*compute.Image{
 		// newer builds that must be ignored in favor of the pinned date
