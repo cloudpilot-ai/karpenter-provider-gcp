@@ -49,7 +49,7 @@ func TestBuildInstance_DropsStaleSourceSecondaryBootDiskMetadata(t *testing.T) {
 	provider := makeProvider()
 	sourceMetadata := computeMetadataValues(map[string]string{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
-		metadata.KubeEnvKey:       "SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/stale-disk\nKUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/stale-disk\nKUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
 	})
 

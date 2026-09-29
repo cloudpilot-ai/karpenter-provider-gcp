@@ -31,6 +31,32 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 )
 
+// requiredSourceKubeEnvEntries are kube-env entries that GKE writes into every
+// node pool template and that node bootstrap cannot work without. A source
+// template without them means GKE changed its bootstrap format or the source
+// pool is unusable, so fail the launch instead of creating an instance that
+// never registers.
+var requiredSourceKubeEnvEntries = []string{
+	"CA_CERT",
+	"KUBE_MANIFESTS_TAR_URL",
+	"KUBERNETES_MASTER_NAME",
+	"SERVER_BINARY_TAR_HASH",
+	"SERVER_BINARY_TAR_URL",
+}
+
+func validateSourceKubeEnv(target *metadata.InstanceMetadata) error {
+	var missing []string
+	for _, key := range requiredSourceKubeEnvEntries {
+		if value, ok := target.GetKubeEnvEntry(key); !ok || value == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("source instance template kube-env is missing required entries: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 func patchKubeEnvOSDistribution(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass) {
 	switch nodeClass.ImageFamily() {
 	case v1alpha1.ImageFamilyUbuntu:

@@ -354,7 +354,7 @@ func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 		"addon.gke.io/node-local-dns-ds-ready=true,iam.gke.io/gke-metadata-server-enabled=true"
 	meta := &compute.Metadata{Items: []*compute.MetadataItems{
 		{Key: "kube-labels", Value: ptr.To(srcLabels)},
-		{Key: "kube-env", Value: ptr.To("KUBELET_ARGS: --v=2 --max-pods=110 --node-labels=" + srcLabels + " --register-with-taints=dedicated=karpenter:NoSchedule\n")},
+		{Key: "kube-env", Value: ptr.To(requiredSourceKubeEnv + "KUBELET_ARGS: --v=2 --max-pods=110 --node-labels=" + srcLabels + " --register-with-taints=dedicated=karpenter:NoSchedule\n")},
 		{Key: "kubelet-config", Value: ptr.To("maxPods: 110\n")},
 	}}
 	maxPods := int32(32)
@@ -1374,7 +1374,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 
 	sourceMetadata := computeMetadataValues(map[string]string{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
-		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\narch=amd64\n",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\narch=amd64\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
 	})
 
@@ -1449,7 +1449,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 
 	sourceMetadata := computeMetadataValues(map[string]string{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
-		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
 	})
 
@@ -1503,7 +1503,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 
 	sourceMetadata := computeMetadataValues(map[string]string{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
-		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\ngke-provisioning=standard\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
 	})
 
@@ -1566,10 +1566,18 @@ func makeGPUIT() *cloudprovider.InstanceType {
 	}
 }
 
+// requiredSourceKubeEnv holds the kube-env entries that validateSourceKubeEnv
+// requires in every source template.
+const requiredSourceKubeEnv = "CA_CERT: test-ca\n" +
+	"KUBE_MANIFESTS_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-manifests.tar.gz\n" +
+	"KUBERNETES_MASTER_NAME: 10.0.0.2\n" +
+	"SERVER_BINARY_TAR_HASH: amd64-sha512\n" +
+	"SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-amd64.tar.gz\n"
+
 func makeSourceMetadata(kubeLabels string) *compute.Metadata {
 	return computeMetadataValues(map[string]string{
 		metadata.KubeLabelsKey:    kubeLabels,
-		metadata.KubeEnvKey:       "KUBELET_ARGS: --max-pods=110 --node-labels=" + kubeLabels + "\ngke-provisioning=standard\n",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=" + kubeLabels + "\ngke-provisioning=standard\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
 	})
 }

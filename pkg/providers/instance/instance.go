@@ -890,6 +890,9 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSourceKubeEnv(target); err != nil {
+		return nil, err
+	}
 	target.SetCustomMetadata(metadata.CustomMetadata(nodeClass.Spec.Metadata))
 	provisioningModel := "standard"
 	if capacityType == karpv1.CapacityTypeSpot {
