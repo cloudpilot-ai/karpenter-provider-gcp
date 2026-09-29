@@ -18,91 +18,14 @@ package imagefamily
 
 import (
 	"context"
-	"errors"
-	"math/rand"
-	"strings"
-	"sync"
-	"time"
 
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type imageListRateLimitError struct {
-	cause      error
-	retryAfter time.Duration
-}
-
-func (e *imageListRateLimitError) Error() string { return e.cause.Error() }
-func (e *imageListRateLimitError) Unwrap() error { return e.cause }
-
-// ImageListRateLimitRetryAfter reports only structured image-list quota errors.
-func ImageListRateLimitRetryAfter(err error) (time.Duration, bool) {
-	var quotaErr *imageListRateLimitError
-	if !errors.As(err, &quotaErr) {
-		return 0, false
-	}
-	return quotaErr.retryAfter, true
-}
-
-func isImageListQuotaError(err error) bool {
-	var apiErr *googleapi.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != 403 {
-		return false
-	}
-	for _, item := range apiErr.Errors {
-		if strings.EqualFold(item.Reason, "rateLimitExceeded") || item.Reason == "RATE_LIMIT_EXCEEDED" {
-			return true
-		}
-	}
-	return false
-}
-
-// imageListCooldown gates subsequent image lists across selector variants within one process.
-type imageListCooldown struct {
-	sync.Mutex
-	until map[string]time.Time
-	now   func() time.Time
-}
-
-func (c *imageListCooldown) remaining(project string) time.Duration {
-	c.Lock()
-	defer c.Unlock()
-	now := c.now()
-	if until := c.until[project]; until.After(now) {
-		return until.Sub(now)
-	}
-	return 0
-}
-
-func (c *imageListCooldown) rateLimited(project string) time.Duration {
-	c.Lock()
-	defer c.Unlock()
-	// Allow the quota bucket to refill; jitter prevents synchronized replicas.
-	delay := time.Minute + time.Duration(rand.Int63n(int64(10*time.Second))) //nolint:gosec // Retry jitter needs no cryptographic entropy.
-	if c.until == nil {
-		c.until = make(map[string]time.Time)
-	}
-	c.until[project] = c.now().Add(delay)
-	return delay
-}
-
 // scanImages visits images newest first and stops when visit returns true.
-// Only the current page is retained; the quota-costly server-side filter is not used.
-func scanImages(ctx context.Context, service *compute.Service, project string, cooldown *imageListCooldown, visit func(*compute.Image) bool) error {
-	if cooldown != nil {
-		if remaining := cooldown.remaining(project); remaining > 0 {
-			return &imageListRateLimitError{cause: errors.New("image list rate limit cooldown"), retryAfter: remaining}
-		}
-	}
-	start := time.Now()
-	pages := 0
-	earlyStop := false
-	defer func() {
-		log.FromContext(ctx).V(1).Info("scanned images", "project", project, "pages", pages, "earlyStop", earlyStop, "duration", time.Since(start))
-	}()
-
+// Only the current page is retained; server-side filtering is not used.
+func scanImages(ctx context.Context, service *compute.Service, project string, visit func(*compute.Image) bool) error {
 	pageToken := ""
 	for {
 		call := service.Images.List(project).
@@ -113,19 +36,10 @@ func scanImages(ctx context.Context, service *compute.Service, project string, c
 		}
 		page, err := call.Context(ctx).Do()
 		if err != nil {
-			if isImageListQuotaError(err) {
-				delay := time.Minute
-				if cooldown != nil {
-					delay = cooldown.rateLimited(project)
-				}
-				return &imageListRateLimitError{cause: err, retryAfter: delay}
-			}
 			return err
 		}
-		pages++
 		for _, image := range page.Items {
 			if visit(image) {
-				earlyStop = true
 				return nil
 			}
 		}

@@ -40,7 +40,6 @@ var cosVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 type ContainerOptimizedOS struct {
 	computeService  *compute.Service
 	versionProvider versionprovider.Provider
-	cooldown        *imageListCooldown
 }
 
 func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
@@ -95,7 +94,7 @@ func ParseGKEVersion(v string) (k8sKey, build string, ok bool) {
 func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8sKey, build string) (string, error) {
 	prefix := fmt.Sprintf("gke-%s-gke%s-", k8sKey, build)
 	var best *compute.Image
-	err := scanImages(ctx, c.computeService, cosImageProject, c.cooldown, func(img *compute.Image) bool {
+	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
 		if strings.HasPrefix(img.Name, prefix) && isUsableCOSImage(img) {
 			best = img
 			return true
@@ -118,7 +117,7 @@ func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8
 func (c *ContainerOptimizedOS) resolveLatestCOSImage(ctx context.Context) (string, error) {
 	filter := c.buildImageFilter(ctx)
 	var best *compute.Image
-	err := scanImages(ctx, c.computeService, cosImageProject, c.cooldown, func(img *compute.Image) bool {
+	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
 		if matchesCOSNameFilter(img.Name, filter) && isUsableCOSImage(img) {
 			best = img
 			return true
