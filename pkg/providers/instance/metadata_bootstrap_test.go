@@ -48,6 +48,16 @@ func TestValidateSourceKubeEnv(t *testing.T) {
 			kubeEnv: strings.Replace(requiredSourceKubeEnv, "CA_CERT: test-ca", "CA_CERT: ", 1),
 			want:    "missing required entries: CA_CERT",
 		},
+		{
+			name:    "empty value with blank line",
+			kubeEnv: strings.Replace(requiredSourceKubeEnv, "CA_CERT: test-ca\n", "CA_CERT: \n\n", 1),
+			want:    "missing required entries: CA_CERT",
+		},
+		{
+			name:    "quoted empty value",
+			kubeEnv: strings.Replace(requiredSourceKubeEnv, "CA_CERT: test-ca", `CA_CERT: ""`, 1),
+			want:    "missing required entries: CA_CERT",
+		},
 	}
 
 	for _, tt := range tests {

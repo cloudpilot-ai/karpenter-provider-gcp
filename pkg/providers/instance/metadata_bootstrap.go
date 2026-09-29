@@ -47,7 +47,7 @@ var requiredSourceKubeEnvEntries = []string{
 func validateSourceKubeEnv(target *metadata.InstanceMetadata) error {
 	var missing []string
 	for _, key := range requiredSourceKubeEnvEntries {
-		if value, ok := target.GetKubeEnvEntry(key); !ok || value == "" {
+		if value, ok := target.GetKubeEnvEntry(key); !ok || kubeEnvValueEmpty(value) {
 			missing = append(missing, key)
 		}
 	}
@@ -55,6 +55,14 @@ func validateSourceKubeEnv(target *metadata.InstanceMetadata) error {
 		return fmt.Errorf("source instance template kube-env is missing required entries: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// kubeEnvValueEmpty reports whether a raw kube-env value is empty once
+// surrounding whitespace is removed. GKE writes empty values as a quoted
+// YAML empty string, such as NODE_LOCAL_SSDS_EXT: "".
+func kubeEnvValueEmpty(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || value == `""` || value == `''`
 }
 
 func patchKubeEnvOSDistribution(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass) {
