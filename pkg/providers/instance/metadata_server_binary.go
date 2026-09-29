@@ -42,15 +42,17 @@ const archHashHTTPTimeout = 30 * time.Second
 func (p *DefaultProvider) patchKubeEnvServerBinaryForArch(ctx context.Context, target *metadata.InstanceMetadata, instanceType *cloudprovider.InstanceType) error {
 	url, ok := target.GetKubeEnvEntry("SERVER_BINARY_TAR_URL")
 	if !ok || url == "" {
-		return nil
+		return fmt.Errorf("source kube-env has no SERVER_BINARY_TAR_URL")
 	}
 	arch := instanceType.Requirements.Get("kubernetes.io/arch").Any()
 	if arch == "" {
 		arch = "amd64"
 	}
+	// An unrecognized URL would leave the source architecture's binaries in
+	// place, so a node of another architecture could not boot.
 	match := serverBinaryArchRegex.FindStringSubmatch(url)
 	if match == nil {
-		return nil
+		return fmt.Errorf("source kube-env SERVER_BINARY_TAR_URL %q does not name a known kubernetes-server-linux architecture", url)
 	}
 	sourceArch := match[1]
 	if sourceArch == arch {

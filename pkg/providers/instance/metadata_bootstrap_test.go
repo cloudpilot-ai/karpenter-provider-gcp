@@ -17,13 +17,67 @@ limitations under the License.
 package instance
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/compute/v1"
 	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 )
+
+func TestValidateSourceKubeEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		kubeEnv string
+		want    string
+	}{
+		{
+			name:    "complete",
+			kubeEnv: requiredSourceKubeEnv + "KUBELET_ARGS: --v=2\n",
+		},
+		{
+			name: "no kube-env",
+			want: "missing required entries: CA_CERT, KUBE_MANIFESTS_TAR_URL, KUBERNETES_MASTER_NAME, SERVER_BINARY_TAR_HASH, SERVER_BINARY_TAR_URL",
+		},
+		{
+			name:    "empty value",
+			kubeEnv: strings.Replace(requiredSourceKubeEnv, "CA_CERT: test-ca", "CA_CERT: ", 1),
+			want:    "missing required entries: CA_CERT",
+		},
+		{
+			name:    "empty value with blank line",
+			kubeEnv: strings.Replace(requiredSourceKubeEnv, "CA_CERT: test-ca\n", "CA_CERT: \n\n", 1),
+			want:    "missing required entries: CA_CERT",
+		},
+		{
+			name:    "quoted empty value",
+			kubeEnv: strings.Replace(requiredSourceKubeEnv, "CA_CERT: test-ca", `CA_CERT: ""`, 1),
+			want:    "missing required entries: CA_CERT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := &compute.Metadata{}
+			if tt.kubeEnv != "" {
+				source.Items = []*compute.MetadataItems{{Key: metadata.KubeEnvKey, Value: lo.ToPtr(tt.kubeEnv)}}
+			}
+			target, err := metadata.FromSourceTemplate(source)
+			require.NoError(t, err)
+
+			err = validateSourceKubeEnv(target)
+			if tt.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
 
 func TestApplyNodeClassKubeletConfigSetsImagePullParallelism(t *testing.T) {
 	config := &kubeletconfig.KubeletConfiguration{}
