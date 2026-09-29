@@ -305,7 +305,7 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 			_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
 				makeSourceMetadata("max-pods-per-node=110"),
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
-				"us-central1-a", karpv1.CapacityTypeOnDemand, nil)
+				"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0)
 
 			require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 			require.Equal(t, tt.wantRetryable, retryable)
