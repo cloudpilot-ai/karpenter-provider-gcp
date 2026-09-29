@@ -45,12 +45,21 @@ The `gcp.restrictNonCmekServices` constraint cannot be auto-satisfied because it
 
 ## Cross-OS and cross-architecture provisioning
 
-Karpenter patches the source pool's kube-env metadata when provisioning nodes with a different OS or architecture:
+Karpenter copies the kube-env metadata from the source pool's instance template and patches it when provisioning nodes with a different OS or architecture:
 
-- **OS mismatch**: `PatchKubeEnvForOSType` adjusts kube-env fields when the target image (Ubuntu vs COS) differs from the source pool.
-- **Architecture mismatch**: `PatchKubeEnvForArch` adjusts kube-env when provisioning arm64 nodes from an amd64 source pool or vice versa.
+- **OS mismatch**: Karpenter adjusts kube-env entries when the target image family (Ubuntu or Container-Optimized OS) differs from the source pool.
+- **Architecture mismatch**: When the node and the source pool differ in architecture (amd64 or arm64), Karpenter swaps the server binary URL and hash.
 
 This allows a single source pool to bootstrap nodes of any OS and architecture combination.
+
+### Source kube-env validation
+
+A node built from incomplete kube-env metadata never registers with the cluster. To avoid creating such instances, Karpenter checks the source template's kube-env before each launch. Karpenter fails the launch with an error when either of these conditions is true:
+
+- Any of these entries is missing or empty: `CA_CERT`, `KUBE_MANIFESTS_TAR_URL`, `KUBERNETES_MASTER_NAME`, `SERVER_BINARY_TAR_HASH`, or `SERVER_BINARY_TAR_URL`.
+- `SERVER_BINARY_TAR_URL` does not point to a `kubernetes-server-linux-amd64.tar.gz` or `kubernetes-server-linux-arm64.tar.gz` archive. Karpenter reads the architecture from this file name to swap in binaries for the node's architecture. The check applies to every launch, including launches where the node and the source pool have the same architecture.
+
+GKE writes all of these entries into every node pool template. A failed check means that the source pool's template is unusable or that GKE changed its node bootstrap format. See [Launches fail with a source kube-env error](#troubleshooting) for how to resolve it.
 
 ## Resolving the bootstrap pool's instance template
 
@@ -148,6 +157,29 @@ gcloud compute instance-groups managed describe MIG --zone ZONE \
 ```
 
 If the logs show a fallback to the label scan, grant the controller `compute.instanceGroupManagers.get` (see [`deploy/iam/karpenter-controller-role.yaml`](../deploy/iam/karpenter-controller-role.yaml)).
+
+**Launches fail with a source kube-env error**
+
+Karpenter validates the source template's kube-env before each launch (see [Source kube-env validation](#source-kube-env-validation)). A failed check logs one of these errors, and Karpenter creates no instance:
+
+- `source instance template kube-env is missing required entries: <entries>`: the template lacks the listed bootstrap entries, or their values are empty.
+- `source kube-env SERVER_BINARY_TAR_URL "<url>" does not name a known kubernetes-server-linux architecture`: the server binary URL does not end in `kubernetes-server-linux-amd64.tar.gz` or `kubernetes-server-linux-arm64.tar.gz`.
+
+Find the errors in the controller logs:
+
+```sh
+kubectl logs -n karpenter-system -l app.kubernetes.io/name=karpenter | grep "kube-env"
+```
+
+To see which entries the source template's kube-env contains, list its entry names. Use the `templateName` value from the `source instance template selected` log line, and replace `--region REGION` with `--global` for a global template:
+
+```sh
+gcloud compute instance-templates describe TEMPLATE --region REGION --format=json \
+  | jq -r '.properties.metadata.items[] | select(.key == "kube-env") | .value' \
+  | cut -d: -f1
+```
+
+If the source pool's template lacks the entries, point Karpenter to another RUNNING GKE node pool with `DEFAULT_NODEPOOL_TEMPLATE_NAME` (see [Pinning a specific pool](#pinning-a-specific-pool)). If every pool's template fails the check, GKE may have changed its node bootstrap format. Report the error and your GKE version in a [GitHub issue](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues).
 
 **Nodes fail to join the cluster after switching bootstrap pools**
 
