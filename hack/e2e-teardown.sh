@@ -110,13 +110,23 @@ if gcloud artifacts repositories describe "${AR_REPO}" \
 fi
 
 log "Removing IAM bindings for ${GSA_EMAIL}..."
-for role in roles/compute.admin roles/container.admin roles/iam.serviceAccountUser; do
-  gcloud projects remove-iam-policy-binding "${E2E_PROJECT_ID}" \
+gcloud projects remove-iam-policy-binding "${E2E_PROJECT_ID}" \
+  --member "serviceAccount:${GSA_EMAIL}" \
+  --role "projects/${E2E_PROJECT_ID}/roles/karpenter_controller" \
+  --condition=None \
+  --quiet || true
+
+# Tolerate an already-deleted or inaccessible project so teardown doesn't abort.
+PROJECT_NUMBER="$(gcloud projects describe "${E2E_PROJECT_ID}" \
+  --format='value(projectNumber)' 2>/dev/null || true)"
+if [ -n "${PROJECT_NUMBER}" ]; then
+  COMPUTE_DEFAULT_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+  gcloud iam service-accounts remove-iam-policy-binding "${COMPUTE_DEFAULT_SA}" \
     --member "serviceAccount:${GSA_EMAIL}" \
-    --role "${role}" \
-    --condition=None \
+    --role roles/iam.serviceAccountUser \
+    --project "${E2E_PROJECT_ID}" \
     --quiet || true
-done
+fi
 
 # Service account
 if gcloud iam service-accounts describe "${GSA_EMAIL}" \
