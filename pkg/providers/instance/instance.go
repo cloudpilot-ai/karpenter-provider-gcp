@@ -62,6 +62,8 @@ const (
 	zoneOperationPollInterval      = 1 * time.Second
 	defaultZoneOperationTimeout    = 2 * time.Minute
 	ipSpaceInsufficientCapacityTTL = 30 * time.Second
+	stockoutTTL                    = 5 * time.Minute
+	unsupportedConfigurationTTL    = 1 * time.Hour
 
 	instanceTerminationActionDelete = "DELETE"
 )
@@ -185,7 +187,7 @@ func waitForNextTick(ctx context.Context, ticker *time.Ticker) error {
 func (p *DefaultProvider) handleZoneOperationError(ctx context.Context, op *compute.Operation, instanceType, zone, capacityType string) error {
 	details, found := extractOperationInsufficientCapacityDetails(op)
 	if found {
-		ttl := insufficientCapacityBackoffTTL(details.code)
+		ttl := insufficientCapacityBackoffTTL(details)
 		p.unavailableOfferings.MarkUnavailableWithTTL(ctx, details.message, instanceType, zone, capacityType, ttl)
 		return newInsufficientCapacityError(instanceType, zone, capacityType, ttl, details)
 	}
@@ -275,18 +277,37 @@ func newInsufficientCapacityError(instanceType, zone, capacityType string, ttl t
 		gceDetails = append(gceDetails, "op="+details.operation)
 	}
 	gceDetails = append(gceDetails, "code="+details.code)
+	status := "unavailable"
+	if isUnsupportedConfiguration(details) {
+		status = "unsupported configuration"
+	}
 	return cloudprovider.NewInsufficientCapacityError(fmt.Errorf(
-		"%s %s/%s unavailable %s (%s): %s",
-		instanceType, capacityType, zone, ttl, strings.Join(gceDetails, ", "), details.message,
+		"%s %s/%s %s %s (%s): %s",
+		instanceType, capacityType, zone, status, ttl, strings.Join(gceDetails, ", "), details.message,
 	))
 }
 
-func insufficientCapacityBackoffTTL(reasonCode string) time.Duration {
-	if reasonCode == "IP_SPACE_EXHAUSTED_WITH_DETAILS" || reasonCode == "IP_SPACE_EXHAUSTED" {
-		return ipSpaceInsufficientCapacityTTL
-	}
+func isIPSpaceExhausted(details insufficientCapacityDetails) bool {
+	return details.code == "IP_SPACE_EXHAUSTED_WITH_DETAILS" || details.code == "IP_SPACE_EXHAUSTED"
+}
 
-	return unavailableofferings.DefaultTTL
+// isUnsupportedConfiguration reports whether the zone does not support the
+// request, which does not resolve with time. IP space exhaustion takes
+// precedence.
+func isUnsupportedConfiguration(details insufficientCapacityDetails) bool {
+	return !isIPSpaceExhausted(details) &&
+		(details.code == "MACHINE_TYPE_UNSUPPORTED" || details.structuredReason == "configuration_availability")
+}
+
+func insufficientCapacityBackoffTTL(details insufficientCapacityDetails) time.Duration {
+	switch {
+	case isIPSpaceExhausted(details):
+		return ipSpaceInsufficientCapacityTTL
+	case isUnsupportedConfiguration(details):
+		return unsupportedConfigurationTTL
+	default:
+		return stockoutTTL
+	}
 }
 
 func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
@@ -477,13 +498,13 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 	if err != nil {
 		details, insufficient := extractInsertInsufficientCapacityDetails(err)
 		if insufficient {
-			ttl := insufficientCapacityBackoffTTL(details.code)
+			ttl := insufficientCapacityBackoffTTL(details)
 			p.unavailableOfferings.MarkUnavailableWithTTL(ctx, details.message, instanceType.Name, zone, capacityType, ttl)
 			err = newInsufficientCapacityError(instanceType.Name, zone, capacityType, ttl, details)
 
 			// If IP space is exhausted, trying other instance types won't help as they share the same subnet.
 			// We should fail fast to avoid unnecessary API calls and noise.
-			if details.code == "IP_SPACE_EXHAUSTED" || details.code == "IP_SPACE_EXHAUSTED_WITH_DETAILS" {
+			if isIPSpaceExhausted(details) {
 				return nil, "", false, err
 			}
 		}
@@ -617,7 +638,7 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 
 	// Skip zones with known ICE for this instance type and capacity type.
 	// Without this filter, every retry calls MarkUnavailable and resets the
-	// 30-min TTL, preventing natural expiry. Applied to both on-demand and
+	// TTL, preventing natural expiry. Applied to both on-demand and
 	// spot so both paths behave consistently.
 	zones = lo.Filter(zones, func(z string, _ int) bool {
 		return !p.unavailableOfferings.IsUnavailable(instanceType.Name, z, capacityType)

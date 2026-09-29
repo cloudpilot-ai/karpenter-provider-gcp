@@ -180,7 +180,7 @@ func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
 	}, "z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand)
 
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
-	require.ErrorContains(t, err, "insufficient capacity, z3-highmem-8-highlssd on-demand/us-east4-a unavailable 30m0s")
+	require.ErrorContains(t, err, "insufficient capacity, z3-highmem-8-highlssd on-demand/us-east4-a unavailable 5m0s")
 	require.ErrorContains(t, err, "reason=resource_availability, op="+operation+", code=ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS")
 	require.ErrorContains(t, err, "localized capacity message")
 	require.True(t, unavailable.IsUnavailable("z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand))
@@ -195,7 +195,7 @@ func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
 		"z3-highmem-8-highlssd",
 		"on-demand",
 		"us-east4-a",
-		"30m0s",
+		"5m0s",
 		"ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
 		"resource_availability",
 		operation,
@@ -204,20 +204,111 @@ func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
 	}
 }
 
-func TestInsufficientCapacityBackoffTTLForIPSpace(t *testing.T) {
+// Stockouts clear with time and are retried soon; unsupported configurations
+// do not, so retrying them on the stockout TTL only repeats a failing launch.
+func TestInsufficientCapacityBackoffTTL(t *testing.T) {
 	t.Parallel()
 
-	ttl := insufficientCapacityBackoffTTL("IP_SPACE_EXHAUSTED")
-
-	require.Equal(t, ipSpaceInsufficientCapacityTTL, ttl)
+	const (
+		unavailable = "unavailable"
+		unsupported = "unsupported configuration"
+	)
+	tests := []struct {
+		name       string
+		details    insufficientCapacityDetails
+		wantTTL    time.Duration
+		wantStatus string
+	}{
+		{"stockout without reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED"}, stockoutTTL, unavailable},
+		{"stockout with resource reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "resource_availability"}, stockoutTTL, unavailable},
+		{"stockout with unknown reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "some_new_reason"}, stockoutTTL, unavailable},
+		{"configuration availability", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "configuration_availability"}, unsupportedConfigurationTTL, unsupported},
+		{"machine type unsupported", insufficientCapacityDetails{code: "MACHINE_TYPE_UNSUPPORTED", structuredReason: "MACHINE_TYPE_UNSUPPORTED"}, unsupportedConfigurationTTL, unsupported},
+		{"ip space exhausted", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED"}, ipSpaceInsufficientCapacityTTL, unavailable},
+		{"ip space exhausted with details", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}, ipSpaceInsufficientCapacityTTL, unavailable},
+		{"ip space exhausted with configuration reason", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS", structuredReason: "configuration_availability"}, ipSpaceInsufficientCapacityTTL, unavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ttl := insufficientCapacityBackoffTTL(tt.details)
+			require.Equal(t, tt.wantTTL, ttl)
+			err := newInsufficientCapacityError("n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, ttl, tt.details)
+			require.ErrorContains(t, err, fmt.Sprintf("n2-standard-4 on-demand/us-east4-a %s %s ", tt.wantStatus, tt.wantTTL))
+		})
+	}
 }
 
-func TestInsufficientCapacityBackoffTTLForOtherReasons(t *testing.T) {
+func requireStoredTTL(t *testing.T, c *cache.Cache, instanceType, zone, capacityType string, want time.Duration) {
+	t.Helper()
+	_, expiration, found := c.GetWithExpiration(fmt.Sprintf("%s:%s:%s", capacityType, instanceType, zone))
+	require.True(t, found, "offering must be marked unavailable")
+	require.WithinDuration(t, time.Now().Add(want), expiration, 5*time.Second)
+}
+
+// An unsupported configuration must still be an insufficient capacity error so
+// core falls through to other offerings, but the provider message must not
+// describe it as a stockout.
+func TestHandleZoneOperationErrorUnsupportedConfiguration(t *testing.T) {
 	t.Parallel()
 
-	ttl := insufficientCapacityBackoffTTL("ZONE_RESOURCE_POOL_EXHAUSTED")
+	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
+	p := &DefaultProvider{unavailableOfferings: unavailableofferings.NewUnavailableOfferingsWithCache(c)}
+	err := p.handleZoneOperationError(context.Background(), &compute.Operation{
+		Error: &compute.OperationError{
+			Errors: []*compute.OperationErrorErrors{{
+				Code:         "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+				ErrorDetails: []*compute.OperationErrorErrorsErrorDetails{{ErrorInfo: &compute.ErrorInfo{Reason: "configuration_availability"}}},
+			}},
+		},
+	}, "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand)
 
-	require.Equal(t, unavailableofferings.DefaultTTL, ttl)
+	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
+	require.ErrorContains(t, err, "n2-standard-4 on-demand/us-east4-a unsupported configuration 1h0m0s")
+	require.ErrorContains(t, err, "reason=configuration_availability")
+	requireStoredTTL(t, c, "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, unsupportedConfigurationTTL)
+}
+
+// A capacity error returned synchronously by Insert is classified by code:
+// only IP space exhaustion stops the caller from trying other instance types.
+func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		code          string
+		wantTTL       time.Duration
+		wantRetryable bool
+	}{
+		{"ZONE_RESOURCE_POOL_EXHAUSTED", stockoutTTL, true},
+		{"MACHINE_TYPE_UNSUPPORTED", unsupportedConfigurationTTL, true},
+		{"IP_SPACE_EXHAUSTED", ipSpaceInsufficientCapacityTTL, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			t.Parallel()
+
+			p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					http.NotFound(w, r)
+					return
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]any{"error": map[string]any{"errors": []map[string]string{{"reason": tt.code}}}})
+			}))
+			p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+			c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
+			p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
+
+			_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
+				makeSourceMetadata("max-pods-per-node=110"),
+				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+				"us-central1-a", karpv1.CapacityTypeOnDemand, nil)
+
+			require.True(t, cloudprovider.IsInsufficientCapacityError(err))
+			require.Equal(t, tt.wantRetryable, retryable)
+			requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeOnDemand, tt.wantTTL)
+		})
+	}
 }
 
 // newFakeComputeProvider builds a DefaultProvider whose computeService targets a fake
