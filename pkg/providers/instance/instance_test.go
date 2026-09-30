@@ -2229,6 +2229,41 @@ func TestConfidentialInstanceType(t *testing.T) {
 	}
 }
 
+func TestAdvancedMachineFeatures(t *testing.T) {
+	t.Parallel()
+
+	enabled, disabled := true, false
+	cases := []struct {
+		name string
+		amf  *v1alpha1.AdvancedMachineFeatures
+	}{
+		{name: "unset"},
+		{name: "empty", amf: &v1alpha1.AdvancedMachineFeatures{}},
+		{name: "nested virtualization enabled", amf: &v1alpha1.AdvancedMachineFeatures{EnableNestedVirtualization: &enabled}},
+		{name: "nested virtualization disabled", amf: &v1alpha1.AdvancedMachineFeatures{EnableNestedVirtualization: &disabled}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.AdvancedMachineFeatures = tc.amf
+
+			instance := buildConfidentialInstance(t, nc)
+
+			if tc.amf == nil || tc.amf.EnableNestedVirtualization == nil {
+				require.Nil(t, instance.AdvancedMachineFeatures)
+				return
+			}
+
+			require.NotNil(t, instance.AdvancedMachineFeatures)
+			require.Equal(t, *tc.amf.EnableNestedVirtualization, instance.AdvancedMachineFeatures.EnableNestedVirtualization)
+			require.Contains(t, instance.AdvancedMachineFeatures.ForceSendFields, "EnableNestedVirtualization")
+		})
+	}
+}
+
 func TestGetOrCreateInstance_AdoptsInstanceFromEarlierAttemptZone(t *testing.T) {
 	t.Parallel()
 

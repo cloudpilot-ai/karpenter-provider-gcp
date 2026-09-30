@@ -53,6 +53,17 @@ spec:
               GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
               This will contain the configuration necessary to launch instances in GCP.
             properties:
+              advancedMachineFeatures:
+                description: AdvancedMachineFeatures configures advanced CPU and virtualisation
+                  options for provisioned nodes.
+                properties:
+                  enableNestedVirtualization:
+                    description: |-
+                      EnableNestedVirtualization defines whether the instance can run nested virtual machines.
+                      Only supported on Intel-based machine families; not supported on E2, AMD, Arm or
+                      Confidential VM instances.
+                    type: boolean
+                type: object
               autoGPUTaint:
                 description: |-
                   AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule

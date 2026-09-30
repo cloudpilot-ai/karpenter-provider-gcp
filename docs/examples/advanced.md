@@ -235,6 +235,28 @@ If the chosen machine type does not support the requested confidential type, GCE
 
 The default `ContainerOptimizedOS` and `Ubuntu` images boot as Confidential VMs on supported families without any image change. GPU Confidential VMs are an exception: an A3 instance with an attached H100 GPU using Intel TDX requires a TDX-specific image (for example `cos-tdx-*`), which is not available through the `family` image selectors. Pin such an image by its full resource URL with `imageSelectorTerms[].id`; see the [GCP supported configurations](https://cloud.google.com/confidential-computing/confidential-vm/docs/supported-configurations#supported-images-gpu).
 
+## Nested virtualization
+
+Nested virtualization lets pods on the node run their own virtual machines, for example with KVM-based sandboxes or emulators.
+
+```yaml
+advancedMachineFeatures:
+  enableNestedVirtualization: true
+```
+
+Nested virtualization is only supported on Intel-based machine families, such as N1, N2, C2, C3 and C4. It is not available on E2, AMD (N2D, C2D, T2D), Arm (T2A, C4A) or Confidential VM instances. See the [GCP nested virtualization documentation](https://cloud.google.com/compute/docs/instances/nested-virtualization/overview) for the current list.
+
+GCE does not reject unsupported machine types: the instance starts normally and the setting is silently ignored. Restrict the NodePool to supported families so nodes that cannot run nested virtual machines are never provisioned:
+
+```yaml
+requirements:
+  - key: karpenter.k8s.gcp/instance-family
+    operator: In
+    values: ["n2", "c3", "c4"]
+```
+
+To confirm nested virtualization is active on a node, check that the `vmx` CPU flag is present (`grep -c vmx /proc/cpuinfo`) or that `/dev/kvm` exists.
+
 ## Disk type scheduling
 
 Karpenter applies `disk-type.gke.io/*` labels to provisioned nodes based on the instance type's machine family. These labels indicate which persistent disk types the instance supports, enabling two capabilities:

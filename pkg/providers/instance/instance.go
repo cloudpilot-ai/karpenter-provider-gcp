@@ -780,7 +780,11 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		instance.Scheduling.OnHostMaintenance = "TERMINATE"
 	}
 
+	// Configure confidential instance
 	p.configureConfidentialInstance(instance, nodeClass)
+
+	// Configure advanced machine features
+	p.configureAdvancedMachineFeatures(instance, nodeClass)
 
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, clusterConfig.Id)
@@ -1178,6 +1182,20 @@ func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instan
 	}
 	// Confidential VMs cannot live-migrate; GCE rejects MIGRATE on create.
 	instance.Scheduling.OnHostMaintenance = "TERMINATE"
+}
+
+// configureAdvancedMachineFeatures passes advanced machine features to the GCE
+// instance. Currently this only contains EnableNestedVirtualization which
+// allows access to KVM on certain GCE machine types
+func (p *DefaultProvider) configureAdvancedMachineFeatures(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass) {
+	amf := nodeClass.Spec.AdvancedMachineFeatures
+	if amf == nil || amf.EnableNestedVirtualization == nil {
+		return
+	}
+	instance.AdvancedMachineFeatures = &compute.AdvancedMachineFeatures{
+		EnableNestedVirtualization: *amf.EnableNestedVirtualization,
+		ForceSendFields:            []string{"EnableNestedVirtualization"},
+	}
 }
 
 // setupInstanceLabels writes controller-owned GCE labels for a new instance.

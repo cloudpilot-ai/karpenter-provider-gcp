@@ -286,6 +286,33 @@ func (e *Environment) CreateNodeClassWithConfidentialType(ctx context.Context, n
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithNestedVirtualization creates a GCENodeClass with
+// advancedMachineFeatures.enableNestedVirtualization set to true.
+// Used by nested virtualization e2e tests.
+func (e *Environment) CreateNodeClassWithNestedVirtualization(ctx context.Context, name string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"advancedMachineFeatures": map[string]any{
+				"enableNestedVirtualization": true,
+			},
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"disks": []any{
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
 // CreateNodeClass but with networkConfig.enablePrivateNodes set to true,
 // so Karpenter provisions nodes with no external (public) IP.
