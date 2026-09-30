@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
+	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -226,8 +227,8 @@ func TestCreateMatchesAdoptedCountOutsideFilteredCandidates(t *testing.T) {
 			t.Parallel()
 			inst := instanceWithSSDLabel("n2d-standard-8", tc.count)
 			inst.Name = "karpenter-claim"
-			provider := New(reproClient{nodeClass: nodeClass}, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{zero, two}}, existingInstanceProvider{inst: inst})
-			got, err := provider.Create(context.Background(), claim)
+			provider := New(reproClient{nodeClass: nodeClass}, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{zero, two}}, existingInstanceProvider{inst: inst}, nil)
+			got, err := provider.Create(karpopts.ToContext(context.Background(), &karpopts.Options{}), claim)
 			if tc.wantError {
 				require.ErrorContains(t, err, "local SSD count")
 				require.Nil(t, got)

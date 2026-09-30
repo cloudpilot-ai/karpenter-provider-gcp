@@ -293,7 +293,6 @@ _Appears in:_
 | `Ephemeral` | LocalSSDModeEphemeral uses local SSDs for kubelet ephemeral storage.<br /> |
 
 
-
 #### NetworkConfig
 
 

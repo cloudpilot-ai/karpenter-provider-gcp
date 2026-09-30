@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 	gcpoptions "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
@@ -113,9 +114,11 @@ type reproGKE struct{}
 func (reproGKE) ResolveClusterZones(context.Context) ([]string, error) {
 	return []string{"us-central1-a"}, nil
 }
+
 func (reproGKE) GetClusterConfig(context.Context) (*container.Cluster, error) {
 	return &container.Cluster{Id: "deadbeef", NetworkConfig: &container.NetworkConfig{Network: "projects/test/global/networks/default", Subnetwork: "projects/test/regions/us-central1/subnetworks/default"}}, nil
 }
+
 func (reproGKE) GetServerConfig(context.Context) (*container.ServerConfig, error) {
 	return &container.ServerConfig{}, nil
 }
@@ -125,17 +128,26 @@ type reproTemplate struct{}
 func (reproTemplate) Sync(context.Context) error               { return nil }
 func (reproTemplate) EnsureFallbackPool(context.Context) error { return nil }
 func (reproTemplate) GetSourceTemplateMetadata(context.Context) (*compute.Metadata, error) {
-	return &compute.Metadata{}, nil
+	return &compute.Metadata{Items: []*compute.MetadataItems{{
+		Key: metadata.KubeEnvKey,
+		Value: lo.ToPtr("CA_CERT: test-ca\n" +
+			"KUBE_MANIFESTS_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-manifests.tar.gz\n" +
+			"KUBERNETES_MASTER_NAME: 10.0.0.2\n" +
+			"SERVER_BINARY_TAR_HASH: amd64-sha512\n" +
+			"SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-amd64.tar.gz\n"),
+	}}}, nil
 }
 
 type reproVersion struct{}
 
 func (reproVersion) Get(context.Context) (string, error) { return "1.35.0", nil }
 
-var _ instancetype.Provider = reproTypes{}
-var _ gke.Provider = reproGKE{}
-var _ nodepooltemplate.Provider = reproTemplate{}
-var _ version.Provider = reproVersion{}
+var (
+	_ instancetype.Provider     = reproTypes{}
+	_ gke.Provider              = reproGKE{}
+	_ nodepooltemplate.Provider = reproTemplate{}
+	_ version.Provider          = reproVersion{}
+)
 
 func TestExactCountCreateMatrix(t *testing.T) {
 	fullCatalog := append([]int{0}, localssd.AllowedLocalSSDCounts("n2d-standard-4", 4)...)
@@ -245,7 +257,7 @@ func TestEphemeralStorageWithExactCountLaunchesSelectedCount(t *testing.T) {
 }
 
 func TestResolveInstanceTypeFromInstanceUsesFullCatalogForKeylessPool(t *testing.T) {
-	ctx := context.Background()
+	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{})
 	nodeClass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
 	nodePool := &karpv1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "pool"}, Spec: karpv1.NodePoolSpec{Template: karpv1.NodeClaimTemplate{Spec: karpv1.NodeClaimTemplateSpec{
 		NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"},
@@ -255,7 +267,7 @@ func TestResolveInstanceTypeFromInstanceUsesFullCatalogForKeylessPool(t *testing
 		{Name: "n2d-standard-4", Requirements: scheduling.NewRequirements(scheduling.NewRequirement(v1alpha1.LabelInstanceLocalSsdCount, corev1.NodeSelectorOpIn, "4"))},
 	}
 	kc := reproClient{nodeClass: nodeClass, nodePool: nodePool}
-	provider := New(kc, reproEvents{}, reproTypes{variants: variants}, nil)
+	provider := New(kc, reproEvents{}, reproTypes{variants: variants}, nil, nil)
 	instance := &instance.Instance{Type: "n2d-standard-4", Labels: map[string]string{
 		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey):              "pool",
 		utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount): "4",
@@ -294,7 +306,7 @@ func TestResolveInstanceTypeFromInstanceIgnoresMissingOwners(t *testing.T) {
 				nodeClass: nodeClass, nodePool: nodePool,
 				nodePoolNotFound: tc.nodePoolNotFound, nodeClassNotFound: tc.nodeClassNotFound,
 			}
-			provider := New(kc, reproEvents{}, reproTypes{}, nil)
+			provider := New(kc, reproEvents{}, reproTypes{}, nil, nil)
 			resolved, err := provider.resolveInstanceTypeFromInstance(context.Background(), instance)
 			require.NoError(t, err)
 			require.Nil(t, resolved)
@@ -383,7 +395,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	typeProvider := reproTypes{variants: variants, machine: mt}
 	menu := variants
 	if config.useProviderMenu {
-		menuProvider := New(kc, reproEvents{}, typeProvider, nil)
+		menuProvider := New(kc, reproEvents{}, typeProvider, nil, nil)
 		var err error
 		menu, err = menuProvider.GetInstanceTypes(ctx, pool)
 		require.NoError(t, err)
@@ -468,7 +480,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	svc, err := compute.NewService(ctx, googleoption.WithEndpoint(srv.URL+"/"), googleoption.WithoutAuthentication())
 	require.NoError(t, err)
 	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", svc, reproGKE{}, typeProvider, reproTemplate{}, reproVersion{}, unavailableofferings.NewUnavailableOfferings())
-	cp := New(kc, reproEvents{}, typeProvider, ip)
+	cp := New(kc, reproEvents{}, typeProvider, ip, nil)
 	if len(results.NewNodeClaims) > 0 {
 		generated := results.NewNodeClaims[0].ToNodeClaim()
 		generated.Name = "claim"
@@ -531,6 +543,7 @@ func reproWriteJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
 }
+
 func reproPod(name string, gib int64, selector map[string]string) *corev1.Pod {
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)}, Status: corev1.PodStatus{Phase: corev1.PodPending}, Spec: corev1.PodSpec{NodeSelector: selector, Containers: []corev1.Container{{Name: "c", Image: "x", Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *resource.NewQuantity(gib*1024*1024*1024, resource.BinarySI)}}}}}}
 }
