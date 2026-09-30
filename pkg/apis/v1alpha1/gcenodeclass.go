@@ -93,6 +93,9 @@ type GCENodeClassSpec struct {
 	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
+	// AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes.
+	// +optional
+	AdvancedMachineFeatures *AdvancedMachineFeatures `json:"advancedMachineFeatures,omitempty"`
 	// ConfidentialInstanceType enables Confidential VM for provisioned nodes using the
 	// named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory
 	// encryption. Leave unset to disable. Only supported on specific machine families.
@@ -413,6 +416,15 @@ type HugepagesConfig struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	HugepageSize1g *int32 `json:"hugepageSize1g,omitempty"`
+}
+
+// AdvancedMachineFeatures defines advanced CPU and virtualisation options for a GCE instance.
+type AdvancedMachineFeatures struct {
+	// EnableNestedVirtualization defines whether the instance can run nested virtual machines.
+	// Only supported on Intel-based machine families; not supported on E2, AMD, Arm or
+	// Confidential VM instances.
+	// +optional
+	EnableNestedVirtualization *bool `json:"enableNestedVirtualization,omitempty"`
 }
 
 // GCENodeClass is the Schema for the GCENodeClass API
