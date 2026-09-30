@@ -142,6 +142,66 @@ kubeletConfiguration:
 
 > **Note:** Setting `maxParallelImagePulls` to `2` or greater requires `serializeImagePulls: false`; admission otherwise fails with `maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false`. `maxParallelImagePulls: 1` on its own is accepted without any `serializeImagePulls` change, and omitting both fields preserves the default serialized behavior.
 
+## Static hugepages
+
+Set `spec.linuxNodeConfig.hugepages` to pre-allocate hugepages on every node that the GCENodeClass provisions. The node allocates the pages at boot, before the kubelet starts, and reports them as `hugepages-2Mi` and `hugepages-1Gi` node capacity.
+
+```yaml
+linuxNodeConfig:
+  hugepages:
+    hugepageSize2m: 4096  # 4096 × 2 MiB = 8 GiB
+    hugepageSize1g: 4     # 4 × 1 GiB = 4 GiB
+```
+
+- `hugepageSize2m` — number of 2 MiB hugepages to allocate
+- `hugepageSize1g` — number of 1 GiB hugepages to allocate
+
+Each field is a page count with a minimum of `1`. Omit a field to allocate no pages of that size. Nodes don't inherit hugepages from the GKE node pool that Karpenter uses as its bootstrap template.
+
+The fields mirror the GKE [pre-allocated hugepages](https://cloud.google.com/kubernetes-engine/docs/how-to/node-system-config#pre-allocated-hugepages) settings, and the GKE limits apply:
+
+- Hugepages can use at most 60% of node memory on machines with less than 30 GB of memory, and at most 80% on larger machines.
+- 1 GiB hugepages are available only on some machine families, such as C3, C3D, C4, and M3.
+
+Karpenter does not validate these limits. Use NodePool requirements, such as `karpenter.k8s.gcp/instance-family` or `karpenter.k8s.gcp/instance-memory`, to limit the NodePool to machine types that can hold the configured pages.
+
+### Advertise hugepages to the scheduler
+
+Karpenter doesn't add the configured hugepages to instance type capacity, so a pending pod that requests hugepages doesn't trigger provisioning on its own. Create a `NodeOverlay` that adds the hugepages capacity to instance types in the NodePool. `NodeOverlay` is an Alpha feature; enable it with `controller.featureGates.nodeOverlay` (see [Settings](../settings.md#feature-gates)).
+
+```yaml
+apiVersion: karpenter.sh/v1alpha1
+kind: NodeOverlay
+metadata:
+  name: hugepages-example
+spec:
+  requirements:
+    - key: karpenter.sh/nodepool
+      operator: In
+      values:
+        - hugepages-example  # NodePool that references the hugepages GCENodeClass
+  capacity:
+    hugepages-2Mi: 8Gi  # hugepageSize2m × 2 MiB
+    hugepages-1Gi: 4Gi  # hugepageSize1g × 1 GiB
+```
+
+Set each capacity value to the total size of the pages in the GCENodeClass, so that the scheduler's view matches what the node allocates.
+
+Pods request hugepages in their resource requests and limits. Kubernetes doesn't overcommit hugepages, so a hugepages request must equal its limit:
+
+```yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+    hugepages-2Mi: 1Gi
+  limits:
+    memory: 128Mi
+    hugepages-2Mi: 1Gi
+```
+
+See [`examples/nodeclass/hugepages-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/hugepages-gcenodeclass.yaml) for a complete GCENodeClass and NodeOverlay, and [Manage HugePages](https://kubernetes.io/docs/tasks/manage-hugepages/scheduling-hugepages/) for how pods consume hugepages.
+
 ## Shielded VM
 
 Shielded VM provides verifiable integrity for your instances, protecting against boot-level and kernel-level malware. GCP organizations that enforce `constraints/compute.requireShieldedVm` require these settings on all instances. Without them, Karpenter-provisioned nodes fail with a `412 conditionNotMet` error.
