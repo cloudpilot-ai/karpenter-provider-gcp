@@ -1,0 +1,32 @@
+# Allocates 4096 2 MiB hugepages (8 GiB) and 4 1 GiB hugepages (4 GiB) on every
+# node at boot. Karpenter does not add hugepages to the instance type capacity,
+# so pair this class with a NodeOverlay that advertises hugepages-2Mi and
+# hugepages-1Gi to the scheduling simulation.
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: hugepages-example
+spec:
+  imageSelectorTerms:
+    - alias: Ubuntu@latest
+  linuxNodeConfig:
+    hugepages:
+      hugepageSize2m: 4096
+      hugepageSize1g: 4
+  disks:
+    - sizeGiB: 60
+      boot: true
+---
+apiVersion: karpenter.sh/v1alpha1
+kind: NodeOverlay
+metadata:
+  name: hugepages-example
+spec:
+  requirements:
+    - key: karpenter.sh/nodepool
+      operator: In
+      values:
+        - hugepages-example
+  capacity:
+    hugepages-2Mi: 8Gi
+    hugepages-1Gi: 4Gi

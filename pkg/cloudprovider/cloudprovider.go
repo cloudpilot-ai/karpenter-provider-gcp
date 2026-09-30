@@ -32,7 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
+	karpoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
@@ -59,18 +61,21 @@ type CloudProvider struct {
 
 	instanceTypeProvider instancetype.Provider
 	instanceProvider     instance.Provider
+	instanceTypeStore    *nodeoverlay.InstanceTypeStore
 }
 
 func New(kubeClient client.Client,
 	recorder events.Recorder,
 	instanceTypeProvider instancetype.Provider,
 	instanceProvider instance.Provider,
+	store *nodeoverlay.InstanceTypeStore,
 ) *CloudProvider {
 	return &CloudProvider{
 		kubeClient:           kubeClient,
 		recorder:             recorder,
 		instanceTypeProvider: instanceTypeProvider,
 		instanceProvider:     instanceProvider,
+		instanceTypeStore:    store,
 	}
 }
 
@@ -157,6 +162,12 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context, ins
 
 	if !ok {
 		return nil, fmt.Errorf("instance type %s not found in offerings", instance.Type)
+	}
+	if karpoptions.FromContext(ctx).FeatureGates.NodeOverlay {
+		instanceType, err = c.instanceTypeStore.Apply(nodePool.Name, instanceType)
+		if err != nil {
+			return nil, fmt.Errorf("applying nodeoverlays, %w", err)
+		}
 	}
 	return instanceType, nil
 }
@@ -389,6 +400,14 @@ func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *kar
 	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
 	if err != nil {
 		return nil, err
+	}
+	if karpoptions.FromContext(ctx).FeatureGates.NodeOverlay {
+		if nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]; ok {
+			instanceTypes, err = c.instanceTypeStore.ApplyAll(nodePoolName, instanceTypes)
+			if err != nil {
+				return nil, fmt.Errorf("applying nodeoverlays, %w", err)
+			}
+		}
 	}
 
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)

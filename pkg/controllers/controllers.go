@@ -24,9 +24,9 @@ import (
 	"k8s.io/client-go/rest"
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/csr"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption"
 	nodeclaimgc "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclaim/garbagecollection"
@@ -55,7 +55,7 @@ func NewController(
 	imageProvider imagefamily.Provider,
 	nodePoolTemplateProvider providernodepooltemplate.Provider,
 	instanceTypeProvider providerinstancetype.Provider,
-	cloudProvider *cloudprovider.CloudProvider,
+	cloudProvider cloudprovider.CloudProvider,
 	pricingProvider pricing.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
