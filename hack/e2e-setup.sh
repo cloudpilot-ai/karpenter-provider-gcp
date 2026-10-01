@@ -14,7 +14,17 @@
 #   E2E_MACHINE_TYPE  system node type      (default: n2-standard-2)
 set -euo pipefail
 
+# Terraform-owned targets use the reserved prefix and must never run imperative setup.
+if [[ "${E2E_PREFIX:-}" == tf-e2e-* ]]; then
+  echo "ERROR: Terraform-owned e2e target; use the reviewed Terraform maintenance procedure" >&2
+  exit 1
+fi
+
 log() { echo "e2e-setup: $*" >&2; }
+
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+# Fail before creating any GCP resources if the pinned local chart cannot be built.
+helm dependency build "${REPO_ROOT}/charts/karpenter"
 
 if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
   ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null)"
@@ -57,8 +67,6 @@ IMAGE_REPO="${E2E_REGION}-docker.pkg.dev/${E2E_PROJECT_ID}/${AR_REPO}/karpenter"
 PRIMARY_CIDR="10.0.0.0/20"
 PODS_CIDR="10.4.0.0/14"
 SERVICES_CIDR="10.8.0.0/20"
-
-REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
 if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
   log "Authenticating with service-account key..."
