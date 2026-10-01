@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# e2e-check-clean.sh — Reports any GCP resources created by e2e-setup.sh that
+# e2e-check-clean.sh — Reports e2e GCP resources that
 # still exist. Exits 0 if clean, 1 if orphaned resources are found.
 # Does NOT delete anything.
 #
-# Optional (with defaults matching e2e-setup.sh):
+# Optional (with local e2e defaults):
 #   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
 #   E2E_PROJECT_ID  GCP project ID  (default: parsed from credentials)
 #   E2E_PREFIX      resource name prefix  (default: karpenter-e2e)
@@ -130,6 +130,6 @@ if [ "${found}" -eq 0 ]; then
   exit 0
 else
   echo "" >&2
-  echo "Run hack/e2e-teardown.sh to remove the above resources." >&2
+  echo "Retirement requires the approved Terraform maintenance procedure in deploy/terraform-e2e/README.md." >&2
   exit 1
 fi

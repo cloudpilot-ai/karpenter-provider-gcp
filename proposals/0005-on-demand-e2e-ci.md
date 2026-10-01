@@ -9,7 +9,7 @@
 
 ## Summary
 
-PlanetScale now provides the GCP project for this repository's e2e infrastructure. This proposal defines an e2e roadmap for on-demand real GKE CI ([#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296)): first ship useful local tooling, then provision the shared environment with Terraform, add a manual WIF pipeline, and finally add PR-comment commands as a thin wrapper.
+PlanetScale now provides the GCP project for this repository's e2e infrastructure. This proposal defines an e2e roadmap for on-demand real GKE CI ([#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296)): first ship useful local tooling, then provision the shared environment with Terraform for manual runs, add WIF with a manual CI pipeline, and finally add PR-comment commands as a thin wrapper.
 
 The local runner tests the current checkout against a controller built from the same commit on a persistent GKE e2e cluster. Later CI captures an immutable PR head SHA, deploys that revision, and publishes a PR comment plus a GitHub check. ChatOps accepts `/e2e`, `/e2e gpu`, or `/e2e full` only after that pipeline exists.
 
@@ -58,11 +58,11 @@ Locally, `make e2e-tests E2E_SELECTION=...` accepts `standard` (the default), `g
 
 ### Initial Infrastructure Model
 
-Terraform provisions and owns the persistent GKE environment in the PlanetScale-provided project, including the resources needed for WIF. The stage that implements [#556](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/556) chooses the target location only after maintainer approval of quotas, capacity, budget and ownership. GPU mode is enabled only after its required capacity is validated.
+Terraform provisions and owns the persistent GKE environment in the PlanetScale-provided project for approved manual runs. CI runtime identity and WIF are added with the manual pipeline in Phase 3. The stage that implements [#556](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/556) chooses the target location only after maintainer approval of quotas, capacity, budget and ownership. GPU mode is enabled only after its required capacity is validated.
 
 Keep the mode-to-cluster abstraction even while all modes target one cluster. If future quota or parallelism requires it, GPU or standard runs can move to separate clusters by changing configuration, not runner logic.
 
-CI must pass `E2E_REGION`, `E2E_LOCATION`, `E2E_PROJECT_ID`, and `E2E_PREFIX` explicitly to every reused setup, deploy, image publishing, and test command. CI scripts must fail fast if any required target input is missing rather than relying on local-development defaults.
+CI must pass `E2E_REGION`, `E2E_LOCATION`, `E2E_PROJECT_ID`, and `E2E_PREFIX` explicitly to every reused deploy, image publishing, and test command. CI scripts must fail fast if any required target input is missing rather than relying on local-development defaults.
 
 ### Repository Layout and Ownership
 
@@ -70,12 +70,12 @@ Start with the local Go runner and keep most later CI logic outside YAML. When t
 
 ```text
 hack/e2e-runner/                 # local Go runner for selection, execution and reporting
-<terraform environment>/          # persistent environment and WIF resources
+deploy/terraform-e2e/            # persistent environment; WIF added in Phase 3
 .github/workflows/<manual>.yaml  # later manual pipeline
 .github/workflows/<chatops>.yaml # later permission-checked dispatcher
 ```
 
-Terraform, rather than setup scripts, owns persistent infrastructure. The exact workflow split is deferred until the manual-pipeline stage.
+Terraform, rather than setup scripts, owns persistent infrastructure. `make e2e-setup` and `make e2e-teardown` are retired in Phase 2; maintenance uses Terraform with separate approval. The exact workflow split is deferred until the manual-pipeline stage.
 
 The local runner owns selection, one global Ginkgo run, a Kubernetes Lease, controller commit checks, and a Markdown report with controller logs. The later manual pipeline handles trusted event wiring, permissions, OIDC/WIF setup, immutable PR-SHA checkout, concurrency and artifact upload; ChatOps only dispatches that pipeline.
 
@@ -87,7 +87,7 @@ The Go runner selects features by Ginkgo labels, invokes the existing suites, an
 
 The existing `e2e/` package remains focused on test definitions and shared test utilities. CI-specific orchestration should not be melted into `e2e/`; the gate and future runner invoke the tests from outside so local e2e development is not coupled to GitHub comments or artifact/reporting concerns.
 
-All first-version CI code and infrastructure setup scripts live in this repository.
+All first-version CI code and Terraform infrastructure configuration live in this repository.
 
 ### Authentication
 
@@ -118,7 +118,7 @@ Required controls:
 - Pass GitHub context/secrets through environment variables before shell use, then quote them.
 - Keep secrets out of public comments and logs.
 - Use job timeouts, bounded parallelism, bounded retries, and per-cluster concurrency.
-- Never call `make e2e-teardown` from normal PR-triggered runs.
+- Never run Terraform destroy or infrastructure retirement from normal PR-triggered runs.
 
 Network egress hardening can be evaluated only if it works on GitHub-hosted runners without paid SaaS or self-hosted infrastructure. Otherwise, document that it is out of scope.
 
@@ -136,7 +136,7 @@ The local runner runs one unified Ginkgo suite with feature labels and a single 
 
 Retries are intentionally limited:
 
-- Transient setup/deploy operations may retry with backoff.
+- Transient deploy operations may retry with backoff; Terraform maintenance is never retried as part of a test run.
 - Deploy alignment mismatch may redeploy once, then fail before tests.
 - Quota exhaustion and GPU capacity failures do not loop; report them as infrastructure failures.
 - Test assertion failures do not become green because of automatic reruns. A future flake-confirmation rerun may be added, but both attempts must be reported and the first failure must remain visible.
@@ -221,8 +221,9 @@ Coverage expansion and a possible KWOK lane remain tracked separately in [#250](
 
 ## Acceptance Criteria
 
-- [X] Phase 1 local runner implemented on the feature branch: `standard`, `gpu`, `all` and feature selections, globally bounded Ginkgo execution, Lease, commit checks and local Markdown report; merge and live validation remain pending.
-- [ ] Terraform reproducibly owns the persistent environment and WIF resources, resolving #556 without conflicting with setup scripts.
+- [X] Phase 1 local runner merged: `standard`, `gpu`, `all` and feature selections, globally bounded Ginkgo execution, Lease, commit checks and local Markdown report; live validation remains pending.
+- [ ] Terraform reproducibly owns the persistent environment for approved manual runs, resolving #556 without conflicting with setup scripts.
+- [ ] Phase 3 adds CI runtime identity and WIF resources alongside the manual pipeline.
 - [ ] A maintainer-triggered pipeline checks out and tests an immutable PR head SHA and authenticates to GCP through OIDC/WIF.
 - [ ] ChatOps accepts `/e2e`, `/e2e gpu`, and `/e2e full` only from users with `write`, `maintain`, or `admin` permission, and dispatches the existing pipeline.
 - [ ] The workflow verifies deploy/test alignment before running tests.
@@ -240,17 +241,17 @@ Coverage expansion and a possible KWOK lane remain tracked separately in [#250](
 
 ## Implementation Phases
 
-### Phase 1 — Local Tooling (implemented on feature branch)
+### Phase 1 — Local Tooling (merged; live validation pending)
 
-`make e2e-tests` uses `hack/e2e-runner`: feature selection, a global Ginkgo worker limit, Kubernetes Lease, checkout/controller alignment, Markdown results and controller logs. Existing Ginkgo suites retain their cleanup; setup/deploy/maintenance remain separate. The runner is useful locally without GitHub. Merge and a separately approved live standard run are still required before treating this phase as operationally validated.
+`make e2e-tests` uses `hack/e2e-runner`: feature selection, a global Ginkgo worker limit, Kubernetes Lease, checkout/controller alignment, Markdown results and controller logs. Existing Ginkgo suites retain their cleanup; setup/deploy/maintenance remain separate. The runner is useful locally without GitHub. A separately approved live standard run is still required before treating this phase as operationally validated.
 
 ### Phase 2 — Terraform Environment
 
-Implement #556 with a Terraform-managed persistent environment and WIF resources. Validate the local runner against the new target.
+Implement #556 with a Terraform-managed persistent environment for approved manual runs; retire imperative setup/teardown. Validate the local runner against the new target after separate approval.
 
 ### Phase 3 — Manual Pipeline
 
-Add maintainer-triggered PR/preset execution with WIF, immutable-SHA alignment, artifacts and PR reporting.
+Add the dedicated CI runtime identity and WIF resources with maintainer-triggered PR/preset execution, immutable-SHA alignment, artifacts and PR reporting.
 
 ### Phase 4 — ChatOps
 

@@ -78,27 +78,3 @@ variable "control_plane_cidr" {
     error_message = "Set a reviewed non-overlapping /28 control-plane CIDR."
   }
 }
-
-variable "github_repository_id" {
-  type        = string
-  description = "Numeric ID of the upstream repository; verify via GitHub before enabling WIF."
-  validation {
-    condition     = can(regex("^[0-9]+$", var.github_repository_id))
-    error_message = "Set the numeric upstream repository ID."
-  }
-}
-
-variable "github_owner_id" {
-  type        = string
-  description = "Numeric ID of the upstream owner; verify via GitHub before enabling WIF."
-  validation {
-    condition     = can(regex("^[0-9]+$", var.github_owner_id))
-    error_message = "Set the numeric upstream owner ID."
-  }
-}
-
-variable "enable_ci_wif" {
-  type        = bool
-  description = "Enable only after protected environment and actual GitHub OIDC claim contract are approved."
-  default     = false
-}
