@@ -544,51 +544,44 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
 	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), clusterConfig)
-	var lastErr error
-	for i, rangeName := range rangeNames {
-		hasMoreRanges := i < len(rangeNames)-1
-		setPrimaryAliasRange(instance, rangeName)
+	if retryable, err := p.insertInstanceWithPodRanges(ctx, instance, instanceType.Name, zone, capacityType, rangeNames); err != nil {
+		return nil, "", retryable, err
+	}
+	return instance, zone, false, nil
+}
 
-		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
-		if err != nil {
-			lastErr = err
-			details, insufficient := extractInsertInsufficientCapacityDetails(err)
-			if insufficient && isIPSpaceExhausted(details) && hasMoreRanges {
-				logPodRangeExhausted(ctx, rangeName, instanceType.Name, zone)
+func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, instance *compute.Instance, instanceType, zone, capacityType string, rangeNames []string) (bool, error) {
+	for i, rangeName := range rangeNames {
+		setPrimaryAliasRange(instance, rangeName)
+		err := p.insertInstance(ctx, instance, zone)
+		if err == nil {
+			return false, nil
+		}
+		if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
+			exhausted := isIPSpaceExhausted(capacityErr.details)
+			if exhausted && i < len(rangeNames)-1 {
+				logPodRangeExhausted(ctx, rangeName, instanceType, zone)
 				continue
 			}
-			if insufficient {
-				err = p.markInsufficientCapacity(ctx, instanceType.Name, zone, capacityType, details)
-
-				// Other instance types share the same Pod ranges.
-				if isIPSpaceExhausted(details) {
-					return nil, "", false, err
-				}
-			}
-			log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
-			return nil, "", true, err
+			err = p.markInsufficientCapacity(ctx, instanceType, zone, capacityType, capacityErr.details)
+			// Other instance types share the same Pod ranges.
+			return !exhausted, err
 		}
+		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType, "zone", zone)
+		return true, err
+	}
+	return true, fmt.Errorf("no pod secondary ranges available")
+}
 
-		if err := p.waitOperationDone(ctx, zone, op.Name); err != nil {
-			lastErr = err
-			if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
-				if isIPSpaceExhausted(capacityErr.details) && hasMoreRanges {
-					logPodRangeExhausted(ctx, rangeName, instanceType.Name, zone)
-					continue
-				}
-				err = p.markInsufficientCapacity(ctx, instanceType.Name, zone, capacityType, capacityErr.details)
-			}
-			log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
-			return nil, "", true, err
+func (p *DefaultProvider) insertInstance(ctx context.Context, instance *compute.Instance, zone string) error {
+	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+	if err != nil {
+		if details, insufficient := extractInsertInsufficientCapacityDetails(err); insufficient {
+			return &insufficientCapacityError{details: details}
 		}
-
-		return instance, zone, false, nil
+		return err
 	}
-
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no pod secondary ranges available")
-	}
-	return nil, "", true, lastErr
+	return p.waitOperationDone(ctx, zone, op.Name)
 }
 
 func resolveInstanceImage(instance *compute.Instance) string {

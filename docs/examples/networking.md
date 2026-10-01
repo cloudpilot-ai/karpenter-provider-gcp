@@ -28,7 +28,8 @@ Direct pods to a specific [secondary IP range](https://cloud.google.com/kubernet
 
 ```yaml
 spec:
-  subnetRangeName: karpenter-pods
+  subnetRangeNames:
+    - karpenter-pods
 ```
 
 See [`examples/nodeclass/subnet-range-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnet-range-gcenodeclass.yaml).
@@ -44,7 +45,7 @@ spec:
 
 See [`examples/nodeclass/subnet-ranges-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnet-ranges-gcenodeclass.yaml).
 
-`subnetRangeName` and `subnetRangeNames` are mutually exclusive. Resolved names and utilization appear on `status.subnetRanges`.
+The legacy `subnetRangeName` field is deprecated but remains supported. Use `subnetRangeNames` even for a single range. When migrating, remove `subnetRangeName` in the same update because the two fields are mutually exclusive. Changing fields can trigger NodeClass drift; see the [migration guide](../../MIGRATION.md#multiple-pod-cidr-ranges-on-gcenodeclass). Resolved names and utilization appear on `status.subnetRanges`.
 
 > **Note**: These fields control pod IPs (alias IPs). To change the node's subnet, use `networkConfig.subnetwork`.
 

@@ -16,11 +16,18 @@ pod alias IPs. When more than one name is listed, Karpenter selects the range wi
 GKE-reported utilization at launch and retries remaining names if Compute returns IP space
 exhausted. Resolved names and utilization are published on `status.subnetRanges`.
 
-`spec.subnetRangeName` is unchanged. The two fields are mutually exclusive. If neither is set,
-Karpenter still uses only the cluster default pod range.
+`spec.subnetRangeName` is deprecated but remains supported. Use `spec.subnetRangeNames` for both
+single and multiple ranges. The two fields are mutually exclusive. If neither is set, Karpenter
+still uses only the cluster default pod range.
 
-**Action required:** none. To spill over across additional pod ranges, list those names (including
-the cluster default) on `subnetRangeNames` and omit `subnetRangeName`.
+**Migration:** replace `subnetRangeName: my-pods` with `subnetRangeNames: [my-pods]`, removing the
+scalar field in the same update. Existing configurations continue to work without an immediate
+migration. Changing fields changes the NodeClass hash and can trigger drift-based replacement
+subject to your NodePool disruption settings.
+
+To spill over across additional pod ranges, list those names (including the cluster default) on
+`subnetRangeNames`. The deprecated scalar field may be removed in a future API version with
+separate migration guidance.
 
 ---
 

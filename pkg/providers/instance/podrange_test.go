@@ -46,7 +46,7 @@ func TestResolvedPodRangeNames(t *testing.T) {
 	t.Run("scalar field", func(t *testing.T) {
 		t.Parallel()
 		nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
-			SubnetRangeName: ptr.To("custom"),
+			SubnetRangeName: ptr.To("custom"), //nolint:staticcheck // Verify deprecated scalar compatibility.
 		}}
 		require.Equal(t, []string{"custom"}, resolvedPodRangeNames(nc, cluster))
 	})
