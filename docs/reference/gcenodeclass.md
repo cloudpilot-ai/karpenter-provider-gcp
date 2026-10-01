@@ -28,6 +28,22 @@ _Appears in:_
 | `subnetwork` _string_ | Subnetwork is the subnetwork for this interface. Required. |  | MinLength: 1 <br /> |
 
 
+#### AdvancedMachineFeatures
+
+
+
+AdvancedMachineFeatures defines advanced CPU and virtualisation options for a GCE instance.
+
+
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enableNestedVirtualization` _boolean_ | EnableNestedVirtualization defines whether the instance can run nested virtual machines.<br />Only supported on Intel-based machine families; not supported on E2, AMD, Arm or<br />Confidential VM instances. |  | Optional: \{\} <br /> |
+
+
 
 
 #### Disk
@@ -44,7 +60,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `sizeGiB` _integer_ | SizeGiB is the size of the disk. Unit: GiB |  | Optional: \{\} <br /> |
-| `category` _[DiskCategory](#diskcategory)_ | The category of the disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme). |  | Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput local-ssd pd-balanced pd-extreme pd-ssd pd-standard] <br />Optional: \{\} <br /> |
+| `category` _[DiskCategory](#diskcategory)_ | The category of the disk (e.g., pd-standard, pd-balanced, pd-ssd, pd-extreme). |  | Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput pd-balanced pd-extreme pd-ssd pd-standard] <br />Optional: \{\} <br /> |
 | `boot` _boolean_ | Indicates that this is a boot disk. |  | Optional: \{\} <br /> |
 | `secondaryBootImage` _string_ | SecondaryBootImage is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME). |  | Optional: \{\} <br /> |
 | `secondaryBootMode` _[SecondaryBootDiskMode](#secondarybootdiskmode)_ | SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE). |  | Enum: [MODE_UNSPECIFIED CONTAINER_IMAGE_CACHE] <br />Optional: \{\} <br /> |
@@ -61,7 +77,7 @@ _Underlying type:_ _string_
 DiskCategory represents a disk category type
 
 _Validation:_
-- Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput local-ssd pd-balanced pd-extreme pd-ssd pd-standard]
+- Enum: [hyperdisk-balanced hyperdisk-balanced-high-availability hyperdisk-extreme hyperdisk-ml hyperdisk-throughput pd-balanced pd-extreme pd-ssd pd-standard]
 
 _Appears in:_
 - [Disk](#disk)
@@ -108,14 +124,17 @@ _Appears in:_
 | `imageFamily` _string_ | ImageFamily dictates the instance template used when generating launch templates.<br />If no ImageSelectorTerms alias is specified, this field is required. |  | Enum: [Ubuntu ContainerOptimizedOS] <br />Optional: \{\} <br /> |
 | `subnetRangeName` _string_ | SubnetRangeName is the name of the subnetwork secondary IPv4 range from which<br />to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's<br />default pod secondary range (ClusterSecondaryRangeName from the cluster's IP<br />allocation policy) is used. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `kubeletConfiguration` _[KubeletConfiguration](#kubeletconfiguration)_ | KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.<br />They are a vswitch of the upstream types, recognizing not all options may be supported.<br />Wherever possible, the types and names should reflect the upstream kubelet types. |  | Optional: \{\} <br /> |
+| `linuxNodeConfig` _[LinuxNodeConfig](#linuxnodeconfig)_ | LinuxNodeConfig configures the Linux kernel of provisioned nodes.<br />Mirrors GKE node pool linux_node_config. |  | Optional: \{\} <br /> |
 | `labels` _object (keys:string, values:string)_ | Labels to be applied on GCE VM instance. |  | MaxProperties: 20 <br />Optional: \{\} <br /> |
 | `metadata` _object (keys:string, values:string)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  | Optional: \{\} <br /> |
 | `networkTags` _[NetworkTag](#networktag) array_ | NetworkTags is a list of network tags to apply to the node. |  | MaxItems: 20 <br />MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `shieldedInstanceConfig` _[ShieldedInstanceConfig](#shieldedinstanceconfig)_ | ShieldedInstanceConfig enables Shielded VM for provisioned nodes: Secure Boot,<br />virtual TPM, and integrity monitoring. |  | Optional: \{\} <br /> |
+| `advancedMachineFeatures` _[AdvancedMachineFeatures](#advancedmachinefeatures)_ | AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes. |  | Optional: \{\} <br /> |
 | `confidentialInstanceType` _string_ | ConfidentialInstanceType enables Confidential VM for provisioned nodes using the<br />named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory<br />encryption. Leave unset to disable. Only supported on specific machine families. |  | Enum: [SEV SEV_SNP TDX] <br />Optional: \{\} <br /> |
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
 | `autoGPUTaint` _boolean_ | AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule<br />to any GPU node at provisioning time, regardless of the NodePool configuration.<br />Disabled by default to preserve backward compatibility. |  | Optional: \{\} <br /> |
 | `gpuDriverVersion` _string_ | GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.<br />Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.<br />Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),<br />"disabled" (skip automatic installation).<br />Ignored for non-GPU instance types. | default | Enum: [default latest disabled] <br />Optional: \{\} <br /> |
+| `localSsdMode` _[LocalSSDMode](#localssdmode)_ | LocalSsdMode exposes local SSDs as raw devices or kubelet ephemeral storage. | RawBlock | Enum: [RawBlock Ephemeral] <br />Optional: \{\} <br /> |
 | `preemptionNoticeDuration` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | PreemptionNoticeDuration is how long before shutdown GCE flips the<br />instance/preempted metadata key on a Spot VM. Unset (the default) gives no advance<br />notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.<br />"120s" gives a two-minute warning, letting Karpenter start draining before shutdown.<br />GCE currently accepts up to two minutes.<br />Only applies to Spot capacity; ignored for on-demand nodes.<br />Reading the notice requires an agent on the node that watches the metadata key<br />and sets the GCESpotPreempting condition — see docs/spot-preemption.md. |  | Pattern: `^([0-9]+(s\|m\|h))+$` <br />Type: string <br />Optional: \{\} <br /> |
 
 
@@ -134,6 +153,25 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `images` _[Image](#image) array_ | Image contains the current image that are available to the<br />cluster under the Image selectors. |  | Optional: \{\} <br /> |
 | `conditions` _Condition array_ | Conditions contains signals for health and readiness |  | Optional: \{\} <br /> |
+
+
+#### HugepagesConfig
+
+
+
+HugepagesConfig defines the static hugepages that a node allocates at boot.
+Karpenter does not add the hugepages to the instance type capacity. Use a
+NodeOverlay to advertise the hugepages capacity to the scheduling simulation.
+
+
+
+_Appears in:_
+- [LinuxNodeConfig](#linuxnodeconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `hugepageSize2m` _integer_ | HugepageSize2m is the number of 2 MiB hugepages to allocate. |  | Minimum: 1 <br />Optional: \{\} <br /> |
+| `hugepageSize1g` _integer_ | HugepageSize1g is the number of 1 GiB hugepages to allocate. |  | Minimum: 1 <br />Optional: \{\} <br /> |
 
 
 #### Image
@@ -219,6 +257,40 @@ _Validation:_
 _Appears in:_
 - [KubeletConfiguration](#kubeletconfiguration)
 
+
+
+#### LinuxNodeConfig
+
+
+
+LinuxNodeConfig defines the Linux kernel options for a provisioned node.
+
+
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `hugepages` _[HugepagesConfig](#hugepagesconfig)_ | Hugepages configures the static hugepages that the node allocates at boot.<br />Mirrors GKE node pool linux_node_config.hugepages_config. |  | Optional: \{\} <br /> |
+
+
+#### LocalSSDMode
+
+_Underlying type:_ _string_
+
+LocalSSDMode controls how local SSDs are exposed to workloads.
+
+_Validation:_
+- Enum: [RawBlock Ephemeral]
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description |
+| --- | --- |
+| `RawBlock` | LocalSSDModeRawBlock leaves local SSDs unformatted.<br /> |
+| `Ephemeral` | LocalSSDModeEphemeral uses local SSDs for kubelet ephemeral storage.<br /> |
 
 
 #### NetworkConfig

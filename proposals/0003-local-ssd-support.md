@@ -13,7 +13,7 @@ Karpenter-GCP should support GCE local SSDs in both GKE exposure modes: `RawBloc
 
 This proposal adds `GCENodeClass.spec.localSsdMode` and models local SSD count as a scheduler-visible instance type property. 1st/2nd generation machine types emit same-name variants per allowed count. 3rd/4th+ fixed-count local SSD SKUs emit one variant with the GCE-provided count.
 
-The selected `InstanceType` variant is the source of truth for the physical attach count. Pod and NodePool requirements constrain the allowed set; they do not directly define the attach count.
+For configurable 1st/2nd generation families, the effective Pod and NodePool requirements must resolve to one exact positive count before a new SSD-backed node can launch. The corresponding `InstanceType` variant remains the source of truth for physical attachment and capacity. Fixed-count 3rd/4th+ SKUs derive their count from the machine type.
 
 ---
 
@@ -35,8 +35,8 @@ Karpenter-GCP also needs to represent local SSD capacity before launch. A single
 - Support both `RawBlock` and `Ephemeral` exposure modes.
 - Support 1st/2nd generation machine types without one NodeClass and NodePool per count.
 - Support 3rd/4th+ generation fixed-count local SSD machine types.
-- Allow RawBlock workloads to select an exact local SSD count.
-- Allow Ephemeral workloads to schedule by normal `resources.requests.ephemeral-storage`.
+- Require configurable-family RawBlock and Ephemeral workloads to select an exact local SSD count.
+- Use normal `resources.requests.ephemeral-storage` as a capacity fit check for the selected Ephemeral shape.
 - Provide a clear way for no-local-SSD NodePools to exclude local SSD variants.
 - Preserve real GCE machine type names in `node.kubernetes.io/instance-type`.
 - Keep create, returned NodeClaim, `List()`, `Get()`, drift, and consolidation behavior coherent for same-name variants.
@@ -121,7 +121,7 @@ The field controls how GKE bootstrap metadata exposes local SSDs when the select
 
 `RawBlock` is the safer default because it does not make positive-count local SSD nodes advertise large Kubernetes `ephemeral-storage` capacity unless the user explicitly opts into that behavior.
 
-Because `localSsdMode` changes bootstrap metadata and advertised capacity, the field is included in `GCENodeClass.Hash()`, and `GCENodeClassHashVersion` is bumped to `v4` so existing nodes drift when the effective mode changes.
+Because `localSsdMode` changes bootstrap metadata and advertised capacity, the field is included in `GCENodeClass.Hash()`, and `GCENodeClassHashVersion` is bumped to `v5`. The version change prevents existing `v4` NodeClaims from drifting solely because `RawBlock` is newly defaulted; subsequent mode changes on `v5` NodeClasses trigger drift through the changed hash.
 
 #### `karpenter.k8s.gcp/instance-local-ssd-count`
 
@@ -134,7 +134,7 @@ karpenter.k8s.gcp/instance-local-ssd-count
 The count value is used in four places:
 
 - `InstanceType.Requirements`: every emitted variant has exactly one count value.
-- Pod or NodePool requirements: users can constrain the allowed count set.
+- Pod or NodePool requirements: omitting the key selects configurable count `0`; once the NodePool declares the key, the effective NodePool and Pod requirements must resolve to one exact count.
 - GCE instance labels: the provider writes the selected count after create so `List()` / `Get()` can resolve same-name variants.
 - Node / NodeClaim labels: the provider reports the selected count.
 
@@ -196,68 +196,79 @@ This is the main reason to use same-name per-count variants. A single `InstanceT
 
 ### Scheduling Contract
 
-RawBlock workloads generally need an exact count because Kubernetes does not allocate individual raw NVMe devices from a count label:
+For configurable 1st/2nd generation families, the NodePool count requirement controls which per-count variants Karpenter can consider. The effective NodePool and Pod requirements select the launch count.
+
+| NodePool count requirement | Pod count selector | Configurable-machine result |
+|----------------------------|--------------------|-----------------------------|
+| omitted                    | omitted or `0`     | count `0`                   |
+| omitted                    | positive count     | no matching variant         |
+| `Exists`                   | omitted            | rejected; NodeClaim deleted |
+| `Exists`                   | `0` or `4`         | selected count              |
+| `In ["0","2","4"]`         | omitted            | rejected; NodeClaim deleted |
+| `In ["0","2","4"]`         | `0` or `4`         | selected count              |
+| `In ["4"]`                 | omitted or `4`     | count `4`                   |
+| `Gt ["0"]`                 | omitted            | rejected; NodeClaim deleted |
+| `Gt ["0"]`                 | `4`                | count `4`                   |
+
+The result also depends on machine support, offering availability, and resource fit. A fixed-count bundled SKU is not subject to this table because its machine type already defines the count.
+
+A NodePool can let Pods choose any supported count without listing the values:
 
 ```yaml
-nodeSelectorTerms:
-- matchExpressions:
-  - key: karpenter.sh/nodepool
-    operator: In
-    values: ["n2d-rawblock"]
-  - key: karpenter.k8s.gcp/instance-local-ssd-count
-    operator: In
-    values: ["4"]
-```
-
-Ephemeral workloads can schedule by normal Kubernetes resource requests:
-
-```yaml
-nodeSelectorTerms:
-- matchExpressions:
-  - key: karpenter.sh/nodepool
-    operator: In
-    values: ["n2d-ephemeral"]
-containers:
-- name: app
-  resources:
-    requests:
-      ephemeral-storage: 800Gi
-```
-
-If exact disk count matters for an Ephemeral workload, the pod can also pin the count:
-
-```yaml
-nodeSelectorTerms:
-- matchExpressions:
-  - key: karpenter.sh/nodepool
-    operator: In
-    values: ["n2d-ephemeral"]
-  - key: karpenter.k8s.gcp/instance-local-ssd-count
-    operator: In
-    values: ["4"]
-containers:
-- name: app
-  resources:
-    requests:
-      ephemeral-storage: 800Gi
-```
-
-NodePool requirements can constrain the allowed count set for all pods in that pool:
-
-```yaml
-requirements:
-- key: karpenter.k8s.gcp/instance-family
-  operator: In
-  values: ["n2d"]
-- key: karpenter.k8s.gcp/instance-size
-  operator: In
-  values: ["8"]
+# NodePool spec.template.spec.requirements
 - key: karpenter.k8s.gcp/instance-local-ssd-count
-  operator: In
-  values: ["0", "1", "2", "4"]
+  operator: Exists
 ```
 
-The NodeClaim may carry a multi-valued count requirement. That is valid. It represents the allowed count set, not the concrete count to attach. The concrete count is determined by the provider after it re-applies compatibility and resource-fit checks to the candidate variants.
+Every configurable-machine Pod on this pool selects a count. Count `0` is explicit:
+
+```yaml
+# Pod spec
+nodeSelector:
+  node.kubernetes.io/instance-type: n2-standard-2
+  karpenter.k8s.gcp/instance-local-ssd-count: "0"
+```
+
+A Pod can select a positive count on the same pool:
+
+```yaml
+# Pod spec
+nodeSelector:
+  node.kubernetes.io/instance-type: n2d-standard-4
+  karpenter.k8s.gcp/instance-local-ssd-count: "4"
+```
+
+This produces `n2d-standard-4` with count `4`. The same selectors may be expressed as match expressions in one required `nodeSelectorTerm`.
+
+A positive-only pool requires each configurable-machine Pod to select one exact count:
+
+```yaml
+# NodePool spec.template.spec.requirements
+- key: karpenter.k8s.gcp/instance-local-ssd-count
+  operator: Gt
+  values: ["0"]
+```
+
+A Pod without a count selector cannot launch a configurable machine on this pool. The same is true for any count-enabled NodePool with a non-singleton requirement. On a mixed pool that also allows configurable names, every non-DaemonSet Pod therefore pins either one exact count or one exact bundled machine type in the same selector term. A bundled-only pool may remain unpinned. Ordinary DaemonSets remain broad and do not need a count selector.
+
+Ephemeral mode uses the same count-selection rules. The storage request checks the selected shape; it does not select or increase the count:
+
+```yaml
+# GCENodeClass spec
+localSsdMode: Ephemeral
+---
+# Pod spec
+nodeSelector:
+  node.kubernetes.io/instance-type: n2d-standard-8
+  karpenter.k8s.gcp/instance-local-ssd-count: "4"
+containers:
+- name: app
+  resources:
+    requests:
+      ephemeral-storage: 800Gi
+```
+
+This Pod gets count `4` when that shape provides at least `800Gi` allocatable `ephemeral-storage`. If count `4` is too small, the Pod remains unschedulable. The provider never infers a count from the resource request.
 
 ### Variant Selection and Pricing
 
@@ -269,7 +280,7 @@ Provider launch ordering should be deterministic after the provider filters cand
 - compatible available offerings
 - `resources.Fits(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable())`
 
-This provider-side resource fit is required. Karpenter core may carry the same real machine type name on the NodeClaim while leaving a multi-valued local SSD count requirement, so the provider must not assume that core handed it a single already-selected count variant.
+Provider-side resource fit remains required as defense in depth. A configurable launch from a count-enabled NodePool additionally requires the NodeClaim count to be one exact value. Count `0` is implicit only when the NodePool omits the count key.
 
 Ordering after that filtering is:
 
@@ -279,31 +290,39 @@ Ordering after that filtering is:
 
 Consequences:
 
-- For same-name variants with uniform price, a pod with no local SSD selector and no Ephemeral storage pressure picks count `0` first.
-- An Ephemeral pod with a large `ephemeral-storage` request only sees variants that fit, then picks the smallest sufficient count.
-- A NodePool that excludes count `0` intentionally defaults pods to the smallest allowed positive count.
+- A NodePool without the count key exposes only configurable count `0`, including for DaemonSet overhead calculations.
+- An exact configurable count selects one same-name variant; an Ephemeral request must fit that variant.
+- A broad count requirement can still select a compatible fixed-count bundled SKU, but cannot launch a configurable machine.
 - Uniform same-name pricing avoids count-based consolidation churn.
 
-The count-ascending tie-break is a correctness invariant for 1st/2nd generation same-name variants. If it regresses, pods without local SSD requirements can receive positive-count SSD nodes.
+The count-ascending tie-break remains deterministic, but correctness for new configurable launches comes from exact-count filtering rather than choosing among ambiguous variants.
 
 ### Count Resolution at Create
 
-Provider `Create()` must resolve physical local SSD count from the selected candidate `InstanceType` variant.
+Provider `Create()` validates the effective NodeClaim count before creating a new configurable-family VM, then resolves physical attachment from the selected candidate variant.
 
 ```text
-if the candidate InstanceType variant has exactly one local SSD count:
-  attach / expose that count
+if the configurable count requirement is absent:
+  allow only count 0
 
-if the candidate InstanceType variant has no local SSD count:
-  fail clearly; this is a provider bug
+if it is In with one non-negative integer:
+  allow only that exact configurable variant
 
-if the NodeClaim count requirement has multiple values:
-  allow it; it is the allowed set, not the concrete attach count
+if it is broad, ranged, or multi-valued:
+  exclude configurable variants
+  retain compatible fixed-count fallbacks
+
+if no fixed-count launch candidate remains:
+  return an InsufficientCapacityError without marking offerings unavailable
+  core deletes the invalid NodeClaim immediately
+
+for the selected candidate variant:
+  require one concrete variant count and attach / expose that count
 ```
 
-Do not resolve create-time count by parsing a single value from the NodeClaim's count requirement. That would make valid allowed sets such as `In ["1","4"]` fail even though the provider is already launching one concrete variant.
+The new-launch gate runs after existing-instance lookup so a response-lost VM from an older broad NodeClaim can still be adopted. The ambiguous-count error is classified as insufficient capacity only to use core's immediate NodeClaim-deletion path; no offering is marked unavailable. This avoids an empty-providerID NodeClaim making `Cluster.Synced()` false for the five-minute launch timeout. Ephemeral capacity-only positive-count selection is intentionally unsupported.
 
-For Ephemeral capacity-only scheduling, `Create()` must choose from the provider-filtered variants, not from all variants that merely match the real machine type name. Otherwise a pod that requested `800Gi` of `ephemeral-storage` could be launched on the count `0` sibling even though the count `4` sibling was the first variant that fit.
+Static NodePools have no Pod requirements to narrow a broad count. A static configurable NodePool must omit the count key for count0 or use singleton `In` for one exact count.
 
 ### Returned NodeClaim and Reconciliation
 
@@ -366,19 +385,21 @@ Karpenter core has code paths that treat `InstanceType.Name` as unique. Same-nam
 
 Sorting alone is not correctness. The selected shape must survive through create, returned NodeClaim status, and reconciliation.
 
+Core also counts `InstanceTypeOptions` rows for the 15-option spot-to-spot consolidation guard and truncates those rows to 600 before serializing unique machine names. For supported configurable launches and key-less pools, the contract prevents count variants from inflating those paths: key-less pools expose only count `0`, and count-enabled pools require one exact effective count. Fixed-count bundled SKUs already have one row per machine name. Operators must keep non-DaemonSet Pods without an exact count or exact bundled SKU off mixed count-enabled pools, including during disruption replacement.
+
 ---
 
 ## Risks and Mitigations
 
-| Risk                                                                                          | Likelihood | Impact                                                                   | Mitigation                                                                                                                                         |
-|-----------------------------------------------------------------------------------------------|------------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| Same-name variants interact badly with Karpenter code that assumes unique instance type names | Medium     | Incorrect drift, disruption, or returned capacity decisions              | Keep same-name variants constrained and test create, drift, disruption, and consolidation                                                          |
-| Provider resolves attach count from NodeClaim requirement instead of selected variant         | Medium     | Multi-valued allowed sets fail or attach the wrong count                 | Make selected variant the source of truth                                                                                                          |
-| Provider omits resource-fit filtering during create                                           | Medium     | Ephemeral capacity-only pods can launch on count `0` variants            | Re-apply `resources.Fits` before launch ordering and test capacity-only Ephemeral scheduling                                                       |
-| Count-ascending tie-break regresses for same-name variants                                    | Low        | Pods without local SSD requirements can receive positive-count SSD nodes | Treat price/name/count ordering as a tested invariant                                                                                              |
-| Broad NodePools include 3rd/4th+ fixed-count local SSD SKUs                                   | Medium     | SSD-indifferent pods can receive fixed-count local SSD nodes             | Use count `0` requirements for no-local-SSD pools or exclude fixed-count local SSD families                                                        |
-| Uniform same-name pricing under-represents true local SSD cost                                | Medium     | Cost estimates are less precise                                          | Prefer scheduler correctness and consolidation stability; revisit count-specific pricing only if variant identity is safe                          |
-| RawBlock count label is mistaken for per-pod device allocation                                | Medium     | Multiple pods can schedule to a node without actual device allocation    | Document that the label is node shape only; use a device plugin or storage layer for per-pod RawBlock allocation (see [Future Work](#future-work)) |
+| Risk                                                                                          | Likelihood | Impact                                                                | Mitigation                                                                                                                                         |
+|-----------------------------------------------------------------------------------------------|------------|-----------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| Same-name variants interact badly with Karpenter code that assumes unique instance type names | Medium     | Incorrect drift, disruption, or returned capacity decisions           | Keep same-name variants constrained and test create, drift, disruption, and consolidation                                                          |
+| Core drops a scheduler-narrowed same-name/count pairing at NodeClaim serialization            | Medium     | Provider can launch a configurable count core rejected                | Require one exact effective count for new configurable positive-SSD launches; expose only count0 on key-less pools                                 |
+| Provider omits resource-fit filtering during create                                           | Medium     | A pinned Ephemeral shape can be too small for the workload            | Re-apply `resources.Fits` before launch ordering and test exact-count Ephemeral fit                                                                |
+| Broad configurable count uses the insufficient-capacity lifecycle classification              | Medium     | Event/metric says capacity although the request is invalid            | Do not mark offerings unavailable; use the classification only so core immediately deletes the NodeClaim and does not stall all provisioning       |
+| Broad NodePools include 3rd/4th+ fixed-count local SSD SKUs                                   | Medium     | SSD-indifferent pods can receive fixed-count local SSD nodes          | Use count `0` requirements for no-local-SSD pools or exclude fixed-count local SSD families                                                        |
+| Uniform same-name pricing under-represents true local SSD cost                                | Medium     | Cost estimates are less precise                                       | Prefer scheduler correctness and consolidation stability; revisit count-specific pricing only if variant identity is safe                          |
+| RawBlock count label is mistaken for per-pod device allocation                                | Medium     | Multiple pods can schedule to a node without actual device allocation | Document that the label is node shape only; use a device plugin or storage layer for per-pod RawBlock allocation (see [Future Work](#future-work)) |
 
 ---
 
@@ -389,8 +410,12 @@ Sorting alone is not correctness. The selected shape must survive through create
 - Variant emission for 1st/2nd generation, 3rd/4th+ fixed-count, and no-SSD machine types.
 - Mode-aware capacity: Ephemeral advertises local SSD capacity; RawBlock does not.
 - Provider-side filtering re-applies resource fit before ordering.
-- Ordering: no-count pods choose count `0`; Ephemeral capacity-only pods choose the smallest sufficient count.
-- Multi-valued NodeClaim count requirements are allowed sets; selected variant determines concrete count.
+- Key-less NodePools expose only configurable count `0`; count-declaring pools expose the per-count catalog.
+- `Gt 0`, `Exists`, singleton `In`, and multi-value `In` NodePools intersect with exact Pod selectors to serialize one count, including explicit count0.
+- Static configurable claims accept omitted or singleton counts and reject broad counts.
+- Broad configurable NodeClaims return uncached `InsufficientCapacityError` with no insert; core's launch lifecycle deletes them immediately, while compatible bundled fallbacks remain eligible.
+- Count0-selective DaemonSet overhead is accounted for on key-less pools.
+- Existing positive-count VMs use the full reconstruction catalog and are adopted before new-launch validation.
 - Create attaches SCRATCH disks only for 1st/2nd generation machine types.
 - Create writes the selected count as a GCE instance label.
 - Returned NodeClaim and `List()` / `Get()` reconstruction match by name plus the GCE count label.
@@ -399,7 +424,9 @@ Sorting alone is not correctness. The selected shape must survive through create
 
 ### E2E / Integration Tests
 
-- 1st/2nd generation count `0`, RawBlock exact-count, and Ephemeral capacity-only provisioning. Ephemeral exact-count uses the same count-label filtering as RawBlock plus the same metadata path as Ephemeral capacity-only, so unit coverage is sufficient.
+- 1st/2nd generation count `0`, RawBlock exact-count, and Ephemeral exact-count provisioning, including Ephemeral resource-fit validation.
+- Broad `Gt 0`, `Exists`, singleton, and multi-value NodePool requirements with exact configurable Pod selection, including explicit count0.
+- Static configurable NodePools with omitted and singleton count requirements.
 - 3rd/4th+ fixed-count local SSD SKU in RawBlock and Ephemeral mode.
 - A count `4` workload is not consolidated to a count `0` node.
 - A no-local-SSD NodePool excludes 3rd/4th+ fixed-count local SSD SKUs with a count `0` requirement.
@@ -412,15 +439,15 @@ Sorting alone is not correctness. The selected shape must survive through create
 The feature is complete when:
 
 - [ ] `GCENodeClass.spec.localSsdMode` exists with validation for `RawBlock` and `Ephemeral`, defaulting to `RawBlock`.
-- [ ] `GCENodeClass.Hash()` includes `localSsdMode`; `GCENodeClassHashVersion` is bumped to `v4`.
+- [ ] `GCENodeClass.Hash()` includes `localSsdMode`; `GCENodeClassHashVersion` is bumped to `v5`.
 - [ ] `karpenter.k8s.gcp/instance-local-ssd-count` is registered as a well-known provider label.
 - [ ] 1st/2nd generation machine types emit same-name per-count variants.
 - [ ] 3rd/4th+ generation fixed-count local SSD machine types emit one fixed-count variant.
 - [ ] Ephemeral capacity is advertised per count variant.
 - [ ] RawBlock local SSDs are not advertised as Kubernetes `ephemeral-storage`.
-- [ ] Provider create uses selected candidate variant count, not a single value parsed from NodeClaim requirements.
+- [ ] Provider allows implicit configurable count0 only when the NodePool omits the count key, otherwise requires one exact effective count before launch, then attaches the selected candidate variant count.
 - [ ] Provider writes selected count to GCE instance labels and reconstructs live instances by name plus count.
-- [ ] Provider-side resource-fit filtering, uniform same-name variant pricing, and count tie-break avoid no-SSD pods selecting positive counts for 1st/2nd generation same-name variants.
+- [ ] Key-less count0 scheduling, exact-count launch filtering, provider-side resource fit, and uniform same-name pricing prevent selection of an unstated configurable positive count.
 - [ ] `disks[].category: local-ssd` is removed or rejected with a clear migration path.
 - [ ] z3 `OnHostMaintenance` behavior is correct.
 - [ ] Unit and e2e tests pass.
@@ -433,8 +460,8 @@ Existing `GCENodeClass.spec.disks[].category: local-ssd` usage should move to th
 
 1. Set `spec.localSsdMode` on the `GCENodeClass`.
 2. Remove `disks[].category: local-ssd` entries.
-3. For RawBlock workloads, add a pod or NodePool requirement on `karpenter.k8s.gcp/instance-local-ssd-count`.
-4. For Ephemeral workloads, add normal `resources.requests.ephemeral-storage`; add the count requirement only when exact SSD count matters.
+3. For configurable-family RawBlock and Ephemeral SSD workloads, either omit the NodePool count key for implicit count0 or ensure the effective Pod/NodePool requirement resolves to one exact count, including explicit count0 on count-enabled pools.
+4. For Ephemeral workloads, also add normal `resources.requests.ephemeral-storage` as a fit check for the selected count.
 5. For no-local-SSD pools that allow broad instance families, add `karpenter.k8s.gcp/instance-local-ssd-count In ["0"]` or otherwise exclude 3rd/4th+ generation fixed-count local SSD SKUs.
 
 ---

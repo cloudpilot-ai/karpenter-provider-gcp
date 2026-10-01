@@ -54,7 +54,7 @@ Check `status.conditions`. The `ImagesReady` condition shows whether Karpenter c
 
 - **Invalid version format** — Pinned versions must match the family's format: `milestone.build.build.build` for ContainerOptimizedOS (e.g. `125.19216.104.126`), `vYYYYMMDD` for Ubuntu (e.g. `v20260416`). Invalid formats are rejected at admission.
 
-- **Version not found** — If `ImagesReady` shows `ImageResolutionFailed`, the pinned version does not exist in GCP. Verify availability using the `gcloud compute images list` commands in [Image management](image-management.md#finding-available-versions).
+- **Version not found** — If `ImagesReady` shows `ImageResolutionFailed`, the pinned version does not exist in GCP or its image is not `READY` yet. Verify availability using the `gcloud compute images list` commands in [Image management](image-management.md#finding-available-versions).
 
 - **Unsupported family** — Only `ContainerOptimizedOS` and `Ubuntu` are supported.
 
@@ -208,7 +208,7 @@ GC only deletes instances that carry the Karpenter cluster tag and have no corre
 
 ## Insufficient capacity errors
 
-When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable for 30 minutes. Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones can recover and become available again.
+When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable. The duration depends on the error: 5 minutes for a stockout, 1 hour when GCE reports that the zone does not support the requested configuration (`configuration_availability` or `MACHINE_TYPE_UNSUPPORTED`), and 30 seconds for IP space exhaustion. Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones can recover and become available again.
 
 If all zones for a given instance type are exhausted, Karpenter returns an insufficient capacity error immediately without attempting GCP API calls that would fail.
 

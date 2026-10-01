@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drift_test
+package drift
 
 import (
 	"testing"
@@ -25,17 +25,8 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var env *environment.Environment
-
 func TestDrift(t *testing.T) {
 	RegisterFailHandler(Fail)
-	BeforeSuite(func() {
-		env = environment.NewEnvironment()
-	})
-	AfterSuite(func() {
-		if env != nil {
-			env.Cleanup()
-		}
-	})
+	environment.RegisterSuiteLifecycle()
 	RunSpecs(t, "Drift Suite")
 }

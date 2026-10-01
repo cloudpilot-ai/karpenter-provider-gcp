@@ -27,6 +27,16 @@ import (
 	"google.golang.org/api/compute/v1"
 )
 
+func TestSelectImage_Ubuntu_SkipsPending(t *testing.T) {
+	images := []*compute.Image{
+		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z", Status: "PENDING"},
+		{Name: "ubuntu-gke-2404-1-35-amd64-v20260401", CreationTimestamp: "2026-04-01T00:00:00Z", Status: "READY"},
+	}
+	got, ok := (&Ubuntu{release: "2404"}).selectImage(images, OSArchAMD64Requirement, "latest")
+	require.True(t, ok)
+	require.Equal(t, "ubuntu-gke-2404-1-35-amd64-v20260401", got)
+}
+
 func TestSelectImage_Ubuntu_PicksNewestNonDeprecatedAmd64(t *testing.T) {
 	images := []*compute.Image{
 		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z"},
@@ -37,7 +47,7 @@ func TestSelectImage_Ubuntu_PicksNewestNonDeprecatedAmd64(t *testing.T) {
 	}
 
 	p := &Ubuntu{release: "2404"}
-	got, ok := p.selectImage(images, OSArchAMD64Requirement, "latest")
+	got, ok := p.selectImage(readyTestImages(images), OSArchAMD64Requirement, "latest")
 	require.True(t, ok)
 	require.Equal(t, "ubuntu-gke-2404-1-35-amd64-v20260420", got)
 }
@@ -58,7 +68,7 @@ func TestSelectImage_Ubuntu_ExcludesNonCleanAmd64(t *testing.T) {
 	}
 
 	p := &Ubuntu{release: "2404"}
-	got, ok := p.selectImage(images, OSArchAMD64Requirement, "latest")
+	got, ok := p.selectImage(readyTestImages(images), OSArchAMD64Requirement, "latest")
 	require.True(t, ok)
 	require.Equal(t, "ubuntu-gke-2404-1-35-amd64-v20260401", got)
 }
@@ -73,6 +83,36 @@ func TestBuildImageFilter_Ubuntu_FallsBackOnNilProvider(t *testing.T) {
 	p := &Ubuntu{release: "2404"}
 	got := p.buildImageFilter(context.Background())
 	require.Equal(t, `name=ubuntu-gke-2404*`, got)
+}
+
+func TestResolveImages_Ubuntu_FindsBothArchitecturesAcrossPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "second", Items: []*compute.Image{
+				{Name: "ubuntu-gke-2404-1-34-amd64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z"},
+			}})
+		case "second":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "third", Items: []*compute.Image{
+				{Name: "ubuntu-gke-2404-1-35-amd64-v20260416", CreationTimestamp: "2026-04-16T00:00:00Z", Status: "READY"},
+			}})
+		case "third":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "fourth", Items: []*compute.Image{
+				{Name: "ubuntu-gke-2404-1-35-arm64-v20260416", CreationTimestamp: "2026-04-15T00:00:00Z", Status: "READY"},
+			}})
+		default:
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{})
+		}
+	}))
+	defer srv.Close()
+	p := &Ubuntu{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}, release: "2404"}
+	got, err := p.ResolveImages(context.Background(), "latest")
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-amd64-v20260416",
+		"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-arm64-v20260416",
+	}, imageSources(got))
 }
 
 func TestResolveImages_Ubuntu_PinnedVersion_Valid(t *testing.T) {
@@ -124,6 +164,18 @@ func TestResolveImages_Ubuntu_PinnedVersion_MissingArm64_IsResolutionError(t *te
 	require.True(t, IsImageResolutionError(err), "expected an imageResolutionError, got %v", err)
 }
 
+func TestResolveImages_Ubuntu_PinnedVersion_PendingArm64(t *testing.T) {
+	images := []*compute.Image{
+		{Name: "ubuntu-gke-2404-1-35-amd64-v20260416", Status: "READY"},
+		{Name: "ubuntu-gke-2404-1-35-arm64-v20260416", Status: "PENDING"},
+	}
+	srv := imageListServer(t, images)
+	defer srv.Close()
+	p := &Ubuntu{computeService: buildComputeService(t, srv), release: "2404"}
+	_, err := p.ResolveImages(context.Background(), "v20260416")
+	require.Error(t, err)
+}
+
 func TestResolveImages_Ubuntu_PinnedVersion_InvalidFormat(t *testing.T) {
 	p := &Ubuntu{}
 	for _, version := range []string{"20260416", "v202604161", "v2026041", "vABCDEFGH", "v20260416-extra"} {
@@ -143,7 +195,7 @@ func TestIsUsableUbuntuImage(t *testing.T) {
 		{Name: "ubuntu-gke-2404-1-35-amd64-v20251218a"},
 		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", Deprecated: &compute.DeprecationStatus{State: ""}},
 	}
-	for _, img := range usable {
+	for _, img := range readyTestImages(usable) {
 		require.True(t, isUsableUbuntuImage(img), "expected %q to be usable", img.Name)
 	}
 
@@ -174,7 +226,7 @@ func TestIsUsableUbuntu2204Image(t *testing.T) {
 		{Name: "ubuntu-gke-2204-1-34-v20251218a"},
 		{Name: "ubuntu-gke-2204-1-34-v20260420", Deprecated: &compute.DeprecationStatus{State: ""}},
 	}
-	for _, img := range usable {
+	for _, img := range readyTestImages(usable) {
 		require.True(t, isUsableUbuntu2204Image(img), "expected %q to be usable", img.Name)
 	}
 
@@ -196,9 +248,9 @@ func TestIsUsableUbuntu2204Image(t *testing.T) {
 
 // TestIsUsableUbuntuArm64Image covers the arm64 predicates added for independent arm64 resolution.
 func TestIsUsableUbuntuArm64Image(t *testing.T) {
-	require.True(t, isUsableUbuntuArm64Image(&compute.Image{Name: "ubuntu-gke-2404-1-35-arm64-v20260420"}))
-	require.True(t, isUsableUbuntuArm64Image(&compute.Image{Name: "ubuntu-gke-2404-1-35-arm64-v20251218a"}))
-	require.True(t, isUsableUbuntu2204Arm64Image(&compute.Image{Name: "ubuntu-gke-2204-1-34-arm64-v20260420"}))
+	require.True(t, isUsableUbuntuArm64Image(&compute.Image{Name: "ubuntu-gke-2404-1-35-arm64-v20260420", Status: "READY"}))
+	require.True(t, isUsableUbuntuArm64Image(&compute.Image{Name: "ubuntu-gke-2404-1-35-arm64-v20251218a", Status: "READY"}))
+	require.True(t, isUsableUbuntu2204Arm64Image(&compute.Image{Name: "ubuntu-gke-2204-1-34-arm64-v20260420", Status: "READY"}))
 
 	for _, img := range []*compute.Image{
 		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420"},          // amd64, not arm64
@@ -216,7 +268,7 @@ func TestIsUsableUbuntuArm64Image(t *testing.T) {
 func imageListServer(t *testing.T, images []*compute.Image) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := &compute.ImageList{Items: images}
+		resp := &compute.ImageList{Items: readyTestImages(images)}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
@@ -350,7 +402,7 @@ func TestSelectImage_Ubuntu2204_PicksAmd64NotArm64(t *testing.T) {
 	}
 
 	p := &Ubuntu{release: "2204"}
-	got, ok := p.selectImage(images, OSArchAMD64Requirement, "latest")
+	got, ok := p.selectImage(readyTestImages(images), OSArchAMD64Requirement, "latest")
 	require.True(t, ok)
 	require.Equal(t, "ubuntu-gke-2204-1-34-v20260401", got)
 }

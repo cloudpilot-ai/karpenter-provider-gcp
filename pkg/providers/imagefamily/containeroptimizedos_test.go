@@ -45,11 +45,49 @@ func buildComputeService(t *testing.T, srv *httptest.Server) *compute.Service {
 	return svc
 }
 
+func TestResolveImages_COS_FindsMatchingImageAcrossPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "second", Items: []*compute.Image{
+				{Name: "gke-1346-gke999-cos-125-19216-104-126-c-pre", CreationTimestamp: "2026-04-02T00:00:00Z", Status: "READY"},
+			}})
+		case "second":
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "third", Items: []*compute.Image{
+				{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2026-04-01T00:00:00Z", Status: "READY"},
+			}})
+		default:
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{})
+		}
+	}))
+	defer srv.Close()
+	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
+	got, err := p.ResolveImages(context.Background(), "latest")
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	require.Equal(t, "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre", got[0].SourceImage)
+}
+
+func TestResolveLatestCOSImage_SkipsPending(t *testing.T) {
+	images := []*compute.Image{
+		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", CreationTimestamp: "2025-04-02T00:00:00Z", Status: "PENDING"},
+		{Name: "gke-1351-gke1390000-cos-125-19216-100-100-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
+	}
+	srv := cosImageServer(t, images)
+	defer srv.Close()
+	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
+	got, err := p.resolveLatestCOSImage(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-pre", got)
+}
+
 func TestResolveLatestCOSImage_PicksNewestNonDeprecated(t *testing.T) {
 	images := []*compute.Image{
 		{
 			Name:              "gke-1351-gke1396004-cos-125-19216-104-126-c-pre",
 			CreationTimestamp: "2025-04-01T00:00:00Z",
+			Status:            "READY",
 		},
 		{
 			Name:              "gke-1351-gke1390000-cos-125-19216-100-100-c-pre",
@@ -88,7 +126,7 @@ func TestResolveLatestCOSImage_ExcludesSpecialisedVariants(t *testing.T) {
 		{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-test", CreationTimestamp: "2025-04-08T00:00:00Z"},
 		// cgpv1 (cgroup v1) variant — must be excluded; GKE 1.29+ kubelet sets --fail-cgroupv1=true
 		{Name: "gke-1353-gke1389001-cos-125-19216-220-106-c-cgpv1-pre", CreationTimestamp: "2025-04-07T00:00:00Z"},
-		{Name: "gke-1351-gke1390000-cos-125-19216-100-100-c-pre", CreationTimestamp: "2025-03-01T00:00:00Z"},
+		{Name: "gke-1351-gke1390000-cos-125-19216-100-100-c-pre", CreationTimestamp: "2025-03-01T00:00:00Z", Status: "READY"},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +208,7 @@ func TestResolveImages_COS_PinnedVersion_Valid(t *testing.T) {
 		{
 			Name:              "gke-1351-gke1396004-cos-125-19216-104-126-c-pre",
 			CreationTimestamp: "2025-04-01T00:00:00Z",
+			Status:            "READY",
 		},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +243,7 @@ func TestResolveImages_COS_PinnedVersion_DifferentMilestone(t *testing.T) {
 		{
 			Name:              "gke-1351-gke1396004-cos-125-19216-104-126-c-pre",
 			CreationTimestamp: "2025-04-01T00:00:00Z",
+			Status:            "READY",
 		},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +296,7 @@ func TestParseGKEVersion(t *testing.T) {
 
 func TestResolveExactBuildCOSImage_PicksMatchingBuild(t *testing.T) {
 	images := []*compute.Image{
-		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
 		// different build — must be excluded by filter (test server returns all, usability check won't exclude)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +310,40 @@ func TestResolveExactBuildCOSImage_PicksMatchingBuild(t *testing.T) {
 	got, err := p.resolveExactBuildCOSImage(context.Background(), "1346", "1068000")
 	require.NoError(t, err)
 	require.Equal(t, "projects/gke-node-images/global/images/gke-1346-gke1068000-cos-125-19216-220-72-c-pre", got)
+}
+
+func TestResolveExactBuildCOSImage_SkipsPending(t *testing.T) {
+	images := []*compute.Image{
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", Status: "PENDING", CreationTimestamp: "2025-04-02T00:00:00Z"},
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-71-c-pre", Status: "READY", CreationTimestamp: "2025-04-01T00:00:00Z"},
+	}
+	srv := cosImageServer(t, images)
+	defer srv.Close()
+	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv)}
+	got, err := p.resolveExactBuildCOSImage(context.Background(), "1346", "1068000")
+	require.NoError(t, err)
+	require.Equal(t, "projects/gke-node-images/global/images/gke-1346-gke1068000-cos-125-19216-220-71-c-pre", got)
+}
+
+func TestResolveImages_GKEVersion_FindsMatchingBuildAcrossPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("pageToken") == "" {
+			_ = json.NewEncoder(w).Encode(&compute.ImageList{NextPageToken: "next", Items: []*compute.Image{
+				{Name: "gke-1346-gke9999999-cos-125-19216-220-72-c-pre", CreationTimestamp: "2026-04-20T00:00:00Z", Status: "READY"},
+			}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(&compute.ImageList{Items: []*compute.Image{
+			{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2026-04-19T00:00:00Z", Status: "READY"},
+		}})
+	}))
+	defer srv.Close()
+	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv)}
+	got, err := p.ResolveImages(context.Background(), "1.34.6-gke.1068000")
+	require.NoError(t, err)
+	require.NotEmpty(t, got)
+	require.Equal(t, "projects/gke-node-images/global/images/gke-1346-gke1068000-cos-125-19216-220-72-c-pre", got[0].SourceImage)
 }
 
 func TestResolveExactBuildCOSImage_ReturnsErrorOnMiss(t *testing.T) {
@@ -286,9 +360,9 @@ func TestResolveExactBuildCOSImage_ReturnsErrorOnMiss(t *testing.T) {
 	require.Contains(t, err.Error(), "gke9999999")
 }
 
-func TestResolveImages_GKEVersion_UsesExactBuildFilter(t *testing.T) {
+func TestResolveImages_GKEVersion_UsesExactBuild(t *testing.T) {
 	images := []*compute.Image{
-		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z"},
+		{Name: "gke-1346-gke1068000-cos-125-19216-220-72-c-pre", CreationTimestamp: "2025-04-01T00:00:00Z", Status: "READY"},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := &compute.ImageList{Items: images}

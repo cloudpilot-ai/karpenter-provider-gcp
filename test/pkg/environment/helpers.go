@@ -48,6 +48,8 @@ import (
 )
 
 const (
+	e2eOwnerLabel = "karpenter-e2e/owned"
+
 	// DefaultE2EDiskGiB is the boot disk size for test nodes; 30 GiB meets the
 	// minimum required by ContainerOptimizedOS while keeping costs low.
 	DefaultE2EDiskGiB = 30
@@ -82,6 +84,18 @@ type TestCase struct {
 	ConsolidateAfter string
 	// DisruptionBudgets defaults to a permissive 100% budget when nil.
 	DisruptionBudgets []map[string]any
+	LocalSSDMode      gcpv1alpha1.LocalSSDMode
+	// BootDiskCategory defaults to pd-balanced.
+	BootDiskCategory     string
+	ExpectedScratchDisks int
+	// PodLocalSSDCount adds the local SSD count to the Pod's node selector.
+	PodLocalSSDCount string
+	// PodEphemeralStorage sets the Pod's ephemeral-storage request.
+	PodEphemeralStorage string
+	// ExtraRequirements are appended to the NodePool template.
+	ExtraRequirements []map[string]any
+	// StaticReplicas sets spec.replicas and omits weight.
+	StaticReplicas *int64
 }
 
 // UniqueSuffix returns a 6-character random hex string safe for use in k8s names.
@@ -125,7 +139,7 @@ func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, di
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
@@ -133,6 +147,42 @@ func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, di
 			"disks":           []any{disk},
 			"subnetRangeName": e.PodsRangeName,
 		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// CreateNodeClassForLocalSSD creates a GCENodeClass with local SSD mode.
+func (e *Environment) CreateNodeClassForLocalSSD(
+	ctx context.Context, name, imageFamily, bootDiskCategory string,
+	mode gcpv1alpha1.LocalSSDMode,
+) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		diskGiB = 50
+	}
+	if bootDiskCategory == "" {
+		bootDiskCategory = "pd-balanced"
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	spec := map[string]any{
+		"imageSelectorTerms": []any{
+			map[string]any{"alias": imageFamily + "@latest"},
+		},
+		"disks": []any{
+			map[string]any{"category": bootDiskCategory, "sizeGiB": diskGiB, "boot": true},
+		},
+		"subnetRangeName": e.PodsRangeName,
+	}
+	if mode != "" {
+		spec["localSsdMode"] = string(mode)
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec":       spec,
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
@@ -158,7 +208,7 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
@@ -168,6 +218,36 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 			},
 			"subnetRangeName":      e.PodsRangeName,
 			"kubeletConfiguration": kubeletConfig,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithHugepages creates a GCENodeClass identical to
+// CreateNodeClass but with the given spec.linuxNodeConfig.hugepages attached.
+// hugepages is a map[string]any whose keys must match the JSON field names on
+// v1alpha1.HugepagesConfig (hugepageSize2m, hugepageSize1g).
+func (e *Environment) CreateNodeClassWithHugepages(ctx context.Context, name, imageFamily string, hugepages map[string]any) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": imageFamily + "@latest"},
+			},
+			"disks": []any{
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+			"linuxNodeConfig": map[string]any{"hugepages": hugepages},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -186,7 +266,7 @@ func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"family": family, "channel": channel},
@@ -213,7 +293,7 @@ func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"family": family, "version": version},
@@ -237,9 +317,36 @@ func (e *Environment) CreateNodeClassWithConfidentialType(ctx context.Context, n
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"confidentialInstanceType": confidentialType,
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"disks": []any{
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// CreateNodeClassWithNestedVirtualization creates a GCENodeClass with
+// advancedMachineFeatures.enableNestedVirtualization set to true.
+// Used by nested virtualization e2e tests.
+func (e *Environment) CreateNodeClassWithNestedVirtualization(ctx context.Context, name string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"advancedMachineFeatures": map[string]any{
+				"enableNestedVirtualization": true,
+			},
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
 			},
@@ -262,7 +369,7 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
@@ -288,7 +395,7 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name,
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"autoGPUTaint":     true,
 			"gpuDriverVersion": gpuDriverVersion,
@@ -414,7 +521,7 @@ func (e *Environment) CreateNodePoolWithExpiry(ctx context.Context, name, nodeCl
 	e.createNodePool(ctx, name, nodeClassName, tc, expireAfter)
 }
 
-func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName string, tc TestCase, expireAfter string) {
+func nodePoolRequirements(tc TestCase) []any {
 	requirements := []any{
 		map[string]any{"key": karpv1.CapacityTypeLabelKey, "operator": "In", "values": []any{tc.CapacityType}},
 		map[string]any{"key": corev1.LabelArchStable, "operator": "In", "values": []any{tc.Arch}},
@@ -439,6 +546,14 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 			"key": gcpv1alpha1.LabelInstanceGPUCount, "operator": "In", "values": []any{tc.GPUCount},
 		})
 	}
+	for _, req := range tc.ExtraRequirements {
+		requirements = append(requirements, req)
+	}
+	return requirements
+}
+
+func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName string, tc TestCase, expireAfter string) {
+	requirements := nodePoolRequirements(tc)
 	templateSpec := map[string]any{
 		"nodeClassRef": map[string]any{
 			"name":  nodeClassName,
@@ -479,29 +594,103 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 		}
 	}
 	deleteIfExists(ctx, e.DynamicClient, nodePoolGVR, name)
+	spec := map[string]any{
+		"disruption": map[string]any{
+			"consolidateAfter":    consolidateAfter,
+			"consolidationPolicy": consolidationPolicy,
+			"budgets":             budgets,
+		},
+		"template": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{e2eOwnerLabel: "true"}},
+			"spec":     templateSpec,
+		},
+	}
+	if tc.StaticReplicas == nil {
+		spec["weight"] = int64(DefaultNodePoolWeight)
+	} else {
+		spec["replicas"] = *tc.StaticReplicas
+	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.sh/v1",
 		"kind":       "NodePool",
-		"metadata":   map[string]any{"name": name},
-		"spec": map[string]any{
-			"weight": int64(DefaultNodePoolWeight),
-			"disruption": map[string]any{
-				"consolidateAfter":    consolidateAfter,
-				"consolidationPolicy": consolidationPolicy,
-				"budgets":             budgets,
-			},
-			"template": map[string]any{"spec": templateSpec},
-		},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec":       spec,
 	}}
 	_, err := e.DynamicClient.Resource(nodePoolGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating NodePool %s", name)
 	e.trackNodePool(name)
 }
 
+// CreateNodeOverlay creates a NodeOverlay that adds capacity to the instance
+// types of the given NodePool in the scheduling simulation. Requires the
+// NodeOverlay feature gate on the controller.
+func (e *Environment) CreateNodeOverlay(ctx context.Context, name, nodePoolName string, capacity corev1.ResourceList) {
+	capacityObj := make(map[string]any, len(capacity))
+	for resourceName, quantity := range capacity {
+		capacityObj[string(resourceName)] = quantity.String()
+	}
+	deleteIfExists(ctx, e.DynamicClient, nodeOverlayGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.sh/v1alpha1",
+		"kind":       "NodeOverlay",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"requirements": []any{
+				map[string]any{"key": karpv1.NodePoolLabelKey, "operator": "In", "values": []any{nodePoolName}},
+			},
+			"capacity": capacityObj,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(nodeOverlayGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating NodeOverlay %s", name)
+	e.trackNodeOverlay(name)
+}
+
+type DeploymentOptions struct {
+	// ExtraNodeSelectors are added to the Pod.
+	ExtraNodeSelectors map[string]string
+	// Annotations are added to the pod template metadata.
+	Annotations map[string]string
+	// EphemeralStorageRequest sets the inflate container's request.
+	EphemeralStorageRequest string
+}
+
 // CreateDeployment creates a single-replica Deployment of the pause container
 // pinned to the given NodePool via a NodeSelector. ARM64 deployments get the
 // kubernetes.io/arch toleration required by GKE's automatic arch taint.
 func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, nodePoolName, arch string) {
+	e.CreateDeploymentWithOptions(ctx, name, appLabel, nodePoolName, arch, DeploymentOptions{})
+}
+
+// CreateDeploymentWithHugepages creates a Deployment like CreateDeployment
+// whose pod requests the given hugepages resources. Kubernetes does not
+// overcommit hugepages, so the limits equal the requests.
+func (e *Environment) CreateDeploymentWithHugepages(ctx context.Context, name, appLabel, nodePoolName, arch string, hugepages corev1.ResourceList) {
+	requests := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("100m"),
+		corev1.ResourceMemory: resource.MustParse("128Mi"),
+	}
+	limits := corev1.ResourceList{
+		corev1.ResourceMemory: resource.MustParse("128Mi"),
+	}
+	for resourceName, quantity := range hugepages {
+		requests[resourceName] = quantity
+		limits[resourceName] = quantity
+	}
+	e.createDeployment(ctx, name, appLabel, nodePoolName, arch, corev1.ResourceRequirements{Requests: requests, Limits: limits}, DeploymentOptions{})
+}
+
+// CreateDeploymentWithOptions creates a Deployment with additional Pod settings.
+func (e *Environment) CreateDeploymentWithOptions(
+	ctx context.Context, name, appLabel, nodePoolName, arch string, opts DeploymentOptions,
+) {
+	e.createDeployment(ctx, name, appLabel, nodePoolName, arch, corev1.ResourceRequirements{Requests: corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("100m"),
+		corev1.ResourceMemory: resource.MustParse("128Mi"),
+	}}, opts)
+}
+
+func (e *Environment) createDeployment(ctx context.Context, name, appLabel, nodePoolName, arch string, resources corev1.ResourceRequirements, opts DeploymentOptions) {
 	replicas := int32(1)
 	zero := int64(0)
 	tolerations := []corev1.Toleration{{
@@ -518,28 +707,34 @@ func (e *Environment) CreateDeployment(ctx context.Context, name, appLabel, node
 			Operator: corev1.TolerationOpEqual,
 		})
 	}
+	nodeSelector := map[string]string{karpv1.NodePoolLabelKey: nodePoolName}
+	for k, v := range opts.ExtraNodeSelectors {
+		nodeSelector[k] = v
+	}
+	podSpec := corev1.PodSpec{
+		NodeSelector:                  nodeSelector,
+		Tolerations:                   tolerations,
+		TerminationGracePeriodSeconds: &zero,
+		Containers: []corev1.Container{{
+			Name:      "inflate",
+			Image:     PauseImage,
+			Resources: resources,
+		}},
+	}
+	if opts.EphemeralStorageRequest != "" {
+		podSpec.Containers[0].Resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse(opts.EphemeralStorageRequest)
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: TestNamespace},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": appLabel}},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": appLabel}},
-				Spec: corev1.PodSpec{
-					NodeSelector:                  map[string]string{karpv1.NodePoolLabelKey: nodePoolName},
-					Tolerations:                   tolerations,
-					TerminationGracePeriodSeconds: &zero,
-					Containers: []corev1.Container{{
-						Name:  "inflate",
-						Image: PauseImage,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("100m"),
-								corev1.ResourceMemory: resource.MustParse("128Mi"),
-							},
-						},
-					}},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      map[string]string{"app": appLabel},
+					Annotations: opts.Annotations,
 				},
+				Spec: podSpec,
 			},
 		},
 	}
@@ -739,6 +934,14 @@ func (e *Environment) DeleteNodeClass(ctx context.Context, name string) {
 	}
 }
 
+// DeleteNodeOverlay ignores 404 so callers need not check existence first.
+func (e *Environment) DeleteNodeOverlay(ctx context.Context, name string) {
+	err := e.DynamicClient.Resource(nodeOverlayGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	if !apierrors.IsNotFound(err) {
+		Expect(err).NotTo(HaveOccurred(), "deleting NodeOverlay %s", name)
+	}
+}
+
 // AllNodeNames returns a set of node names (map keys only) for O(1) membership tests.
 func (e *Environment) AllNodeNames(ctx context.Context) map[string]struct{} {
 	nodes, err := e.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
@@ -851,6 +1054,50 @@ func (e *Environment) waitForReadyCondition(ctx context.Context, gvr schema.Grou
 // WaitForNodePoolReady polls until the named NodePool reports Ready=True.
 func (e *Environment) WaitForNodePoolReady(ctx context.Context, name string) {
 	e.waitForReadyCondition(ctx, nodePoolGVR, name, NodePoolReadyTimeout)
+}
+
+// ConsistentlyExpectPendingPods requires Pods to remain unschedulable for the duration.
+func (e *Environment) ConsistentlyExpectPendingPods(ctx context.Context, appLabel string, duration time.Duration) {
+	check := func(g Gomega) {
+		pods, err := e.KubeClient.CoreV1().Pods(TestNamespace).List(ctx,
+			metav1.ListOptions{LabelSelector: fmt.Sprintf("app=%s", appLabel)})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(pods.Items).NotTo(BeEmpty(), "no pod with label app=%s yet", appLabel)
+
+		p := &pods.Items[0]
+		g.Expect(p.Status.Phase).To(Equal(corev1.PodPending),
+			"pod app=%s phase=%s (want Pending)", appLabel, p.Status.Phase)
+		g.Expect(p.Spec.NodeName).To(BeEmpty(),
+			"pod app=%s scheduled onto %s — expected unschedulable", appLabel, p.Spec.NodeName)
+
+		hasFailedScheduling := false
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == "Unschedulable" {
+				hasFailedScheduling = true
+				break
+			}
+		}
+		g.Expect(hasFailedScheduling).To(BeTrue(),
+			"pod app=%s lacks PodScheduled=False/Reason=Unschedulable", appLabel)
+	}
+	Eventually(check).WithTimeout(ProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed(),
+		"pod app=%s did not reach Unschedulable", appLabel)
+	Consistently(check, duration, DefaultPollInterval).Should(Succeed(),
+		"pod app=%s did not remain Unschedulable for %s", appLabel, duration)
+}
+
+// ExpectNoNodeClaim asserts that a NodePool has no NodeClaims.
+func (e *Environment) ExpectNoNodeClaim(ctx context.Context, nodePoolName string) {
+	claims, err := e.DynamicClient.Resource(nodeClaimGVR).List(ctx, metav1.ListOptions{
+		LabelSelector: "karpenter.sh/nodepool=" + nodePoolName,
+	})
+	Expect(err).NotTo(HaveOccurred(), "listing NodeClaims for pool %s", nodePoolName)
+	names := make([]string, 0, len(claims.Items))
+	for i := range claims.Items {
+		names = append(names, claims.Items[i].GetName())
+	}
+	Expect(claims.Items).To(BeEmpty(),
+		"expected no NodeClaim for pool %s, found: %v", nodePoolName, names)
 }
 
 // WaitForNodeClaimLaunched polls NodeClaims owned by nodePoolName and fails
@@ -999,6 +1246,12 @@ func (e *Environment) WaitForNodeClassReady(ctx context.Context, name string) {
 	e.waitForReadyCondition(ctx, gceNodeClassGVR, name, NodeClassReadyTimeout)
 }
 
+// WaitForNodeOverlayReady polls until the named NodeOverlay reports Ready=True,
+// which means that the controller validated it.
+func (e *Environment) WaitForNodeOverlayReady(ctx context.Context, name string) {
+	e.waitForReadyCondition(ctx, nodeOverlayGVR, name, NodeOverlayReadyTimeout)
+}
+
 // AddNodeClassMetadataEntry adds a single key/value pair to spec.metadata of the
 // named GCENodeClass using a merge patch. This is the simplest way to trigger
 // NodeClassDrift in tests — the hash controller detects the spec change, updates
@@ -1029,7 +1282,7 @@ func (e *Environment) CreateNodeClassWithAlias(ctx context.Context, name, alias 
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": alias},
@@ -1057,7 +1310,7 @@ func (e *Environment) CreateNodeClassWithImageID(ctx context.Context, name, imag
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
-		"metadata":   map[string]any{"name": name},
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"imageFamily": imageFamily,
 			"imageSelectorTerms": []any{
@@ -1093,6 +1346,50 @@ func (e *Environment) NodeClassSourceImages(ctx context.Context, name string) []
 	return out
 }
 
+func usableImage(img *compute.Image) bool {
+	if img.Status != "READY" {
+		return false
+	}
+	if img.Deprecated == nil {
+		return true
+	}
+	switch img.Deprecated.State {
+	case "DEPRECATED", "OBSOLETE", "DELETED":
+		return false
+	default:
+		return true
+	}
+}
+
+// newestImage reads only the metadata needed to select an image and stops at
+// the first match in creation-time order.
+func newestImage(ctx context.Context, service *compute.Service, project string, matches func(*compute.Image) bool) (*compute.Image, error) {
+	pageToken := ""
+	for {
+		call := service.Images.List(project).OrderBy("creationTimestamp desc").
+			Fields(googleapi.Field("nextPageToken,items(name,creationTimestamp,status,deprecated/state)"))
+		if pageToken != "" {
+			call.PageToken(pageToken)
+		}
+		page, err := call.Context(ctx).Do()
+		if err != nil {
+			return nil, err
+		}
+		for _, img := range page.Items {
+			if !usableImage(img) {
+				continue
+			}
+			if matches(img) {
+				return img, nil
+			}
+		}
+		if page.NextPageToken == "" {
+			return nil, nil
+		}
+		pageToken = page.NextPageToken
+	}
+}
+
 // ResolveCurrentCOSImage queries the gke-node-images project for the most
 // recent non-deprecated amd64 COS GKE image matching the cluster's K8s patch
 // version and returns its full resource URL.
@@ -1107,35 +1404,18 @@ func (e *Environment) ResolveCurrentCOSImage(ctx context.Context) string {
 	Expect(len(parts)).To(BeNumerically(">=", 3),
 		"unexpected server version format: %s", serverVer.GitVersion)
 
-	filter := fmt.Sprintf("name=gke-%s%s%s-*", parts[0], parts[1], parts[2])
-
-	var best *compute.Image
-	listErr := e.computeSvc.Images.List("gke-node-images").
-		Filter(filter).
-		Pages(ctx, func(page *compute.ImageList) error {
-			for _, img := range page.Items {
-				if img.Deprecated != nil {
-					switch img.Deprecated.State {
-					case "DEPRECATED", "OBSOLETE", "DELETED":
-						continue
-					}
-				}
-				skip := false
-				for _, substr := range []string{"arm64", "kmod", "nvda", "gvisor", "-test", "cgpv1"} {
-					if strings.Contains(img.Name, substr) {
-						skip = true
-						break
-					}
-				}
-				if skip {
-					continue
-				}
-				if best == nil || img.CreationTimestamp > best.CreationTimestamp {
-					best = img
-				}
+	prefix := fmt.Sprintf("gke-%s%s%s-", parts[0], parts[1], parts[2])
+	best, listErr := newestImage(ctx, e.computeSvc, "gke-node-images", func(img *compute.Image) bool {
+		if !strings.HasPrefix(img.Name, prefix) {
+			return false
+		}
+		for _, substr := range []string{"arm64", "kmod", "nvda", "gvisor", "-test", "cgpv1"} {
+			if strings.Contains(img.Name, substr) {
+				return false
 			}
-			return nil
-		})
+		}
+		return true
+	})
 	Expect(listErr).NotTo(HaveOccurred(), "listing COS images in gke-node-images")
 	Expect(best).NotTo(BeNil(), "no COS image found for K8s version %s", serverVer.GitVersion)
 	return fmt.Sprintf("projects/gke-node-images/global/images/%s", best.Name)
@@ -1155,38 +1435,18 @@ func (e *Environment) ResolveCurrentUbuntuVersion(ctx context.Context) string {
 	Expect(len(parts)).To(BeNumerically(">=", 2),
 		"unexpected server version format: %s", serverVer.GitVersion)
 
-	filter := fmt.Sprintf("name=ubuntu-gke-2404-%s-%s*", parts[0], parts[1])
-
-	var best *compute.Image
-	listErr := e.computeSvc.Images.List("ubuntu-os-gke-cloud").
-		Filter(filter).
-		Pages(ctx, func(page *compute.ImageList) error {
-			for _, img := range page.Items {
-				if img.Deprecated != nil {
-					switch img.Deprecated.State {
-					case "DEPRECATED", "OBSOLETE", "DELETED":
-						continue
-					}
-				}
-				if !strings.Contains(img.Name, "-amd64-") {
-					continue
-				}
-				skip := false
-				for _, substr := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test"} {
-					if strings.Contains(img.Name, substr) {
-						skip = true
-						break
-					}
-				}
-				if skip {
-					continue
-				}
-				if best == nil || img.CreationTimestamp > best.CreationTimestamp {
-					best = img
-				}
+	prefix := fmt.Sprintf("ubuntu-gke-2404-%s-%s", parts[0], parts[1])
+	best, listErr := newestImage(ctx, e.computeSvc, "ubuntu-os-gke-cloud", func(img *compute.Image) bool {
+		if !strings.HasPrefix(img.Name, prefix) || !strings.Contains(img.Name, "-amd64-") {
+			return false
+		}
+		for _, substr := range []string{"cgroupsv1", "linux64k", "-tpu-", "-test"} {
+			if strings.Contains(img.Name, substr) {
+				return false
 			}
-			return nil
-		})
+		}
+		return true
+	})
 	Expect(listErr).NotTo(HaveOccurred(), "listing Ubuntu images in ubuntu-os-gke-cloud")
 	Expect(best).NotTo(BeNil(), "no Ubuntu image found for K8s version %s", serverVer.GitVersion)
 

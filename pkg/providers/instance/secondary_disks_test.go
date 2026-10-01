@@ -49,7 +49,7 @@ func TestBuildInstance_DropsStaleSourceSecondaryBootDiskMetadata(t *testing.T) {
 	provider := makeProvider()
 	sourceMetadata := computeMetadataValues(map[string]string{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
-		metadata.KubeEnvKey:       "SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/stale-disk\nKUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "SECONDARY_BOOT_DISKS: /mnt/disks/gke-secondary-disks/stale-disk\nKUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
 		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
 	})
 
@@ -59,6 +59,7 @@ func TestBuildInstance_DropsStaleSourceSecondaryBootDiskMetadata(t *testing.T) {
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-secondary-boot-disk-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -80,6 +81,7 @@ func TestBuildInstance_SecondaryBootDiskMetadata(t *testing.T) {
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-secondary-boot-disk-test",
 		karpv1.CapacityTypeOnDemand,
+		nil, 0,
 	)
 
 	require.NoError(t, err)
