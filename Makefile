@@ -129,13 +129,8 @@ E2E_KARPENTER_DEPLOYMENT ?=
 E2E_GAC_ENV     = $(if $(E2E_SA_PATH),GOOGLE_APPLICATION_CREDENTIALS=$(E2E_SA_PATH))
 E2E_GAC_ENV_ABS = $(if $(E2E_SA_PATH),GOOGLE_APPLICATION_CREDENTIALS=$(abspath $(E2E_SA_PATH)))
 
-e2e-setup: require-e2e-vars ## Create (or reuse) the e2e GKE cluster and supporting GCP infra
-	$(E2E_GAC_ENV) \
-	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
-	E2E_PREFIX=$(E2E_PREFIX) \
-	E2E_REGION=$(E2E_REGION) \
-	E2E_LOCATION=$(E2E_LOCATION) \
-	./hack/e2e-setup.sh
+e2e-setup: ## Use deploy/terraform-e2e/ for persistent e2e infrastructure
+	@echo "e2e-setup is retired; see deploy/terraform-e2e/README.md for the approved Terraform maintenance procedure" >&2; exit 1
 
 e2e-clean-env: require-e2e-vars ## Remove leftover e2e Kubernetes resources (preserves cluster and controller)
 	E2E_PROJECT_ID=$(E2E_PROJECT_ID) E2E_LOCATION=$(E2E_LOCATION) E2E_PREFIX=$(E2E_PREFIX) ./hack/e2e-clean-env.sh
@@ -186,12 +181,8 @@ e2e-test: require-e2e-vars ## Run a feature directory or focused spec (SUITE=<na
 	$(if $(SUITE),,--label-filter='!suite:gpu && !suite:local-ssd') \
 	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/)
 
-e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra
-	$(E2E_GAC_ENV) \
-	E2E_PREFIX=$(E2E_PREFIX) \
-	E2E_REGION=$(E2E_REGION) \
-	E2E_LOCATION=$(E2E_LOCATION) \
-	./hack/e2e-teardown.sh
+e2e-teardown: ## Use deploy/terraform-e2e/ for approved retirement
+	@echo "e2e-teardown is retired; see deploy/terraform-e2e/README.md for the approved Terraform retirement procedure" >&2; exit 1
 
 e2e-check-clean: ## Report any orphaned e2e GCP resources (does not delete)
 	$(E2E_GAC_ENV) \

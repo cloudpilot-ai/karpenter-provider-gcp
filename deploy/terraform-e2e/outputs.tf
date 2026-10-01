@@ -15,7 +15,7 @@ output "prefix" {
 }
 
 output "cluster_name" {
-  value = google_container_cluster.e2e.name
+  value = module.cluster.cluster_name
 }
 
 output "image_repository" {
@@ -23,17 +23,9 @@ output "image_repository" {
 }
 
 output "controller_service_account" {
-  value = google_service_account.controller.email
+  value = module.cluster.karpenter_controller_sa_email
 }
 
 output "node_service_account" {
-  value = google_service_account.node.email
-}
-
-output "runtime_service_account" {
-  value = google_service_account.runtime.email
-}
-
-output "wif_provider" {
-  value = var.enable_ci_wif ? google_iam_workload_identity_pool_provider.github[0].name : null
+  value = module.cluster.karpenter_node_sa_email
 }

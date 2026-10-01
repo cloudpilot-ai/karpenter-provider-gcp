@@ -112,10 +112,10 @@ type Environment struct {
 }
 
 // NewEnvironment reads config from env vars, creates k8s clients, and waits
-// for the karpenter Deployment (installed by e2e-setup.sh via Helm) to be ready.
+// for the karpenter Deployment (installed by e2e-deploy.sh via Helm) to be ready.
 //
 // Required env vars: PROJECT_ID, CLUSTER_NAME, CLUSTER_LOCATION, PODS_RANGE_NAME
-// The kubeconfig must already point at the e2e cluster (set by e2e-setup.sh).
+// The kubeconfig must already point at the intended e2e cluster.
 func NewEnvironment() *Environment {
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
@@ -293,7 +293,7 @@ func (e *Environment) ListNodeClaims(ctx context.Context) ([]unstructured.Unstru
 
 // waitForControllerReady polls until the karpenter Deployment has all replicas
 // available and both GKE template node pools are RUNNING.
-// The Deployment was installed by e2e-setup.sh via Helm.
+// The Deployment was installed by e2e-deploy.sh via Helm.
 func (e *Environment) waitForControllerReady() {
 	deployCtx, deployCancel := context.WithTimeout(context.Background(), ControllerStartTimeout)
 	defer deployCancel()
@@ -302,7 +302,7 @@ func (e *Environment) waitForControllerReady() {
 		dep, err := e.KubeClient.AppsV1().Deployments(KarpenterNamespace).
 			Get(deployCtx, KarpenterDeployment, metav1.GetOptions{})
 		g.Expect(err).NotTo(HaveOccurred(),
-			"getting karpenter Deployment — did e2e-setup.sh run successfully?")
+			"getting karpenter Deployment — did e2e-deploy.sh run successfully?")
 		g.Expect(dep.Status.AvailableReplicas).To(BeNumerically(">=", 1),
 			"karpenter Deployment has no available replicas yet")
 	}).WithTimeout(ControllerStartTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
