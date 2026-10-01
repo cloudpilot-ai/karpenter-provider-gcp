@@ -126,7 +126,7 @@ func TestBuildInstance_Hugepages2MMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand,
+		karpv1.CapacityTypeOnDemand, nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestBuildInstance_Hugepages1GMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand,
+		karpv1.CapacityTypeOnDemand, nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestBuildInstance_HugepagesBothSizesMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), makeSourceMetadata("max-pods-per-node=110,max-pods=110"),
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand,
+		karpv1.CapacityTypeOnDemand, nil, 0,
 	)
 
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestBuildInstance_DropsStaleSourceHugepagesMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand,
+		karpv1.CapacityTypeOnDemand, nil, 0,
 	)
 
 	require.NoError(t, err)

@@ -99,7 +99,6 @@ spec:
                       - hyperdisk-extreme
                       - hyperdisk-ml
                       - hyperdisk-throughput
-                      - local-ssd
                       - pd-balanced
                       - pd-extreme
                       - pd-ssd
@@ -506,6 +505,14 @@ spec:
                         type: integer
                     type: object
                 type: object
+              localSsdMode:
+                default: RawBlock
+                description: LocalSsdMode exposes local SSDs as raw devices or kubelet
+                  ephemeral storage.
+                enum:
+                - RawBlock
+                - Ephemeral
+                type: string
               metadata:
                 additionalProperties:
                   type: string
