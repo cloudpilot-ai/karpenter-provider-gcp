@@ -257,6 +257,52 @@ requirements:
 
 To confirm nested virtualization is active on a node, check that the `vmx` CPU flag is present (`grep -c vmx /proc/cpuinfo`) or that `/dev/kvm` exists.
 
+## Local SSDs
+
+[Local SSDs](https://cloud.google.com/compute/docs/disks/local-ssd) give nodes fast scratch storage. Their data is lost when the node stops, is preempted, or is deleted, so use them for caches and temporary data only.
+
+Set `spec.localSsdMode` to choose how workloads see the disks:
+
+- `RawBlock` (default) — unformatted NVMe block devices that your workload formats and mounts.
+- `Ephemeral` — the disks back the kubelet and container runtime storage, and their capacity is reported as the node's `ephemeral-storage`.
+
+```yaml
+localSsdMode: Ephemeral
+```
+
+`localSsdMode` does not set how many disks a node gets. The machine type decides that.
+
+**Fixed-count machine types**, such as `c4d-standard-8-lssd` or `z3-highmem-8-highlssd`, include a set number of local SSDs. Select the machine type and the disks are attached:
+
+```yaml
+nodeSelector:
+  node.kubernetes.io/instance-type: c4d-standard-8-lssd
+```
+
+**Configurable machine types** in the `n1`, `n2`, `n2d`, `c2`, and `c2d` families take a count through the `karpenter.k8s.gcp/instance-local-ssd-count` label. The NodePool must include the label, or Karpenter only launches these machine types without local SSDs:
+
+```yaml
+# NodePool
+requirements:
+  - key: karpenter.k8s.gcp/instance-local-ssd-count
+    operator: Exists
+```
+
+The NodePool and Pod requirements together must then select exactly one count. A Pod usually selects it alongside the machine type:
+
+```yaml
+# Pod
+nodeSelector:
+  node.kubernetes.io/instance-type: n2d-standard-8
+  karpenter.k8s.gcp/instance-local-ssd-count: "4"
+```
+
+If the requirements allow more than one count, Karpenter does not launch the node. The supported counts depend on the machine family and vCPU count; see the GCE [general-purpose](https://cloud.google.com/compute/docs/general-purpose-machines) and [compute-optimized](https://cloud.google.com/compute/docs/compute-optimized-machines) machine family pages.
+
+In `Ephemeral` mode, Karpenter checks a Pod's `ephemeral-storage` request against the capacity of the selected disks, which is 375 GiB per disk on most machine types. The request does not choose the count. In `RawBlock` mode, `ephemeral-storage` reflects only the boot disk.
+
+If you are upgrading from a version that accepted `spec.disks[].category: local-ssd`, see [`MIGRATION.md`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/MIGRATION.md).
+
 ## Disk type scheduling
 
 Karpenter applies `disk-type.gke.io/*` labels to provisioned nodes based on the instance type's machine family. These labels indicate which persistent disk types the instance supports, enabling two capabilities:
