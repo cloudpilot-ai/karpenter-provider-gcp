@@ -4,7 +4,7 @@ locals {
 }
 
 resource "google_service_account" "karpenter_controller" {
-  account_id   = "${var.common_name}-ctrl"
+  account_id   = coalesce(var.controller_service_account_id, "${var.common_name}-ctrl")
   display_name = "Karpenter controller"
   project      = var.project_id
 }
@@ -63,4 +63,16 @@ output "karpenter_controller_sa_email" {
 
 output "karpenter_node_sa_email" {
   value = local.node_sa_email
+}
+
+output "network_id" {
+  value = google_compute_network.default.id
+}
+
+output "subnetwork_id" {
+  value = google_compute_subnetwork.default.id
+}
+
+output "cluster_name" {
+  value = google_container_cluster.default.name
 }
