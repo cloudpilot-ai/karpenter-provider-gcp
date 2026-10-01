@@ -14,6 +14,12 @@
 #   E2E_LOCATION    GCP location (zone or region)
 set -euo pipefail
 
+# Terraform-owned targets use the reserved prefix and must never run imperative teardown.
+if [[ "${E2E_PREFIX:-}" == tf-e2e-* ]]; then
+  echo "ERROR: Terraform-owned e2e target; use the reviewed Terraform maintenance procedure" >&2
+  exit 1
+fi
+
 log() { echo "e2e-teardown: $*" >&2; }
 
 if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
