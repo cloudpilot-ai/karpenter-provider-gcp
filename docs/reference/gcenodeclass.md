@@ -84,6 +84,88 @@ _Appears in:_
 
 
 
+#### GCECustomMachineType
+
+
+
+GCECustomMachineType registers a GCE custom machine type so the instance type provider can
+discover it, price it, and make it available for scheduling like any predefined shape. See
+proposals/0009-custom-machine-type-catalog.md.
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  | Optional: \{\} <br /> |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  | Optional: \{\} <br /> |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[GCECustomMachineTypeSpec](#gcecustommachinetypespec)_ |  |  |  |
+| `status` _[GCECustomMachineTypeStatus](#gcecustommachinetypestatus)_ |  |  |  |
+
+
+
+
+#### GCECustomMachineTypePrices
+
+
+
+GCECustomMachineTypePrices are decimal-string USD/hour prices, matching the currency
+representation used at other API boundaries in this codebase to avoid float precision
+issues over the wire.
+
+
+
+_Appears in:_
+- [GCECustomMachineTypeSpec](#gcecustommachinetypespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `onDemand` _string_ | OnDemand is the on-demand hourly price in USD. |  | Pattern: `^[0-9]+(\.[0-9]+)?$` <br />Required: \{\} <br /> |
+| `spot` _string_ | Spot is the Spot hourly price in USD. |  | Pattern: `^[0-9]+(\.[0-9]+)?$` <br />Required: \{\} <br /> |
+
+
+#### GCECustomMachineTypeSpec
+
+
+
+GCECustomMachineTypeSpec registers a GCE custom machine type (e.g. n2-custom-8-24576) so it
+joins the instance type catalog alongside predefined shapes. GCP does not enumerate custom
+shapes through machineTypes.aggregatedList (the API Karpenter otherwise uses to discover
+instance types), so a shape must be registered here before it can be scheduled onto.
+
+
+
+_Appears in:_
+- [GCECustomMachineType](#gcecustommachinetype)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `machineType` _string_ | MachineType is the real GCE custom machine type name, e.g. "n2-custom-8-24576". Immutable<br />after creation; create a new object to register a different shape. |  | Pattern: `^[a-z][a-z0-9]*-custom-[1-9][0-9]*-[1-9][0-9]*(-ext)?$` <br />Required: \{\} <br /> |
+| `prices` _[GCECustomMachineTypePrices](#gcecustommachinetypeprices)_ | Prices are the hourly prices Karpenter uses for scheduling and consolidation decisions.<br />GCP does not publish prices for custom shapes (unlike predefined ones), so they must be<br />supplied explicitly until the pricing provider can compute them (see proposals/0009). |  | Required: \{\} <br /> |
+
+
+#### GCECustomMachineTypeStatus
+
+
+
+GCECustomMachineTypeStatus contains the resolved state of the GCECustomMachineType, as
+discovered from GCE via machineTypes.get (which, unlike machineTypes.aggregatedList,
+supports resolving a specific valid custom shape on demand).
+
+
+
+_Appears in:_
+- [GCECustomMachineType](#gcecustommachinetype)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `guestCpus` _integer_ | GuestCpus is the resolved vCPU count for MachineType. |  | Optional: \{\} <br /> |
+| `memoryMb` _integer_ | MemoryMb is the resolved memory, in MB, for MachineType. |  | Optional: \{\} <br /> |
+| `zones` _string array_ | Zones lists the cluster zones where MachineType was confirmed available. |  | Optional: \{\} <br /> |
+| `conditions` _Condition array_ | Conditions contains signals for health and readiness. |  | Optional: \{\} <br /> |
+
+
 #### GCENodeClass
 
 

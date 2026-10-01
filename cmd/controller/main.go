@@ -69,6 +69,8 @@ func main() {
 			op.InstanceTypeProvider,
 			cloudProvider,
 			op.PricingProvider,
+			op.AuthOptions,
+			op.GKEProvider,
 		)...).
 		Start(ctx)
 }
