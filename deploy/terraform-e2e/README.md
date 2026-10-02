@@ -8,6 +8,12 @@ The module reads controller permissions from
 not imported or retired automatically. `make e2e-setup` and `make e2e-teardown`
 are retired; they print this path rather than touching GCP.
 
+The image repository deletes **tagged and untagged** versions older than seven
+days, with no keep exception. If a controller image is deleted while its pod
+still runs, a later restart may fail to pull that digest; redeploy an image
+before relying on an older installation. Review the policy in the approved
+Terraform plan before applying; cleanup is asynchronous, not an exact-time TTL.
+
 The project and billing account must already exist. Confirm owner and permitted
 operations, enabled APIs, Singapore zone and machine availability (including
 GPU/ARM where needed), quota, budget, CIDR non-overlap and resource-name

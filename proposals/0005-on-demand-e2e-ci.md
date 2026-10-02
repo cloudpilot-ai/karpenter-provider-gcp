@@ -247,7 +247,7 @@ Coverage expansion and a possible KWOK lane remain tracked separately in [#250](
 
 ### Phase 2 — Terraform Environment
 
-Implement #556 with a Terraform-managed persistent environment for approved manual runs; retire imperative setup/teardown. Validate the local runner against the new target after separate approval.
+Implement #556 with a Terraform-managed persistent environment for approved manual runs; retire imperative setup/teardown. Registry images expire after seven days (unlike CI result artifacts, retained for 30 days), so a stale controller may need redeployment before restart. Validate the local runner against the new target after separate approval.
 
 ### Phase 3 — Manual Pipeline
 
