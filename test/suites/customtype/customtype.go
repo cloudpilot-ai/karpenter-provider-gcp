@@ -40,8 +40,13 @@ var _ = BeforeEach(func() { env = environment.Current() })
 
 var _ = Describe("Custom Machine Type", Label("suite:customtype"), func() {
 	It("should schedule a workload onto a registered custom machine type", func(ctx SpecContext) {
-		// n2-custom-2-8192: 2 vCPU / 8 GiB, the minimum valid n2 custom shape.
-		const machineType = "n2-custom-2-8192"
+		// n2-custom-4-20480: 4 vCPU / 20 GiB (5 GiB/vCPU). Deliberately not 4 GiB/vCPU
+		// (n2-standard-4), 8 GiB/vCPU (n2-highmem-4), or 1 GiB/vCPU (n2-highcpu-4): GCP
+		// collapses a custom shape that exactly matches a predefined ratio into that
+		// predefined machine type, so the created instance (and its instance-type label)
+		// would come back as the predefined name instead - see proposals/0009's Open
+		// Questions. A genuinely off-ratio shape is required to test custom-type scheduling.
+		const machineType = "n2-custom-4-20480"
 
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "customtype")
 		name := prefix + "-" + environment.UniqueSuffix()

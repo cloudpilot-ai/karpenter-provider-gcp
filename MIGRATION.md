@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+### New IAM permission required: `compute.machineTypes.get`
+
+Registering a `GCECustomMachineType` requires the controller's service account to have `compute.machineTypes.get`, in addition to the existing `compute.machineTypes.list`. Add it to your controller's IAM role before upgrading; see [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). Without it, every `GCECustomMachineType` registration fails to resolve and stays `Ready=False`.
+
 ### Replace the non-working local SSD disk category
 
 `GCENodeClass.spec.disks[].category: local-ssd` never provisioned local SSDs successfully and is no longer accepted by the CRD. If your NodeClass uses it, remove that disk entry before upgrading the CRD. To provision local SSDs, use `spec.localSsdMode` (`RawBlock` by default; set `Ephemeral` for kubelet storage). For configurable machine families (`n1`, `n2`, `n2d`, `c2`, `c2d`), declare `karpenter.k8s.gcp/instance-local-ssd-count` on the NodePool and select one exact count through the NodePool or Pod requirements. Fixed-count local SSD machine types, such as `c4d-standard-8-lssd`, do not need a Pod count selector. See [Proposal 0003](proposals/0003-local-ssd-support.md#migration) for examples.

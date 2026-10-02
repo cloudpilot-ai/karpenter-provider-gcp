@@ -16,6 +16,7 @@ includedPermissions:
   - compute.images.get
   - compute.images.list
   - compute.instanceGroupManagers.get
+  - compute.machineTypes.get  # required to resolve GCECustomMachineType registrations
   - compute.machineTypes.list
   - compute.networks.get      # required for Shared VPC (cross-project network validation)
   - compute.projects.get
