@@ -180,7 +180,9 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context, ins
 
 	instanceType, ok := matchVariantForInstance(instanceTypes, instance)
 	if !ok {
-		return nil, fmt.Errorf("instance type %s not found in offerings", instance.Type)
+		// Catalog membership controls new launches, not whether existing VMs can be
+		// discovered and garbage-collected after their registration is removed.
+		return nil, nil
 	}
 	if karpoptions.FromContext(ctx).FeatureGates.NodeOverlay {
 		instanceType, err = c.instanceTypeStore.Apply(nodePool.Name, instanceType)
@@ -413,17 +415,15 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 
 		nodeClaim.Status.Capacity = lo.PickBy(instanceType.Capacity, resourceFilter)
 		nodeClaim.Status.Allocatable = lo.PickBy(instanceType.Allocatable(), resourceFilter)
-
-		// Add instance type label for gce nodeclaim
-		labels[corev1.LabelInstanceTypeStable] = instanceType.Name
 	}
 
-	// Set core labels
+	// Identity comes from the VM even when its type is no longer in the catalog.
+	labels[corev1.LabelInstanceTypeStable] = i.Type
 	labels[corev1.LabelTopologyZone] = i.Location
 	labels[karpv1.CapacityTypeLabelKey] = i.CapacityType
 
 	// Add node pool label if present
-	if v, ok := i.Labels[karpv1.NodePoolLabelKey]; ok {
+	if v, ok := i.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)]; ok {
 		labels[karpv1.NodePoolLabelKey] = v
 	}
 
