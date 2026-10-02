@@ -206,6 +206,110 @@ func TestGCECustomMachineTypeReconcile_PartialFailureRetriesPromptly(t *testing.
 	assert.Equal(t, []string{"us-central1-a"}, obj.Status.Zones)
 }
 
+func TestGCECustomMachineTypeReconcile_RemovesLastConfirmedZoneDuringPartialFailure(t *testing.T) {
+	obj := &v1alpha1.GCECustomMachineType{
+		ObjectMeta: metav1.ObjectMeta{Name: "custom"},
+		Spec:       v1alpha1.GCECustomMachineTypeSpec{MachineType: "n2-custom-8-24576"},
+		Status:     v1alpha1.GCECustomMachineTypeStatus{GuestCpus: 8, MemoryMb: 24576, Zones: []string{"us-central1-a"}},
+	}
+	obj.StatusConditions().SetTrue(status.ConditionReady)
+	c := &Controller{
+		kubeClient:  &fakeKubeClient{},
+		authOptions: &auth.Credential{ProjectID: "test-project"},
+		gkeProvider: &fakeGKEProvider{zones: []string{"us-central1-a", "us-central1-b"}},
+		getMachineType: func(_ context.Context, req *computepb.GetMachineTypeRequest, _ ...gax.CallOption) (*computepb.MachineType, error) {
+			if req.GetZone() == "us-central1-a" {
+				return nil, &googleapi.Error{Code: http.StatusNotFound}
+			}
+			return nil, errors.New("temporary API failure")
+		},
+	}
+	_, err := c.Reconcile(context.Background(), obj)
+	require.Error(t, err)
+	assert.Empty(t, obj.Status.Zones)
+	assert.Equal(t, metav1.ConditionUnknown, obj.StatusConditions().Get(status.ConditionReady).Status)
+}
+
+func TestGCECustomMachineTypeReconcile_RefreshConfirmedZones(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		zones     []string
+		errors    map[string]error
+		wantZones []string
+		wantErr   bool
+	}{
+		{
+			name:      "partial transient failure retains confirmed zone",
+			zones:     []string{"us-central1-a", "us-central1-b"},
+			errors:    map[string]error{"us-central1-b": errors.New("temporary API failure")},
+			wantZones: []string{"us-central1-a", "us-central1-b"},
+			wantErr:   true,
+		},
+		{
+			name:      "all transient failures retain confirmed resources",
+			zones:     []string{"us-central1-a", "us-central1-b"},
+			errors:    map[string]error{"us-central1-a": errors.New("temporary API failure"), "us-central1-b": errors.New("temporary API failure")},
+			wantZones: []string{"us-central1-a", "us-central1-b"},
+			wantErr:   true,
+		},
+		{
+			name:      "definitive absence removes zone even alongside transient failure",
+			zones:     []string{"us-central1-a", "us-central1-b"},
+			errors:    map[string]error{"us-central1-a": errors.New("temporary API failure"), "us-central1-b": &googleapi.Error{Code: http.StatusNotFound}},
+			wantZones: []string{"us-central1-a"},
+			wantErr:   true,
+		},
+		{
+			name:      "zone removed from cluster is not retained",
+			zones:     []string{"us-central1-a"},
+			errors:    map[string]error{"us-central1-a": errors.New("temporary API failure")},
+			wantZones: []string{"us-central1-a"},
+			wantErr:   true,
+		},
+		{
+			name:      "definitive absence removes zone after successful lookup",
+			zones:     []string{"us-central1-a", "us-central1-b"},
+			errors:    map[string]error{"us-central1-b": &googleapi.Error{Code: http.StatusNotFound}},
+			wantZones: []string{"us-central1-a"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := &v1alpha1.GCECustomMachineType{
+				ObjectMeta: metav1.ObjectMeta{Name: "custom"},
+				Spec:       v1alpha1.GCECustomMachineTypeSpec{MachineType: "n2-custom-8-24576"},
+				Status: v1alpha1.GCECustomMachineTypeStatus{
+					GuestCpus: 8,
+					MemoryMb:  24576,
+					Zones:     []string{"us-central1-a", "us-central1-b"},
+				},
+			}
+			obj.StatusConditions().SetTrue(status.ConditionReady)
+			c := &Controller{
+				kubeClient:  &fakeKubeClient{},
+				authOptions: &auth.Credential{ProjectID: "test-project"},
+				gkeProvider: &fakeGKEProvider{zones: tt.zones},
+				getMachineType: func(_ context.Context, req *computepb.GetMachineTypeRequest, _ ...gax.CallOption) (*computepb.MachineType, error) {
+					if err := tt.errors[req.GetZone()]; err != nil {
+						return nil, err
+					}
+					return &computepb.MachineType{GuestCpus: lo.ToPtr[int32](8), MemoryMb: lo.ToPtr[int32](24576)}, nil
+				},
+			}
+
+			_, err := c.Reconcile(context.Background(), obj)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.True(t, obj.StatusConditions().Get(status.ConditionReady).IsTrue())
+			assert.ElementsMatch(t, tt.wantZones, obj.Status.Zones)
+			assert.Equal(t, int32(8), obj.Status.GuestCpus)
+			assert.Equal(t, int32(24576), obj.Status.MemoryMb)
+		})
+	}
+}
+
 // TestGCECustomMachineTypeReconcile_DuplicateRegistration is a regression test for a Greptile
 // review finding on PR #601: two GCECustomMachineType objects can name the same
 // spec.machineType, and without an explicit tie-break the catalog merge would silently use

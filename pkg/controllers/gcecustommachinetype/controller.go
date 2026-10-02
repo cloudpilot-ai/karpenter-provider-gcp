@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
@@ -102,12 +103,19 @@ func (c *Controller) Reconcile(ctx context.Context, obj *v1alpha1.GCECustomMachi
 		return reconcile.Result{}, fmt.Errorf("resolving cluster zones: %w", err)
 	}
 
-	guestCpus, memoryMb, resolvedZones, sawUnresolvedZone := c.resolveZones(ctx, obj.Spec.MachineType, zones)
+	guestCpus, memoryMb, resolvedZones, sawUnresolvedZone := c.resolveZones(ctx, obj, zones)
 
 	switch {
 	case len(resolvedZones) == 0 && sawUnresolvedZone:
-		// No definitive answer at all yet; leave status/conditions untouched and retry with
-		// the controller's standard backoff rather than flapping Ready to False.
+		// Previously confirmed zones were removed or returned 404, while the remaining
+		// zones are unknown. Withdraw the old offerings without claiming definitive absence.
+		if len(obj.Status.Zones) > 0 {
+			obj.Status.Zones = nil
+			obj.StatusConditions().SetUnknownWithReason(status.ConditionReady, "MachineTypeResolutionFailed", "no confirmed zones remain; retrying unresolved zones")
+			if _, err := c.patchStatus(ctx, stored, obj); err != nil {
+				return reconcile.Result{}, err
+			}
+		}
 		return reconcile.Result{}, fmt.Errorf("could not resolve %q in any zone due to transient errors", obj.Spec.MachineType)
 	case len(resolvedZones) == 0:
 		obj.Status.GuestCpus = 0
@@ -136,11 +144,14 @@ func (c *Controller) Reconcile(ctx context.Context, obj *v1alpha1.GCECustomMachi
 	return c.patchStatus(ctx, stored, obj)
 }
 
-// resolveZones calls machineTypes.get for machineType in every zone, returning the resolved
-// vCPU/memory (from whichever zone answered - a custom shape's resources don't vary by zone),
-// every zone where it was confirmed available, and whether any zone's availability remains
-// unresolved because of a transient (non-404) error.
-func (c *Controller) resolveZones(ctx context.Context, machineType string, zones []string) (guestCpus, memoryMb int32, resolvedZones []string, sawUnresolvedZone bool) {
+// resolveZones retains previously confirmed zones on transient errors; only a definitive
+// absence or removal from the cluster's zones can withdraw their offerings.
+func (c *Controller) resolveZones(ctx context.Context, obj *v1alpha1.GCECustomMachineType, zones []string) (guestCpus, memoryMb int32, resolvedZones []string, sawUnresolvedZone bool) {
+	machineType := obj.Spec.MachineType
+	wasReady := obj.StatusConditions().Get(status.ConditionReady).IsTrue()
+	if wasReady {
+		guestCpus, memoryMb = obj.Status.GuestCpus, obj.Status.MemoryMb
+	}
 	for _, zone := range zones {
 		mt, err := c.getMachineType(ctx, &computepb.GetMachineTypeRequest{
 			Project:     c.authOptions.ProjectID,
@@ -157,6 +168,9 @@ func (c *Controller) resolveZones(ctx context.Context, machineType string, zones
 			// Transient, authorization, quota, or context error: this zone's availability is
 			// unknown, not confirmed absent. Retry rather than reporting Ready=False on it.
 			sawUnresolvedZone = true
+			if wasReady && slices.Contains(obj.Status.Zones, zone) {
+				resolvedZones = append(resolvedZones, zone)
+			}
 			log.FromContext(ctx).Error(err, "failed to resolve custom machine type in zone, will retry",
 				"machineType", machineType, "zone", zone)
 		}
