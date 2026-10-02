@@ -144,8 +144,8 @@ func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, di
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
 			},
-			"disks":           []any{disk},
-			"subnetRangeName": e.PodsRangeName,
+			"disks":            []any{disk},
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -173,7 +173,7 @@ func (e *Environment) CreateNodeClassForLocalSSD(
 		"disks": []any{
 			map[string]any{"category": bootDiskCategory, "sizeGiB": diskGiB, "boot": true},
 		},
-		"subnetRangeName": e.PodsRangeName,
+		"subnetRangeNames": []any{e.PodsRangeName},
 	}
 	if mode != "" {
 		spec["localSsdMode"] = string(mode)
@@ -216,7 +216,7 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 			"disks": []any{
 				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
-			"subnetRangeName":      e.PodsRangeName,
+			"subnetRangeNames":     []any{e.PodsRangeName},
 			"kubeletConfiguration": kubeletConfig,
 		},
 	}}
@@ -246,8 +246,8 @@ func (e *Environment) CreateNodeClassWithHugepages(ctx context.Context, name, im
 			"disks": []any{
 				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
-			"linuxNodeConfig": map[string]any{"hugepages": hugepages},
+			"subnetRangeNames": []any{e.PodsRangeName},
+			"linuxNodeConfig":  map[string]any{"hugepages": hugepages},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -274,7 +274,7 @@ func (e *Environment) CreateNodeClassWithFamilyChannel(ctx context.Context, name
 			"disks": []any{
 				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -301,7 +301,7 @@ func (e *Environment) CreateNodeClassWithFamilyVersion(ctx context.Context, name
 			"disks": []any{
 				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -326,7 +326,7 @@ func (e *Environment) CreateNodeClassWithConfidentialType(ctx context.Context, n
 			"disks": []any{
 				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -353,7 +353,7 @@ func (e *Environment) CreateNodeClassWithNestedVirtualization(ctx context.Contex
 			"disks": []any{
 				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -377,7 +377,7 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 			"disks": []any{
 				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 			"networkConfig": map[string]any{
 				"enablePrivateNodes": true,
 			},
@@ -405,7 +405,7 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name,
 			"disks": []any{
 				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -1307,7 +1307,7 @@ func (e *Environment) CreateNodeClassWithAlias(ctx context.Context, name, alias 
 			"disks": []any{
 				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
@@ -1336,7 +1336,7 @@ func (e *Environment) CreateNodeClassWithImageID(ctx context.Context, name, imag
 			"disks": []any{
 				map[string]any{"sizeGiB": diskGiB, "boot": true},
 			},
-			"subnetRangeName": e.PodsRangeName,
+			"subnetRangeNames": []any{e.PodsRangeName},
 		},
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})

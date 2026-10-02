@@ -28,11 +28,25 @@ Direct pods to a specific [secondary IP range](https://cloud.google.com/kubernet
 
 ```yaml
 spec:
-  subnetRangeName: karpenter-pods
+  subnetRangeNames:
+    - karpenter-pods
 ```
 
 See [`examples/nodeclass/subnet-range-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnet-range-gcenodeclass.yaml).
 
-> **Note**: `subnetRangeName` controls pod IPs (alias IPs). To change the node's subnet, use `networkConfig.subnetwork`.
+To spill over across several ranges (the cluster default plus [additional pod ranges](https://cloud.google.com/kubernetes-engine/docs/how-to/multi-pod-cidr)), list them on one NodeClass. At launch Karpenter picks the range with the lowest GKE-reported utilization, and retries remaining names if Compute returns IP space exhausted.
 
-On clusters with [additional pod ranges](https://cloud.google.com/kubernetes-engine/docs/how-to/multi-pod-cidr) (`additionalPodRangesConfig`), Karpenter always allocates from the cluster's default pod range and does not spill over to additional ranges automatically. If your default range is near exhaustion, set `subnetRangeName` to pin allocation to a specific secondary range.
+```yaml
+spec:
+  subnetRangeNames:
+    - gke-example-pods
+    - gke-example-additional
+```
+
+See [`examples/nodeclass/subnet-ranges-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnet-ranges-gcenodeclass.yaml).
+
+The legacy `subnetRangeName` field is deprecated but remains supported. Use `subnetRangeNames` even for a single range. When migrating, remove `subnetRangeName` in the same update because the two fields are mutually exclusive. Changing fields can trigger NodeClass drift; see the [migration guide](../../MIGRATION.md#multiple-pod-cidr-ranges-on-gcenodeclass). Resolved names and utilization appear on `status.subnetRanges`.
+
+> **Note**: These fields control pod IPs (alias IPs). To change the node's subnet, use `networkConfig.subnetwork`.
+
+If neither field is set, Karpenter allocates from the cluster's default pod range only and does not include additional ranges automatically.

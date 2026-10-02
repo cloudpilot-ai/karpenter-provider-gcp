@@ -31,11 +31,26 @@ type GCENodeClassStatus struct {
 	// cluster under the Image selectors.
 	// +optional
 	Images []Image `json:"images,omitempty"`
+	// SubnetRanges contains the pod secondary IPv4 ranges considered for launch
+	// and their GKE-reported utilization when known.
+	// +optional
+	SubnetRanges []SubnetRangeStatus `json:"subnetRanges,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
 	// +listType=map
 	// +listMapKey=type
 	Conditions []status.Condition `json:"conditions,omitempty"`
+}
+
+// SubnetRangeStatus is a resolved pod secondary range considered for node launch.
+type SubnetRangeStatus struct {
+	// Name is the subnetwork secondary IPv4 range name.
+	// +required
+	Name string `json:"name"`
+	// Utilization is GKE's reported usage of the range as a decimal string
+	// between "0" and "1" when known.
+	// +optional
+	Utilization *string `json:"utilization,omitempty"`
 }
 
 // Image contains resolved image selector values utilized for node launch
