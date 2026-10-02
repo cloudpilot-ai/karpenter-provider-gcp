@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### NodeClass labels now apply to newly provisioned persistent disks
+
+`GCENodeClass.spec.labels` now applies to the VM instance and all persistent disks created from `spec.disks`, including the boot disk. Existing disks are not relabeled by this change, and local SSDs and CSI-managed volumes are outside its scope.
+
+**Action required:** update the controller's custom IAM role from [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml) before upgrading. Compute Engine requires `compute.disks.setLabels` when creating a disk with labels through `instances.insert`; without it, provisioning fails for NodeClasses with non-empty `spec.labels`.
+
 ### Replace the non-working local SSD disk category
 
 `GCENodeClass.spec.disks[].category: local-ssd` never provisioned local SSDs successfully and is no longer accepted by the CRD. If your NodeClass uses it, remove that disk entry before upgrading the CRD. To provision local SSDs, use `spec.localSsdMode` (`RawBlock` by default; set `Ephemeral` for kubelet storage). For configurable machine families (`n1`, `n2`, `n2d`, `c2`, `c2d`), declare `karpenter.k8s.gcp/instance-local-ssd-count` on the NodePool and select one exact count through the NodePool or Pod requirements. Fixed-count local SSD machine types, such as `c4d-standard-8-lssd`, do not need a Pod count selector. See [Proposal 0003](proposals/0003-local-ssd-support.md#migration) for examples.
