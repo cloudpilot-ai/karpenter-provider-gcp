@@ -1,0 +1,10 @@
+# Copy to an ignored .tfvars only after the sponsored target is approved.
+project_id          = "replace-with-approved-project"
+region              = "asia-southeast1"
+location            = "asia-southeast1-b"
+prefix              = "tf-e2e-sgp"
+system_machine_type = "replace-with-approved-machine-type"
+primary_cidr        = "10.0.0.0/20"
+pods_cidr           = "10.4.0.0/14"
+services_cidr       = "10.8.0.0/20"
+control_plane_cidr  = "10.12.0.0/28"
