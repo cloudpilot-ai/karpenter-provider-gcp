@@ -765,6 +765,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 		// Create a new disk configuration for each disk to avoid sharing references
 		initParams := &compute.AttachedDiskInitializeParams{
 			DiskSizeGb: int64(disk.SizeGiB),
+			Labels:     maps.Clone(nodeClass.Spec.Labels),
 		}
 		if disk.Category != "" {
 			initParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category)

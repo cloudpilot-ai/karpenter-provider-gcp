@@ -6,6 +6,7 @@ spec:
   imageSelectorTerms:
     - family: ContainerOptimizedOS
       channel: cluster
+  # Also applied to the boot disk and other persistent disks.
   labels:
     env: dev
   networkTags:
