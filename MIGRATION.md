@@ -7,7 +7,7 @@
 
 ### New IAM permission required: `compute.machineTypes.get`
 
-Registering a `GCECustomMachineType` requires the controller's service account to have `compute.machineTypes.get`, in addition to the existing `compute.machineTypes.list`. Add it to your controller's IAM role before upgrading; see [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). Without it, every `GCECustomMachineType` registration fails to resolve and stays `Ready=False`.
+Registering a `GCECustomMachineType` requires the controller's service account to have `compute.machineTypes.get`, in addition to the existing `compute.machineTypes.list`. Add it to your controller's IAM role before upgrading; see [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). Without it, every `GCECustomMachineType` registration is treated as a transient failure and retried rather than marked `Ready=False` — it stays stuck at `Ready=Unknown` indefinitely instead of surfacing a clear error, so check the controller logs for `PermissionDenied` if a registration never becomes `Ready`.
 
 ### Replace the non-working local SSD disk category
 
