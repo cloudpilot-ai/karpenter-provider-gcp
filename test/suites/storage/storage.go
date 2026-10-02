@@ -34,6 +34,45 @@ var env *environment.Environment
 var _ = BeforeEach(func() { env = environment.Current() })
 
 var _ = Describe("Disk Selection", Label("suite:storage"), func() {
+	It("should inherit GCENodeClass labels on the persistent boot disk", func(ctx SpecContext) {
+		name := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "boot-disk-labels") + "-" + environment.UniqueSuffix()
+		var provisionedNodeName string
+		DeferCleanup(func(ctx context.Context) {
+			env.DeleteDeployment(ctx, name)
+			env.DeleteNodePool(ctx, name)
+			if provisionedNodeName != "" {
+				Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
+			}
+			env.DeleteNodeClass(ctx, name)
+		})
+
+		labels := map[string]string{"environment": "storage-test", "disk-owner": "karpenter"}
+		env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
+		env.AddNodeClassLabels(ctx, name, labels)
+		env.WaitForNodeClassReady(ctx, name)
+		env.CreateNodePool(ctx, name, name, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2"},
+		})
+		env.WaitForNodePoolReady(ctx, name)
+		env.CreateDeployment(ctx, name, name, name, karpv1.ArchitectureAmd64)
+
+		pod := env.WaitForRunningPod(ctx, name)
+		Expect(pod.Spec.NodeName).NotTo(BeEmpty())
+		provisionedNodeName = pod.Spec.NodeName
+		node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, provisionedNodeName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(node.Spec.ProviderID).NotTo(BeEmpty())
+
+		disk, err := env.GetGCEBootDisk(ctx, node.Spec.ProviderID)
+		Expect(err).NotTo(HaveOccurred())
+		for key, value := range labels {
+			Expect(disk.Labels).To(HaveKeyWithValue(key, value))
+		}
+	}, SpecTimeout(15*time.Minute))
+
 	It("should use the machine-series default when disk category is omitted", func(ctx SpecContext) {
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "default-disk")
 		nodeClassName := prefix + "-" + environment.UniqueSuffix()
