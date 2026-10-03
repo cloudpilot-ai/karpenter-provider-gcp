@@ -21,6 +21,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
@@ -30,36 +31,27 @@ import (
 
 var _ = Describe("Local-SSD failure modes", Label("suite:local-ssd"), func() {
 	It("leaves the pod Pending when the pinned SSD-count mismatches a bundled SKU", func(ctx SpecContext) {
-		name := newLocalSSDPool(ctx, environment.TestCase{
+		const instanceType = "c4-standard-4-lssd"
+		mt, err := env.GetGCEMachineType(ctx, instanceType)
+		Expect(err).NotTo(HaveOccurred(), "negative test requires %s in the cluster catalog", instanceType)
+		Expect(mt.BundledLocalSsds).NotTo(BeNil())
+		Expect(mt.BundledLocalSsds.PartitionCount).To(Equal(int64(1)))
+
+		name := env.CreateLocalSSDPool(ctx, environment.TestCase{
 			CapacityType:     karpv1.CapacityTypeOnDemand,
 			Arch:             karpv1.ArchitectureAmd64,
-			Families:         []string{"z3"},
-			InstanceTypes:    []string{"z3-highmem-22-standardlssd"},
+			Families:         []string{"c4"},
+			InstanceTypes:    []string{instanceType},
 			BootDiskCategory: "hyperdisk-balanced",
 			LocalSSDMode:     gcpv1alpha1.LocalSSDModeEphemeral,
 		})
 		env.CreateDeploymentWithOptions(ctx, name, name, name, karpv1.ArchitectureAmd64,
 			environment.DeploymentOptions{ExtraNodeSelectors: map[string]string{
-				corev1.LabelInstanceTypeStable:         "z3-highmem-22-standardlssd",
-				gcpv1alpha1.LabelInstanceLocalSsdCount: "4",
+				corev1.LabelInstanceTypeStable:         instanceType,
+				gcpv1alpha1.LabelInstanceLocalSsdCount: "2",
 			}})
 		DeferCleanup(func(ctx context.Context) { env.DeleteDeployment(ctx, name) })
 		env.ConsistentlyExpectPendingPods(ctx, name, 30*time.Second)
 		env.ExpectNoNodeClaim(ctx, name)
 	}, SpecTimeout(10*time.Minute))
 })
-
-func newLocalSSDPool(ctx context.Context, tc environment.TestCase) string {
-	prefix := environment.TestPrefix(tc.Arch, tc.CapacityType, "cos", "lssd")
-	name := prefix + "-" + environment.UniqueSuffix()
-	DeferCleanup(func(ctx context.Context) {
-		env.DeleteNodePool(ctx, name)
-		env.DeleteNodeClass(ctx, name)
-	})
-	env.CreateNodeClassForLocalSSD(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS,
-		tc.BootDiskCategory, tc.LocalSSDMode)
-	env.WaitForNodeClassReady(ctx, name)
-	env.CreateNodePool(ctx, name, name, tc)
-	env.WaitForNodePoolReady(ctx, name)
-	return name
-}

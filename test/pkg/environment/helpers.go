@@ -44,6 +44,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 )
 
@@ -479,6 +480,25 @@ func (e *Environment) GetGCEInstance(ctx context.Context, providerID string) (*c
 	return e.computeSvc.Instances.Get(project, zone, name).Context(ctx).Do()
 }
 
+func (e *Environment) GetGCEMachineType(ctx context.Context, name string) (*compute.MachineType, error) {
+	provider := gke.NewDefaultProvider(e.computeSvc, e.containerSvc, e.ProjectID, e.ClusterLocation, e.ClusterName)
+	zones, err := provider.ResolveClusterZones(options.ToContext(ctx, &options.Options{
+		ProjectID:       e.ProjectID,
+		ClusterLocation: e.ClusterLocation,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	for _, zone := range zones {
+		mt, err := e.computeSvc.MachineTypes.Get(e.ProjectID, zone, name).Context(ctx).Do()
+		if isNotFound(err) {
+			continue
+		}
+		return mt, err
+	}
+	return nil, fmt.Errorf("machine type %q not found in cluster zones %v", name, zones)
+}
+
 // GetGCEBootDisk returns the persistent boot disk attached to the given instance.
 func (e *Environment) GetGCEBootDisk(ctx context.Context, providerID string) (*compute.Disk, error) {
 	project, zone, _, err := parseProviderID(providerID)
@@ -515,6 +535,21 @@ func (e *Environment) GetGCEBootDiskType(ctx context.Context, providerID string)
 		return "", fmt.Errorf("boot disk %q has no type", disk.Name)
 	}
 	return path.Base(disk.Type), nil
+}
+
+func (e *Environment) CreateLocalSSDPool(ctx context.Context, tc TestCase) string {
+	prefix := TestPrefix(tc.Arch, tc.CapacityType, "cos", "lssd")
+	name := prefix + "-" + UniqueSuffix()
+	DeferCleanup(func(ctx context.Context) {
+		e.DeleteNodePool(ctx, name)
+		e.DeleteNodeClass(ctx, name)
+	})
+	e.CreateNodeClassForLocalSSD(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS,
+		tc.BootDiskCategory, tc.LocalSSDMode)
+	e.WaitForNodeClassReady(ctx, name)
+	e.CreateNodePool(ctx, name, name, tc)
+	e.WaitForNodePoolReady(ctx, name)
+	return name
 }
 
 // CreateNodePool creates a NodePool with the given requirements and the default

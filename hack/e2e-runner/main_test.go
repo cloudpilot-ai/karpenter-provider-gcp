@@ -23,9 +23,18 @@ import (
 )
 
 func TestLocalSSDSelection(t *testing.T) {
-	for _, selection := range []string{"local-ssd", "all"} {
-		t.Run(selection, func(t *testing.T) {
-			filter, err := selectFilter("../../test/suites", selection)
+	for _, tc := range []struct {
+		selection string
+		basic     bool
+		extended  bool
+	}{
+		{selection: "local-ssd", basic: true},
+		{selection: "local-ssd-extended", extended: true},
+		{selection: "local-ssd,local-ssd-extended", basic: true, extended: true},
+		{selection: "all", basic: true, extended: true},
+	} {
+		t.Run(tc.selection, func(t *testing.T) {
+			filter, err := selectFilter("../../test/suites", tc.selection)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -33,8 +42,13 @@ func TestLocalSSDSelection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !matches([]string{"suite:local-ssd"}) {
-				t.Fatalf("%s selection excludes local-ssd", selection)
+			for suite, want := range map[string]bool{
+				"local-ssd":          tc.basic,
+				"local-ssd-extended": tc.extended,
+			} {
+				if got := matches([]string{"suite:" + suite}); got != want {
+					t.Fatalf("%s selection matches %s = %v, want %v", tc.selection, suite, got, want)
+				}
 			}
 		})
 	}
@@ -54,7 +68,8 @@ func TestStandardSelection(t *testing.T) {
 		want  bool
 	}{
 		{suite: "gpu", want: false},
-		{suite: "local-ssd", want: false},
+		{suite: "local-ssd-extended", want: false},
+		{suite: "local-ssd", want: true},
 		{suite: "storage", want: true},
 		{suite: "provisioning", want: true},
 	} {

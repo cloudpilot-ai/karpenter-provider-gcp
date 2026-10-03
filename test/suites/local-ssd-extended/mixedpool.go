@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package localssd
+package localssdextended
 
 import (
 	"context"
@@ -31,9 +31,9 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Mixed local-SSD pool", Label("suite:local-ssd"), func() {
+var _ = Describe("Mixed local-SSD pool", Label("suite:local-ssd-extended"), func() {
 	It("pd-balanced pool serves exact SSD counts including explicit zero", func(ctx SpecContext) {
-		pool := newLocalSSDPool(ctx, environment.TestCase{
+		pool := env.CreateLocalSSDPool(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,
 			Families:      []string{"n2", "n2d"},
@@ -59,7 +59,7 @@ var _ = Describe("Mixed local-SSD pool", Label("suite:local-ssd"), func() {
 		if os.Getenv("E2E_Z3_TESTS") != "true" {
 			Skip("set E2E_Z3_TESTS=true to run z3 capacity-constrained tests")
 		}
-		pool := newLocalSSDPool(ctx, environment.TestCase{
+		pool := env.CreateLocalSSDPool(ctx, environment.TestCase{
 			CapacityType:     karpv1.CapacityTypeOnDemand,
 			Arch:             karpv1.ArchitectureAmd64,
 			Families:         []string{"c4", "c4d", "z3"},
