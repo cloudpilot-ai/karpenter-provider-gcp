@@ -183,7 +183,7 @@ e2e-test: require-e2e-vars ## Run a feature directory or focused spec (SUITE=<na
 	KARPENTER_DEPLOYMENT=$(E2E_KARPENTER_DEPLOYMENT) \
 	go run github.com/onsi/ginkgo/v2/ginkgo --procs=$(GINKGO_PROCS) --timeout=30m -v \
 	$(if $(FOCUS),--focus="$(FOCUS)",) \
-	$(if $(SUITE),,--label-filter='!suite:gpu && !suite:local-ssd') \
+	$(if $(SUITE),,--label-filter='!suite:gpu && !suite:local-ssd-extended') \
 	$(if $(SUITE),./test/suites/$(SUITE)/,./test/suites/)
 
 e2e-teardown: ## Delete the e2e GKE cluster and all supporting GCP infra

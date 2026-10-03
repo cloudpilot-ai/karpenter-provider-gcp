@@ -33,7 +33,7 @@ import (
 )
 
 var presets = map[string]string{
-	"standard":     "!suite:gpu && !suite:local-ssd",
+	"standard":     "!suite:gpu && !suite:local-ssd-extended",
 	"gpu":          "suite:gpu",
 	"all":          "",
 	"provisioning": "suite:provisioning",
