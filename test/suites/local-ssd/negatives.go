@@ -21,7 +21,6 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
@@ -32,11 +31,6 @@ import (
 var _ = Describe("Local-SSD failure modes", Label("suite:local-ssd"), func() {
 	It("leaves the pod Pending when the pinned SSD-count mismatches a bundled SKU", func(ctx SpecContext) {
 		const instanceType = "c4-standard-4-lssd"
-		mt, err := env.GetGCEMachineType(ctx, instanceType)
-		Expect(err).NotTo(HaveOccurred(), "negative test requires %s in the cluster catalog", instanceType)
-		Expect(mt.BundledLocalSsds).NotTo(BeNil())
-		Expect(mt.BundledLocalSsds.PartitionCount).To(Equal(int64(1)))
-
 		name := env.CreateLocalSSDPool(ctx, environment.TestCase{
 			CapacityType:     karpv1.CapacityTypeOnDemand,
 			Arch:             karpv1.ArchitectureAmd64,

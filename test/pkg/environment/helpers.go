@@ -44,7 +44,6 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 )
 
@@ -478,25 +477,6 @@ func (e *Environment) GetGCEInstance(ctx context.Context, providerID string) (*c
 		return nil, err
 	}
 	return e.computeSvc.Instances.Get(project, zone, name).Context(ctx).Do()
-}
-
-func (e *Environment) GetGCEMachineType(ctx context.Context, name string) (*compute.MachineType, error) {
-	provider := gke.NewDefaultProvider(e.computeSvc, e.containerSvc, e.ProjectID, e.ClusterLocation, e.ClusterName)
-	zones, err := provider.ResolveClusterZones(options.ToContext(ctx, &options.Options{
-		ProjectID:       e.ProjectID,
-		ClusterLocation: e.ClusterLocation,
-	}))
-	if err != nil {
-		return nil, err
-	}
-	for _, zone := range zones {
-		mt, err := e.computeSvc.MachineTypes.Get(e.ProjectID, zone, name).Context(ctx).Do()
-		if isNotFound(err) {
-			continue
-		}
-		return mt, err
-	}
-	return nil, fmt.Errorf("machine type %q not found in cluster zones %v", name, zones)
 }
 
 // GetGCEBootDisk returns the persistent boot disk attached to the given instance.
