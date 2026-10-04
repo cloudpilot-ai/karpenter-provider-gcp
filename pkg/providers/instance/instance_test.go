@@ -857,6 +857,34 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
 }
 
+func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("pd-balanced", nil, nil)
+	nodeClass.Spec.Labels = map[string]string{"env": "dev"}
+	nodeClass.Spec.Disks = append(nodeClass.Spec.Disks, v1alpha1.Disk{SizeGiB: 20, Category: "pd-ssd"})
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	require.NoError(t, err)
+	require.Len(t, disks, 2)
+	for _, disk := range disks {
+		require.Equal(t, map[string]string{"env": "dev"}, disk.InitializeParams.Labels)
+	}
+
+	// Neither the NodeClass nor another disk's labels should change when one disk is modified.
+	disks[0].InitializeParams.Labels["env"] = "changed"
+	require.Equal(t, "dev", nodeClass.Spec.Labels["env"])
+	require.Equal(t, "dev", disks[1].InitializeParams.Labels["env"])
+
+	nodeClass.Spec.Labels = nil
+	disks, err = p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	require.NoError(t, err)
+	require.Nil(t, disks[0].InitializeParams.Labels)
+	require.Nil(t, disks[1].InitializeParams.Labels)
+	require.Nil(t, p.scratchDisk("us-central1-a").InitializeParams.Labels)
+}
+
 func TestRenderDiskProperties_OmitsEmptyDiskCategory(t *testing.T) {
 	t.Parallel()
 

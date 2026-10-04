@@ -465,7 +465,9 @@ spec:
               labels:
                 additionalProperties:
                   type: string
-                description: Labels to be applied on GCE VM instance.
+                description: |-
+                  Labels to be applied on the GCE VM instance and its persistent disks.
+                  Local SSD scratch disks do not support labels.
                 maxProperties: 20
                 type: object
                 x-kubernetes-validations:

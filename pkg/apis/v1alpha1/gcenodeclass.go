@@ -70,7 +70,8 @@ type GCENodeClassSpec struct {
 	// Mirrors GKE node pool linux_node_config.
 	// +optional
 	LinuxNodeConfig *LinuxNodeConfig `json:"linuxNodeConfig,omitempty"`
-	// Labels to be applied on GCE VM instance.
+	// Labels to be applied on the GCE VM instance and its persistent disks.
+	// Local SSD scratch disks do not support labels.
 	// +kubebuilder:validation:MaxProperties=20
 	// +kubebuilder:validation:XValidation:message="empty tag keys aren't supported",rule="self.all(k, k != '')"
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching gce:gce-cluster-name",rule="self.all(k, k !='gce:gce-cluster-name')"
