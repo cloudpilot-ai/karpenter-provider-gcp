@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package localssd
+package localssdextended
 
 import (
 	"time"
@@ -28,9 +28,9 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-var _ = Describe("Local-SSD consolidation", Label("suite:local-ssd"), func() {
+var _ = Describe("Local-SSD consolidation", Label("suite:local-ssd-extended"), func() {
 	It("does not consolidate a count-4 node onto a count-0 sibling", func(ctx SpecContext) {
-		pool := newLocalSSDPool(ctx, environment.TestCase{
+		pool := env.CreateLocalSSDPool(ctx, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,
 			Families:      []string{"n2d"},

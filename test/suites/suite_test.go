@@ -34,6 +34,7 @@ import (
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/interruption"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/kubelet_config"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/local-ssd"
+	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/local-ssd-extended"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/nested-virtualization"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/networking"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/provisioning"

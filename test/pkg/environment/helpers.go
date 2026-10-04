@@ -517,6 +517,21 @@ func (e *Environment) GetGCEBootDiskType(ctx context.Context, providerID string)
 	return path.Base(disk.Type), nil
 }
 
+func (e *Environment) CreateLocalSSDPool(ctx context.Context, tc TestCase) string {
+	prefix := TestPrefix(tc.Arch, tc.CapacityType, "cos", "lssd")
+	name := prefix + "-" + UniqueSuffix()
+	DeferCleanup(func(ctx context.Context) {
+		e.DeleteNodePool(ctx, name)
+		e.DeleteNodeClass(ctx, name)
+	})
+	e.CreateNodeClassForLocalSSD(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS,
+		tc.BootDiskCategory, tc.LocalSSDMode)
+	e.WaitForNodeClassReady(ctx, name)
+	e.CreateNodePool(ctx, name, name, tc)
+	e.WaitForNodePoolReady(ctx, name)
+	return name
+}
+
 // CreateNodePool creates a NodePool with the given requirements and the default
 // consolidation policy (WhenEmptyOrUnderutilized, consolidateAfter=30s).
 func (e *Environment) CreateNodePool(ctx context.Context, name, nodeClassName string, tc TestCase) {
