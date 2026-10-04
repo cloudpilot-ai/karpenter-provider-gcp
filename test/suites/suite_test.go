@@ -26,6 +26,7 @@ import (
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/channel-image-selection"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/confidential"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/consolidation"
+	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/customtype"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/drift"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/expiration"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/gc"

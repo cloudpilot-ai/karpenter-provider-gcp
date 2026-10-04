@@ -33,5 +33,7 @@ func init() {
 	scheme.Scheme.AddKnownTypes(gv,
 		&GCENodeClass{},
 		&GCENodeClassList{},
+		&GCECustomMachineType{},
+		&GCECustomMachineTypeList{},
 	)
 }

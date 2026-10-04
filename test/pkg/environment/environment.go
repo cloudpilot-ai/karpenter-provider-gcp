@@ -79,10 +79,11 @@ const (
 
 var (
 	// Access NodeClaims through ListNodeClaims rather than this GVR directly.
-	nodeClaimGVR    = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
-	nodePoolGVR     = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
-	gceNodeClassGVR = schema.GroupVersionResource{Group: "karpenter.k8s.gcp", Version: "v1alpha1", Resource: "gcenodeclasses"}
-	nodeOverlayGVR  = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1alpha1", Resource: "nodeoverlays"}
+	nodeClaimGVR            = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodeclaims"}
+	nodePoolGVR             = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
+	gceNodeClassGVR         = schema.GroupVersionResource{Group: "karpenter.k8s.gcp", Version: "v1alpha1", Resource: "gcenodeclasses"}
+	gceCustomMachineTypeGVR = schema.GroupVersionResource{Group: "karpenter.k8s.gcp", Version: "v1alpha1", Resource: "gcecustommachinetypes"}
+	nodeOverlayGVR          = schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1alpha1", Resource: "nodeoverlays"}
 )
 
 // Environment holds shared state for a test suite run.
