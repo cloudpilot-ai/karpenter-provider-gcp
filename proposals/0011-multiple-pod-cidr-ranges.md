@@ -1,6 +1,6 @@
 # Proposal: Multiple pod CIDR ranges on GCENodeClass
 
-- **Status**: Implemented
+- **Status**: In Review (implemented by [#573](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/573))
 - **Authors**: @guyeisenbach
 - **Created**: 2026-08-20
 - **Related Issues**: [#572](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/572)
@@ -34,9 +34,10 @@ AWS Karpenter ranks matching subnets by available IPs. GCP secondary ranges are 
 
 ### Non-Goals
 
-- Automatically spilling into `additionalPodRangesConfig` when neither field is set (preserves today's default).
 - AWS-style tag selectors for secondary ranges.
 - Changing which GKE cluster pod ranges exist (operators still add ranges on the cluster).
+- Reproducing GKE's node-pool pod-range allocation algorithm.
+- Discovering ranges on separate subnetworks (`additionalIpRangesConfigs`); only the cluster's primary subnetwork is considered.
 
 ---
 
@@ -71,7 +72,7 @@ Read the effective primary subnetwork through `subnetworks.get` with `views=WITH
 
 Rank resolved names by greatest known free-IP count. Unknown counts sort after known values, preserving candidate order as a tie-breaker. Known zero counts remain eligible because snapshots do not guarantee whether a contiguous pod CIDR block can be allocated.
 
-A shared subnet provider caches successful snapshots for one minute. Capacity reads have a three-second deadline and occur once per `Create`, not once per range or instance type. Failed reads are logged and launch continues in candidate order. Status clears counts and retains its normal five-minute refresh after a failed read.
+A shared subnet provider caches successful snapshots for one minute. Capacity reads have a three-second deadline and occur once per `Create`, not once per range or instance type. Failed reads are logged and launch continues in candidate order. Status publishes the resolved names without counts and still requeues every five minutes.
 
 `GetClusterConfig` is cached for 30 minutes, so eligibility discovery remains best-effort. Discovery follows GKE's cluster-level range configuration; selection uses this provider's free-IP heuristic rather than reproducing GKE's node-pool allocation algorithm. Insert retry remains authoritative.
 
@@ -79,7 +80,7 @@ A shared subnet provider caches successful snapshots for one minute. Capacity re
 
 Today a single `IP_SPACE_EXHAUSTED` / `IP_SPACE_EXHAUSTED_WITH_DETAILS` fails fast and marks the zone offering unavailable (other instance types share the subnet). With multiple candidates, retry Insert with the next range **before** marking IP space exhausted. Fail-fast only after every candidate fails.
 
-Which range is chosen among a list is not hashed. Changing the list itself is hashed (`GCENodeClassHashVersion` stays `v4`; the new field is optional and `IgnoreZeroValue` leaves existing hashes unchanged).
+Which range is chosen among a list is not hashed. Changing the list itself is hashed. This change does not bump `GCENodeClassHashVersion`; the new field is optional and `IgnoreZeroValue` leaves existing hashes unchanged.
 
 #### Status
 
@@ -116,7 +117,7 @@ Changing `subnetRangeName` or `subnetRangeNames` is NodeClass drift. Launch-time
 
 ### E2E / Integration Tests
 
-Existing e2e NodeClasses may keep `subnetRangeName`. Multi-range spillover is unit-tested; live additional-range clusters are optional follow-up.
+Existing e2e NodeClasses may keep `subnetRangeName`. E2e setup provisions two dedicated pod ranges on the primary subnet, `-pods-small` (/22) and `-pods-large` (/20), attaches them to the cluster, and passes their names to the suite. Serial networking specs cover default discovery of the cluster's ranges, scalar and list overrides asserted against the node's actual primary-interface alias range, published free-IP counts compared with a direct `subnetworks.get`, and placement in the range with the most free IPs when the poorer range is listed first.
 
 ---
 
@@ -124,11 +125,11 @@ Existing e2e NodeClasses may keep `subnetRangeName`. Multi-range spillover is un
 
 The feature is complete when:
 
-- [ ] `spec.subnetRangeNames` is on the CRD and mutually exclusive with `subnetRangeName`
-- [ ] Launch ranks by Compute free-IP counts and retries on IP space exhaustion
-- [ ] `status.subnetRanges` is populated
-- [ ] Docs and examples cover the list field
-- [ ] Existing `subnetRangeName` configs keep working
+- [X] `spec.subnetRangeNames` is on the CRD and mutually exclusive with `subnetRangeName`
+- [X] Launch ranks by Compute free-IP counts and retries on IP space exhaustion
+- [X] `status.subnetRanges` is populated
+- [X] Docs and examples cover the list field
+- [X] Existing `subnetRangeName` configs keep working
 
 ---
 

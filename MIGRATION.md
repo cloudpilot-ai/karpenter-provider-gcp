@@ -30,9 +30,10 @@ cluster-level ranges, or set `subnetRangeNames` to restrict allocation to specif
 Ranges on separate additional subnetworks are not discovered.
 
 **Capacity reporting:** `status.subnetRanges[].totalFreeIP` is optional. Zero is a reported
-count; an omitted count means unknown capacity. Counts are cached for one minute and do not guarantee an allocatable contiguous
-pod CIDR block. A failed or timed-out capacity read leaves launch order unchanged and clears
-status counts; allocation still relies on Compute insertion and range fallback.
+count; an omitted count means unknown capacity. Counts are cached for one minute and do not
+guarantee an allocatable contiguous pod CIDR block. A failed or timed-out capacity read leaves
+launch order unchanged and clears status counts; allocation still relies on Compute insertion
+and range fallback.
 
 The controller now reads `subnetworks.get` with `WITH_UTILIZATION` for capacity. The custom role
 already includes `compute.subnetworks.get`; ensure the controller also has that permission in
