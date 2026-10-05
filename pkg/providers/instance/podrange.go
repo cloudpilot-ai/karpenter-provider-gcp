@@ -17,12 +17,16 @@ limitations under the License.
 package instance
 
 import (
+	"context"
+	"slices"
 	"sort"
 
 	containerv1 "google.golang.org/api/container/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
 // resolvedPodRangeNames returns the pod secondary range names to try at launch:
@@ -39,32 +43,39 @@ func resolvedPodRangeNames(nodeClass *v1alpha1.GCENodeClass, cluster *containerv
 	return []string{""}
 }
 
-// rankPodRangeNames orders names by lowest known GKE utilization. Names without
-// utilization sort after known values; spec order is the tie-breaker.
-func rankPodRangeNames(names []string, cluster *containerv1.Cluster) []string {
-	type ranked struct {
-		name  string
-		util  float64
-		known bool
-		index int
-	}
-	items := make([]ranked, len(names))
-	for i, name := range names {
-		util, known := gke.PodRangeUtilization(cluster, name)
-		items[i] = ranked{name: name, util: util, known: known, index: i}
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].known != items[j].known {
-			return items[i].known
+// rankPodRangeNames prefers the greatest known free-IP count. Unknown counts
+// sort after known values; original candidate order breaks ties.
+func rankPodRangeNames(names []string, freeIPs map[string]int64) []string {
+	ordered := slices.Clone(names)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		first, firstKnown := freeIPs[ordered[i]]
+		second, secondKnown := freeIPs[ordered[j]]
+		if firstKnown != secondKnown {
+			return firstKnown
 		}
-		if items[i].known && items[i].util != items[j].util {
-			return items[i].util < items[j].util
-		}
-		return items[i].index < items[j].index
+		return first > second
 	})
-	out := make([]string, len(items))
-	for i, item := range items {
-		out[i] = item.name
+	return ordered
+}
+
+func (p *DefaultProvider) podRangeFreeIPs(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) map[string]int64 {
+	cluster, err := p.gkeProvider.GetClusterConfig(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "getting cluster config for pod range capacity")
+		return nil
 	}
-	return out
+	names := resolvedPodRangeNames(nodeClass, cluster)
+	if len(names) == 1 && names[0] == "" {
+		return nil
+	}
+	network, target := subnet.PrimaryNetwork(nodeClass, cluster)
+	if target == "" {
+		return nil
+	}
+	counts, err := p.subnetProvider.GetFreeIPCounts(ctx, network, target)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "getting pod range free IPs, continuing without capacity ranking", "subnetwork", target)
+		return nil
+	}
+	return counts
 }

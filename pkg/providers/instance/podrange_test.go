@@ -67,37 +67,18 @@ func TestResolvedPodRangeNames(t *testing.T) {
 func TestRankPodRangeNames(t *testing.T) {
 	t.Parallel()
 
-	cluster := &containerv1.Cluster{
-		IpAllocationPolicy: &containerv1.IPAllocationPolicy{
-			ClusterSecondaryRangeName:      "default-pods",
-			DefaultPodIpv4RangeUtilization: 0.8,
-			AdditionalPodRangesConfig: &containerv1.AdditionalPodRangesConfig{
-				PodRangeInfo: []*containerv1.RangeInfo{
-					{RangeName: "extra-a", Utilization: 0.2},
-					{RangeName: "extra-b", Utilization: 0.5},
-				},
-			},
-		},
-	}
-
-	ranked := rankPodRangeNames([]string{"default-pods", "extra-b", "extra-a", "unknown"}, cluster)
+	counts := map[string]int64{"default-pods": 0, "extra-a": 8000, "extra-b": 1000}
+	names := []string{"default-pods", "extra-b", "extra-a", "unknown"}
+	ranked := rankPodRangeNames(names, counts)
+	require.Equal(t, []string{"default-pods", "extra-b", "extra-a", "unknown"}, names, "ranking must not mutate candidates")
 	require.Equal(t, []string{"extra-a", "extra-b", "default-pods", "unknown"}, ranked)
 }
 
 func TestRankPodRangeNamesSpecOrderTieBreak(t *testing.T) {
 	t.Parallel()
 
-	cluster := &containerv1.Cluster{
-		IpAllocationPolicy: &containerv1.IPAllocationPolicy{
-			AdditionalPodRangesConfig: &containerv1.AdditionalPodRangesConfig{
-				PodRangeInfo: []*containerv1.RangeInfo{
-					{RangeName: "a", Utilization: 0.3},
-					{RangeName: "b", Utilization: 0.3},
-				},
-			},
-		},
-	}
-
-	require.Equal(t, []string{"a", "b"}, rankPodRangeNames([]string{"a", "b"}, cluster))
-	require.Equal(t, []string{"b", "a"}, rankPodRangeNames([]string{"b", "a"}, cluster))
+	counts := map[string]int64{"a": 1000, "b": 1000}
+	require.Equal(t, []string{"a", "b"}, rankPodRangeNames([]string{"a", "b"}, counts))
+	require.Equal(t, []string{"b", "a"}, rankPodRangeNames([]string{"b", "a"}, counts))
+	require.Equal(t, []string{"b", "a"}, rankPodRangeNames([]string{"b", "a"}, nil))
 }

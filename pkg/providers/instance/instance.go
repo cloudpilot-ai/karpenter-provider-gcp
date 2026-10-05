@@ -54,6 +54,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
@@ -97,6 +98,7 @@ type Provider interface {
 
 type DefaultProvider struct {
 	gkeProvider              gke.Provider
+	subnetProvider           subnet.Provider
 	instanceTypeProvider     instancetype.Provider
 	nodePoolTemplateProvider nodepooltemplate.Provider
 	versionProvider          version.Provider
@@ -117,6 +119,7 @@ type DefaultProvider struct {
 func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount, computeDefaultSA string,
 	computeService *compute.Service,
 	gkeProvider gke.Provider,
+	subnetProvider subnet.Provider,
 	instanceTypeProvider instancetype.Provider,
 	nodePoolTemplateProvider nodepooltemplate.Provider,
 	versionProvider version.Provider,
@@ -124,6 +127,7 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 ) Provider {
 	return &DefaultProvider{
 		gkeProvider:              gkeProvider,
+		subnetProvider:           subnetProvider,
 		instanceTypeProvider:     instanceTypeProvider,
 		nodePoolTemplateProvider: nodePoolTemplateProvider,
 		versionProvider:          versionProvider,
@@ -429,11 +433,12 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	instanceTypes = orderInstanceTypesByPrice(launchInstanceTypes, requirements)
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
+	freeIPs := p.podRangeFreeIPs(ctx, nodeClass)
 	var errs []error
 	var attemptedZones []string
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
-		instance, zone, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType, attemptedZones)
+		instance, zone, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType, attemptedZones, freeIPs)
 		if zone != "" && !lo.Contains(attemptedZones, zone) {
 			attemptedZones = append(attemptedZones, zone)
 		}
@@ -485,7 +490,7 @@ func (e *retryableError) Error() string {
 	return e.err.Error()
 }
 
-func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, capacityType string, attemptedZones []string) (*compute.Instance, string, error) {
+func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, capacityType string, attemptedZones []string, freeIPs map[string]int64) (*compute.Instance, string, error) {
 	mt := p.instanceTypeProvider.GetMachineType(instanceType.Name)
 
 	ssdCount, err := resolveCreateSSDCount(instanceType)
@@ -511,7 +516,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 		return nil, zone, &retryableError{err}
 	}
 
-	instance, effectiveZone, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType, attemptedZones, mt, ssdCount)
+	instance, effectiveZone, retryable, err := p.getOrCreateInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, capacityType, attemptedZones, mt, ssdCount, freeIPs)
 	if err != nil {
 		if retryable {
 			return nil, zone, &retryableError{err}
@@ -522,7 +527,7 @@ func (p *DefaultProvider) tryCreateInstance(ctx context.Context, nodeClass *v1al
 	return instance, effectiveZone, nil
 }
 
-func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string, attemptedZones []string, mt *computepb.MachineType, ssdCount int) (*compute.Instance, string, bool, error) {
+func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, capacityType string, attemptedZones []string, mt *computepb.MachineType, ssdCount int, freeIPs map[string]int64) (*compute.Instance, string, bool, error) {
 	instanceName := fmt.Sprintf("karpenter-%s", nodeClaim.Name)
 	for _, candidate := range lo.Uniq(append([]string{zone}, attemptedZones...)) {
 		existing, exists, err := p.isInstanceExists(ctx, candidate, instanceName)
@@ -543,7 +548,7 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 	if err != nil {
 		return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
-	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), clusterConfig)
+	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), freeIPs)
 	retryable, err := p.insertInstanceWithPodRanges(ctx, instance, instanceType, zone, capacityType, rangeNames)
 	if err != nil {
 		return nil, "", retryable, err
@@ -981,25 +986,22 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 	clusterPrivate := cluster.PrivateClusterConfig != nil && cluster.PrivateClusterConfig.EnablePrivateNodes
 
 	rangeName := ""
-	if names := rankPodRangeNames(resolvedPodRangeNames(nodeClass, cluster), cluster); len(names) > 0 {
+	if names := resolvedPodRangeNames(nodeClass, cluster); len(names) > 0 {
 		rangeName = names[0]
 	}
 
 	// Primary interface: built from cluster config, overrideable via NodeClass networkConfig.
-	subnetwork := cluster.NetworkConfig.Subnetwork
+	network, subnetwork := subnet.PrimaryNetwork(nodeClass, cluster)
 	disableExternal := clusterPrivate
 	if nodeClass.Spec.NetworkConfig != nil {
 		cfg := nodeClass.Spec.NetworkConfig
-		if cfg.Subnetwork != "" {
-			subnetwork = cfg.Subnetwork
-		}
 		if cfg.EnablePrivateNodes != nil {
 			disableExternal = *cfg.EnablePrivateNodes
 		}
 	}
 
 	primary := &compute.NetworkInterface{
-		Network:    cluster.NetworkConfig.Network,
+		Network:    network,
 		Subnetwork: subnetwork,
 		AliasIpRanges: []*compute.AliasIpRange{{
 			IpCidrRange:         fmt.Sprintf("/%d", targetRange),

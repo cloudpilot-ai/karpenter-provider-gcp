@@ -312,7 +312,7 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 			_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
 				makeSourceMetadata("max-pods-per-node=110"),
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
-				"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0)
+				"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
 
 			require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 			require.Equal(t, tt.wantRetryable, retryable)
@@ -451,7 +451,7 @@ func TestGetOrCreateInstanceFallsBackToNextPodRange(t *testing.T) {
 
 			instance, _, retryable, err := p.getOrCreateInstance(context.Background(),
 				spotOrOnDemandNodeClaim(), nodeClass, instanceType, makeSourceMetadata("max-pods-per-node=110"),
-				podRangeFallbackCluster(), "us-central1-f", karpv1.CapacityTypeOnDemand, nil, nil, 0,
+				podRangeFallbackCluster(), "us-central1-f", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil,
 			)
 
 			require.NoError(t, err)
@@ -1328,7 +1328,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		require.Equal(t, "custom-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
 
-	t.Run("NodeClass SubnetRangeNames selects lowest utilization", func(t *testing.T) {
+	t.Run("NodeClass SubnetRangeNames sets the first candidate before launch ranking", func(t *testing.T) {
 		t.Parallel()
 
 		nodeClass := &v1alpha1.GCENodeClass{
@@ -1343,7 +1343,7 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		}
 		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
-		require.Equal(t, "free-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
+		require.Equal(t, "full-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
 
 	t.Run("CIDR prefix derived from maxPods", func(t *testing.T) {
@@ -2917,7 +2917,7 @@ func TestGetOrCreateInstance_AdoptsInstanceFromEarlierAttemptZone(t *testing.T) 
 	nodeClaim.Name = "default-vzmzs"
 
 	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
-		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"}, nil, 0)
+		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"}, nil, 0, nil)
 
 	require.NoError(t, err)
 	require.False(t, retryable)
@@ -2948,7 +2948,7 @@ func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
 	nodeClaim.Name = "default-sgfkv"
 
 	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
-		"us-central1-c", karpv1.CapacityTypeOnDemand, nil, nil, 0)
+		"us-central1-c", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
 
 	require.NoError(t, err)
 	require.False(t, retryable)

@@ -30,7 +30,7 @@ func crdPath() string {
 	return filepath.Join("..", "..", "..", "charts", "karpenter", "crds", "karpenter.k8s.gcp_gcenodeclasses.yaml")
 }
 
-func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+func nodeClassSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	t.Helper()
 
 	raw, err := os.ReadFile(crdPath())
@@ -40,7 +40,24 @@ func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	require.NoError(t, yaml.Unmarshal(raw, &crd))
 	require.Len(t, crd.Spec.Versions, 1)
 
-	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+	return *crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+}
+
+func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return nodeClassSchema(t).Properties["spec"]
+}
+
+func TestGCENodeClassCRDFreeIPCount(t *testing.T) {
+	rangeSchema := nodeClassSchema(t).Properties["status"].Properties["subnetRanges"].Items.Schema
+	field, ok := rangeSchema.Properties["totalFreeIP"]
+	require.True(t, ok)
+	require.Equal(t, "integer", field.Type)
+	require.Equal(t, "int64", field.Format)
+	require.NotNil(t, field.Minimum)
+	require.Equal(t, float64(0), *field.Minimum)
+	require.NotContains(t, rangeSchema.Required, "totalFreeIP")
+	require.NotContains(t, rangeSchema.Properties, "utilization")
 }
 
 func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {

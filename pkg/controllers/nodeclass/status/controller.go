@@ -35,6 +35,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
 type nodeClassStatusReconciler interface {
@@ -48,11 +49,11 @@ type Controller struct {
 	subnetRange *SubnetRange
 }
 
-func NewController(kubeClient client.Client, imageProvider imagefamily.Provider, gkeProvider gke.Provider) *Controller {
+func NewController(kubeClient client.Client, imageProvider imagefamily.Provider, gkeProvider gke.Provider, subnetProvider subnet.Provider) *Controller {
 	return &Controller{
 		kubeClient:  kubeClient,
 		image:       &Image{imageProvider: imageProvider},
-		subnetRange: &SubnetRange{gkeProvider: gkeProvider},
+		subnetRange: &SubnetRange{gkeProvider: gkeProvider, subnetProvider: subnetProvider},
 	}
 }
 

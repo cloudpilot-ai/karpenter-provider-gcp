@@ -110,30 +110,3 @@ func TestClusterPodRangeNamesAdditionalRanges(t *testing.T) {
 		})
 	}
 }
-
-func TestPodRangeUtilization(t *testing.T) {
-	t.Parallel()
-
-	cluster := &containerv1.Cluster{
-		IpAllocationPolicy: &containerv1.IPAllocationPolicy{
-			ClusterSecondaryRangeName:      "default-pods",
-			DefaultPodIpv4RangeUtilization: 0.1,
-			AdditionalPodRangesConfig: &containerv1.AdditionalPodRangesConfig{
-				PodRangeInfo: []*containerv1.RangeInfo{
-					{RangeName: "extra", Utilization: 0.9},
-				},
-			},
-		},
-	}
-
-	util, ok := PodRangeUtilization(cluster, "default-pods")
-	require.True(t, ok)
-	require.Equal(t, 0.1, util)
-
-	util, ok = PodRangeUtilization(cluster, "extra")
-	require.True(t, ok)
-	require.Equal(t, 0.9, util)
-
-	_, ok = PodRangeUtilization(cluster, "missing")
-	require.False(t, ok)
-}

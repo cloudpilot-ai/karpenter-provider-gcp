@@ -63,7 +63,7 @@ type GCENodeClassSpec struct {
 	SubnetRangeName *string `json:"subnetRangeName,omitempty"`
 	// SubnetRangeNames is a list of subnetwork secondary IPv4 range names from which
 	// to allocate pod IP addresses (alias IPs for pods). When more than one name is
-	// listed, the provider selects the range with the lowest GKE-reported utilization
+	// listed, the provider prefers the range with the most Compute-reported free IPv4 addresses
 	// at launch. Mutually exclusive with subnetRangeName. When set, this list replaces
 	// the cluster defaults completely. If neither field is set, the cluster's default
 	// and additional pod ranges on its primary subnetwork are used.

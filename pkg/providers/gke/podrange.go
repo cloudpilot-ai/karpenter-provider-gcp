@@ -46,24 +46,3 @@ func ClusterPodRangeNames(cluster *containerv1.Cluster) []string {
 	}
 	return names
 }
-
-// PodRangeUtilization returns GKE-reported utilization for a secondary range when
-// the cluster object includes it.
-func PodRangeUtilization(cluster *containerv1.Cluster, name string) (float64, bool) {
-	if cluster == nil || cluster.IpAllocationPolicy == nil || name == "" {
-		return 0, false
-	}
-	pol := cluster.IpAllocationPolicy
-	if name == pol.ClusterSecondaryRangeName {
-		return pol.DefaultPodIpv4RangeUtilization, true
-	}
-	if pol.AdditionalPodRangesConfig == nil {
-		return 0, false
-	}
-	for _, info := range pol.AdditionalPodRangesConfig.PodRangeInfo {
-		if info != nil && info.RangeName == name {
-			return info.Utilization, true
-		}
-	}
-	return 0, false
-}

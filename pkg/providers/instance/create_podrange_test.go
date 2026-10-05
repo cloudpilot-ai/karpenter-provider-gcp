@@ -20,14 +20,19 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
+	computeapi "cloud.google.com/go/compute/apiv1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
+	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -36,6 +41,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
 type podRangeLaunch struct {
@@ -58,6 +64,16 @@ type podRangeTemplateProvider struct {
 
 func (*podRangeTemplateProvider) GetSourceTemplateMetadata(context.Context) (*compute.Metadata, error) {
 	return makeSourceMetadata("max-pods-per-node=110"), nil
+}
+
+func newPodRangeCapacityProvider(t *testing.T, handler http.Handler) subnet.Provider {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	client, err := computeapi.NewSubnetworksRESTClient(context.Background(), option.WithEndpoint(server.URL), option.WithoutAuthentication())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	return subnet.NewProvider(client, "us-central1", clock.RealClock{})
 }
 
 func newPodRangeLaunchProvider(t *testing.T, asynchronous bool, failureCode func(podRangeLaunch) string) (*DefaultProvider, func() []podRangeLaunch) {
@@ -106,6 +122,13 @@ func newPodRangeLaunchProvider(t *testing.T, asynchronous bool, failureCode func
 		fakeGKEProvider: fakeGKEProvider{zones: []string{"us-central1-a"}},
 		cluster:         podRangeFallbackCluster(),
 	}
+	p.gkeProvider.(*podRangeClusterProvider).cluster.NetworkConfig.Network = "projects/test-project/global/networks/vpc"
+	p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"utilizationDetails": map[string]any{"ipv4Utilizations": []map[string]string{
+			{"rangeName": "default-pods", "totalFreeIp": "1000"},
+			{"rangeName": "extra-pods", "totalFreeIp": "100"},
+		}}})
+	}))
 	p.instanceTypeProvider = &instancetype.DefaultProvider{}
 	p.nodePoolTemplateProvider = &podRangeTemplateProvider{}
 	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferings()
@@ -230,11 +253,15 @@ func TestCreatePodRangeOverridesReplaceClusterRanges(t *testing.T) {
 	}
 }
 
-func TestCreateSelectsLeastUsedDiscoveredPodRange(t *testing.T) {
+func TestCreateSelectsMostFreeDiscoveredPodRange(t *testing.T) {
 	t.Parallel()
 	p, attempts := newPodRangeLaunchProvider(t, true, func(podRangeLaunch) string { return "" })
-	cluster := p.gkeProvider.(*podRangeClusterProvider).cluster
-	cluster.IpAllocationPolicy.DefaultPodIpv4RangeUtilization = 0.95
+	p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"utilizationDetails": map[string]any{"ipv4Utilizations": []map[string]string{
+			{"rangeName": "default-pods", "totalFreeIp": "1000"},
+			{"rangeName": "extra-pods", "totalFreeIp": "8000"},
+		}}})
+	}))
 
 	instance, err := p.Create(context.Background(), &v1alpha1.GCENodeClass{}, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
 
@@ -263,6 +290,71 @@ func TestCreateDiscoversConfiguredAndReportedPodRanges(t *testing.T) {
 		{machineType: "n2-standard-4", rangeName: "extra-pods"},
 		{machineType: "n2-standard-4", rangeName: "unreported-pods"},
 	}, attempts())
+}
+
+func TestCreateCapacityLookupFailureIsAdvisory(t *testing.T) {
+	t.Parallel()
+	p, attempts := newPodRangeLaunchProvider(t, true, func(attempt podRangeLaunch) string {
+		if attempt.machineType == "n2-standard-4" {
+			return "ZONE_RESOURCE_POOL_EXHAUSTED"
+		}
+		return ""
+	})
+	var lookups atomic.Int32
+	p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		lookups.Add(1)
+		http.Error(w, `{"error":{"code":403,"message":"denied"}}`, http.StatusForbidden)
+	}))
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"extra-pods", "default-pods"}}}
+
+	instance, err := p.Create(context.Background(), nc, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+
+	require.NoError(t, err)
+	require.Equal(t, "n2-standard-8", instance.Type)
+	require.Equal(t, []podRangeLaunch{
+		{machineType: "n2-standard-4", rangeName: "extra-pods"},
+		{machineType: "n2-standard-8", rangeName: "extra-pods"},
+	}, attempts(), "lookup failure must preserve explicit order across type retries")
+	require.Equal(t, int32(1), lookups.Load(), "a failed capacity lookup must not repeat for every type")
+}
+
+func TestCreateCapacityUsesSubnetworkOverride(t *testing.T) {
+	t.Parallel()
+	p, attempts := newPodRangeLaunchProvider(t, true, func(podRangeLaunch) string { return "" })
+	p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/compute/v1/projects/host/regions/us-central1/subnetworks/custom", r.URL.Path)
+		writeJSON(w, map[string]any{"utilizationDetails": map[string]any{"ipv4Utilizations": []map[string]string{
+			{"rangeName": "default-pods", "totalFreeIp": "10"},
+			{"rangeName": "extra-pods", "totalFreeIp": "8000"},
+			{"rangeName": "ineligible", "totalFreeIp": "999999"},
+		}}})
+	}))
+	nc := podRangeLaunchNodeClass()
+	nc.Spec.NetworkConfig = &v1alpha1.NetworkConfig{Subnetwork: "projects/host/regions/us-central1/subnetworks/custom"}
+
+	instance, err := p.Create(context.Background(), nc, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+
+	require.NoError(t, err)
+	require.Equal(t, "n2-standard-4", instance.Type)
+	require.Equal(t, []podRangeLaunch{{machineType: "n2-standard-4", rangeName: "extra-pods"}}, attempts(),
+		"capacity must use the target subnet without broadening eligible ranges")
+}
+
+func TestCreateZeroFreeCountStillAttemptsAllocation(t *testing.T) {
+	t.Parallel()
+	p, attempts := newPodRangeLaunchProvider(t, true, func(podRangeLaunch) string { return "" })
+	p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"utilizationDetails": map[string]any{"ipv4Utilizations": []map[string]string{
+			{"rangeName": "default-pods", "totalFreeIp": "0"},
+		}}})
+	}))
+
+	instance, err := p.Create(context.Background(), &v1alpha1.GCENodeClass{}, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+
+	require.NoError(t, err)
+	require.Equal(t, "n2-standard-4", instance.Type)
+	require.Equal(t, []podRangeLaunch{{machineType: "n2-standard-4", rangeName: "default-pods"}}, attempts(),
+		"cached zero is a hint, not a reason to skip authoritative allocation")
 }
 
 func TestCreateRetriesAnotherTypeAfterNonIPCapacityFailure(t *testing.T) {

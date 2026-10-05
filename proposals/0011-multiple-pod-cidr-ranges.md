@@ -11,7 +11,7 @@
 
 Before this change, `GCENodeClass` exposed a single optional `spec.subnetRangeName` for the GKE secondary IPv4 range used as pod alias IPs. Operators with [additional pod ranges](https://cloud.google.com/kubernetes-engine/docs/how-to/multi-pod-cidr) must clone NodeClass and NodePool objects to spill over when the default range is exhausted.
 
-This proposal adds `spec.subnetRangeNames`, an optional list of secondary range names. At launch the provider ranks those ranges by GKE-reported utilization and allocates from the least-used range. `spec.subnetRangeName` is deprecated but remains for backward compatibility and is mutually exclusive with the list. If both fields are omitted, candidates are discovered from the cluster's default and additional pod ranges on its primary subnetwork. Either explicit field replaces the discovered list completely.
+This proposal adds `spec.subnetRangeNames`, an optional list of secondary range names. At launch the provider ranks those ranges by Compute-reported free IPv4 addresses and prefers the range with the greatest known count. `spec.subnetRangeName` is deprecated but remains for backward compatibility and is mutually exclusive with the list. If both fields are omitted, candidates are discovered from the cluster's default and additional pod ranges on its primary subnetwork. Either explicit field replaces the discovered list completely.
 
 ---
 
@@ -27,9 +27,9 @@ AWS Karpenter ranks matching subnets by available IPs. GCP secondary ranges are 
 
 - Let one GCENodeClass name several GKE pod secondary ranges.
 - Discover cluster-level pod ranges by default, with complete replacement by an explicit scalar or list.
-- Prefer the range with the lowest known GKE utilization at launch.
+- Prefer the range with the greatest known free IPv4 address count at launch.
 - Keep existing `subnetRangeName` YAML working.
-- Surface resolved range utilization on NodeClass status.
+- Surface resolved range free-IP counts on NodeClass status.
 - Retry remaining listed ranges when Compute returns IP space exhausted.
 
 ### Non-Goals
@@ -44,7 +44,7 @@ AWS Karpenter ranks matching subnets by available IPs. GCP secondary ranges are 
 
 ### Overview
 
-Keep `spec.subnetRangeName`. Add `spec.subnetRangeNames`. CEL rejects setting both. Launch resolves candidates, ranks by GKE utilization, sets `AliasIpRanges[0].SubnetworkRangeName`, and retries other candidates on `IP_SPACE_EXHAUSTED`.
+Keep `spec.subnetRangeName`. Add `spec.subnetRangeNames`. CEL rejects setting both. Launch resolves candidates, ranks by Compute free-IP counts, sets `AliasIpRanges[0].SubnetworkRangeName`, and retries other candidates on `IP_SPACE_EXHAUSTED`.
 
 ### Design Details
 
@@ -67,14 +67,13 @@ Helper `GCENodeClass.PodSubnetRangeNames()` returns the list, else a one-element
 
 #### Capacity observation
 
-GKE already reports utilization on the cluster object:
+Read the effective primary subnetwork through `subnetworks.get` with `views=WITH_UTILIZATION`. Each named entry in `utilizationDetails.ipv4Utilizations` supplies an optional `totalFreeIp` count; the unnamed primary IPv4 range is excluded. Fully qualified references identify the target project and region, including Shared VPC host projects. Bare references require a fully qualified effective network to resolve ownership safely.
 
-- Default range: `IPAllocationPolicy.DefaultPodIpv4RangeUtilization`
-- Additional ranges: `IPAllocationPolicy.AdditionalPodRangesConfig.PodRangeInfo[].Utilization`
+Rank resolved names by greatest known free-IP count. Unknown counts sort after known values, preserving candidate order as a tie-breaker. Known zero counts remain eligible because snapshots do not guarantee whether a contiguous pod CIDR block can be allocated.
 
-Rank resolved names by lowest known utilization. Names without utilization sort after known values, preserving spec order as a tie-breaker.
+A shared subnet provider caches successful snapshots for one minute. Capacity reads have a three-second deadline and occur once per `Create`, not once per range or instance type. Failed reads are logged and launch continues in candidate order. Status clears counts and retains its normal five-minute refresh after a failed read.
 
-`GetClusterConfig` is cached for 30 minutes, so discovery and ranking are best-effort. Insert retry covers stale utilization. Discovery follows GKE's cluster-level range configuration; selection remains this provider's utilization heuristic rather than reproducing GKE's node-pool allocation algorithm.
+`GetClusterConfig` is cached for 30 minutes, so eligibility discovery remains best-effort. Discovery follows GKE's cluster-level range configuration; selection uses this provider's free-IP heuristic rather than reproducing GKE's node-pool allocation algorithm. Insert retry remains authoritative.
 
 #### Launch and IP exhaustion
 
@@ -84,7 +83,7 @@ Which range is chosen among a list is not hashed. Changing the list itself is ha
 
 #### Status
 
-`status.subnetRanges` lists each resolved candidate `name` and optional `utilization`, analogous to AWS `status.subnets`. A nodeclass status reconciler fills this from `GetClusterConfig`.
+`status.subnetRanges` lists each resolved candidate `name` and optional integer `totalFreeIP`, analogous to AWS subnet capacity observations. An omitted count is unknown; an explicit zero is preserved. The reconciler combines GKE eligibility with counts from the shared subnet provider. Capacity failures do not change image readiness.
 
 #### Drift
 
@@ -96,7 +95,7 @@ Changing `subnetRangeName` or `subnetRangeNames` is NodeClass drift. Launch-time
 
 | Risk                                               | Likelihood | Impact                                | Mitigation                                                                    |
 |----------------------------------------------------|------------|---------------------------------------|-------------------------------------------------------------------------------|
-| Stale cluster-cache utilization                    | Medium     | Temporary preference for a full range | Retry remaining ranges on IP_SPACE_EXHAUSTED                                  |
+| Stale subnet capacity snapshot                     | Medium     | Temporary preference for a full range | Retry remaining ranges on IP_SPACE_EXHAUSTED                                  |
 | Operator lists a range not attached to the cluster | Low        | Insert failure                        | Document that names must be the default or `additionalPodRangesConfig` ranges |
 | Mutual-exclusivity surprise                        | Low        | CRD reject                            | Docs + CEL message; keep single-field path                                    |
 
@@ -107,10 +106,11 @@ Changing `subnetRangeName` or `subnetRangeNames` is NodeClass drift. Launch-time
 ### Unit Tests
 
 - CRD CEL: both fields set is rejected; list item pattern; unique items.
-- Ranking: lowest utilization first; unknown last; spec-order tie-break.
+- Ranking: greatest free-IP count first; unknown last; candidate-order tie-break; known zero remains eligible.
 - Discovery: default plus configured and reported additional names; stable union, deduplication, missing utilization, missing primary name, and exclusion of separate subnetworks.
-- Launch: omitted fields discover candidates; explicit scalar/list completely replaces them; lowest known utilization is preferred.
-- Status: candidate membership matches launch, with optional utilization.
+- Launch: omitted fields discover candidates; explicit scalar/list completely replaces them; greatest known free-IP count is preferred; capacity read failure does not block launch.
+- Status: candidate membership matches launch, with optional integer free-IP counts; clear stale counts on failure without a reconcile error.
+- Capacity: HTTP query/view, omitted-versus-zero fields, Shared VPC/override resolution, cache identity/expiry/ownership and bounded cancellation.
 - Insert: IP_SPACE_EXHAUSTED retries the next range and only fail-fasts after the last.
 - Drift: changing `subnetRangeNames` is NodeClass drift.
 
@@ -125,7 +125,7 @@ Existing e2e NodeClasses may keep `subnetRangeName`. Multi-range spillover is un
 The feature is complete when:
 
 - [ ] `spec.subnetRangeNames` is on the CRD and mutually exclusive with `subnetRangeName`
-- [ ] Launch ranks by GKE utilization and retries on IP space exhaustion
+- [ ] Launch ranks by Compute free-IP counts and retries on IP space exhaustion
 - [ ] `status.subnetRanges` is populated
 - [ ] Docs and examples cover the list field
 - [ ] Existing `subnetRangeName` configs keep working
@@ -134,7 +134,7 @@ The feature is complete when:
 
 ## Migration
 
-Omitted pod-range fields now allow allocation from the cluster default and additional pod ranges. To retain default-range-only allocation, explicitly set `subnetRangeNames` to a single-element list containing the cluster default range name. Explicit scalar/list overrides remain restricted to those names. Migrate deprecated `subnetRangeName` to a single-element `subnetRangeNames` list; removal will be announced separately.
+Omitted pod-range fields now allow allocation from the cluster default and additional pod ranges. To retain default-range-only allocation, explicitly set `subnetRangeNames` to a single-element list containing the cluster default range name. Explicit scalar/list overrides remain restricted to those names. Migrate deprecated `subnetRangeName` to a single-element `subnetRangeNames` list; removal will be announced separately. Status reports optional integer `totalFreeIP` counts. The existing `compute.subnetworks.get` permission is now used for capacity reads, including in Shared VPC host projects.
 
 ---
 
@@ -150,10 +150,14 @@ This preserves the previous default but does not follow GKE's cluster-level addi
 
 ### Count remaining alias IPs via Compute instance listing
 
-More accurate than GKE utilization but expensive and racy. GKE utilization plus Insert retry is sufficient.
+Unnecessary and expensive: `subnetworks.get` already provides per-range free-IP counts. Those snapshots plus Insert retry avoid reconstructing allocation state from instances.
+
+### Rank by GKE cluster utilization
+
+A relative ratio can prefer a small range over a larger range with more free addresses, and describes cluster-level usage rather than subnet-wide free capacity. Compute free-IP counts are a more useful selection hint.
 
 ---
 
 ## Future Direction
 
-Shorter cluster-config TTL specifically for utilization, or a dedicated pod-range provider cache similar to AWS subnets.
+Shorter cluster-config TTL for eligibility discovery, or in-flight allocation tracking to reduce concurrent selection of the same range. Compute insertion remains the authoritative capacity check.

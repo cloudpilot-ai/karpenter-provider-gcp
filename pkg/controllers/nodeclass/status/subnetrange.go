@@ -18,7 +18,6 @@ package status
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -26,12 +25,14 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
 const subnetRangeStatusRequeue = 5 * time.Minute
 
 type SubnetRange struct {
-	gkeProvider gke.Provider
+	gkeProvider    gke.Provider
+	subnetProvider subnet.Provider
 }
 
 func (s *SubnetRange) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (reconcile.Result, error) {
@@ -45,15 +46,22 @@ func (s *SubnetRange) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENode
 	if len(names) == 0 {
 		names = gke.ClusterPodRangeNames(cluster)
 	}
+	var counts map[string]int64
+	network, target := subnet.PrimaryNetwork(nodeClass, cluster)
+	if len(names) > 0 && target != "" {
+		counts, err = s.subnetProvider.GetFreeIPCounts(ctx, network, target)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "getting pod range free IPs, publishing names without counts", "subnetwork", target)
+		}
+	}
 	status := make([]v1alpha1.SubnetRangeStatus, 0, len(names))
 	for _, name := range names {
 		if name == "" {
 			continue
 		}
 		entry := v1alpha1.SubnetRangeStatus{Name: name}
-		if util, ok := gke.PodRangeUtilization(cluster, name); ok {
-			u := strconv.FormatFloat(util, 'f', -1, 64)
-			entry.Utilization = &u
+		if count, ok := counts[name]; ok {
+			entry.TotalFreeIP = &count
 		}
 		status = append(status, entry)
 	}

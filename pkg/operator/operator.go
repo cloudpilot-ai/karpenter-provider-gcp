@@ -23,10 +23,12 @@ import (
 	"regexp"
 	"strings"
 
+	computeapi "cloud.google.com/go/compute/apiv1"
 	"github.com/samber/lo"
 	"google.golang.org/api/compute/v1"
 	container "google.golang.org/api/container/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
@@ -41,6 +43,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
@@ -58,6 +61,7 @@ type Operator struct {
 	InstanceTypeProvider      instancetype.Provider
 	InstanceProvider          instance.Provider
 	GKEProvider               gke.Provider
+	SubnetProvider            subnet.Provider
 	AuthOptions               *auth.Credential
 }
 
@@ -130,6 +134,13 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeDefaultSA = proj.DefaultServiceAccount
 	}
 
+	subnetClient, err := computeapi.NewSubnetworksRESTClient(ctx)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to initialize subnetwork client")
+		os.Exit(1)
+	}
+	subnetProvider := subnet.NewProvider(subnetClient, region, clock.RealClock{})
+
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache, operator.GetClient())
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,
@@ -140,6 +151,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeDefaultSA,
 		computeService,
 		gkeProvider,
+		subnetProvider,
 		instanceTypeProvider,
 		nodeTemplateProvider,
 		versionProvider,
@@ -155,6 +167,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceTypeProvider:      instanceTypeProvider,
 		InstanceProvider:          instanceProvider,
 		GKEProvider:               gkeProvider,
+		SubnetProvider:            subnetProvider,
 		AuthOptions:               &auth,
 	}
 }

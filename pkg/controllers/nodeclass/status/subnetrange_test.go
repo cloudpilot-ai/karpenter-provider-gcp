@@ -18,13 +18,21 @@ package status
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	computeapi "cloud.google.com/go/compute/apiv1"
 	"github.com/stretchr/testify/require"
 	containerv1 "google.golang.org/api/container/v1"
+	"google.golang.org/api/option"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
 type stubGKEProvider struct {
@@ -43,47 +51,52 @@ func (s *stubGKEProvider) GetServerConfig(context.Context) (*containerv1.ServerC
 	return &containerv1.ServerConfig{}, nil
 }
 
-func TestSubnetRangeStatus(t *testing.T) {
-	t.Parallel()
+func statusSubnetProvider(t *testing.T, handler http.Handler) subnet.Provider {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	client, err := computeapi.NewSubnetworksRESTClient(context.Background(), option.WithEndpoint(server.URL), option.WithoutAuthentication())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	return subnet.NewProvider(client, "us-central1", clock.RealClock{})
+}
 
-	cluster := &containerv1.Cluster{
+func statusCluster() *containerv1.Cluster {
+	return &containerv1.Cluster{
+		NetworkConfig: &containerv1.NetworkConfig{Network: "projects/host/global/networks/vpc", Subnetwork: "pods"},
 		IpAllocationPolicy: &containerv1.IPAllocationPolicy{
-			ClusterSecondaryRangeName:      "default-pods",
-			DefaultPodIpv4RangeUtilization: 0.4,
+			ClusterSecondaryRangeName: "default-pods",
 			AdditionalPodRangesConfig: &containerv1.AdditionalPodRangesConfig{
-				PodRangeInfo: []*containerv1.RangeInfo{
-					{RangeName: "extra-pods", Utilization: 0.1},
-				},
+				PodRangeNames: []string{"unreported-pods"},
+				PodRangeInfo:  []*containerv1.RangeInfo{{RangeName: "extra-pods"}},
 			},
 		},
 	}
-	r := &SubnetRange{gkeProvider: &stubGKEProvider{cluster: cluster}}
-	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
-		SubnetRangeNames: []string{"default-pods", "extra-pods"},
-	}}
+}
+
+func TestSubnetRangeStatusReportsFreeIPs(t *testing.T) {
+	t.Parallel()
+	p := statusSubnetProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/compute/v1/projects/host/regions/us-central1/subnetworks/pods", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"utilizationDetails":{"ipv4Utilizations":[
+			{"rangeName":"available","totalFreeIp":"1024"},
+			{"rangeName":"exhausted","totalFreeIp":"0"},
+			{"rangeName":"unknown"}
+		]}}`)
+	}))
+	r := &SubnetRange{gkeProvider: &stubGKEProvider{cluster: statusCluster()}, subnetProvider: p}
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"available", "exhausted", "unknown"}}}
 
 	_, err := r.Reconcile(context.Background(), nc)
 	require.NoError(t, err)
-	require.Equal(t, []v1alpha1.SubnetRangeStatus{
-		{Name: "default-pods", Utilization: ptr.To("0.4")},
-		{Name: "extra-pods", Utilization: ptr.To("0.1")},
-	}, nc.Status.SubnetRanges)
+	statusJSON, err := json.Marshal(nc.Status.SubnetRanges)
+	require.NoError(t, err)
+	require.JSONEq(t, `[{"name":"available","totalFreeIP":1024},{"name":"exhausted","totalFreeIP":0},{"name":"unknown"}]`, string(statusJSON))
 }
 
 func TestSubnetRangeStatusDiscoveryAndOverrides(t *testing.T) {
 	t.Parallel()
-	cluster := &containerv1.Cluster{
-		IpAllocationPolicy: &containerv1.IPAllocationPolicy{
-			ClusterSecondaryRangeName:      "default-pods",
-			DefaultPodIpv4RangeUtilization: 0.4,
-			AdditionalPodRangesConfig: &containerv1.AdditionalPodRangesConfig{
-				PodRangeNames: []string{"unreported-pods"},
-				PodRangeInfo: []*containerv1.RangeInfo{
-					{RangeName: "extra-pods", Utilization: 0.1},
-				},
-			},
-		},
-	}
 	tests := []struct {
 		name string
 		spec v1alpha1.GCENodeClassSpec
@@ -92,28 +105,36 @@ func TestSubnetRangeStatusDiscoveryAndOverrides(t *testing.T) {
 		{
 			name: "omitted fields discover all ranges",
 			want: []v1alpha1.SubnetRangeStatus{
-				{Name: "default-pods", Utilization: ptr.To("0.4")},
+				{Name: "default-pods", TotalFreeIP: ptr.To(int64(400))},
 				{Name: "unreported-pods"},
-				{Name: "extra-pods", Utilization: ptr.To("0.1")},
+				{Name: "extra-pods", TotalFreeIP: ptr.To(int64(100))},
 			},
 		},
 		{
 			name: "list replaces discovery",
 			spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"extra-pods"}},
-			want: []v1alpha1.SubnetRangeStatus{{Name: "extra-pods", Utilization: ptr.To("0.1")}},
+			want: []v1alpha1.SubnetRangeStatus{{Name: "extra-pods", TotalFreeIP: ptr.To(int64(100))}},
 		},
 		{
 			name: "deprecated scalar replaces discovery",
 			spec: v1alpha1.GCENodeClassSpec{
 				SubnetRangeName: ptr.To("extra-pods"), //nolint:staticcheck // Verify the deprecated override remains supported.
 			},
-			want: []v1alpha1.SubnetRangeStatus{{Name: "extra-pods", Utilization: ptr.To("0.1")}},
+			want: []v1alpha1.SubnetRangeStatus{{Name: "extra-pods", TotalFreeIP: ptr.To(int64(100))}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := &SubnetRange{gkeProvider: &stubGKEProvider{cluster: cluster}}
+			p := statusSubnetProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, `{"utilizationDetails":{"ipv4Utilizations":[
+					{"rangeName":"default-pods","totalFreeIp":"400"},
+					{"rangeName":"extra-pods","totalFreeIp":"100"},
+					{"rangeName":"ineligible","totalFreeIp":"9999"}
+				]}}`)
+			}))
+			r := &SubnetRange{gkeProvider: &stubGKEProvider{cluster: statusCluster()}, subnetProvider: p}
 			nc := &v1alpha1.GCENodeClass{Spec: tt.spec}
 
 			_, err := r.Reconcile(context.Background(), nc)
@@ -122,4 +143,39 @@ func TestSubnetRangeStatusDiscoveryAndOverrides(t *testing.T) {
 			require.Equal(t, tt.want, nc.Status.SubnetRanges)
 		})
 	}
+}
+
+func TestSubnetRangeStatusUsesSubnetworkOverride(t *testing.T) {
+	t.Parallel()
+	p := statusSubnetProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/compute/v1/projects/other-host/regions/us-east1/subnetworks/custom", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"utilizationDetails":{"ipv4Utilizations":[{"rangeName":"custom-pods","totalFreeIp":"400"}]}}`)
+	}))
+	r := &SubnetRange{gkeProvider: &stubGKEProvider{cluster: statusCluster()}, subnetProvider: p}
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		SubnetRangeNames: []string{"custom-pods"},
+		NetworkConfig:    &v1alpha1.NetworkConfig{Subnetwork: "projects/other-host/regions/us-east1/subnetworks/custom"},
+	}}
+
+	_, err := r.Reconcile(context.Background(), nc)
+
+	require.NoError(t, err)
+	require.Equal(t, []v1alpha1.SubnetRangeStatus{{Name: "custom-pods", TotalFreeIP: ptr.To(int64(400))}}, nc.Status.SubnetRanges)
+}
+
+func TestSubnetRangeStatusFailureClearsCountsWithoutError(t *testing.T) {
+	t.Parallel()
+	p := statusSubnetProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"code":403,"message":"denied"}}`, http.StatusForbidden)
+	}))
+	r := &SubnetRange{gkeProvider: &stubGKEProvider{cluster: statusCluster()}, subnetProvider: p}
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"extra-pods"}}}
+	nc.Status.SubnetRanges = []v1alpha1.SubnetRangeStatus{{Name: "extra-pods", TotalFreeIP: ptr.To(int64(100))}}
+
+	result, err := r.Reconcile(context.Background(), nc)
+
+	require.NoError(t, err)
+	require.Equal(t, subnetRangeStatusRequeue, result.RequeueAfter)
+	require.Equal(t, []v1alpha1.SubnetRangeStatus{{Name: "extra-pods"}}, nc.Status.SubnetRanges)
 }

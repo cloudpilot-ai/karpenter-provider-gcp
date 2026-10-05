@@ -32,7 +32,7 @@ type GCENodeClassStatus struct {
 	// +optional
 	Images []Image `json:"images,omitempty"`
 	// SubnetRanges contains the pod secondary IPv4 ranges considered for launch
-	// and their GKE-reported utilization when known.
+	// and their Compute-reported free IPv4 address counts when known.
 	// +optional
 	SubnetRanges []SubnetRangeStatus `json:"subnetRanges,omitempty"`
 	// Conditions contains signals for health and readiness
@@ -47,10 +47,12 @@ type SubnetRangeStatus struct {
 	// Name is the subnetwork secondary IPv4 range name.
 	// +required
 	Name string `json:"name"`
-	// Utilization is GKE's reported usage of the range as a decimal string
-	// between "0" and "1" when known.
+	// TotalFreeIP is the Compute-reported number of free IPv4 addresses in this
+	// secondary range. Omitted when unknown; zero means no free addresses were reported.
+	// Counts are snapshots, not a guarantee of an allocatable contiguous pod CIDR block.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
-	Utilization *string `json:"utilization,omitempty"`
+	TotalFreeIP *int64 `json:"totalFreeIP,omitempty"`
 }
 
 // Image contains resolved image selector values utilized for node launch
