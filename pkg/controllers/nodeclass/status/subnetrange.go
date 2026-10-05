@@ -43,7 +43,7 @@ func (s *SubnetRange) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENode
 
 	names := nodeClass.PodSubnetRangeNames()
 	if len(names) == 0 {
-		names = []string{gke.DefaultPodRangeName(cluster)}
+		names = gke.ClusterPodRangeNames(cluster)
 	}
 	status := make([]v1alpha1.SubnetRangeStatus, 0, len(names))
 	for _, name := range names {

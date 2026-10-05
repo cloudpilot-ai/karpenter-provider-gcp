@@ -69,3 +69,57 @@ func TestSubnetRangeStatus(t *testing.T) {
 		{Name: "extra-pods", Utilization: ptr.To("0.1")},
 	}, nc.Status.SubnetRanges)
 }
+
+func TestSubnetRangeStatusDiscoveryAndOverrides(t *testing.T) {
+	t.Parallel()
+	cluster := &containerv1.Cluster{
+		IpAllocationPolicy: &containerv1.IPAllocationPolicy{
+			ClusterSecondaryRangeName:      "default-pods",
+			DefaultPodIpv4RangeUtilization: 0.4,
+			AdditionalPodRangesConfig: &containerv1.AdditionalPodRangesConfig{
+				PodRangeNames: []string{"unreported-pods"},
+				PodRangeInfo: []*containerv1.RangeInfo{
+					{RangeName: "extra-pods", Utilization: 0.1},
+				},
+			},
+		},
+	}
+	tests := []struct {
+		name string
+		spec v1alpha1.GCENodeClassSpec
+		want []v1alpha1.SubnetRangeStatus
+	}{
+		{
+			name: "omitted fields discover all ranges",
+			want: []v1alpha1.SubnetRangeStatus{
+				{Name: "default-pods", Utilization: ptr.To("0.4")},
+				{Name: "unreported-pods"},
+				{Name: "extra-pods", Utilization: ptr.To("0.1")},
+			},
+		},
+		{
+			name: "list replaces discovery",
+			spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"extra-pods"}},
+			want: []v1alpha1.SubnetRangeStatus{{Name: "extra-pods", Utilization: ptr.To("0.1")}},
+		},
+		{
+			name: "deprecated scalar replaces discovery",
+			spec: v1alpha1.GCENodeClassSpec{
+				SubnetRangeName: ptr.To("extra-pods"), //nolint:staticcheck // Verify the deprecated override remains supported.
+			},
+			want: []v1alpha1.SubnetRangeStatus{{Name: "extra-pods", Utilization: ptr.To("0.1")}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &SubnetRange{gkeProvider: &stubGKEProvider{cluster: cluster}}
+			nc := &v1alpha1.GCENodeClass{Spec: tt.spec}
+
+			_, err := r.Reconcile(context.Background(), nc)
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, nc.Status.SubnetRanges)
+		})
+	}
+}

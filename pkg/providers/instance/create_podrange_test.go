@@ -28,6 +28,7 @@ import (
 	"google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
@@ -44,10 +45,11 @@ type podRangeLaunch struct {
 
 type podRangeClusterProvider struct {
 	fakeGKEProvider
+	cluster *containerv1.Cluster
 }
 
-func (*podRangeClusterProvider) GetClusterConfig(context.Context) (*containerv1.Cluster, error) {
-	return podRangeFallbackCluster(), nil
+func (p *podRangeClusterProvider) GetClusterConfig(context.Context) (*containerv1.Cluster, error) {
+	return p.cluster, nil
 }
 
 type podRangeTemplateProvider struct {
@@ -100,7 +102,10 @@ func newPodRangeLaunchProvider(t *testing.T, asynchronous bool, failureCode func
 	}))
 	p.region = "us-central1"
 	p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
-	p.gkeProvider = &podRangeClusterProvider{fakeGKEProvider{zones: []string{"us-central1-a"}}}
+	p.gkeProvider = &podRangeClusterProvider{
+		fakeGKEProvider: fakeGKEProvider{zones: []string{"us-central1-a"}},
+		cluster:         podRangeFallbackCluster(),
+	}
 	p.instanceTypeProvider = &instancetype.DefaultProvider{}
 	p.nodePoolTemplateProvider = &podRangeTemplateProvider{}
 	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferings()
@@ -173,6 +178,91 @@ func TestCreateFallsBackToAvailablePodRange(t *testing.T) {
 		{machineType: "n2-standard-4", rangeName: "extra-pods"},
 	}, attempts())
 	require.False(t, p.unavailableOfferings.IsUnavailable("n2-standard-4", "us-central1-a", "on-demand"))
+}
+
+func TestCreateDiscoversAdditionalPodRanges(t *testing.T) {
+	t.Parallel()
+	p, attempts := newPodRangeLaunchProvider(t, true, func(attempt podRangeLaunch) string {
+		if attempt.rangeName == "default-pods" {
+			return "IP_SPACE_EXHAUSTED"
+		}
+		return ""
+	})
+
+	instance, err := p.Create(context.Background(), &v1alpha1.GCENodeClass{}, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+
+	require.NoError(t, err)
+	require.Equal(t, "n2-standard-4", instance.Type)
+	require.Equal(t, []podRangeLaunch{
+		{machineType: "n2-standard-4", rangeName: "default-pods"},
+		{machineType: "n2-standard-4", rangeName: "extra-pods"},
+	}, attempts())
+}
+
+func TestCreatePodRangeOverridesReplaceClusterRanges(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		spec v1alpha1.GCENodeClassSpec
+	}{
+		{name: "list", spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"custom-pods"}}},
+		{name: "deprecated scalar", spec: v1alpha1.GCENodeClassSpec{
+			SubnetRangeName: ptr.To("custom-pods"), //nolint:staticcheck // Verify the deprecated override remains supported.
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p, attempts := newPodRangeLaunchProvider(t, true, func(attempt podRangeLaunch) string {
+				if attempt.rangeName == "custom-pods" {
+					return "IP_SPACE_EXHAUSTED"
+				}
+				return ""
+			})
+
+			instance, err := p.Create(context.Background(), &v1alpha1.GCENodeClass{Spec: tt.spec}, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+
+			require.Nil(t, instance)
+			require.True(t, cloudprovider.IsInsufficientCapacityError(err), "got %v", err)
+			require.Equal(t, []podRangeLaunch{{machineType: "n2-standard-4", rangeName: "custom-pods"}}, attempts(),
+				"explicit overrides must not fall back to available cluster ranges")
+		})
+	}
+}
+
+func TestCreateSelectsLeastUsedDiscoveredPodRange(t *testing.T) {
+	t.Parallel()
+	p, attempts := newPodRangeLaunchProvider(t, true, func(podRangeLaunch) string { return "" })
+	cluster := p.gkeProvider.(*podRangeClusterProvider).cluster
+	cluster.IpAllocationPolicy.DefaultPodIpv4RangeUtilization = 0.95
+
+	instance, err := p.Create(context.Background(), &v1alpha1.GCENodeClass{}, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+
+	require.NoError(t, err)
+	require.Equal(t, "n2-standard-4", instance.Type)
+	require.Equal(t, []podRangeLaunch{{machineType: "n2-standard-4", rangeName: "extra-pods"}}, attempts())
+}
+
+func TestCreateDiscoversConfiguredAndReportedPodRanges(t *testing.T) {
+	t.Parallel()
+	p, attempts := newPodRangeLaunchProvider(t, true, func(attempt podRangeLaunch) string {
+		if attempt.rangeName != "unreported-pods" {
+			return "IP_SPACE_EXHAUSTED"
+		}
+		return ""
+	})
+	cluster := p.gkeProvider.(*podRangeClusterProvider).cluster
+	cluster.IpAllocationPolicy.AdditionalPodRangesConfig.PodRangeNames = []string{"unreported-pods"}
+
+	instance, err := p.Create(context.Background(), &v1alpha1.GCENodeClass{}, onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+
+	require.NoError(t, err)
+	require.Equal(t, "n2-standard-4", instance.Type)
+	require.Equal(t, []podRangeLaunch{
+		{machineType: "n2-standard-4", rangeName: "default-pods"},
+		{machineType: "n2-standard-4", rangeName: "extra-pods"},
+		{machineType: "n2-standard-4", rangeName: "unreported-pods"},
+	}, attempts())
 }
 
 func TestCreateRetriesAnotherTypeAfterNonIPCapacityFailure(t *testing.T) {

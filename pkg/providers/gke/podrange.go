@@ -17,16 +17,34 @@ limitations under the License.
 package gke
 
 import (
+	"slices"
+
 	containerv1 "google.golang.org/api/container/v1"
 )
 
-// DefaultPodRangeName returns the secondary range GKE assigns pod IPs from by
-// default, or an empty string when the cluster does not report one.
-func DefaultPodRangeName(cluster *containerv1.Cluster) string {
+// ClusterPodRangeNames returns the default and additional pod ranges on the
+// cluster's primary subnetwork, preserving GKE order and removing duplicates.
+func ClusterPodRangeNames(cluster *containerv1.Cluster) []string {
 	if cluster == nil || cluster.IpAllocationPolicy == nil {
-		return ""
+		return nil
 	}
-	return cluster.IpAllocationPolicy.ClusterSecondaryRangeName
+	pol := cluster.IpAllocationPolicy
+	candidates := []string{pol.ClusterSecondaryRangeName}
+	if additional := pol.AdditionalPodRangesConfig; additional != nil {
+		candidates = append(candidates, additional.PodRangeNames...)
+		for _, info := range additional.PodRangeInfo {
+			if info != nil {
+				candidates = append(candidates, info.RangeName)
+			}
+		}
+	}
+	var names []string
+	for _, name := range candidates {
+		if name != "" && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // PodRangeUtilization returns GKE-reported utilization for a secondary range when

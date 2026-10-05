@@ -14,12 +14,19 @@ exhausted. Resolved names and utilization are published on `status.subnetRanges`
 
 `spec.subnetRangeName` is deprecated but remains supported for backward compatibility.
 Use `spec.subnetRangeNames` instead, even for a single range. The two fields are mutually
-exclusive. If neither is set, Karpenter still uses only the cluster default pod range.
+exclusive. Either field completely replaces the discovered range list; overrides are not
+merged with cluster ranges. If neither is set, Karpenter now considers the cluster default
+plus additional pod ranges reported by GKE on the primary subnetwork.
 
 **Recommended migration:** replace `subnetRangeName: pods` with `subnetRangeNames: [pods]`,
 using your existing range name, and remove `subnetRangeName`. No immediate action is required;
-removal of the deprecated field will be announced separately. To spill over across additional
-pod ranges, list those names (including the cluster default) on `subnetRangeNames`.
+removal of the deprecated field will be announced separately.
+
+**Default behavior change:** NodeClasses with both fields omitted can now allocate from
+additional cluster pod ranges. To retain default-range-only allocation, set
+`subnetRangeNames: [CLUSTER_DEFAULT_RANGE_NAME]`. Otherwise, omit both fields to use all
+cluster-level ranges, or set `subnetRangeNames` to restrict allocation to specific ranges.
+Ranges on separate additional subnetworks are not discovered.
 
 ### New IAM permission required: `compute.machineTypes.get`
 

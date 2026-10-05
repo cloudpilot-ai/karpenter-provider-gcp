@@ -51,9 +51,9 @@ type GCENodeClassSpec struct {
 	// +optional
 	ImageFamily *string `json:"imageFamily,omitempty"`
 	// SubnetRangeName is the name of the subnetwork secondary IPv4 range from which
-	// to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's
-	// default pod secondary range (ClusterSecondaryRangeName from the cluster's IP
-	// allocation policy) is used. Mutually exclusive with subnetRangeNames.
+	// to allocate pod IP addresses (alias IPs for pods). When set, only this range is
+	// considered. Mutually exclusive with subnetRangeNames. If neither field is set,
+	// the cluster's default and additional pod ranges on its primary subnetwork are used.
 	//
 	// Deprecated: use SubnetRangeNames with a single entry instead.
 	// +kubebuilder:validation:MinLength=1
@@ -64,9 +64,9 @@ type GCENodeClassSpec struct {
 	// SubnetRangeNames is a list of subnetwork secondary IPv4 range names from which
 	// to allocate pod IP addresses (alias IPs for pods). When more than one name is
 	// listed, the provider selects the range with the lowest GKE-reported utilization
-	// at launch. Mutually exclusive with subnetRangeName. If neither field is set, the
-	// cluster's default pod secondary range is used (additional pod ranges are not
-	// included automatically).
+	// at launch. Mutually exclusive with subnetRangeName. When set, this list replaces
+	// the cluster defaults completely. If neither field is set, the cluster's default
+	// and additional pod ranges on its primary subnetwork are used.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:XValidation:message="subnetRangeNames must be unique",rule="self.all(x, self.exists_one(y, x == y))"
@@ -574,7 +574,7 @@ func (in *GCENodeClass) GetMaxPods() int32 {
 }
 
 // PodSubnetRangeNames returns the NodeClass-configured pod secondary range names.
-// An empty result means the launch path should fall back to the cluster default.
+// An empty result means the launch path should discover the cluster's pod ranges.
 func (in *GCENodeClass) PodSubnetRangeNames() []string {
 	if in == nil {
 		return nil

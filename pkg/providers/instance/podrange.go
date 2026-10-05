@@ -26,13 +26,17 @@ import (
 )
 
 // resolvedPodRangeNames returns the pod secondary range names to try at launch:
-// NodeClass list or scalar, else the cluster default. A single empty string means
+// NodeClass list or scalar, else the default and additional cluster ranges.
+// A single empty string means
 // leave SubnetworkRangeName unset so GKE can pick.
 func resolvedPodRangeNames(nodeClass *v1alpha1.GCENodeClass, cluster *containerv1.Cluster) []string {
 	if names := nodeClass.PodSubnetRangeNames(); len(names) > 0 {
 		return names
 	}
-	return []string{gke.DefaultPodRangeName(cluster)}
+	if names := gke.ClusterPodRangeNames(cluster); len(names) > 0 {
+		return names
+	}
+	return []string{""}
 }
 
 // rankPodRangeNames orders names by lowest known GKE utilization. Names without
