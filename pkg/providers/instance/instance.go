@@ -573,6 +573,7 @@ func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, insta
 			return retryable, err
 		}
 
+		retryable := true
 		if err := p.waitOperationDone(ctx, zone, op.Name); err != nil {
 			if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
 				if isIPSpaceExhausted(capacityErr.details) && hasMoreRanges {
@@ -580,9 +581,10 @@ func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, insta
 					continue
 				}
 				err = p.markInsufficientCapacity(ctx, instanceType.Name, zone, capacityType, capacityErr.details)
+				retryable = !isIPSpaceExhausted(capacityErr.details)
 			}
 			log.FromContext(ctx).Error(err, "failed to wait for operation to be done", "instanceType", instanceType.Name, "zone", zone)
-			return true, err
+			return retryable, err
 		}
 
 		return false, nil
