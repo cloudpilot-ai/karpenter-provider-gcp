@@ -21,7 +21,8 @@ plus additional pod ranges reported by GKE on the primary subnetwork.
 
 **Recommended migration:** replace `subnetRangeName: pods` with `subnetRangeNames: [pods]`,
 using your existing range name, and remove `subnetRangeName`. No immediate action is required;
-removal of the deprecated field will be announced separately.
+removal of the deprecated field will be announced separately. Migrating from `subnetRangeName`
+to `subnetRangeNames` marks existing nodes as drifted and may cause Karpenter to replace them.
 
 **Default behavior change:** NodeClasses with both fields omitted can now allocate from
 additional cluster pod ranges. To retain default-range-only allocation, set
