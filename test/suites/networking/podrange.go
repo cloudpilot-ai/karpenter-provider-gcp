@@ -60,10 +60,10 @@ var _ = Describe("Pod ranges", Serial, Label("suite:networking"), func() {
 		waitForPodRangeStatus(ctx, f.name, cluster, []string{env.SmallPodsRangeName, env.LargePodsRangeName})
 	}, SpecTimeout(10*time.Minute))
 
-	DescribeTable("explicit range overrides replace discovery", func(ctx SpecContext, scalar bool) {
+	DescribeTable("explicit range overrides replace discovery", func(ctx SpecContext, useSubnetRangeName bool) {
 		var value string
 		var names []string
-		if scalar {
+		if useSubnetRangeName {
 			value = env.SmallPodsRangeName
 		} else {
 			names = []string{env.SmallPodsRangeName}
@@ -72,8 +72,8 @@ var _ = Describe("Pod ranges", Serial, Label("suite:networking"), func() {
 		waitForPodRangeStatus(ctx, f.name, cluster, []string{env.SmallPodsRangeName})
 		Expect(primaryAliasRange(f.provision(ctx))).To(Equal(env.SmallPodsRangeName))
 	},
-		Entry("scalar", true, SpecTimeout(15*time.Minute)),
-		Entry("singleton list", false, SpecTimeout(15*time.Minute)),
+		Entry("subnetRangeName", true, SpecTimeout(15*time.Minute)),
+		Entry("subnetRangeNames with one range", false, SpecTimeout(15*time.Minute)),
 	)
 
 	It("selects the richer range even when the poorer range is listed first", func(ctx SpecContext) {
@@ -109,7 +109,7 @@ type podRangeFixture struct {
 	nodeName string
 }
 
-func newPodRangeFixture(ctx context.Context, scalar string, names []string) *podRangeFixture {
+func newPodRangeFixture(ctx context.Context, subnetRangeName string, names []string) *podRangeFixture {
 	f := &podRangeFixture{name: "pod-ranges-" + environment.UniqueSuffix()}
 	DeferCleanup(func(ctx SpecContext) {
 		env.DeleteDeployment(ctx, f.name)
@@ -119,7 +119,7 @@ func newPodRangeFixture(ctx context.Context, scalar string, names []string) *pod
 			Expect(env.WaitForNodeRemoval(ctx, f.nodeName)).To(Succeed())
 		}
 	}, NodeTimeout(10*time.Minute))
-	env.CreateNodeClassWithPodRanges(ctx, f.name, scalar, names)
+	env.CreateNodeClassWithPodRanges(ctx, f.name, subnetRangeName, names)
 	env.WaitForNodeClassReady(ctx, f.name)
 	return f
 }

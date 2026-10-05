@@ -34,9 +34,8 @@ import (
 )
 
 // resolvedPodRangeNames returns the pod secondary range names to try at launch:
-// NodeClass list or scalar, else the default and additional cluster ranges.
-// A single empty string means
-// leave SubnetworkRangeName unset so GKE can pick.
+// Explicit NodeClass ranges replace the default and additional cluster ranges.
+// A single empty string leaves SubnetworkRangeName unset so GKE can pick.
 func resolvedPodRangeNames(nodeClass *v1alpha1.GCENodeClass, cluster *containerv1.Cluster) []string {
 	if names := nodeClass.PodSubnetRangeNames(); len(names) > 0 {
 		return names
@@ -87,17 +86,15 @@ func rejectedPodRangeMessage(message, rangeName string) bool {
 		(strings.Contains(lower, "not found") || strings.Contains(lower, "not valid") || strings.Contains(lower, "does not exist"))
 }
 
-func (p *DefaultProvider) invalidateRejectedPodRange(instance *compute.Instance, err error, rangeName string, discovered, exhausted bool) {
-	rejected := isRejectedPodRange(err, rangeName)
-	if exhausted || rejected {
-		p.invalidatePodRangeCaches(instance, discovered && rejected)
+func setPrimaryAliasRange(instance *compute.Instance, rangeName string) {
+	if instance == nil || len(instance.NetworkInterfaces) == 0 {
+		return
 	}
-}
-
-func (p *DefaultProvider) invalidateExhaustedPodRange(instance *compute.Instance, details insufficientCapacityDetails) {
-	if isIPSpaceExhausted(details) {
-		p.invalidatePodRangeCaches(instance, false)
+	iface := instance.NetworkInterfaces[0]
+	if len(iface.AliasIpRanges) == 0 {
+		return
 	}
+	iface.AliasIpRanges[0].SubnetworkRangeName = rangeName
 }
 
 func (p *DefaultProvider) invalidatePodRangeCaches(instance *compute.Instance, discovery bool) {

@@ -26,7 +26,7 @@ AWS Karpenter ranks matching subnets by available IPs. GCP secondary ranges are 
 ### Goals
 
 - Let one GCENodeClass name several GKE pod secondary ranges.
-- Discover cluster-level pod ranges by default, with complete replacement by an explicit scalar or list.
+- Discover cluster-level pod ranges by default, with complete replacement by explicit `subnetRangeName` or `subnetRangeNames` settings.
 - Prefer the range with the greatest known free IPv4 address count at launch.
 - Keep existing `subnetRangeName` YAML working.
 - Surface resolved range free-IP counts on NodeClass status.
@@ -61,7 +61,7 @@ spec:
 - Per-item validation matches `subnetRangeName` (RFC 1035-ish GCE range name).
 - `MinItems=1`, `MaxItems=16`, unique items.
 - Unset list and unset single field: discover the cluster default and additional pod ranges on the primary subnetwork.
-- Explicit scalar or list: replace the discovered list entirely, without merging cluster ranges.
+- Explicit `subnetRangeName` or `subnetRangeNames`: replace the discovered list entirely, without merging cluster ranges.
 - Discovery combines the primary range, `additionalPodRangesConfig.podRangeNames`, and names from `podRangeInfo` in that order, removing duplicates and empty names. Separate-subnetwork `additionalIpRangesConfigs` are excluded.
 
 Helper `GCENodeClass.PodSubnetRangeNames()` returns the list, else a one-element slice from `subnetRangeName`, else nil. Launch and status use the same cluster-range discovery helper when it returns nil. If no named range is reported, launch retains one attempt with the range name unset.
@@ -109,7 +109,7 @@ Changing `subnetRangeName` or `subnetRangeNames` is NodeClass drift. Launch-time
 - CRD CEL: both fields set is rejected; list item pattern; unique items.
 - Ranking: greatest free-IP count first; unknown last; candidate-order tie-break; known zero remains eligible.
 - Discovery: default plus configured and reported additional names; stable union, deduplication, missing utilization, missing primary name, and exclusion of separate subnetworks.
-- Launch: omitted fields discover candidates; explicit scalar/list completely replaces them; greatest known free-IP count is preferred; capacity read failure does not block launch.
+- Launch: omitted fields discover candidates; explicit `subnetRangeName` or `subnetRangeNames` settings completely replace them; greatest known free-IP count is preferred; capacity read failure does not block launch.
 - Status: candidate membership matches launch, with optional integer free-IP counts; clear stale counts on failure without a reconcile error.
 - Capacity: HTTP query/view, omitted-versus-zero fields, Shared VPC/override resolution, cache identity/expiry/ownership and bounded cancellation.
 - Insert: IP_SPACE_EXHAUSTED retries the next range and only fail-fasts after the last.
@@ -117,7 +117,7 @@ Changing `subnetRangeName` or `subnetRangeNames` is NodeClass drift. Launch-time
 
 ### E2E / Integration Tests
 
-Existing e2e NodeClasses may keep `subnetRangeName`. E2e setup provisions two dedicated pod ranges on the primary subnet, `-pods-small` (/22) and `-pods-large` (/20), attaches them to the cluster, and passes their names to the suite. Serial networking specs cover default discovery of the cluster's ranges, scalar and list overrides asserted against the node's actual primary-interface alias range, published free-IP counts compared with a direct `subnetworks.get`, and placement in the range with the most free IPs when the poorer range is listed first.
+Existing e2e NodeClasses may keep `subnetRangeName`. E2e setup provisions two dedicated pod ranges on the primary subnet, `-pods-small` (/22) and `-pods-large` (/20), attaches them to the cluster, and passes their names to the suite. Serial networking specs cover default discovery of the cluster's ranges, `subnetRangeName` and `subnetRangeNames` overrides asserted against the node's actual primary-interface alias range, published free-IP counts compared with a direct `subnetworks.get`, and placement in the range with the most free IPs when the poorer range is listed first.
 
 ---
 
@@ -135,7 +135,7 @@ The feature is complete when:
 
 ## Migration
 
-Omitted pod-range fields now allow allocation from the cluster default and additional pod ranges. To retain default-range-only allocation, explicitly set `subnetRangeNames` to a single-element list containing the cluster default range name. Explicit scalar/list overrides remain restricted to those names. Migrate deprecated `subnetRangeName` to a single-element `subnetRangeNames` list; removal will be announced separately. Status reports optional integer `totalFreeIP` counts. The existing `compute.subnetworks.get` permission is now used for capacity reads, including in Shared VPC host projects.
+Omitted pod-range fields now allow allocation from the cluster default and additional pod ranges. To retain default-range-only allocation, explicitly set `subnetRangeNames` to a single-element list containing the cluster default range name. Explicit `subnetRangeName` or `subnetRangeNames` settings restrict allocation to the specified names. Migrate deprecated `subnetRangeName` to a single-element `subnetRangeNames` list; removal will be announced separately. Status reports optional integer `totalFreeIP` counts. The existing `compute.subnetworks.get` permission is now used for capacity reads, including in Shared VPC host projects.
 
 ---
 
@@ -143,7 +143,7 @@ Omitted pod-range fields now allow allocation from the cluster default and addit
 
 ### Drop `subnetRangeName` and migrate to a list
 
-Would force a CRD/YAML migration for every existing NodeClass. Keeping the scalar field is cheaper while v1alpha1 is still in motion.
+Would force a CRD/YAML migration for every existing NodeClass. Keeping `subnetRangeName` avoids that migration while v1alpha1 is still in motion.
 
 ### Use only the cluster default range when unset
 

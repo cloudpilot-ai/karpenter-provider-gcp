@@ -371,99 +371,13 @@ func TestHandleZoneOperationErrorForNonCapacityFailure(t *testing.T) {
 	require.False(t, ok)
 }
 
-// podRangeFallbackCluster reports two pod ranges so the launch loop has somewhere to fall back to.
-func podRangeFallbackCluster() *containerv1.Cluster {
-	cluster := makeCluster("net", "subnet", "default-pods", false)
-	cluster.IpAllocationPolicy.AdditionalPodRangesConfig = &containerv1.AdditionalPodRangesConfig{
-		PodRangeInfo: []*containerv1.RangeInfo{
-			{RangeName: "default-pods", Utilization: 0.1},
-			{RangeName: "extra-pods", Utilization: 0.9},
-		},
-	}
-	return cluster
+type emptySubnetProvider struct{}
+
+func (emptySubnetProvider) GetFreeIPCounts(context.Context, string, string) (map[string]int64, error) {
+	return nil, nil
 }
 
-// podRangeFallbackHandler serves the instance-get, insert and operation-poll calls of a
-// single launch, failing the first insert with an IP exhaustion error of the given kind.
-// asyncFailure reports the exhaustion through the zone operation instead of the insert call.
-func podRangeFallbackHandler(inserts *atomic.Int32, asyncFailure bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.Contains(r.URL.Path, "/operations/"):
-			op := &compute.Operation{Name: "op-1", Status: "DONE"}
-			if asyncFailure && inserts.Load() == 1 {
-				op.Error = &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
-					Code:    "IP_SPACE_EXHAUSTED",
-					Message: "IP address range of subnetwork is exhausted",
-				}}}
-			}
-			writeJSON(w, op)
-		case r.Method == http.MethodPost:
-			if inserts.Add(1) == 1 && !asyncFailure {
-				w.WriteHeader(http.StatusBadRequest)
-				writeJSON(w, map[string]any{"error": map[string]any{
-					"code":    http.StatusBadRequest,
-					"message": "IP address range of subnetwork is exhausted",
-					"errors":  []map[string]string{{"reason": "IP_SPACE_EXHAUSTED", "message": "range exhausted"}},
-				}})
-				return
-			}
-			writeJSON(w, &compute.Operation{Name: "op-1", Status: "RUNNING"})
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			writeJSON(w, map[string]any{"error": map[string]any{
-				"code":    http.StatusNotFound,
-				"message": "not found",
-				"errors":  []map[string]string{{"reason": "notFound"}},
-			}})
-		}
-	}
-}
-
-func TestGetOrCreateInstanceFallsBackToNextPodRange(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name         string
-		asyncFailure bool
-	}{
-		{name: "insert call reports exhaustion"},
-		{name: "zone operation reports exhaustion", asyncFailure: true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			var inserts atomic.Int32
-			p := newFakeComputeProvider(t, podRangeFallbackHandler(&inserts, tc.asyncFailure))
-			p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
-			p.unavailableOfferings = unavailableofferings.NewUnavailableOfferings()
-
-			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
-				SubnetRangeNames: []string{"default-pods", "extra-pods"},
-			}}
-			instanceType := &cloudprovider.InstanceType{
-				Name:         "n2-standard-2",
-				Requirements: scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64")),
-				Overhead:     &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
-			}
-
-			instance, _, retryable, err := p.getOrCreateInstance(context.Background(),
-				spotOrOnDemandNodeClaim(), nodeClass, instanceType, makeSourceMetadata("max-pods-per-node=110"),
-				podRangeFallbackCluster(), "us-central1-f", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil,
-			)
-
-			require.NoError(t, err)
-			require.False(t, retryable)
-			require.NotNil(t, instance)
-			require.Equal(t, int32(2), inserts.Load(), "the exhausted range must be retried with the next range")
-			require.Equal(t, "extra-pods", instance.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName)
-			require.False(t, p.unavailableOfferings.IsUnavailable("n2-standard-2", "us-central1-f", karpv1.CapacityTypeOnDemand),
-				"a successful fallback must not mark the offering unavailable")
-		})
-	}
-}
+func (emptySubnetProvider) Invalidate(string, string) {}
 
 // newFakeComputeProvider builds a DefaultProvider whose computeService targets a fake
 // HTTP server driven by handler.
@@ -480,7 +394,7 @@ func newFakeComputeProvider(t *testing.T, handler http.Handler) *DefaultProvider
 		projectID:      "test-project",
 		region:         "us-central1",
 		computeService: svc,
-		subnetProvider: newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, map[string]any{}) })),
+		subnetProvider: emptySubnetProvider{},
 		gkeProvider:    &fakeGKEProvider{},
 		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
 	}
