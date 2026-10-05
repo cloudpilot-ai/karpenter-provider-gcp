@@ -23,6 +23,5 @@ spec:
   networkConfig:
     subnetwork: regions/us-central1/subnetworks/karpenter-nodes
   disks:
-    - category: pd-balanced
-      sizeGiB: 60
+    - sizeGiB: 60
       boot: true

@@ -76,6 +76,40 @@ func TestPatchKubeEnvServerBinaryForArchNoopWhenArchMatches(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestPatchKubeEnvServerBinaryForArchErrors(t *testing.T) {
+	amd64 := &cloudprovider.InstanceType{Requirements: scheduling.NewRequirements(
+		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+	)}
+
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "missing",
+			want: "no SERVER_BINARY_TAR_URL",
+		},
+		{
+			name: "unknown architecture",
+			url:  "https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-riscv64.tar.gz",
+			want: "does not name a known kubernetes-server-linux architecture",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := metadata.NewInstanceMetadata()
+			if tt.url != "" {
+				target.SetKubeEnvEntry("SERVER_BINARY_TAR_URL", tt.url)
+			}
+
+			err := (&DefaultProvider{}).patchKubeEnvServerBinaryForArch(context.Background(), target, amd64)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
 func TestGetServerBinaryHashCachesByVersionAndArch(t *testing.T) {
 	serverBinaryHashCache.Clear()
 	requests := 0

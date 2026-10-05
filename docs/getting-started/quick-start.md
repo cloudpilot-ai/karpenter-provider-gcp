@@ -20,10 +20,11 @@ spec:
     - family: ContainerOptimizedOS
       channel: cluster
   disks:
-    - category: pd-balanced
-      sizeGiB: 60
+    - sizeGiB: 60
       boot: true
 ```
+
+With `category` omitted, Compute Engine selects the default disk type for the provisioned machine family. Set `category` only when you need a specific compatible disk type; see [Disk type scheduling](../examples/advanced.md#disk-type-scheduling).
 
 Apply it:
 

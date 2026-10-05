@@ -70,10 +70,10 @@ func newTestProvider() *DefaultProvider {
 		MemoryMb:  lo.ToPtr[int32](16384),
 	}
 	return &DefaultProvider{
-		authOptions:       &auth.Credential{Region: "us-central1"},
-		pricingProvider:   &fakePricingProvider{},
-		gkeProvider:       &fakeGKEProvider{},
-		instanceTypesInfo: []*computepb.MachineType{mt},
+		authOptions:         &auth.Credential{Region: "us-central1"},
+		pricingProvider:     &fakePricingProvider{},
+		gkeProvider:         &fakeGKEProvider{},
+		instanceTypesByName: map[string]*computepb.MachineType{"n2-standard-4": mt},
 		instanceTypesOfferings: map[string]sets.Set[string]{
 			"n2-standard-4": sets.New("us-central1-a"),
 		},

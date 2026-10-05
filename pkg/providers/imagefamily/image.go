@@ -157,6 +157,9 @@ func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.Image
 	if img == nil {
 		return nil, nil
 	}
+	if err := imageReady(img); err != nil {
+		return nil, err
+	}
 
 	var requirements scheduling.Requirements
 	switch img.Architecture {
@@ -244,12 +247,22 @@ func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) 
 		if gceim == nil {
 			continue
 		}
+		if err := imageReady(gceim); err != nil {
+			return nil, err
+		}
 		result = append(result, im)
 	}
 	if len(ims) > 0 && len(result) == 0 {
 		return nil, &imageResolutionError{msg: fmt.Sprintf("%d candidate image(s) were resolved but none exist in GCP; verify the pinned version is available", len(ims))}
 	}
 	return result, nil
+}
+
+func imageReady(img *compute.Image) error {
+	if img.Status != "READY" {
+		return fmt.Errorf("image %s is not ready (status: %s)", img.Name, img.Status)
+	}
+	return nil
 }
 
 func (p *DefaultProvider) resolveImage(ctx context.Context, sourceImage string) (*compute.Image, error) {

@@ -68,9 +68,9 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 			"invalid Ubuntu version %q: must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')", version)}
 	}
 
-	images, err := u.listImages(ctx)
+	images, err := u.listImages(ctx, version)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to resolve Ubuntu GKE image from catalog")
+		log.FromContext(ctx).Error(err, "failed to resolve Ubuntu GKE image from image project")
 		return Images{}, err
 	}
 
@@ -92,18 +92,29 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 	return ret, nil
 }
 
-// listImages returns all Ubuntu GKE images matching the cluster's K8s minor version.
-func (u *Ubuntu) listImages(ctx context.Context) ([]*compute.Image, error) {
-	filter := u.buildImageFilter(ctx)
-	var images []*compute.Image
-	err := u.computeService.Images.List(ubuntuGKEImageProject).
-		Filter(filter).
-		Pages(ctx, func(page *compute.ImageList) error {
-			images = append(images, page.Items...)
-			return nil
-		})
+// listImages retains only the newest matching image for each architecture.
+func (u *Ubuntu) listImages(ctx context.Context, version string) ([]*compute.Image, error) {
+	prefix := strings.TrimSuffix(strings.TrimPrefix(u.buildImageFilter(ctx), "name="), "*")
+	best := make(map[string]*compute.Image, len(ubuntuArchitectures))
+	err := scanImages(ctx, u.computeService, ubuntuGKEImageProject, func(img *compute.Image) bool {
+		if !strings.HasPrefix(img.Name, prefix) || (version != "latest" && !strings.HasSuffix(img.Name, "-"+version)) {
+			return false
+		}
+		for _, arch := range ubuntuArchitectures {
+			if best[arch] == nil && u.isUsableForArch(img, arch) {
+				best[arch] = img
+			}
+		}
+		return len(best) == len(ubuntuArchitectures)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("listing Ubuntu GKE images in %s: %w", ubuntuGKEImageProject, err)
+	}
+	images := make([]*compute.Image, 0, len(ubuntuArchitectures))
+	for _, arch := range ubuntuArchitectures {
+		if best[arch] != nil {
+			images = append(images, best[arch])
+		}
 	}
 	return images, nil
 }
@@ -169,26 +180,26 @@ func ubuntuImageDeprecated(img *compute.Image) bool {
 
 // isUsableUbuntuImage reports whether img is a non-deprecated, clean amd64 ubuntu-gke-2404 image.
 func isUsableUbuntuImage(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2404AMD64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2404AMD64Re.MatchString(img.Name)
 }
 
 // isUsableUbuntuArm64Image reports whether img is a non-deprecated, clean arm64 ubuntu-gke-2404 image.
 func isUsableUbuntuArm64Image(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2404ARM64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2404ARM64Re.MatchString(img.Name)
 }
 
 // isUsableUbuntu2204Image reports whether img is a non-deprecated, clean amd64 ubuntu-gke-2204 image
 // (the 2204 series carries no arch token for amd64).
 func isUsableUbuntu2204Image(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2204AMD64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2204AMD64Re.MatchString(img.Name)
 }
 
 // isUsableUbuntu2204Arm64Image reports whether img is a non-deprecated, clean arm64 ubuntu-gke-2204 image.
 func isUsableUbuntu2204Arm64Image(img *compute.Image) bool {
-	return !ubuntuImageDeprecated(img) && ubuntu2204ARM64Re.MatchString(img.Name)
+	return img.Status == "READY" && !ubuntuImageDeprecated(img) && ubuntu2204ARM64Re.MatchString(img.Name)
 }
 
-// buildImageFilter returns a GCP Images.List filter scoped to the cluster's K8s minor version.
+// buildImageFilter describes the local name scope for the cluster's K8s minor version.
 func (u *Ubuntu) buildImageFilter(ctx context.Context) string {
 	prefix := u.imagePrefix()
 	if u.versionProvider == nil {

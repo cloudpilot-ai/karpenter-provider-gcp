@@ -1,0 +1,20 @@
+### E2E Test Results
+
+<p><strong>Test commit:</strong> {{.Commit}} | <strong>Controller commit:</strong> {{.ControllerCommit}} | <strong>Total duration:</strong> {{.Duration}}</p>
+<p><strong>Controller resources:</strong> {{.Resources}}</p>
+{{if .LogsUnavailable}}<p><strong>Controller logs:</strong> unavailable</p>
+{{end}}
+<table>
+<thead><tr><th>Suite</th><th>Result</th><th>Duration</th></tr></thead>
+<tbody>
+{{range .Suites}}<tr>
+<td><details>
+<summary>{{.Name}} — {{.Passed}} passed, {{.Failed}} failed{{if .Skipped}}, {{.Skipped}} skipped{{end}}{{if .Pending}}, {{.Pending}} pending{{end}}</summary>
+<ul>
+{{range .Specs}}<li>{{.Result}} · {{.Name}} ({{.Duration}})</li>
+{{end}}</ul>
+</details></td>
+<td>{{.Result}}</td><td>{{.Duration}}</td>
+</tr>
+{{end}}</tbody>
+</table>

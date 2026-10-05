@@ -13,9 +13,11 @@ includedPermissions:
   - compute.instances.setTags
   # Compute Engine — infrastructure discovery
   - compute.disks.create  # implicit: required by Instances.Insert (boot disk)
+  - compute.disks.setLabels  # required by Instances.Insert when initializing labeled disks
   - compute.images.get
   - compute.images.list
   - compute.instanceGroupManagers.get
+  - compute.machineTypes.get  # required to resolve GCECustomMachineType registrations
   - compute.machineTypes.list
   - compute.networks.get      # required for Shared VPC (cross-project network validation)
   - compute.projects.get

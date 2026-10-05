@@ -56,6 +56,17 @@ spec:
               GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
               This will contain the configuration necessary to launch instances in GCP.
             properties:
+              advancedMachineFeatures:
+                description: AdvancedMachineFeatures configures advanced CPU and virtualisation
+                  options for provisioned nodes.
+                properties:
+                  enableNestedVirtualization:
+                    description: |-
+                      EnableNestedVirtualization defines whether the instance can run nested virtual machines.
+                      Only supported on Intel-based machine families; not supported on E2, AMD, Arm or
+                      Confidential VM instances.
+                    type: boolean
+                type: object
               autoGPUTaint:
                 description: |-
                   AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule
@@ -88,7 +99,6 @@ spec:
                       - hyperdisk-extreme
                       - hyperdisk-ml
                       - hyperdisk-throughput
-                      - local-ssd
                       - pd-balanced
                       - pd-extreme
                       - pd-ssd
@@ -455,7 +465,9 @@ spec:
               labels:
                 additionalProperties:
                   type: string
-                description: Labels to be applied on GCE VM instance.
+                description: |-
+                  Labels to be applied on the GCE VM instance and its persistent disks.
+                  Local SSD scratch disks do not support labels.
                 maxProperties: 20
                 type: object
                 x-kubernetes-validations:
@@ -471,6 +483,38 @@ spec:
                   rule: self.all(k, k !='karpenter.sh/nodeclaim')
                 - message: tag contains a restricted tag matching karpenter.k8s.gcp/gcenodeclass
                   rule: self.all(k, k !='karpenter.k8s.gcp/gcenodeclass')
+              linuxNodeConfig:
+                description: |-
+                  LinuxNodeConfig configures the Linux kernel of provisioned nodes.
+                  Mirrors GKE node pool linux_node_config.
+                properties:
+                  hugepages:
+                    description: |-
+                      Hugepages configures the static hugepages that the node allocates at boot.
+                      Mirrors GKE node pool linux_node_config.hugepages_config.
+                    properties:
+                      hugepageSize1g:
+                        description: HugepageSize1g is the number of 1 GiB hugepages
+                          to allocate.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      hugepageSize2m:
+                        description: HugepageSize2m is the number of 2 MiB hugepages
+                          to allocate.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                type: object
+              localSsdMode:
+                default: RawBlock
+                description: LocalSsdMode exposes local SSDs as raw devices or kubelet
+                  ephemeral storage.
+                enum:
+                - RawBlock
+                - Ephemeral
+                type: string
               metadata:
                 additionalProperties:
                   type: string
@@ -549,6 +593,21 @@ spec:
                   type: string
                 maxItems: 20
                 type: array
+              preemptionNoticeDuration:
+                description: |-
+                  PreemptionNoticeDuration is how long before shutdown GCE flips the
+                  instance/preempted metadata key on a Spot VM. Unset (the default) gives no advance
+                  notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.
+                  "120s" gives a two-minute warning, letting Karpenter start draining before shutdown.
+                  GCE currently accepts up to two minutes.
+                  Only applies to Spot capacity; ignored for on-demand nodes.
+                  Reading the notice requires an agent on the node that watches the metadata key
+                  and sets the GCESpotPreempting condition — see docs/spot-preemption.md.
+                pattern: ^([0-9]+(s|m|h))+$
+                type: string
+                x-kubernetes-validations:
+                - message: preemptionNoticeDuration must not exceed 120s
+                  rule: duration(self) <= duration('120s')
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance

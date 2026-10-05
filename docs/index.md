@@ -44,6 +44,7 @@ Key capabilities:
 - [GPU nodes](gpu-nodes.md) — GPU instance types, driver version control, and device plugin scheduling
 - [Image selection](image-selection.md) — select node images by GKE release channel, version pin, or raw image ID
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
+- [Spot preemption notice](spot-preemption.md) — get up to two minutes' warning before GCE reclaims a Spot VM
 - [Static capacity](examples/static-capacity.md) — keep a fixed number of nodes running with `spec.replicas`
 - [Image management](image-management.md) — controlling GKE node image selection, version pinning, and drift
 
@@ -61,7 +62,7 @@ Key capabilities:
 - [GPU](examples/gpu.md) — GPU workloads
 - [Networking](examples/networking.md) — private nodes, custom subnetwork, pod IP range
 - [Static capacity](examples/static-capacity.md) — fixed node count with `spec.replicas`
-- [Advanced](examples/advanced.md) — kubelet config, Shielded VM, Confidential VM, metadata, secondary disk, multiple pools
+- [Advanced](examples/advanced.md) — kubelet config, static hugepages, Shielded VM, Confidential VM, nested virtualization, local SSDs, metadata, secondary disk, multiple pools
 
 ## Community
 

@@ -6,6 +6,7 @@ spec:
   imageSelectorTerms:
     - family: ContainerOptimizedOS
       channel: cluster
+  # Also applied to the boot disk and other persistent disks.
   labels:
     env: dev
   networkTags:
@@ -13,6 +14,5 @@ spec:
   kubeletConfiguration:
     maxPods: 50
   disks:
-    - category: pd-balanced
-      sizeGiB: 60
+    - sizeGiB: 60
       boot: true

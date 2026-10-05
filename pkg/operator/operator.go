@@ -58,6 +58,7 @@ type Operator struct {
 	InstanceTypeProvider      instancetype.Provider
 	InstanceProvider          instance.Provider
 	GKEProvider               gke.Provider
+	AuthOptions               *auth.Credential
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -129,6 +130,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeDefaultSA = proj.DefaultServiceAccount
 	}
 
+	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache, operator.GetClient())
 	instanceProvider := instance.NewProvider(
 		options.FromContext(ctx).ClusterName,
 		options.FromContext(ctx).ClusterLocation,
@@ -138,11 +140,11 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		computeDefaultSA,
 		computeService,
 		gkeProvider,
+		instanceTypeProvider,
 		nodeTemplateProvider,
 		versionProvider,
 		unavailableOfferingsCache,
 	)
-	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, &auth, pricingProvider, gkeProvider, unavailableOfferingsCache)
 
 	return ctx, &Operator{
 		Operator:                  operator,
@@ -153,6 +155,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceTypeProvider:      instanceTypeProvider,
 		InstanceProvider:          instanceProvider,
 		GKEProvider:               gkeProvider,
+		AuthOptions:               &auth,
 	}
 }
 

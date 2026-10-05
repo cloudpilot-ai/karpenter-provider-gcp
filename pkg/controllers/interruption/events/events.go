@@ -22,6 +22,17 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
+func PreemptionNoticeReceived(node *corev1.Node) (evts []events.Event) {
+	evts = append(evts, events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "PreemptionNoticeReceived",
+		Message:        "GCE signaled an imminent Spot preemption for the Node",
+		DedupeValues:   []string{string(node.UID)},
+	})
+	return evts
+}
+
 func TerminatingOnInterruption(nodeClaim *karpv1.NodeClaim) (evts []events.Event) {
 	evts = append(evts, events.Event{
 		InvolvedObject: nodeClaim,

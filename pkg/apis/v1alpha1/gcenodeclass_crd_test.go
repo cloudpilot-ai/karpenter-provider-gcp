@@ -30,7 +30,7 @@ func crdPath() string {
 	return filepath.Join("..", "..", "..", "charts", "karpenter", "crds", "karpenter.k8s.gcp_gcenodeclasses.yaml")
 }
 
-func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	t.Helper()
 
 	raw, err := os.ReadFile(crdPath())
@@ -40,8 +40,17 @@ func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	require.NoError(t, yaml.Unmarshal(raw, &crd))
 	require.Len(t, crd.Spec.Versions, 1)
 
-	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.
-		Properties["spec"].Properties["kubeletConfiguration"]
+	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+}
+
+func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return specSchema(t).Properties["kubeletConfiguration"]
+}
+
+func hugepagesSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return specSchema(t).Properties["linuxNodeConfig"].Properties["hugepages"]
 }
 
 func TestGCENodeClassCRDAllowsMaxParallelImagePullsOfOne(t *testing.T) {
@@ -124,4 +133,13 @@ func TestGCENodeClassCRDSubnetRangeNamesUniqueViaCEL(t *testing.T) {
 	require.NotContains(t, crdText, `uniqueItems: true`, "Kubernetes CRDs forbid uniqueItems")
 	require.Contains(t, crdText, `subnetRangeNames must be unique`)
 	require.Contains(t, crdText, `self.all(x, self.exists_one(y, x == y))`)
+}
+
+func TestGCENodeClassCRDRejectsZeroHugepages(t *testing.T) {
+	for _, name := range []string{"hugepageSize2m", "hugepageSize1g"} {
+		field := hugepagesSchema(t).Properties[name]
+
+		require.NotNil(t, field.Minimum, "%s must declare a minimum", name)
+		require.Equal(t, float64(1), *field.Minimum, "%s must reject 0", name)
+	}
 }

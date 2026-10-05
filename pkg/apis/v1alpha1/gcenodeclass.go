@@ -81,7 +81,12 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	// +optional
 	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
-	// Labels to be applied on GCE VM instance.
+	// LinuxNodeConfig configures the Linux kernel of provisioned nodes.
+	// Mirrors GKE node pool linux_node_config.
+	// +optional
+	LinuxNodeConfig *LinuxNodeConfig `json:"linuxNodeConfig,omitempty"`
+	// Labels to be applied on the GCE VM instance and its persistent disks.
+	// Local SSD scratch disks do not support labels.
 	// +kubebuilder:validation:MaxProperties=20
 	// +kubebuilder:validation:XValidation:message="empty tag keys aren't supported",rule="self.all(k, k != '')"
 	// +kubebuilder:validation:XValidation:message="tag contains a restricted tag matching gce:gce-cluster-name",rule="self.all(k, k !='gce:gce-cluster-name')"
@@ -104,6 +109,9 @@ type GCENodeClassSpec struct {
 	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
+	// AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes.
+	// +optional
+	AdvancedMachineFeatures *AdvancedMachineFeatures `json:"advancedMachineFeatures,omitempty"`
 	// ConfidentialInstanceType enables Confidential VM for provisioned nodes using the
 	// named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory
 	// encryption. Leave unset to disable. Only supported on specific machine families.
@@ -127,7 +135,35 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:default=default
 	// +optional
 	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
+	// LocalSsdMode exposes local SSDs as raw devices or kubelet ephemeral storage.
+	// +kubebuilder:default=RawBlock
+	// +optional
+	LocalSsdMode LocalSSDMode `json:"localSsdMode,omitempty"`
+	// PreemptionNoticeDuration is how long before shutdown GCE flips the
+	// instance/preempted metadata key on a Spot VM. Unset (the default) gives no advance
+	// notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.
+	// "120s" gives a two-minute warning, letting Karpenter start draining before shutdown.
+	// GCE currently accepts up to two minutes.
+	// Only applies to Spot capacity; ignored for on-demand nodes.
+	// Reading the notice requires an agent on the node that watches the metadata key
+	// and sets the GCESpotPreempting condition — see docs/spot-preemption.md.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+	// +kubebuilder:validation:XValidation:message="preemptionNoticeDuration must not exceed 120s",rule="duration(self) <= duration('120s')"
+	// +optional
+	PreemptionNoticeDuration *metav1.Duration `json:"preemptionNoticeDuration,omitempty"`
 }
+
+// LocalSSDMode controls how local SSDs are exposed to workloads.
+// +kubebuilder:validation:Enum=RawBlock;Ephemeral
+type LocalSSDMode string
+
+const (
+	// LocalSSDModeRawBlock leaves local SSDs unformatted.
+	LocalSSDModeRawBlock LocalSSDMode = "RawBlock"
+	// LocalSSDModeEphemeral uses local SSDs for kubelet ephemeral storage.
+	LocalSSDModeEphemeral LocalSSDMode = "Ephemeral"
+)
 
 // NetworkConfig holds network settings for provisioned nodes.
 // The shape mirrors the Terraform google_container_node_pool network_config block
@@ -363,7 +399,7 @@ type Disk struct {
 }
 
 // DiskCategory represents a disk category type
-// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;local-ssd;pd-balanced;pd-extreme;pd-ssd;pd-standard
+// +kubebuilder:validation:Enum=hyperdisk-balanced;hyperdisk-balanced-high-availability;hyperdisk-extreme;hyperdisk-ml;hyperdisk-throughput;pd-balanced;pd-extreme;pd-ssd;pd-standard
 type DiskCategory string
 
 // SecondaryBootDiskMode is the mode of the secondary boot disk.
@@ -391,6 +427,37 @@ type ShieldedInstanceConfig struct {
 	EnableIntegrityMonitoring *bool `json:"enableIntegrityMonitoring,omitempty"`
 }
 
+// LinuxNodeConfig defines the Linux kernel options for a provisioned node.
+type LinuxNodeConfig struct {
+	// Hugepages configures the static hugepages that the node allocates at boot.
+	// Mirrors GKE node pool linux_node_config.hugepages_config.
+	// +optional
+	Hugepages *HugepagesConfig `json:"hugepages,omitempty"`
+}
+
+// HugepagesConfig defines the static hugepages that a node allocates at boot.
+// Karpenter does not add the hugepages to the instance type capacity. Use a
+// NodeOverlay to advertise the hugepages capacity to the scheduling simulation.
+type HugepagesConfig struct {
+	// HugepageSize2m is the number of 2 MiB hugepages to allocate.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	HugepageSize2m *int32 `json:"hugepageSize2m,omitempty"`
+	// HugepageSize1g is the number of 1 GiB hugepages to allocate.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	HugepageSize1g *int32 `json:"hugepageSize1g,omitempty"`
+}
+
+// AdvancedMachineFeatures defines advanced CPU and virtualisation options for a GCE instance.
+type AdvancedMachineFeatures struct {
+	// EnableNestedVirtualization defines whether the instance can run nested virtual machines.
+	// Only supported on Intel-based machine families; not supported on E2, AMD, Arm or
+	// Confidential VM instances.
+	// +optional
+	EnableNestedVirtualization *bool `json:"enableNestedVirtualization,omitempty"`
+}
+
 // GCENodeClass is the Schema for the GCENodeClass API
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:path=gcenodeclasses,scope=Cluster,categories=karpenter,shortName={gcenc,gcencs}
@@ -412,7 +479,7 @@ const (
 	// 1. A field changes its default value for an existing field that is already hashed
 	// 2. A field is added to the hash calculation with an already-set value
 	// 3. A field is removed from the hash calculations
-	GCENodeClassHashVersion = "v4"
+	GCENodeClassHashVersion = "v5"
 )
 
 func (in *GCENodeClass) Hash() string {

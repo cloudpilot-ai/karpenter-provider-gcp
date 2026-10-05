@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/awslabs/operatorpkg/status"
@@ -32,7 +33,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
+	karpoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
@@ -42,6 +45,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 const CloudProviderName = "gcp"
@@ -59,18 +63,21 @@ type CloudProvider struct {
 
 	instanceTypeProvider instancetype.Provider
 	instanceProvider     instance.Provider
+	instanceTypeStore    *nodeoverlay.InstanceTypeStore
 }
 
 func New(kubeClient client.Client,
 	recorder events.Recorder,
 	instanceTypeProvider instancetype.Provider,
 	instanceProvider instance.Provider,
+	store *nodeoverlay.InstanceTypeStore,
 ) *CloudProvider {
 	return &CloudProvider{
 		kubeClient:           kubeClient,
 		recorder:             recorder,
 		instanceTypeProvider: instanceTypeProvider,
 		instanceProvider:     instanceProvider,
+		instanceTypeStore:    store,
 	}
 }
 
@@ -105,9 +112,10 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, fmt.Errorf("creating instance, %w", err)
 	}
 
-	instanceType, _ := lo.Find(instanceTypes, func(i *cloudprovider.InstanceType) bool {
-		return i.Name == instance.Type
-	})
+	instanceType, err := c.resolveCreatedInstanceType(ctx, nodeClass, instanceTypes, instance)
+	if err != nil {
+		return nil, err
+	}
 
 	nc := c.instanceToNodeClaim(instance, instanceType)
 	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
@@ -115,6 +123,25 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
 	})
 	return nc, nil
+}
+
+func (c *CloudProvider) resolveCreatedInstanceType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType, inst *instance.Instance) (*cloudprovider.InstanceType, error) {
+	instanceType, _ := matchVariantForInstance(instanceTypes, inst)
+	count, stamped := inst.Labels[utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)]
+	if !stamped || (instanceType != nil && instanceType.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Any() == count) {
+		return instanceType, nil
+	}
+
+	// An adopted VM can outlive a NodeClass change that filtered its variant out of launch candidates.
+	allInstanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	if err != nil {
+		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving adopted instance type, %w", err), "InstanceTypeResolutionFailed", "Error resolving adopted instance type")
+	}
+	instanceType, _ = matchVariantForInstance(allInstanceTypes, inst)
+	if instanceType == nil || instanceType.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Any() != count {
+		return nil, cloudprovider.NewCreateError(fmt.Errorf("instance %s has local SSD count %q without a matching variant for %s", inst.Name, count, inst.Type), "LocalSSDCountMismatch", "Existing instance local SSD count has no matching variant")
+	}
+	return instanceType, nil
 }
 
 func (c *CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
@@ -146,19 +173,48 @@ func (c *CloudProvider) resolveInstanceTypeFromInstance(ctx context.Context, ins
 		return nil, client.IgnoreNotFound(fmt.Errorf("resolving nodepool, %w", err))
 	}
 
-	instanceTypes, err := c.GetInstanceTypes(ctx, nodePool)
+	instanceTypes, err := c.getAllInstanceTypes(ctx, nodePool)
 	if err != nil {
 		return nil, client.IgnoreNotFound(fmt.Errorf("getting instance types, %w", err))
 	}
 
-	instanceType, ok := lo.Find(instanceTypes, func(i *cloudprovider.InstanceType) bool {
-		return i.Name == instance.Type
-	})
-
+	instanceType, ok := matchVariantForInstance(instanceTypes, instance)
 	if !ok {
-		return nil, fmt.Errorf("instance type %s not found in offerings", instance.Type)
+		// Catalog membership controls new launches, not whether existing VMs can be
+		// discovered and garbage-collected after their registration is removed.
+		return nil, nil
+	}
+	if karpoptions.FromContext(ctx).FeatureGates.NodeOverlay {
+		instanceType, err = c.instanceTypeStore.Apply(nodePool.Name, instanceType)
+		if err != nil {
+			return nil, fmt.Errorf("applying nodeoverlays, %w", err)
+		}
 	}
 	return instanceType, nil
+}
+
+// matchVariantForInstance disambiguates same-name instance types using the
+// local-SSD count stamped on the VM. Unlabeled VMs use the first name match.
+func matchVariantForInstance(its []*cloudprovider.InstanceType, inst *instance.Instance) (*cloudprovider.InstanceType, bool) {
+	gceCountKey := utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)
+	wantCount, hasCount := inst.Labels[gceCountKey]
+	var fallback *cloudprovider.InstanceType
+	for _, i := range its {
+		if i.Name != inst.Type {
+			continue
+		}
+		if fallback == nil {
+			fallback = i
+		}
+		if !hasCount {
+			return i, true
+		}
+		req := i.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount)
+		if req.Operator() == corev1.NodeSelectorOpIn && req.Len() == 1 && req.Any() == wantCount {
+			return i, true
+		}
+	}
+	return fallback, fallback != nil
 }
 
 func (c *CloudProvider) resolveNodePoolFromInstance(ctx context.Context, instance *instance.Instance) (*karpv1.NodePool, error) {
@@ -196,7 +252,9 @@ func (c *CloudProvider) LivenessProbe(req *http.Request) error {
 	return c.instanceTypeProvider.LivenessProbe(req)
 }
 
-// GetInstanceTypes returns all available InstanceTypes
+// GetInstanceTypes returns the instance types the scheduler may use for a NodePool.
+// Non-zero configurable SSD counts require the count label on the NodePool;
+// existing instances are reconciled against the unfiltered catalog.
 func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
 	if err != nil {
@@ -215,7 +273,30 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 	if err != nil {
 		return nil, err
 	}
-	return instanceTypes, nil
+	return instanceTypesForScheduling(nodePool, instanceTypes), nil
+}
+
+func (c *CloudProvider) getAllInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
+	if err != nil {
+		return nil, err
+	}
+	return c.instanceTypeProvider.List(ctx, nodeClass)
+}
+
+func instanceTypesForScheduling(nodePool *karpv1.NodePool, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...)
+	requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
+	if requirements.Has(v1alpha1.LabelInstanceLocalSsdCount) {
+		return slices.Clone(instanceTypes)
+	}
+	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
+		if !localssd.FamilySupportsConfigurableLocalSSDs(instanceType.Name) {
+			return true
+		}
+		count := instanceType.Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount)
+		return count.Operator() == corev1.NodeSelectorOpIn && count.Len() == 1 && count.Any() == "0"
+	})
 }
 
 func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *karpv1.NodePool) (*v1alpha1.GCENodeClass, error) {
@@ -334,17 +415,15 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 
 		nodeClaim.Status.Capacity = lo.PickBy(instanceType.Capacity, resourceFilter)
 		nodeClaim.Status.Allocatable = lo.PickBy(instanceType.Allocatable(), resourceFilter)
-
-		// Add instance type label for gce nodeclaim
-		labels[corev1.LabelInstanceTypeStable] = instanceType.Name
 	}
 
-	// Set core labels
+	// Identity comes from the VM even when its type is no longer in the catalog.
+	labels[corev1.LabelInstanceTypeStable] = i.Type
 	labels[corev1.LabelTopologyZone] = i.Location
 	labels[karpv1.CapacityTypeLabelKey] = i.CapacityType
 
 	// Add node pool label if present
-	if v, ok := i.Labels[karpv1.NodePoolLabelKey]; ok {
+	if v, ok := i.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)]; ok {
 		labels[karpv1.NodePoolLabelKey] = v
 	}
 
@@ -389,6 +468,14 @@ func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *kar
 	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
 	if err != nil {
 		return nil, err
+	}
+	if karpoptions.FromContext(ctx).FeatureGates.NodeOverlay {
+		if nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]; ok {
+			instanceTypes, err = c.instanceTypeStore.ApplyAll(nodePoolName, instanceTypes)
+			if err != nil {
+				return nil, fmt.Errorf("applying nodeoverlays, %w", err)
+			}
+		}
 	}
 
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)

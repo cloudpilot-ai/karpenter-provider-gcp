@@ -26,9 +26,13 @@ import (
 	lop "github.com/samber/lo/parallel"
 	"go.uber.org/multierr"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 )
 
@@ -65,5 +69,13 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("instancetype").
 		WatchesRawSource(singleton.Source()).
+		// GCECustomMachineType registrations aren't otherwise watched, so a newly-Ready
+		// registration (or a price/status change) would sit unschedulable until the next
+		// 12-hour refresh. Any change re-triggers the same singleton reconcile immediately.
+		Watches(&v1alpha1.GCECustomMachineType{}, handler.EnqueueRequestsFromMapFunc(
+			func(context.Context, client.Object) []reconcile.Request {
+				return []reconcile.Request{{}}
+			},
+		)).
 		Complete(singleton.AsReconciler(c))
 }

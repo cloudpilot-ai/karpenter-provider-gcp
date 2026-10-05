@@ -13,6 +13,5 @@ spec:
   kubeletConfiguration:
     maxPods: 50
   disks:
-    - category: pd-balanced
-      sizeGiB: 60
+    - sizeGiB: 60
       boot: true

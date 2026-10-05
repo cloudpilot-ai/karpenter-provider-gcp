@@ -12,8 +12,7 @@ spec:
     - family: ContainerOptimizedOS
       channel: cluster
   disks:
-    - category: pd-balanced
-      sizeGiB: 60
+    - sizeGiB: 60
       boot: true
 ---
 apiVersion: karpenter.sh/v1

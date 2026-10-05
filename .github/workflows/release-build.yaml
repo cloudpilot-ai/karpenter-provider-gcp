@@ -80,6 +80,11 @@ jobs:
             exit 1
           fi
 
+      - name: Build chart dependencies
+        run: |
+          # charts/ is not committed; helm package fails without the pinned subchart archives
+          helm dependency build charts/karpenter
+
       - name: Package charts
         run: |
           helm package charts/karpenter     --version "${{ env.tag_semver }}" --app-version "${{ env.tag }}" -d charts/

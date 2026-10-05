@@ -142,6 +142,66 @@ kubeletConfiguration:
 
 > **Note:** Setting `maxParallelImagePulls` to `2` or greater requires `serializeImagePulls: false`; admission otherwise fails with `maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false`. `maxParallelImagePulls: 1` on its own is accepted without any `serializeImagePulls` change, and omitting both fields preserves the default serialized behavior.
 
+## Static hugepages
+
+Set `spec.linuxNodeConfig.hugepages` to pre-allocate hugepages on every node that the GCENodeClass provisions. The node allocates the pages at boot, before the kubelet starts, and reports them as `hugepages-2Mi` and `hugepages-1Gi` node capacity.
+
+```yaml
+linuxNodeConfig:
+  hugepages:
+    hugepageSize2m: 4096  # 4096 × 2 MiB = 8 GiB
+    hugepageSize1g: 4     # 4 × 1 GiB = 4 GiB
+```
+
+- `hugepageSize2m` — number of 2 MiB hugepages to allocate
+- `hugepageSize1g` — number of 1 GiB hugepages to allocate
+
+Each field is a page count with a minimum of `1`. Omit a field to allocate no pages of that size. Nodes don't inherit hugepages from the GKE node pool that Karpenter uses as its bootstrap template.
+
+The fields mirror the GKE [pre-allocated hugepages](https://cloud.google.com/kubernetes-engine/docs/how-to/node-system-config#pre-allocated-hugepages) settings, and the GKE limits apply:
+
+- Hugepages can use at most 60% of node memory on machines with less than 30 GB of memory, and at most 80% on larger machines.
+- 1 GiB hugepages are available only on some machine families, such as C3, C3D, C4, and M3.
+
+Karpenter does not validate these limits. Use NodePool requirements, such as `karpenter.k8s.gcp/instance-family` or `karpenter.k8s.gcp/instance-memory`, to limit the NodePool to machine types that can hold the configured pages.
+
+### Advertise hugepages to the scheduler
+
+Karpenter doesn't add the configured hugepages to instance type capacity, so a pending pod that requests hugepages doesn't trigger provisioning on its own. Create a `NodeOverlay` that adds the hugepages capacity to instance types in the NodePool. `NodeOverlay` is an Alpha feature; enable it with `controller.featureGates.nodeOverlay` (see [Settings](../settings.md#feature-gates)).
+
+```yaml
+apiVersion: karpenter.sh/v1alpha1
+kind: NodeOverlay
+metadata:
+  name: hugepages-example
+spec:
+  requirements:
+    - key: karpenter.sh/nodepool
+      operator: In
+      values:
+        - hugepages-example  # NodePool that references the hugepages GCENodeClass
+  capacity:
+    hugepages-2Mi: 8Gi  # hugepageSize2m × 2 MiB
+    hugepages-1Gi: 4Gi  # hugepageSize1g × 1 GiB
+```
+
+Set each capacity value to the total size of the pages in the GCENodeClass, so that the scheduler's view matches what the node allocates.
+
+Pods request hugepages in their resource requests and limits. Kubernetes doesn't overcommit hugepages, so a hugepages request must equal its limit:
+
+```yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+    hugepages-2Mi: 1Gi
+  limits:
+    memory: 128Mi
+    hugepages-2Mi: 1Gi
+```
+
+See [`examples/nodeclass/hugepages-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/hugepages-gcenodeclass.yaml) for a complete GCENodeClass and NodeOverlay, and [Manage HugePages](https://kubernetes.io/docs/tasks/manage-hugepages/scheduling-hugepages/) for how pods consume hugepages.
+
 ## Shielded VM
 
 Shielded VM provides verifiable integrity for your instances, protecting against boot-level and kernel-level malware. GCP organizations that enforce `constraints/compute.requireShieldedVm` require these settings on all instances. Without them, Karpenter-provisioned nodes fail with a `412 conditionNotMet` error.
@@ -175,6 +235,74 @@ If the chosen machine type does not support the requested confidential type, GCE
 
 The default `ContainerOptimizedOS` and `Ubuntu` images boot as Confidential VMs on supported families without any image change. GPU Confidential VMs are an exception: an A3 instance with an attached H100 GPU using Intel TDX requires a TDX-specific image (for example `cos-tdx-*`), which is not available through the `family` image selectors. Pin such an image by its full resource URL with `imageSelectorTerms[].id`; see the [GCP supported configurations](https://cloud.google.com/confidential-computing/confidential-vm/docs/supported-configurations#supported-images-gpu).
 
+## Nested virtualization
+
+Nested virtualization lets pods on the node run their own virtual machines, for example with KVM-based sandboxes or emulators.
+
+```yaml
+advancedMachineFeatures:
+  enableNestedVirtualization: true
+```
+
+Nested virtualization is only supported on Intel-based machine families, such as N1, N2, C2, C3 and C4. It is not available on E2, AMD (N2D, C2D, T2D), Arm (T2A, C4A) or Confidential VM instances. See the [GCP nested virtualization documentation](https://cloud.google.com/compute/docs/instances/nested-virtualization/overview) for the current list.
+
+GCE does not reject unsupported machine types: the instance starts normally and the setting is silently ignored. Restrict the NodePool to supported families so nodes that cannot run nested virtual machines are never provisioned:
+
+```yaml
+requirements:
+  - key: karpenter.k8s.gcp/instance-family
+    operator: In
+    values: ["n2", "c3", "c4"]
+```
+
+To confirm nested virtualization is active on a node, check that the `vmx` CPU flag is present (`grep -c vmx /proc/cpuinfo`) or that `/dev/kvm` exists.
+
+## Local SSDs
+
+[Local SSDs](https://cloud.google.com/compute/docs/disks/local-ssd) give nodes fast scratch storage. Their data is lost when the node stops, is preempted, or is deleted, so use them for caches and temporary data only.
+
+Set `spec.localSsdMode` to choose how workloads see the disks:
+
+- `RawBlock` (default) — unformatted NVMe block devices that your workload formats and mounts.
+- `Ephemeral` — the disks back the kubelet and container runtime storage, and their capacity is reported as the node's `ephemeral-storage`.
+
+```yaml
+localSsdMode: Ephemeral
+```
+
+`localSsdMode` does not set how many disks a node gets. The machine type decides that.
+
+**Fixed-count machine types**, such as `c4d-standard-8-lssd` or `z3-highmem-8-highlssd`, include a set number of local SSDs. Select the machine type and the disks are attached:
+
+```yaml
+nodeSelector:
+  node.kubernetes.io/instance-type: c4d-standard-8-lssd
+```
+
+**Configurable machine types** in the `n1`, `n2`, `n2d`, `c2`, and `c2d` families take a count through the `karpenter.k8s.gcp/instance-local-ssd-count` label. The NodePool must include the label, or Karpenter only launches these machine types without local SSDs:
+
+```yaml
+# NodePool
+requirements:
+  - key: karpenter.k8s.gcp/instance-local-ssd-count
+    operator: Exists
+```
+
+The NodePool and Pod requirements together must then select exactly one count. A Pod usually selects it alongside the machine type:
+
+```yaml
+# Pod
+nodeSelector:
+  node.kubernetes.io/instance-type: n2d-standard-8
+  karpenter.k8s.gcp/instance-local-ssd-count: "4"
+```
+
+If the requirements allow more than one count, Karpenter does not launch the node. The supported counts depend on the machine family and vCPU count; see the GCE [general-purpose](https://cloud.google.com/compute/docs/general-purpose-machines) and [compute-optimized](https://cloud.google.com/compute/docs/compute-optimized-machines) machine family pages.
+
+In `Ephemeral` mode, Karpenter checks a Pod's `ephemeral-storage` request against the capacity of the selected disks, which is 375 GiB per disk on most machine types. The request does not choose the count. In `RawBlock` mode, `ephemeral-storage` reflects only the boot disk.
+
+If you are upgrading from a version that accepted `spec.disks[].category: local-ssd`, see [`MIGRATION.md`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/MIGRATION.md).
+
 ## Disk type scheduling
 
 Karpenter applies `disk-type.gke.io/*` labels to provisioned nodes based on the instance type's machine family. These labels indicate which persistent disk types the instance supports, enabling two capabilities:
@@ -205,6 +333,41 @@ spec:
 ```
 
 This NodePool provisions only instance types from families that support Hyperdisk Balanced (such as n2, n4, c3, c4). Instance types from families without Hyperdisk Balanced support (such as e2, n1) are excluded.
+
+### Default disk selection
+
+Omit `category` from `spec.disks[]` unless the workload requires a specific disk type:
+
+```yaml
+disks:
+  - sizeGiB: 60
+    boot: true
+```
+
+Karpenter leaves the disk type unset, and Compute Engine applies the default for the machine family that is provisioned. This lets one GCENodeClass and NodePool span families that use different disk technologies, widening capacity options without requiring separate resources per family. Compute Engine documents these representative defaults:
+
+- **N2, N2D** — `pd-standard`
+- **C3, C3D** — `pd-balanced`
+- **N4, N4D** — `hyperdisk-balanced`
+
+See the Compute Engine API documentation for [`disks[].initializeParams.diskType`](https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert) for the complete default mapping. These defaults belong to Compute Engine, not Karpenter.
+
+> **Note:** Nodes in one NodePool can receive different disk types with different performance and cost characteristics. Pin `category` when a workload requires predictable disk characteristics.
+
+### Pinning a disk type
+
+Set `category` when the workload requires a specific compatible disk type:
+
+```yaml
+disks:
+  - category: pd-balanced
+    sizeGiB: 60
+    boot: true
+```
+
+An explicit category makes disk performance and cost more predictable, but it is only compatible with machine families that support that disk type. Disks that set `provisionedIOPS` or `provisionedThroughput` require an explicit compatible `category`.
+
+The NodePool `disk-type.gke.io/*` requirements described above constrain which instance types Karpenter selects; they do not select the boot disk type. Combine them with an explicit `category` to keep machine selection compatible with the fixed disk type. For the full `disks[]` field specification, see the [GCENodeClass reference](../reference/gcenodeclass.md).
 
 ### Available disk-type labels
 
