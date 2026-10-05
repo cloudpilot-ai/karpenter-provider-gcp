@@ -314,6 +314,49 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 	}
 }
 
+func TestGetOrCreateInstanceResourceNotReady(t *testing.T) {
+	t.Parallel()
+
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]any{"error": map[string]any{
+			"code":    http.StatusBadRequest,
+			"message": "The resource 'projects/gke-node-images/global/images/gke-1358-gke1900000-cos-125-19216-655-40-c-pre' is not ready",
+			"errors":  []map[string]string{{"reason": "resourceNotReady"}},
+		}})
+	}))
+	p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
+	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
+
+	_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
+		makeSourceMetadata("max-pods-per-node=110"),
+		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+		"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0)
+
+	require.Error(t, err)
+	require.False(t, retryable, "resourceNotReady must not fall through to the next instance type")
+	require.False(t, cloudprovider.IsInsufficientCapacityError(err), "resourceNotReady is not a capacity signal")
+	var createErr *cloudprovider.CreateError
+	require.ErrorAs(t, err, &createErr)
+	require.Equal(t, "ResourceNotReady", createErr.ConditionReason)
+	require.Empty(t, c.Items(), "the offering must not be marked unavailable")
+}
+
+func TestIsResourceNotReadyError(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isResourceNotReadyError(&googleapi.Error{Errors: []googleapi.ErrorItem{{Reason: "resourceNotReady"}}}))
+	require.True(t, isResourceNotReadyError(fmt.Errorf("wrapped: %w", &googleapi.Error{Errors: []googleapi.ErrorItem{{Reason: "resourceNotReady"}}})))
+	require.False(t, isResourceNotReadyError(&googleapi.Error{Message: "The resource is not ready"}))
+	require.False(t, isResourceNotReadyError(&googleapi.Error{Errors: []googleapi.ErrorItem{{Reason: "ZONE_RESOURCE_POOL_EXHAUSTED"}}}))
+	require.False(t, isResourceNotReadyError(fmt.Errorf("not a googleapi error")))
+}
+
 // newFakeComputeProvider builds a DefaultProvider whose computeService targets a fake
 // HTTP server driven by handler.
 func newFakeComputeProvider(t *testing.T, handler http.Handler) *DefaultProvider {
