@@ -208,3 +208,53 @@ func TestFreeIPLookupIsBounded(t *testing.T) {
 	require.Nil(t, counts)
 	require.True(t, errors.Is(err, context.DeadlineExceeded), "got %v", err)
 }
+
+func TestInvalidationPreservesOtherSubnetSnapshots(t *testing.T) {
+	var count atomic.Int64
+	count.Store(100)
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"utilizationDetails":{"ipv4Utilizations":[{"rangeName":"pods","totalFreeIp":"%d"}]}}`, count.Load())
+	}))
+	p := NewProvider(client, "us-central1", clock.RealClock{})
+	network := "projects/host/global/networks/vpc"
+	for _, name := range []string{"first", "second"} {
+		_, err := p.GetFreeIPCounts(context.Background(), network, name)
+		require.NoError(t, err)
+	}
+	count.Store(200)
+	p.Invalidate("", "projects/host/regions/us-central1/subnetworks/first")
+	first, err := p.GetFreeIPCounts(context.Background(), network, "first")
+	require.NoError(t, err)
+	second, err := p.GetFreeIPCounts(context.Background(), network, "second")
+	require.NoError(t, err)
+	require.Equal(t, int64(200), first["pods"])
+	require.Equal(t, int64(100), second["pods"])
+}
+
+func TestInvalidationDiscardsInflightCapacitySnapshot(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	var requests atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := requests.Add(1)
+		if n == 1 {
+			close(started)
+			<-release
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"utilizationDetails":{"ipv4Utilizations":[{"rangeName":"pods","totalFreeIp":"%d"}]}}`, n*100)
+	}))
+	p := NewProvider(client, "us-central1", clock.RealClock{})
+	network := "projects/host/global/networks/vpc"
+	done := make(chan error, 1)
+	go func() { _, err := p.GetFreeIPCounts(context.Background(), network, "pods"); done <- err }()
+	<-started
+	p.Invalidate(network, "pods")
+	once.Do(func() { close(release) })
+	require.NoError(t, <-done)
+	counts, err := p.GetFreeIPCounts(context.Background(), network, "pods")
+	require.NoError(t, err)
+	require.Equal(t, int64(200), counts["pods"])
+}

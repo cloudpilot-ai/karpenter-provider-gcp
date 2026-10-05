@@ -18,10 +18,14 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sort"
+	"strings"
 
+	"google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
+	"google.golang.org/api/googleapi"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -56,6 +60,54 @@ func rankPodRangeNames(names []string, freeIPs map[string]int64) []string {
 		return first > second
 	})
 	return ordered
+}
+
+// isRejectedPodRange accepts only an explicit field-specific range rejection,
+// not generic bad requests or unrelated network configuration errors.
+func isRejectedPodRange(err error, rangeName string) bool {
+	var apiError *googleapi.Error
+	if rangeName == "" || !errors.As(err, &apiError) || apiError.Code != 400 {
+		return false
+	}
+	for _, detail := range apiError.Errors {
+		if detail.Reason != "invalid" && detail.Reason != "invalidParameter" {
+			continue
+		}
+		if rejectedPodRangeMessage(detail.Message, rangeName) {
+			return true
+		}
+	}
+	return false
+}
+
+func rejectedPodRangeMessage(message, rangeName string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "aliasipranges") && strings.Contains(lower, "subnetworkrangename") &&
+		(strings.Contains(message, "'"+rangeName+"'") || strings.Contains(message, "\""+rangeName+"\"")) &&
+		(strings.Contains(lower, "not found") || strings.Contains(lower, "not valid") || strings.Contains(lower, "does not exist"))
+}
+
+func (p *DefaultProvider) invalidateRejectedPodRange(instance *compute.Instance, err error, rangeName string, discovered, exhausted bool) {
+	rejected := isRejectedPodRange(err, rangeName)
+	if exhausted || rejected {
+		p.invalidatePodRangeCaches(instance, discovered && rejected)
+	}
+}
+
+func (p *DefaultProvider) invalidateExhaustedPodRange(instance *compute.Instance, details insufficientCapacityDetails) {
+	if isIPSpaceExhausted(details) {
+		p.invalidatePodRangeCaches(instance, false)
+	}
+}
+
+func (p *DefaultProvider) invalidatePodRangeCaches(instance *compute.Instance, discovery bool) {
+	if len(instance.NetworkInterfaces) > 0 && instance.NetworkInterfaces[0] != nil {
+		iface := instance.NetworkInterfaces[0]
+		p.subnetProvider.Invalidate(iface.Network, iface.Subnetwork)
+	}
+	if discovery {
+		p.gkeProvider.InvalidateClusterConfig()
+	}
 }
 
 func (p *DefaultProvider) podRangeFreeIPs(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) map[string]int64 {

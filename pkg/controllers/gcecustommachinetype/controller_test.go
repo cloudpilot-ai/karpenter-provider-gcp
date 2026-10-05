@@ -385,3 +385,5 @@ func TestEnqueueSiblingsWithSameMachineType(t *testing.T) {
 	require.Len(t, requests, 1, "only the same-machineType duplicate should be requeued, not the deleted object itself or an unrelated registration")
 	assert.Equal(t, "duplicate", requests[0].Name)
 }
+
+func (*fakeGKEProvider) InvalidateClusterConfig() {}

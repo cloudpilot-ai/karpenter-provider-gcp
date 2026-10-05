@@ -179,3 +179,5 @@ func TestSubnetRangeStatusFailureClearsCountsWithoutError(t *testing.T) {
 	require.Equal(t, subnetRangeStatusRequeue, result.RequeueAfter)
 	require.Equal(t, []v1alpha1.SubnetRangeStatus{{Name: "extra-pods"}}, nc.Status.SubnetRanges)
 }
+
+func (*stubGKEProvider) InvalidateClusterConfig() {}

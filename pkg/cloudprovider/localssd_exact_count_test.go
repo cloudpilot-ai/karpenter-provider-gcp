@@ -111,6 +111,8 @@ func (p reproTypes) GetMachineType(string) *computepb.MachineType      { return 
 
 type reproGKE struct{}
 
+func (reproGKE) InvalidateClusterConfig() {}
+
 func (reproGKE) ResolveClusterZones(context.Context) ([]string, error) {
 	return []string{"us-central1-a"}, nil
 }

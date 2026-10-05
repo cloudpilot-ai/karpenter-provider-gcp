@@ -480,6 +480,8 @@ func newFakeComputeProvider(t *testing.T, handler http.Handler) *DefaultProvider
 		projectID:      "test-project",
 		region:         "us-central1",
 		computeService: svc,
+		subnetProvider: newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, map[string]any{}) })),
+		gkeProvider:    &fakeGKEProvider{},
 		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
 	}
 }
@@ -3055,3 +3057,5 @@ func TestPatchLocalSSDMetadata(t *testing.T) {
 		})
 	}
 }
+
+func (*fakeGKEProvider) InvalidateClusterConfig() {}

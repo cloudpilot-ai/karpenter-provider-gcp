@@ -549,14 +549,14 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 	}
 	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), freeIPs)
-	retryable, err := p.insertInstanceWithPodRanges(ctx, instance, instanceType, zone, capacityType, rangeNames)
+	retryable, err := p.insertInstanceWithPodRanges(ctx, instance, instanceType, zone, capacityType, rangeNames, len(nodeClass.PodSubnetRangeNames()) == 0)
 	if err != nil {
 		return nil, "", retryable, err
 	}
 	return instance, zone, false, nil
 }
 
-func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, instance *compute.Instance, instanceType *cloudprovider.InstanceType, zone, capacityType string, rangeNames []string) (bool, error) {
+func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, instance *compute.Instance, instanceType *cloudprovider.InstanceType, zone, capacityType string, rangeNames []string, discovered bool) (bool, error) {
 	for i, rangeName := range rangeNames {
 		hasMoreRanges := i < len(rangeNames)-1
 		setPrimaryAliasRange(instance, rangeName)
@@ -564,6 +564,7 @@ func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, insta
 		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 		if err != nil {
 			details, insufficient := extractInsertInsufficientCapacityDetails(err)
+			p.invalidateRejectedPodRange(instance, err, rangeName, discovered, isIPSpaceExhausted(details))
 			if insufficient && isIPSpaceExhausted(details) && hasMoreRanges {
 				logPodRangeExhausted(ctx, rangeName, instanceType.Name, zone)
 				continue
@@ -581,6 +582,7 @@ func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, insta
 		retryable := true
 		if err := p.waitOperationDone(ctx, zone, op.Name); err != nil {
 			if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
+				p.invalidateExhaustedPodRange(instance, capacityErr.details)
 				if isIPSpaceExhausted(capacityErr.details) && hasMoreRanges {
 					logPodRangeExhausted(ctx, rangeName, instanceType.Name, zone)
 					continue

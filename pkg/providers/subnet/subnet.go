@@ -39,14 +39,16 @@ const (
 
 type Provider interface {
 	GetFreeIPCounts(ctx context.Context, network, subnetwork string) (map[string]int64, error)
+	Invalidate(network, subnetwork string)
 }
 
 type DefaultProvider struct {
-	client *compute.SubnetworksClient
-	region string
-	clock  clock.PassiveClock
-	mu     sync.Mutex
-	cache  map[subnetworkRef]snapshot
+	client     *compute.SubnetworksClient
+	region     string
+	clock      clock.PassiveClock
+	mu         sync.Mutex
+	cache      map[subnetworkRef]snapshot
+	generation uint64
 }
 
 type snapshot struct {
@@ -71,6 +73,7 @@ func (p *DefaultProvider) GetFreeIPCounts(ctx context.Context, network, subnetwo
 		return counts, nil
 	}
 	delete(p.cache, target)
+	generation := p.generation
 	p.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
@@ -89,9 +92,23 @@ func (p *DefaultProvider) GetFreeIPCounts(ctx context.Context, network, subnetwo
 		}
 	}
 	p.mu.Lock()
-	p.cache[target] = snapshot{counts: maps.Clone(counts), expiresAt: p.clock.Now().Add(cacheTTL)}
+	if generation == p.generation {
+		p.cache[target] = snapshot{counts: maps.Clone(counts), expiresAt: p.clock.Now().Add(cacheTTL)}
+	}
 	p.mu.Unlock()
 	return counts, nil
+}
+
+// Invalidate discards all range counts for the affected subnetwork.
+func (p *DefaultProvider) Invalidate(network, subnetwork string) {
+	target, err := resolveTarget(network, subnetwork, p.region)
+	if err != nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.cache, target)
+	p.generation++
 }
 
 type subnetworkRef struct {

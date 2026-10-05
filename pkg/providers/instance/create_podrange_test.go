@@ -51,7 +51,8 @@ type podRangeLaunch struct {
 
 type podRangeClusterProvider struct {
 	fakeGKEProvider
-	cluster *containerv1.Cluster
+	cluster          *containerv1.Cluster
+	refreshedCluster *containerv1.Cluster
 }
 
 func (p *podRangeClusterProvider) GetClusterConfig(context.Context) (*containerv1.Cluster, error) {
@@ -76,8 +77,12 @@ func newPodRangeCapacityProvider(t *testing.T, handler http.Handler) subnet.Prov
 	return subnet.NewProvider(client, "us-central1", clock.RealClock{})
 }
 
-func newPodRangeLaunchProvider(t *testing.T, asynchronous bool, failureCode func(podRangeLaunch) string) (*DefaultProvider, func() []podRangeLaunch) {
+func newPodRangeLaunchProvider(t *testing.T, asynchronous bool, failureCode func(podRangeLaunch) string, failureMessages ...string) (*DefaultProvider, func() []podRangeLaunch) {
 	t.Helper()
+	failureMessage := "capacity exhausted"
+	if len(failureMessages) > 0 {
+		failureMessage = failureMessages[0]
+	}
 	var mu sync.Mutex
 	var attempts []podRangeLaunch
 	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +104,7 @@ func newPodRangeLaunchProvider(t *testing.T, asynchronous bool, failureCode func
 			if code := failureCode(attempt); code != "" && !asynchronous {
 				w.WriteHeader(http.StatusBadRequest)
 				writeJSON(w, map[string]any{"error": map[string]any{
-					"errors": []map[string]string{{"reason": code, "message": "capacity exhausted"}},
+					"errors": []map[string]string{{"reason": code, "message": failureMessage}},
 				}})
 				return
 			}
@@ -374,4 +379,121 @@ func TestCreateRetriesAnotherTypeAfterNonIPCapacityFailure(t *testing.T) {
 		{machineType: "n2-standard-4", rangeName: "default-pods"},
 		{machineType: "n2-standard-8", rangeName: "default-pods"},
 	}, attempts(), "stockouts should retry another type, not another pod range")
+}
+
+func TestCreateRefreshesCapacityAfterPodRangeExhaustion(t *testing.T) {
+	for _, asynchronous := range []bool{false, true} {
+		t.Run(map[bool]string{false: "insert", true: "operation"}[asynchronous], func(t *testing.T) {
+			var exhausted atomic.Bool
+			p, attempts := newPodRangeLaunchProvider(t, asynchronous, func(attempt podRangeLaunch) string {
+				if attempt.rangeName == "default-pods" {
+					exhausted.Store(true)
+					return "IP_SPACE_EXHAUSTED"
+				}
+				return ""
+			})
+			p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				count := "1000"
+				if exhausted.Load() {
+					count = "0"
+				}
+				writeJSON(w, map[string]any{"utilizationDetails": map[string]any{"ipv4Utilizations": []map[string]string{
+					{"rangeName": "default-pods", "totalFreeIp": count}, {"rangeName": "extra-pods", "totalFreeIp": "100"},
+				}}})
+			}))
+			for range 2 {
+				_, err := p.Create(context.Background(), podRangeLaunchNodeClass(), onDemandNodeClaim(), podRangeLaunchInstanceTypes())
+				require.NoError(t, err)
+			}
+			require.Equal(t, []podRangeLaunch{
+				{machineType: "n2-standard-4", rangeName: "default-pods"},
+				{machineType: "n2-standard-4", rangeName: "extra-pods"},
+				{machineType: "n2-standard-4", rangeName: "extra-pods"},
+			}, attempts())
+		})
+	}
+}
+
+func (p *podRangeClusterProvider) InvalidateClusterConfig() {
+	if p.refreshedCluster != nil {
+		p.cluster = p.refreshedCluster
+	}
+}
+
+func TestCreateRefreshesDiscoveryAfterRejectedPodRange(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "discovery", true: "override"}[explicit], func(t *testing.T) {
+			p, attempts := newPodRangeLaunchProvider(t, false, func(attempt podRangeLaunch) string {
+				if attempt.rangeName == "extra-pods" {
+					return "invalid"
+				}
+				return ""
+			}, "Invalid value for field 'resource.networkInterfaces[0].aliasIpRanges[0].subnetworkRangeName': 'extra-pods'. The specified range name is not valid.")
+			var rejected atomic.Bool
+			p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				count := "8000"
+				if rejected.Load() {
+					count = "0"
+				}
+				writeJSON(w, map[string]any{"utilizationDetails": map[string]any{"ipv4Utilizations": []map[string]string{
+					{"rangeName": "default-pods", "totalFreeIp": "1000"}, {"rangeName": "extra-pods", "totalFreeIp": count},
+				}}})
+			}))
+			fresh := podRangeFallbackCluster()
+			fresh.NetworkConfig = p.gkeProvider.(*podRangeClusterProvider).cluster.NetworkConfig
+			fresh.IpAllocationPolicy.AdditionalPodRangesConfig = nil
+			p.gkeProvider.(*podRangeClusterProvider).refreshedCluster = fresh
+			nodeClass := &v1alpha1.GCENodeClass{}
+			if explicit {
+				nodeClass.Spec.SubnetRangeNames = []string{"extra-pods"}
+			}
+			_, err := p.Create(context.Background(), nodeClass, onDemandNodeClaim(), podRangeLaunchInstanceTypes()[:1])
+			require.Error(t, err)
+			rejected.Store(true)
+			_, err = p.Create(context.Background(), nodeClass, onDemandNodeClaim(), podRangeLaunchInstanceTypes()[:1])
+			if explicit {
+				require.Error(t, err)
+				require.Equal(t, "extra-pods", attempts()[1].rangeName)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, []podRangeLaunch{
+					{machineType: "n2-standard-4", rangeName: "extra-pods"},
+					{machineType: "n2-standard-4", rangeName: "default-pods"},
+				}, attempts())
+			}
+		})
+	}
+}
+
+func TestCreateUnrelatedBadRequestKeepsCapacitySnapshot(t *testing.T) {
+	for _, tc := range []struct{ name, reason, message string }{
+		{"unrelated field", "invalid", "Invalid machine type"},
+		{"different range", "invalid", "aliasIpRanges[0].subnetworkRangeName: 'different-pods' not found"},
+		{"generic invalid", "invalid", "aliasIpRanges[0].subnetworkRangeName: 'default-pods' invalid CIDR size"},
+		{"permission", "forbidden", "aliasIpRanges[0].subnetworkRangeName: 'default-pods' not found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, attempts := newPodRangeLaunchProvider(t, false, func(podRangeLaunch) string { return tc.reason }, tc.message)
+			var changed atomic.Bool
+			p.subnetProvider = newPodRangeCapacityProvider(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				count := "1000"
+				if changed.Load() {
+					count = "0"
+				}
+				writeJSON(w, map[string]any{"utilizationDetails": map[string]any{"ipv4Utilizations": []map[string]string{
+					{"rangeName": "default-pods", "totalFreeIp": count}, {"rangeName": "extra-pods", "totalFreeIp": "100"},
+				}}})
+			}))
+			for range 2 {
+				_, err := p.Create(context.Background(), podRangeLaunchNodeClass(), onDemandNodeClaim(), podRangeLaunchInstanceTypes()[:1])
+				require.Error(t, err)
+				changed.Store(true)
+			}
+			require.Equal(t, []podRangeLaunch{
+				{machineType: "n2-standard-4", rangeName: "default-pods"},
+				{machineType: "n2-standard-4", rangeName: "default-pods"},
+			}, attempts())
+
+		})
+	}
 }
