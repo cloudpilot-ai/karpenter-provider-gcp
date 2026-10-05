@@ -54,6 +54,8 @@ type GCENodeClassSpec struct {
 	// to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's
 	// default pod secondary range (ClusterSecondaryRangeName from the cluster's IP
 	// allocation policy) is used. Mutually exclusive with subnetRangeNames.
+	//
+	// Deprecated: use SubnetRangeNames with a single entry instead.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`

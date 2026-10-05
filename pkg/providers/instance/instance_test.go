@@ -1316,12 +1316,11 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		require.Equal(t, "cluster-pods-range", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
 
-	t.Run("NodeClass SubnetRangeName overrides cluster pod range", func(t *testing.T) {
+	t.Run("NodeClass SubnetRangeNames overrides cluster pod range", func(t *testing.T) {
 		t.Parallel()
 
-		name := "custom-pods"
 		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeName: &name},
+			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"custom-pods"}},
 		}
 		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
 		result := p.setupNetworkInterfaces(cluster, nodeClass)

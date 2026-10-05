@@ -12,11 +12,15 @@ pod alias IPs. When more than one name is listed, Karpenter selects the range wi
 GKE-reported utilization at launch and retries remaining names if Compute returns IP space
 exhausted. Resolved names and utilization are published on `status.subnetRanges`.
 
-`spec.subnetRangeName` is unchanged. The two fields are mutually exclusive. If neither is set,
-Karpenter still uses only the cluster default pod range.
+`spec.subnetRangeName` is deprecated but remains supported for backward compatibility.
+Use `spec.subnetRangeNames` instead, even for a single range. The two fields are mutually
+exclusive. If neither is set, Karpenter still uses only the cluster default pod range.
 
-**Action required:** none. To spill over across additional pod ranges, list those names (including
-the cluster default) on `subnetRangeNames` and omit `subnetRangeName`.
+**Recommended migration:** replace `subnetRangeName: pods` with `subnetRangeNames: [pods]`,
+using your existing range name, and remove `subnetRangeName`. No immediate action is required;
+removal of the deprecated field will be announced separately. To spill over across additional
+pod ranges, list those names (including the cluster default) on `subnetRangeNames`.
+
 ### New IAM permission required: `compute.machineTypes.get`
 
 Registering a `GCECustomMachineType` requires the controller's service account to have `compute.machineTypes.get`, in addition to the existing `compute.machineTypes.list`. Add it to your controller's IAM role before upgrading; see [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). Without it, every `GCECustomMachineType` registration is treated as a transient failure and retried rather than marked `Ready=False` — it stays stuck at `Ready=Unknown` indefinitely instead of surfacing a clear error, so check the controller logs for `PermissionDenied` if a registration never becomes `Ready`.
