@@ -50,14 +50,14 @@ var _ = Describe("Pod ranges", Serial, Label("suite:networking"), func() {
 	It("discovers the default and GKE additional pod ranges without overrides", func(ctx SpecContext) {
 		f := newPodRangeFixture(ctx, "", nil)
 		expected := clusterPodRangeNames(cluster)
-		waitForPodRangeStatus(ctx, f.name, cluster, expected)
+		waitForPodRangeNames(ctx, f.name, expected)
 		instance := f.provision(ctx)
 		Expect(primaryAliasRange(instance)).To(BeElementOf(expected))
 	}, SpecTimeout(15*time.Minute))
 
 	It("publishes Compute free-IP counts for additional ranges", func(ctx SpecContext) {
 		f := newPodRangeFixture(ctx, "", []string{env.SmallPodsRangeName, env.LargePodsRangeName})
-		waitForPodRangeStatus(ctx, f.name, cluster, []string{env.SmallPodsRangeName, env.LargePodsRangeName})
+		waitForPodRangeFreeIPs(ctx, f.name, cluster, []string{env.SmallPodsRangeName, env.LargePodsRangeName})
 	}, SpecTimeout(10*time.Minute))
 
 	DescribeTable("explicit range overrides replace discovery", func(ctx SpecContext, useSubnetRangeName bool) {
@@ -69,7 +69,7 @@ var _ = Describe("Pod ranges", Serial, Label("suite:networking"), func() {
 			names = []string{env.SmallPodsRangeName}
 		}
 		f := newPodRangeFixture(ctx, value, names)
-		waitForPodRangeStatus(ctx, f.name, cluster, []string{env.SmallPodsRangeName})
+		waitForPodRangeNames(ctx, f.name, []string{env.SmallPodsRangeName})
 		Expect(primaryAliasRange(f.provision(ctx))).To(Equal(env.SmallPodsRangeName))
 	},
 		Entry("subnetRangeName", true, SpecTimeout(15*time.Minute)),
@@ -79,26 +79,18 @@ var _ = Describe("Pod ranges", Serial, Label("suite:networking"), func() {
 	It("selects the richer range even when the poorer range is listed first", func(ctx SpecContext) {
 		names := []string{env.SmallPodsRangeName, env.LargePodsRangeName}
 		f := newPodRangeFixture(ctx, "", names)
+		waitForPodRangeNames(ctx, f.name, names)
+		var counts map[string]*computepb.SubnetworkUtilizationDetailsIPV4Utilization
 		Eventually(func(g Gomega) {
-			counts := readPodRangeUtilization(ctx, cluster)
+			counts = readPodRangeUtilization(ctx, cluster)
 			for _, name := range names {
 				g.Expect(counts).To(HaveKey(name))
-				g.Expect(counts[name].TotalAllocatedIp).NotTo(BeNil())
-				g.Expect(counts[name].GetTotalAllocatedIp()).To(BeZero(), "waiting for range %s to become idle", name)
+				g.Expect(counts[name].TotalFreeIp).NotTo(BeNil())
+				// Both candidates must fit a node CIDR so exhaustion fallback cannot hide broken ranking.
+				g.Expect(counts[name].GetTotalFreeIp()).To(BeNumerically(">=", 1024), "range %s must have room for a node CIDR", name)
 			}
+			g.Expect(counts[env.LargePodsRangeName].GetTotalFreeIp()).To(BeNumerically(">", counts[env.SmallPodsRangeName].GetTotalFreeIp()))
 		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
-		waitForPodRangeStatus(ctx, f.name, cluster, names)
-		// Empty dedicated ranges ensure the first candidate could succeed, rather than
-		// masking broken ranking with exhaustion fallback. A GKE node uses a whole CIDR.
-		counts := readPodRangeUtilization(ctx, cluster)
-		for _, name := range names {
-			Expect(counts).To(HaveKey(name))
-			Expect(counts[name].TotalAllocatedIp).NotTo(BeNil())
-			Expect(counts[name].GetTotalAllocatedIp()).To(BeZero(), "range %s must be idle before ranking test", name)
-			Expect(counts[name].TotalFreeIp).NotTo(BeNil())
-			Expect(counts[name].GetTotalFreeIp()).To(BeNumerically(">=", 1024), "range %s must have room for a node CIDR", name)
-		}
-		Expect(counts[env.LargePodsRangeName].GetTotalFreeIp()).To(BeNumerically(">", counts[env.SmallPodsRangeName].GetTotalFreeIp()))
 		GinkgoWriter.Printf("[ranking] poorer=%s freeIP=%d richer=%s freeIP=%d\n", env.SmallPodsRangeName, counts[env.SmallPodsRangeName].GetTotalFreeIp(), env.LargePodsRangeName, counts[env.LargePodsRangeName].GetTotalFreeIp())
 		Expect(primaryAliasRange(f.provision(ctx))).To(Equal(env.LargePodsRangeName))
 	}, SpecTimeout(15*time.Minute))
@@ -188,9 +180,20 @@ func readPodRangeUtilization(ctx context.Context, cluster *containerv1.Cluster) 
 	return counts
 }
 
-// Fresh NodeClasses normally report counts immediately; allow the five-minute
-// status refresh if a previous spec's allocation is still visible in the cache.
-func waitForPodRangeStatus(ctx context.Context, name string, cluster *containerv1.Cluster, expected []string) {
+func waitForPodRangeNames(ctx context.Context, name string, expected []string) {
+	Eventually(func(g Gomega) {
+		nodeClass, err := env.GetNodeClass(ctx, name)
+		g.Expect(err).NotTo(HaveOccurred())
+		var names []string
+		for _, entry := range nodeClass.Status.SubnetRanges {
+			names = append(names, entry.Name)
+		}
+		g.Expect(names).To(ConsistOf(expected))
+	}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+}
+
+// Allow the five-minute status refresh if a previous spec's allocation is still cached.
+func waitForPodRangeFreeIPs(ctx context.Context, name string, cluster *containerv1.Cluster, expected []string) {
 	Eventually(func(g Gomega) {
 		before := readPodRangeUtilization(ctx, cluster)
 		nodeClass, err := env.GetNodeClass(ctx, name)
