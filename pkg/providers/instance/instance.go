@@ -308,6 +308,15 @@ func newInsufficientCapacityError(instanceType, zone, capacityType string, ttl t
 	))
 }
 
+func isResourceNotReadyError(err error) bool {
+	if apiErr, ok := errors.AsType[*googleapi.Error](err); ok {
+		return lo.ContainsBy(apiErr.Errors, func(e googleapi.ErrorItem) bool {
+			return e.Reason == "resourceNotReady"
+		})
+	}
+	return false
+}
+
 func isIPSpaceExhausted(details insufficientCapacityDetails) bool {
 	return details.code == "IP_SPACE_EXHAUSTED_WITH_DETAILS" || details.code == "IP_SPACE_EXHAUSTED"
 }
@@ -591,10 +600,17 @@ func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, insta
 			retryable = !exhausted
 		}
 		log.FromContext(ctx).Error(err, failureMessage, "instanceType", instanceType.Name, "zone", zone)
-		return retryable, err
+		return handleResourceNotReadyError(err, retryable)
 	}
 
 	return true, fmt.Errorf("no pod secondary ranges available")
+}
+
+func handleResourceNotReadyError(err error, retryable bool) (bool, error) {
+	if isResourceNotReadyError(err) {
+		return false, cloudprovider.NewCreateError(err, "ResourceNotReady", "A resource the instance references is not ready")
+	}
+	return retryable, err
 }
 
 func resolveInstanceImage(instance *compute.Instance) string {
