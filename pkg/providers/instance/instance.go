@@ -294,6 +294,15 @@ func newInsufficientCapacityError(instanceType, zone, capacityType string, ttl t
 	))
 }
 
+func isResourceNotReadyError(err error) bool {
+	if apiErr, ok := errors.AsType[*googleapi.Error](err); ok {
+		return lo.ContainsBy(apiErr.Errors, func(e googleapi.ErrorItem) bool {
+			return e.Reason == "resourceNotReady"
+		})
+	}
+	return false
+}
+
 func isIPSpaceExhausted(details insufficientCapacityDetails) bool {
 	return details.code == "IP_SPACE_EXHAUSTED_WITH_DETAILS" || details.code == "IP_SPACE_EXHAUSTED"
 }
@@ -531,6 +540,9 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 			}
 		}
 		log.FromContext(ctx).Error(err, "failed to create instance", "instanceType", instanceType.Name, "zone", zone)
+		if isResourceNotReadyError(err) {
+			return nil, "", false, cloudprovider.NewCreateError(err, "ResourceNotReady", "A resource the instance references is not ready")
+		}
 		return nil, "", true, err
 	}
 
