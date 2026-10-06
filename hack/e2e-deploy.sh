@@ -19,6 +19,13 @@
 #   E2E_REGION        GCP region (default: us-central1)
 set -euo pipefail
 
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+# A clean checkout has no vendored Helm subcharts. Check the pinned dependency
+# before cleanup, image publishing, or any GCP access (release charts do not use it).
+if [[ -z "${RELEASE_VERSION:-}" ]]; then
+  helm dependency build "${REPO_ROOT}/charts/karpenter"
+fi
+
 : "${E2E_PROJECT_ID:?E2E_PROJECT_ID must be set}"
 : "${E2E_LOCATION:?E2E_LOCATION must be set}"
 
@@ -34,8 +41,6 @@ RELEASE_VERSION="${RELEASE_VERSION:-}"
 CLUSTER_NAME="${E2E_PREFIX}-cluster"
 GSA_ID="${E2E_PREFIX}-karpenter"
 GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
-
-REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
 "${REPO_ROOT}/hack/e2e-clean-env.sh"
 
@@ -97,8 +102,6 @@ else
       github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
   )"
   log "Image: ${IMAGE_REF}"
-
-  helm dependency build "${REPO_ROOT}/charts/karpenter"
 
   helm upgrade --install karpenter-crd "${REPO_ROOT}/charts/karpenter-crd" \
     --namespace karpenter-system \
