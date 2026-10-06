@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+## v0.7.0
+
 ### Multiple pod CIDR ranges on GCENodeClass
 
 `GCENodeClass` now accepts `spec.subnetRangeNames`, a list of GKE secondary IPv4 range names for
