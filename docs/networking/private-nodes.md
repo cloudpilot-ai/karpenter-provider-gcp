@@ -89,15 +89,17 @@ networkConfig:
 
 Secondary interfaces inherit the `enablePrivateNodes` setting from the top level.
 
-## Relationship to `networkTags` and `subnetRangeName`
+## Relationship to `networkTags` and pod secondary ranges
 
-| Field                                                    | Scope                     | Purpose                          |
-|----------------------------------------------------------|---------------------------|----------------------------------|
-| `networkTags`                                            | Instance (all interfaces) | GCP firewall rule targets        |
-| `networkConfig.subnetwork`                               | Primary interface         | Which subnetwork to attach       |
-| `networkConfig.enablePrivateNodes`                       | All interfaces            | Whether to assign an external IP |
-| `networkConfig.additionalNetworkInterfaces[].network`    | Per secondary interface   | Which VPC network to attach      |
-| `networkConfig.additionalNetworkInterfaces[].subnetwork` | Per secondary interface   | Which subnetwork to attach       |
-| `subnetRangeName`                                        | Primary interface         | Secondary IP range for pod IPs   |
+| Field                                                    | Scope                     | Purpose                           |
+|----------------------------------------------------------|---------------------------|-----------------------------------|
+| `networkTags`                                            | Instance (all interfaces) | GCP firewall rule targets         |
+| `networkConfig.subnetwork`                               | Primary interface         | Which subnetwork to attach        |
+| `networkConfig.enablePrivateNodes`                       | All interfaces            | Whether to assign an external IP  |
+| `networkConfig.additionalNetworkInterfaces[].network`    | Per secondary interface   | Which VPC network to attach       |
+| `networkConfig.additionalNetworkInterfaces[].subnetwork` | Per secondary interface   | Which subnetwork to attach        |
+| `subnetRangeName` / `subnetRangeNames`                   | Primary interface         | Secondary IP range(s) for pod IPs |
+
+When both pod-range fields are omitted, Karpenter discovers the cluster's default and additional pod ranges on its primary subnetwork. Either explicit field replaces that list completely. If `networkConfig.subnetwork` overrides the primary subnetwork, specify pod range names belonging to that subnetwork; discovery does not select ranges on separate subnetworks. Capacity reads use the effective primary subnetwork, including its Shared VPC host project; the controller needs `compute.subnetworks.get` there to report free-IP counts.
 
 `networkTags` is intentionally top-level because GCP's Compute API places tags on the `Instance` resource, not on individual `NetworkInterface` objects — they apply to all interfaces on the instance.

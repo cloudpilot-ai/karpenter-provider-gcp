@@ -19,6 +19,7 @@ package instance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -168,7 +169,7 @@ func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
 	const operation = "operation-1788548040491-65aacca9e01b7-9614bc69-e30ce63a"
 	unavailable := unavailableofferings.NewUnavailableOfferings()
 	p := &DefaultProvider{unavailableOfferings: unavailable}
-	err := p.handleZoneOperationError(context.Background(), &compute.Operation{
+	op := &compute.Operation{
 		Name: operation,
 		Error: &compute.OperationError{
 			Errors: []*compute.OperationErrorErrors{{
@@ -180,7 +181,10 @@ func TestHandleZoneOperationErrorIncludesCapacityContext(t *testing.T) {
 				},
 			}},
 		},
-	}, "z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand)
+	}
+	details, found := extractOperationInsufficientCapacityDetails(op)
+	require.True(t, found)
+	err := p.markInsufficientCapacity(context.Background(), "z3-highmem-8-highlssd", "us-east4-a", karpv1.CapacityTypeOnDemand, details)
 
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.ErrorContains(t, err, "insufficient capacity, z3-highmem-8-highlssd on-demand/us-east4-a unavailable 5m0s")
@@ -257,14 +261,17 @@ func TestHandleZoneOperationErrorUnsupportedConfiguration(t *testing.T) {
 
 	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
 	p := &DefaultProvider{unavailableOfferings: unavailableofferings.NewUnavailableOfferingsWithCache(c)}
-	err := p.handleZoneOperationError(context.Background(), &compute.Operation{
+	operationErr := handleZoneOperationError(&compute.Operation{
 		Error: &compute.OperationError{
 			Errors: []*compute.OperationErrorErrors{{
 				Code:         "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
 				ErrorDetails: []*compute.OperationErrorErrorsErrorDetails{{ErrorInfo: &compute.ErrorInfo{Reason: "configuration_availability"}}},
 			}},
 		},
-	}, "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand)
+	})
+	capacityErr, ok := errors.AsType[*insufficientCapacityError](operationErr)
+	require.True(t, ok)
+	err := p.markInsufficientCapacity(context.Background(), "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, capacityErr.details)
 
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.ErrorContains(t, err, "n2-standard-4 on-demand/us-east4-a unsupported configuration 1h0m0s")
@@ -305,7 +312,7 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 			_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
 				makeSourceMetadata("max-pods-per-node=110"),
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
-				"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0)
+				"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
 
 			require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 			require.Equal(t, tt.wantRetryable, retryable)
@@ -313,6 +320,64 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 		})
 	}
 }
+
+func TestSetPrimaryAliasRange(t *testing.T) {
+	t.Parallel()
+
+	instance := &compute.Instance{
+		NetworkInterfaces: []*compute.NetworkInterface{{
+			AliasIpRanges: []*compute.AliasIpRange{{SubnetworkRangeName: "first"}},
+		}},
+	}
+	setPrimaryAliasRange(instance, "second")
+	require.Equal(t, "second", instance.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName)
+}
+
+func TestIsIPSpaceExhausted(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isIPSpaceExhausted(insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED"}))
+	require.True(t, isIPSpaceExhausted(insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}))
+	require.False(t, isIPSpaceExhausted(insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED"}))
+}
+
+func TestHandleZoneOperationErrorPreservesReasonCode(t *testing.T) {
+	t.Parallel()
+
+	op := &compute.Operation{Error: &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
+		Code: "IP_SPACE_EXHAUSTED",
+		// GCE messages do not necessarily repeat the reason code, so the code itself
+		// must survive the conversion for the pod range fallback to trigger.
+		Message: "IP address range of subnetwork is exhausted",
+	}}}}
+
+	capacityErr, ok := errors.AsType[*insufficientCapacityError](handleZoneOperationError(op))
+	require.True(t, ok)
+	require.Equal(t, "IP_SPACE_EXHAUSTED", capacityErr.details.code)
+	require.True(t, isIPSpaceExhausted(capacityErr.details))
+}
+
+func TestHandleZoneOperationErrorForNonCapacityFailure(t *testing.T) {
+	t.Parallel()
+
+	op := &compute.Operation{Error: &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
+		Code:    "QUOTA_EXCEEDED",
+		Message: "quota exceeded",
+	}}}}
+
+	err := handleZoneOperationError(op)
+	require.Error(t, err)
+	_, ok := errors.AsType[*insufficientCapacityError](err)
+	require.False(t, ok)
+}
+
+type emptySubnetProvider struct{}
+
+func (emptySubnetProvider) GetFreeIPCounts(context.Context, string, string) (map[string]int64, error) {
+	return nil, nil
+}
+
+func (emptySubnetProvider) Invalidate(string, string) {}
 
 func TestGetOrCreateInstanceResourceNotReady(t *testing.T) {
 	t.Parallel()
@@ -336,7 +401,7 @@ func TestGetOrCreateInstanceResourceNotReady(t *testing.T) {
 	_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
 		makeSourceMetadata("max-pods-per-node=110"),
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
-		"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0)
+		"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
 
 	require.Error(t, err)
 	require.False(t, retryable, "resourceNotReady must not fall through to the next instance type")
@@ -372,6 +437,8 @@ func newFakeComputeProvider(t *testing.T, handler http.Handler) *DefaultProvider
 		projectID:      "test-project",
 		region:         "us-central1",
 		computeService: svc,
+		subnetProvider: emptySubnetProvider{},
+		gkeProvider:    &fakeGKEProvider{},
 		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
 	}
 }
@@ -1208,17 +1275,34 @@ func TestSetupNetworkInterfaces(t *testing.T) {
 		require.Equal(t, "cluster-pods-range", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
 
-	t.Run("NodeClass SubnetRangeName overrides cluster pod range", func(t *testing.T) {
+	t.Run("NodeClass SubnetRangeNames overrides cluster pod range", func(t *testing.T) {
 		t.Parallel()
 
-		name := "custom-pods"
 		nodeClass := &v1alpha1.GCENodeClass{
-			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeName: &name},
+			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"custom-pods"}},
 		}
 		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
 		result := p.setupNetworkInterfaces(cluster, nodeClass)
 
 		require.Equal(t, "custom-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
+	})
+
+	t.Run("NodeClass SubnetRangeNames sets the first candidate before launch ranking", func(t *testing.T) {
+		t.Parallel()
+
+		nodeClass := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{SubnetRangeNames: []string{"full-pods", "free-pods"}},
+		}
+		cluster := makeCluster("net", "subnet", "cluster-pods-range", false)
+		cluster.IpAllocationPolicy.AdditionalPodRangesConfig = &containerv1.AdditionalPodRangesConfig{
+			PodRangeInfo: []*containerv1.RangeInfo{
+				{RangeName: "full-pods", Utilization: 0.95},
+				{RangeName: "free-pods", Utilization: 0.1},
+			},
+		}
+		result := p.setupNetworkInterfaces(cluster, nodeClass)
+
+		require.Equal(t, "full-pods", result[0].AliasIpRanges[0].SubnetworkRangeName)
 	})
 
 	t.Run("CIDR prefix derived from maxPods", func(t *testing.T) {
@@ -2133,7 +2217,7 @@ func TestWaitOperationDone_RetriesOnTransient503(t *testing.T) {
 		writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
 	}))
 
-	err := p.waitOperationDone(context.Background(), "n1-standard-1", "us-central1-a", "on-demand", "op-123")
+	err := p.waitOperationDone(context.Background(), "us-central1-a", "op-123")
 	require.NoError(t, err)
 
 	require.Equal(t, int32(3), callCount.Load())
@@ -2150,7 +2234,7 @@ func TestWaitOperationDone_FailsOnPersistent503(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := p.waitOperationDone(ctx, "n1-standard-1", "us-central1-a", "on-demand", "op-123")
+	err := p.waitOperationDone(ctx, "us-central1-a", "op-123")
 
 	require.Error(t, err)
 }
@@ -2792,7 +2876,7 @@ func TestGetOrCreateInstance_AdoptsInstanceFromEarlierAttemptZone(t *testing.T) 
 	nodeClaim.Name = "default-vzmzs"
 
 	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
-		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"}, nil, 0)
+		"us-central1-c", karpv1.CapacityTypeOnDemand, []string{"us-central1-f"}, nil, 0, nil)
 
 	require.NoError(t, err)
 	require.False(t, retryable)
@@ -2823,7 +2907,7 @@ func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
 	nodeClaim.Name = "default-sgfkv"
 
 	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
-		"us-central1-c", karpv1.CapacityTypeOnDemand, nil, nil, 0)
+		"us-central1-c", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
 
 	require.NoError(t, err)
 	require.False(t, retryable)
@@ -2930,3 +3014,5 @@ func TestPatchLocalSSDMetadata(t *testing.T) {
 		})
 	}
 }
+
+func (*fakeGKEProvider) InvalidateClusterConfig() {}

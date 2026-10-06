@@ -111,6 +111,8 @@ func (p reproTypes) GetMachineType(string) *computepb.MachineType      { return 
 
 type reproGKE struct{}
 
+func (reproGKE) InvalidateClusterConfig() {}
+
 func (reproGKE) ResolveClusterZones(context.Context) ([]string, error) {
 	return []string{"us-central1-a"}, nil
 }
@@ -479,7 +481,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	defer srv.Close()
 	svc, err := compute.NewService(ctx, googleoption.WithEndpoint(srv.URL+"/"), googleoption.WithoutAuthentication())
 	require.NoError(t, err)
-	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", svc, reproGKE{}, typeProvider, reproTemplate{}, reproVersion{}, unavailableofferings.NewUnavailableOfferings())
+	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", svc, reproGKE{}, nil, typeProvider, reproTemplate{}, reproVersion{}, unavailableofferings.NewUnavailableOfferings())
 	cp := New(kc, reproEvents{}, typeProvider, ip, nil)
 	if len(results.NewNodeClaims) > 0 {
 		generated := results.NewNodeClaims[0].ToNodeClaim()

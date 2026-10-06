@@ -204,7 +204,8 @@ _Appears in:_
 | `disks` _[Disk](#disk) array_ | Disk defines the disks to attach to the provisioned instance. |  | MaxItems: 10 <br />Optional: \{\} <br /> |
 | `imageSelectorTerms` _[ImageSelectorTerm](#imageselectorterm) array_ | ImageSelectorTerms is a list of or image selector terms. The terms are ORed. |  | MaxItems: 30 <br />MinItems: 1 <br />Required: \{\} <br /> |
 | `imageFamily` _string_ | ImageFamily dictates the instance template used when generating launch templates.<br />If no ImageSelectorTerms alias is specified, this field is required. |  | Enum: [Ubuntu ContainerOptimizedOS] <br />Optional: \{\} <br /> |
-| `subnetRangeName` _string_ | SubnetRangeName is the name of the subnetwork secondary IPv4 range from which<br />to allocate pod IP addresses (alias IPs for pods). If not specified, the cluster's<br />default pod secondary range (ClusterSecondaryRangeName from the cluster's IP<br />allocation policy) is used. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
+| `subnetRangeName` _string_ | SubnetRangeName is the name of the subnetwork secondary IPv4 range from which<br />to allocate pod IP addresses (alias IPs for pods). When set, only this range is<br />considered. Mutually exclusive with subnetRangeNames. If neither field is set,<br />the cluster's default and additional pod ranges on its primary subnetwork are used.<br />Deprecated: use SubnetRangeNames with a single entry instead. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
+| `subnetRangeNames` _string array_ | SubnetRangeNames is a list of subnetwork secondary IPv4 range names from which<br />to allocate pod IP addresses (alias IPs for pods). When more than one name is<br />listed, the provider prefers the range with the most Compute-reported free IPv4 addresses<br />at launch. Mutually exclusive with subnetRangeName. When set, this list replaces<br />the cluster defaults completely. If neither field is set, the cluster's default<br />and additional pod ranges on its primary subnetwork are used. |  | MaxItems: 16 <br />MinItems: 1 <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `kubeletConfiguration` _[KubeletConfiguration](#kubeletconfiguration)_ | KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.<br />They are a vswitch of the upstream types, recognizing not all options may be supported.<br />Wherever possible, the types and names should reflect the upstream kubelet types. |  | Optional: \{\} <br /> |
 | `linuxNodeConfig` _[LinuxNodeConfig](#linuxnodeconfig)_ | LinuxNodeConfig configures the Linux kernel of provisioned nodes.<br />Mirrors GKE node pool linux_node_config. |  | Optional: \{\} <br /> |
 | `labels` _object (keys:string, values:string)_ | Labels to be applied on the GCE VM instance and its persistent disks.<br />Local SSD scratch disks do not support labels. |  | MaxProperties: 20 <br />Optional: \{\} <br /> |
@@ -234,6 +235,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `images` _[Image](#image) array_ | Image contains the current image that are available to the<br />cluster under the Image selectors. |  | Optional: \{\} <br /> |
+| `subnetRanges` _[SubnetRangeStatus](#subnetrangestatus) array_ | SubnetRanges contains the pod secondary IPv4 ranges considered for launch<br />and their Compute-reported free IPv4 address counts when known. |  | Optional: \{\} <br /> |
 | `conditions` _Condition array_ | Conditions contains signals for health and readiness |  | Optional: \{\} <br /> |
 
 
@@ -443,5 +445,22 @@ _Appears in:_
 | `enableSecureBoot` _boolean_ | EnableSecureBoot defines whether the instance has Secure Boot enabled. |  | Optional: \{\} <br /> |
 | `enableVtpm` _boolean_ | EnableVtpm defines whether the instance has the vTPM enabled. |  | Optional: \{\} <br /> |
 | `enableIntegrityMonitoring` _boolean_ | EnableIntegrityMonitoring defines whether the instance has integrity monitoring enabled. |  | Optional: \{\} <br /> |
+
+
+#### SubnetRangeStatus
+
+
+
+SubnetRangeStatus is a resolved pod secondary range considered for node launch.
+
+
+
+_Appears in:_
+- [GCENodeClassStatus](#gcenodeclassstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the subnetwork secondary IPv4 range name. |  | Required: \{\} <br /> |
+| `totalFreeIP` _integer_ | TotalFreeIP is the Compute-reported number of free IPv4 addresses in this<br />secondary range. Omitted when unknown; zero means no free addresses were reported.<br />Counts are snapshots, not a guarantee of an allocatable contiguous pod CIDR block. |  | Minimum: 0 <br />Optional: \{\} <br /> |
 
 

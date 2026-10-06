@@ -24,7 +24,7 @@ includedPermissions:
   - compute.instanceTemplates.get
   - compute.instanceTemplates.list
   - compute.regions.get
-  - compute.subnetworks.get   # required for Shared VPC (cross-project subnet validation)
+  - compute.subnetworks.get   # pod-range capacity, including Shared VPC host subnetworks
   - compute.subnetworks.use
   - compute.subnetworks.useExternalIp
   - compute.zones.list

@@ -231,3 +231,5 @@ func TestDispatch_ChannelCluster_UnspecifiedCluster_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "UNSPECIFIED")
 }
+
+func (*stubGKEProvider) InvalidateClusterConfig() {}

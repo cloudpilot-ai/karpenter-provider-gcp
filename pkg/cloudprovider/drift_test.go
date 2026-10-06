@@ -310,6 +310,13 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			want: NodeClassDrift,
 		},
 		{
+			name: "SubnetRangeNames",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.SubnetRangeNames = []string{"pods-a", "pods-b"}
+			},
+			want: NodeClassDrift,
+		},
+		{
 			name: "LocalSsdMode",
 			mutate: func(nc *v1alpha1.GCENodeClass) {
 				nc.Spec.LocalSsdMode = v1alpha1.LocalSSDModeEphemeral

@@ -30,7 +30,7 @@ func crdPath() string {
 	return filepath.Join("..", "..", "..", "charts", "karpenter", "crds", "karpenter.k8s.gcp_gcenodeclasses.yaml")
 }
 
-func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+func nodeClassSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	t.Helper()
 
 	raw, err := os.ReadFile(crdPath())
@@ -40,7 +40,24 @@ func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
 	require.NoError(t, yaml.Unmarshal(raw, &crd))
 	require.Len(t, crd.Spec.Versions, 1)
 
-	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+	return *crd.Spec.Versions[0].Schema.OpenAPIV3Schema
+}
+
+func specSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return nodeClassSchema(t).Properties["spec"]
+}
+
+func TestGCENodeClassCRDFreeIPCount(t *testing.T) {
+	rangeSchema := nodeClassSchema(t).Properties["status"].Properties["subnetRanges"].Items.Schema
+	field, ok := rangeSchema.Properties["totalFreeIP"]
+	require.True(t, ok)
+	require.Equal(t, "integer", field.Type)
+	require.Equal(t, "int64", field.Format)
+	require.NotNil(t, field.Minimum)
+	require.Equal(t, float64(0), *field.Minimum)
+	require.NotContains(t, rangeSchema.Required, "totalFreeIP")
+	require.NotContains(t, rangeSchema.Properties, "utilization")
 }
 
 func kubeletConfigurationSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
@@ -113,6 +130,26 @@ func TestGCENodeClassCRDRejectsReservedMetadataKeys(t *testing.T) {
 		require.Contains(t, crdText, `'`+key+`'`, "reserved metadata key %q must be denied by the CRD", key)
 	}
 	require.NotContains(t, crdText, `'serial-port-logging-enable'`, "non-reserved metadata keys must remain freeform")
+}
+
+func TestGCENodeClassCRDSubnetRangeNamesMutuallyExclusive(t *testing.T) {
+	crd, err := os.ReadFile(crdPath())
+	require.NoError(t, err)
+
+	crdText := string(crd)
+	require.Contains(t, crdText, `subnetRangeName and subnetRangeNames are mutually exclusive`)
+	require.Contains(t, crdText, `!(has(self.subnetRangeName) && has(self.subnetRangeNames))`)
+	require.Contains(t, crdText, `subnetRangeNames:`)
+}
+
+func TestGCENodeClassCRDSubnetRangeNamesUniqueViaCEL(t *testing.T) {
+	crd, err := os.ReadFile(crdPath())
+	require.NoError(t, err)
+
+	crdText := string(crd)
+	require.NotContains(t, crdText, `uniqueItems: true`, "Kubernetes CRDs forbid uniqueItems")
+	require.Contains(t, crdText, `subnetRangeNames must be unique`)
+	require.Contains(t, crdText, `self.all(x, self.exists_one(y, x == y))`)
 }
 
 func TestGCENodeClassCRDRejectsZeroHugepages(t *testing.T) {

@@ -82,3 +82,5 @@ func newTestProvider() *DefaultProvider {
 		cm:                       pretty.NewChangeMonitor(),
 	}
 }
+
+func (*fakeGKEProvider) InvalidateClusterConfig() {}

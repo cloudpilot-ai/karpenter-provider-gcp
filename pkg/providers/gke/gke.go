@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -46,6 +47,7 @@ const (
 type Provider interface {
 	ResolveClusterZones(ctx context.Context) ([]string, error)
 	GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error)
+	InvalidateClusterConfig()
 	GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error)
 }
 
@@ -57,6 +59,8 @@ type DefaultProvider struct {
 	nodeLocation string
 	clusterName  string
 
+	clusterMu         sync.Mutex
+	clusterGeneration uint64
 	zoneCache         *cache.Cache
 	clusterCache      *cache.Cache
 	serverConfigCache *cache.Cache
@@ -126,16 +130,32 @@ func (p *DefaultProvider) ResolveClusterZones(ctx context.Context) ([]string, er
 }
 
 func (p *DefaultProvider) GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error) {
+	p.clusterMu.Lock()
 	if v, ok := p.clusterCache.Get(clusterCacheKey); ok {
+		p.clusterMu.Unlock()
 		return v.(*containerv1.Cluster), nil
 	}
+	generation := p.clusterGeneration
+	p.clusterMu.Unlock()
 	name := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.projectID, p.nodeLocation, p.clusterName)
 	cluster, err := p.containerService.Projects.Locations.Clusters.Get(name).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("fetching cluster config: %w", err)
 	}
-	p.clusterCache.SetDefault(clusterCacheKey, cluster)
+	p.clusterMu.Lock()
+	if generation == p.clusterGeneration {
+		p.clusterCache.SetDefault(clusterCacheKey, cluster)
+	}
+	p.clusterMu.Unlock()
 	return cluster, nil
+}
+
+// InvalidateClusterConfig forces the next discovery read to fetch current GKE configuration.
+func (p *DefaultProvider) InvalidateClusterConfig() {
+	p.clusterMu.Lock()
+	defer p.clusterMu.Unlock()
+	p.clusterCache.Delete(clusterCacheKey)
+	p.clusterGeneration++
 }
 
 func (p *DefaultProvider) GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error) {

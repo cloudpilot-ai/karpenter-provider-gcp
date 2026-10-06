@@ -127,6 +127,15 @@ func (e *Environment) CreateNodeClassWithDiskCategory(ctx context.Context, name,
 }
 
 func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, diskCategory string) {
+	e.createNodeClassWithPodRanges(ctx, name, imageFamily, diskCategory, e.PodsRangeName, nil)
+}
+
+// CreateNodeClassWithPodRanges omits overrides when subnetRangeName and names are empty.
+func (e *Environment) CreateNodeClassWithPodRanges(ctx context.Context, name, subnetRangeName string, names []string) {
+	e.createNodeClassWithPodRanges(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS, "", subnetRangeName, names)
+}
+
+func (e *Environment) createNodeClassWithPodRanges(ctx context.Context, name, imageFamily, diskCategory, subnetRangeName string, names []string) {
 	diskGiB := int64(DefaultE2EDiskGiB)
 	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
 		diskGiB = 50 // ubuntu-gke images require more space than COS
@@ -144,10 +153,15 @@ func (e *Environment) createNodeClass(ctx context.Context, name, imageFamily, di
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": imageFamily + "@latest"},
 			},
-			"disks":           []any{disk},
-			"subnetRangeName": e.PodsRangeName,
+			"disks": []any{disk},
 		},
 	}}
+	if subnetRangeName != "" {
+		Expect(unstructured.SetNestedField(obj.Object, subnetRangeName, "spec", "subnetRangeName")).To(Succeed())
+	}
+	if len(names) > 0 {
+		Expect(unstructured.SetNestedStringSlice(obj.Object, names, "spec", "subnetRangeNames")).To(Succeed())
+	}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
 	e.trackNodeClass(name)

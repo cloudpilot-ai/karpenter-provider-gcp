@@ -88,10 +88,12 @@ var (
 
 // Environment holds shared state for a test suite run.
 type Environment struct {
-	ProjectID       string
-	ClusterName     string
-	ClusterLocation string // region or zone, e.g. "us-central1" or "us-central1-a"
-	PodsRangeName   string
+	ProjectID          string
+	ClusterName        string
+	ClusterLocation    string // region or zone, e.g. "us-central1" or "us-central1-a"
+	PodsRangeName      string
+	SmallPodsRangeName string
+	LargePodsRangeName string
 
 	KubeClient    kubernetes.Interface
 	DynamicClient dynamic.Interface
@@ -142,18 +144,20 @@ func NewEnvironment() *Environment {
 	Expect(err).NotTo(HaveOccurred(), "creating GCP compute service client")
 
 	env := &Environment{
-		ProjectID:         mustEnv("PROJECT_ID"),
-		ClusterName:       mustEnv("CLUSTER_NAME"),
-		ClusterLocation:   mustEnv("CLUSTER_LOCATION"),
-		PodsRangeName:     mustEnv("PODS_RANGE_NAME"),
-		KubeClient:        kubeClient,
-		DynamicClient:     dynamicClient,
-		MetricsClient:     metricsClient,
-		containerSvc:      containerSvc,
-		computeSvc:        computeSvc,
-		ownedNodePools:    make(map[string]struct{}),
-		ownedNodeClasses:  make(map[string]struct{}),
-		ownedNodeOverlays: make(map[string]struct{}),
+		ProjectID:          mustEnv("PROJECT_ID"),
+		ClusterName:        mustEnv("CLUSTER_NAME"),
+		ClusterLocation:    mustEnv("CLUSTER_LOCATION"),
+		PodsRangeName:      mustEnv("PODS_RANGE_NAME"),
+		SmallPodsRangeName: os.Getenv("SMALL_PODS_RANGE_NAME"),
+		LargePodsRangeName: os.Getenv("LARGE_PODS_RANGE_NAME"),
+		KubeClient:         kubeClient,
+		DynamicClient:      dynamicClient,
+		MetricsClient:      metricsClient,
+		containerSvc:       containerSvc,
+		computeSvc:         computeSvc,
+		ownedNodePools:     make(map[string]struct{}),
+		ownedNodeClasses:   make(map[string]struct{}),
+		ownedNodeOverlays:  make(map[string]struct{}),
 	}
 
 	// Fast-fail: verify the cluster exists at the configured location before
