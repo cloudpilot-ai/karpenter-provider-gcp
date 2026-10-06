@@ -114,7 +114,7 @@ func (p *DefaultProvider) podRangeFreeIPs(ctx context.Context, nodeClass *v1alph
 		return nil
 	}
 	names := resolvedPodRangeNames(nodeClass, cluster)
-	if len(names) == 1 && names[0] == "" {
+	if len(names) < 2 {
 		return nil
 	}
 	network, target := subnet.PrimaryNetwork(nodeClass, cluster)

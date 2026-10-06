@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/googleapis/gax-go/v2"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 )
@@ -35,6 +35,7 @@ import (
 const (
 	lookupTimeout = 3 * time.Second
 	cacheTTL      = time.Minute
+	failureTTL    = 10 * time.Second
 )
 
 type Provider interface {
@@ -42,48 +43,60 @@ type Provider interface {
 	Invalidate(network, subnetwork string)
 }
 
+// SubnetworksClient reads subnet utilization from the Compute API.
+type SubnetworksClient interface {
+	Get(context.Context, *computepb.GetSubnetworkRequest, ...gax.CallOption) (*computepb.Subnetwork, error)
+}
+
 type DefaultProvider struct {
-	client     *compute.SubnetworksClient
-	region     string
-	clock      clock.PassiveClock
-	mu         sync.Mutex
-	cache      map[subnetworkRef]snapshot
-	generation uint64
+	client SubnetworksClient
+	region string
+	clock  clock.PassiveClock
+	mu     sync.Mutex
+	cache  map[subnetworkRef]snapshot
 }
 
 type snapshot struct {
 	counts    map[string]int64
+	err       error
 	expiresAt time.Time
 }
 
-func NewProvider(client *compute.SubnetworksClient, region string, clock clock.PassiveClock) Provider {
+func NewProvider(client SubnetworksClient, region string, clock clock.PassiveClock) Provider {
 	return &DefaultProvider{client: client, region: region, clock: clock, cache: map[subnetworkRef]snapshot{}}
 }
 
 func (p *DefaultProvider) GetFreeIPCounts(ctx context.Context, network, subnetwork string) (map[string]int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	target, err := resolveTarget(network, subnetwork, p.region)
 	if err != nil {
 		return nil, err
 	}
 	p.mu.Lock()
-	cached, ok := p.cache[target]
-	if ok && p.clock.Now().Before(cached.expiresAt) {
-		counts := maps.Clone(cached.counts)
-		p.mu.Unlock()
-		return counts, nil
+	defer p.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if cached, ok := p.cache[target]; ok && p.clock.Now().Before(cached.expiresAt) {
+		return maps.Clone(cached.counts), cached.err
 	}
 	delete(p.cache, target)
-	generation := p.generation
-	p.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	lookupCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
-	response, err := p.client.Get(ctx, &computepb.GetSubnetworkRequest{
+	response, err := p.client.Get(lookupCtx, &computepb.GetSubnetworkRequest{
 		Project: target.project, Region: target.region, Subnetwork: target.name,
 		Views: ptr.To("WITH_UTILIZATION"),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("getting free IPs for %s: %w", target, err)
+		err = fmt.Errorf("getting free IPs for %s: %w", target, err)
+		// A canceled caller must not put other callers into the failure cooldown.
+		if ctx.Err() == nil {
+			p.cache[target] = snapshot{err: err, expiresAt: p.clock.Now().Add(failureTTL)}
+		}
+		return nil, err
 	}
 	counts := map[string]int64{}
 	for _, entry := range response.GetUtilizationDetails().GetIpv4Utilizations() {
@@ -91,12 +104,8 @@ func (p *DefaultProvider) GetFreeIPCounts(ctx context.Context, network, subnetwo
 			counts[entry.GetRangeName()] = *entry.TotalFreeIp
 		}
 	}
-	p.mu.Lock()
-	if generation == p.generation {
-		p.cache[target] = snapshot{counts: maps.Clone(counts), expiresAt: p.clock.Now().Add(cacheTTL)}
-	}
-	p.mu.Unlock()
-	return counts, nil
+	p.cache[target] = snapshot{counts: counts, expiresAt: p.clock.Now().Add(cacheTTL)}
+	return maps.Clone(counts), nil
 }
 
 // Invalidate discards all range counts for the affected subnetwork.
@@ -108,7 +117,6 @@ func (p *DefaultProvider) Invalidate(network, subnetwork string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.cache, target)
-	p.generation++
 }
 
 type subnetworkRef struct {
