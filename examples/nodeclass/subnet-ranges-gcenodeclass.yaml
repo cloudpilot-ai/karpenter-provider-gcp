@@ -1,5 +1,6 @@
 # Direct pod IPs across several secondary IP ranges.
-# At launch Karpenter picks the listed range with the lowest GKE utilization.
+# At launch Karpenter prefers the listed range with the most free IPv4 addresses
+# and tries the remaining ranges if one reports IP space exhaustion.
 # subnetRangeNames is mutually exclusive with subnetRangeName.
 # Use networkConfig.subnetwork for the node subnet.
 apiVersion: karpenter.k8s.gcp/v1alpha1
