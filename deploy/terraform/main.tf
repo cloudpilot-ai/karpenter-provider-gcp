@@ -32,20 +32,36 @@ resource "google_compute_subnetwork" "default" {
     range_name    = var.pods_range_name
     ip_cidr_range = var.pods_cidr
   }
+
+  dynamic "secondary_ip_range" {
+    for_each = var.additional_pod_ranges
+    content {
+      range_name    = secondary_ip_range.key
+      ip_cidr_range = secondary_ip_range.value
+    }
+  }
 }
 
 resource "google_container_cluster" "default" {
   project = var.project_id
   name    = coalesce(var.cluster_name, var.common_name)
 
-  location = coalesce(var.cluster_location, var.google_region)
+  location           = coalesce(var.cluster_location, var.google_region)
+  min_master_version = var.kubernetes_version
 
   network    = google_compute_network.default.id
   subnetwork = google_compute_subnetwork.default.id
 
   ip_allocation_policy {
-    services_secondary_range_name = google_compute_subnetwork.default.secondary_ip_range[0].range_name
-    cluster_secondary_range_name  = google_compute_subnetwork.default.secondary_ip_range[1].range_name
+    services_secondary_range_name = var.services_range_name
+    cluster_secondary_range_name  = var.pods_range_name
+
+    dynamic "additional_pod_ranges_config" {
+      for_each = length(var.additional_pod_ranges) > 0 ? [1] : []
+      content {
+        pod_range_names = keys(var.additional_pod_ranges)
+      }
+    }
   }
 
   deletion_protection = var.deletion_protection
@@ -67,6 +83,11 @@ resource "google_container_cluster" "default" {
   }
 
   lifecycle {
+    precondition {
+      condition     = !contains(keys(var.additional_pod_ranges), var.pods_range_name) && !contains(keys(var.additional_pod_ranges), var.services_range_name)
+      error_message = "Additional pod range names must differ from the default pod and services range names."
+    }
+
     precondition {
       condition     = !var.private_nodes || var.control_plane_cidr != null
       error_message = "control_plane_cidr is required for private nodes."

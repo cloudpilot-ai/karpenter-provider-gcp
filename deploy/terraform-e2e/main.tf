@@ -8,6 +8,8 @@ module "cluster" {
   project_id                    = var.project_id
   google_region                 = var.region
   cluster_location              = var.location
+  kubernetes_version            = var.kubernetes_version
+  additional_pod_ranges         = var.additional_pod_ranges
   common_name                   = var.prefix
   network_name                  = "${var.prefix}-vpc"
   subnetwork_name               = "${var.prefix}-subnet"

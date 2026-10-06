@@ -43,6 +43,22 @@ variable "system_machine_type" {
   }
 }
 
+variable "kubernetes_version" {
+  type        = string
+  nullable    = false
+  description = "Requested minimum GKE master version, such as 1.35 or 1.36 (must be available in the approved location). Auto-upgrades still apply."
+  validation {
+    condition     = length(trimspace(var.kubernetes_version)) > 0
+    error_message = "Set an explicit Kubernetes minor or full GKE version."
+  }
+}
+
+variable "additional_pod_ranges" {
+  type        = map(string)
+  default     = {}
+  description = "Additional named pod CIDRs; include small and large ranges for multi-range networking tests. CIDRs must not overlap other ranges."
+}
+
 variable "primary_cidr" {
   type        = string
   description = "Approved subnet primary CIDR (must not overlap other VPC ranges)."

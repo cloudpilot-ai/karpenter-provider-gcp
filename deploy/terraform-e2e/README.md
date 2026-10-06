@@ -22,6 +22,33 @@ GitHub identity. The cluster has deletion protection and the system pool has
 `prevent_destroy`; retirement requires a separate reviewed code change and
 explicit destructive approval.
 
+## Kubernetes version and pod ranges
+
+Set `kubernetes_version` explicitly to a minor such as `"1.35"` or `"1.36"`,
+or a full GKE version. Check availability in the approved zone before planning:
+
+```sh
+gcloud container get-server-config --project="$E2E_PROJECT_ID" \
+  --zone="$E2E_LOCATION" --format='yaml(validMasterVersions,channels)'
+```
+
+The input sets GKE's `min_master_version`, not a permanent version pin. GKE
+resolves a minor to an available patch and can auto-upgrade afterward. The
+system pool inherits the master version on creation. Verify the actual control
+plane and node versions before testing. GKE does not support downgrading an
+existing cluster from 1.36 to 1.35; use separately approved targets if both
+versions must remain available. Version upgrades require the same maintenance
+window and explicit apply consent as other infrastructure changes.
+
+`additional_pod_ranges` maps subnet secondary range names to CIDRs and attaches
+those ranges to GKE. The example includes a small `/24` and a large `/20` for
+the multi-range networking tests. Review all ranges for overlap before applying.
+An empty map preserves a single pod range, but multi-range tests require both
+additional ranges. With the example names, pass `E2E_PREFIX=tf-e2e-sgp` to
+Make; it derives `E2E_PODS_RANGE`, `E2E_SMALL_PODS_RANGE` and
+`E2E_LARGE_PODS_RANGE`. Override the latter two when using different map keys.
+Changing `prefix` also requires updating the example's map keys.
+
 ## State and validation
 
 A maintainer must bootstrap a separate, access-controlled GCS backend outside
@@ -38,6 +65,9 @@ Offline checks from this directory:
 terraform fmt -check -recursive
 terraform init -backend=false -input=false -lockfile=readonly
 terraform validate
+terraform test
+terraform -chdir=../terraform init -backend=false -input=false
+terraform -chdir=../terraform test
 ```
 
 `terraform.tfvars.example` is a placeholder, not a deployable target. For an

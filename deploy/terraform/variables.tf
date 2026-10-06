@@ -36,6 +36,12 @@ variable "cluster_location" {
   description = "GKE zone or region; defaults to google_region."
 }
 
+variable "kubernetes_version" {
+  type        = string
+  default     = null
+  description = "Minimum GKE master version (minor such as 1.35 or full GKE version); null uses GKE's default. Auto-upgrades still apply."
+}
+
 variable "primary_cidr" {
   type    = string
   default = "10.0.0.0/24"
@@ -59,6 +65,16 @@ variable "services_range_name" {
 variable "pods_range_name" {
   type    = string
   default = "pod-ranges"
+}
+
+variable "additional_pod_ranges" {
+  type        = map(string)
+  default     = {}
+  description = "Additional GKE pod secondary ranges, keyed by subnet range name. CIDRs must not overlap other ranges."
+  validation {
+    condition     = alltrue([for cidr in values(var.additional_pod_ranges) : can(cidrhost(cidr, 0))])
+    error_message = "Each additional pod range must have a valid CIDR."
+  }
 }
 
 variable "private_nodes" {

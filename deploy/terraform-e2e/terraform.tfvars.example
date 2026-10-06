@@ -4,7 +4,12 @@ region              = "asia-southeast1"
 location            = "asia-southeast1-b"
 prefix              = "tf-e2e-sgp"
 system_machine_type = "replace-with-approved-machine-type"
+kubernetes_version  = "1.35" # Or 1.36, when available in the selected location.
 primary_cidr        = "10.0.0.0/20"
 pods_cidr           = "10.4.0.0/14"
 services_cidr       = "10.8.0.0/20"
 control_plane_cidr  = "10.12.0.0/28"
+additional_pod_ranges = {
+  tf-e2e-sgp-pods-small = "10.13.0.0/24"
+  tf-e2e-sgp-pods-large = "10.14.0.0/20"
+}
