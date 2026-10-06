@@ -257,6 +257,20 @@ To increase provisioning success:
 
 ---
 
+## NodeClaim launch fails with `ResourceNotReady`
+
+If the `NodeClaim` `Launched` condition reports the reason `ResourceNotReady`, GCE rejected the instance. A resource that the instance references is not ready yet. This resource is usually the boot image, for example when the image status changed after Karpenter selected it.
+
+The problem affects every instance type, so Karpenter does not try the next instance type. It also does not mark the instance type or zone as unavailable. Karpenter retries the launch later and starts again from the lowest-priced instance type. The launch succeeds after the resource becomes ready.
+
+If the condition persists, confirm that the boot image status is `READY`:
+
+```sh
+gcloud compute images describe <image-name> --project <image-project> --format="value(status)"
+```
+
+---
+
 ## Zone mismatch errors
 
 Karpenter provisions nodes only in zones configured for your GKE cluster. If a NodePool's `topology.kubernetes.io/zone` requirement specifies zones outside the cluster's configured locations, provisioning fails with an error like:
