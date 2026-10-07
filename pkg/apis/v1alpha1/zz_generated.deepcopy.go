@@ -349,6 +349,13 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 		*out = make([]NetworkTag, len(*in))
 		copy(*out, *in)
 	}
+	if in.ResourceManagerTags != nil {
+		in, out := &in.ResourceManagerTags, &out.ResourceManagerTags
+		*out = make(map[string]ResourceManagerTagValue, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	if in.ShieldedInstanceConfig != nil {
 		in, out := &in.ShieldedInstanceConfig, &out.ShieldedInstanceConfig
 		*out = new(ShieldedInstanceConfig)

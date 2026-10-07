@@ -211,6 +211,7 @@ _Appears in:_
 | `labels` _object (keys:string, values:string)_ | Labels to be applied on the GCE VM instance and its persistent disks.<br />Local SSD scratch disks do not support labels. |  | MaxProperties: 20 <br />Optional: \{\} <br /> |
 | `metadata` _object (keys:string, values:string)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  | Optional: \{\} <br /> |
 | `networkTags` _[NetworkTag](#networktag) array_ | NetworkTags is a list of network tags to apply to the node. |  | MaxItems: 20 <br />MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
+| `resourceManagerTags` _object (keys:string, values:[ResourceManagerTagValue](#resourcemanagertagvalue))_ | ResourceManagerTags are GCP resource manager (secure) tags bound to the instance<br />at creation. Unlike network tags, binding them is IAM-controlled, so they can be<br />used as targets in network firewall policies, IAM conditions and organization policies.<br />Keys are `tagKeys/\{tag_key_id\}` or `\{org_id\|project_id\}/\{tag_key_short_name\}`; values are<br />`tagValues/\{tag_value_id\}` or `\{tag_value_short_name\}`. Mirrors GKE node pool<br />resource_manager_tags. The Karpenter service account needs roles/resourcemanager.tagUser<br />on the tag values. |  | MaxProperties: 50 <br />Optional: \{\} <br /> |
 | `shieldedInstanceConfig` _[ShieldedInstanceConfig](#shieldedinstanceconfig)_ | ShieldedInstanceConfig enables Shielded VM for provisioned nodes: Secure Boot,<br />virtual TPM, and integrity monitoring. |  | Optional: \{\} <br /> |
 | `advancedMachineFeatures` _[AdvancedMachineFeatures](#advancedmachinefeatures)_ | AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes. |  | Optional: \{\} <br /> |
 | `confidentialInstanceType` _string_ | ConfidentialInstanceType enables Confidential VM for provisioned nodes using the<br />named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory<br />encryption. Leave unset to disable. Only supported on specific machine families. |  | Enum: [SEV SEV_SNP TDX] <br />Optional: \{\} <br /> |
@@ -409,6 +410,23 @@ _Validation:_
 - MaxLength: 63
 - MinLength: 1
 - Pattern: `^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+
+
+#### ResourceManagerTagValue
+
+_Underlying type:_ _string_
+
+ResourceManagerTagValue is a resource manager tag value, either `tagValues/{tag_value_id}`
+or a `{tag_value_short_name}` under a namespaced key.
+
+_Validation:_
+- MaxLength: 63
+- MinLength: 1
+- Pattern: `^(tagValues/[0-9]+|[^/]+)$`
 
 _Appears in:_
 - [GCENodeClassSpec](#gcenodeclassspec)

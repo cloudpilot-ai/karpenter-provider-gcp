@@ -287,6 +287,13 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			want: NodeClassDrift,
 		},
 		{
+			name: "ResourceManagerTags",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.ResourceManagerTags = map[string]v1alpha1.ResourceManagerTagValue{"tagKeys/123": "tagValues/456"}
+			},
+			want: NodeClassDrift,
+		},
+		{
 			name: "ShieldedInstanceConfig",
 			mutate: func(nc *v1alpha1.GCENodeClass) {
 				nc.Spec.ShieldedInstanceConfig = &v1alpha1.ShieldedInstanceConfig{EnableSecureBoot: ptr(true)}

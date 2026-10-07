@@ -60,7 +60,7 @@ Key capabilities:
 - [arm64](examples/arm64.md) — Google Axion and Ampere Altra nodes
 - [Ubuntu](examples/ubuntu.md) — Ubuntu image family
 - [GPU](examples/gpu.md) — GPU workloads
-- [Networking](examples/networking.md) — private nodes, custom subnetwork, pod IP range
+- [Networking](examples/networking.md) — private nodes, custom subnetwork, pod IP range, resource manager tags
 - [Static capacity](examples/static-capacity.md) — fixed node count with `spec.replicas`
 - [Advanced](examples/advanced.md) — kubelet config, static hugepages, Shielded VM, Confidential VM, nested virtualization, local SSDs, metadata, secondary disk, multiple pools
 

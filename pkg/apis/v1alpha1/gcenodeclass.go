@@ -107,6 +107,17 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:MaxItems=20
 	// +optional
 	NetworkTags []NetworkTag `json:"networkTags,omitempty"`
+	// ResourceManagerTags are GCP resource manager (secure) tags bound to the instance
+	// at creation. Unlike network tags, binding them is IAM-controlled, so they can be
+	// used as targets in network firewall policies, IAM conditions and organization policies.
+	// Keys are `tagKeys/{tag_key_id}` or `{org_id|project_id}/{tag_key_short_name}`; values are
+	// `tagValues/{tag_value_id}` or `{tag_value_short_name}`. Mirrors GKE node pool
+	// resource_manager_tags. The Karpenter service account needs roles/resourcemanager.tagUser
+	// on the tag values.
+	// +kubebuilder:validation:MaxProperties=50
+	// +kubebuilder:validation:XValidation:message="invalid resourceManagerTags key",rule="self.all(k, k.matches('^tagKeys/[0-9]+$') || (!k.startsWith('tagKeys/') && k.matches('^[^/]+/[^/]+$')))"
+	// +optional
+	ResourceManagerTags map[string]ResourceManagerTagValue `json:"resourceManagerTags,omitempty"`
 	// ShieldedInstanceConfig enables Shielded VM for provisioned nodes: Secure Boot,
 	// virtual TPM, and integrity monitoring.
 	// +optional
@@ -415,6 +426,13 @@ type SecondaryBootDiskMode string
 // +kubebuilder:validation:MinLength=1
 // +kubebuilder:validation:MaxLength=63
 type NetworkTag string
+
+// ResourceManagerTagValue is a resource manager tag value, either `tagValues/{tag_value_id}`
+// or a `{tag_value_short_name}` under a namespaced key.
+// +kubebuilder:validation:Pattern=`^(tagValues/[0-9]+|[^/]+)$`
+// +kubebuilder:validation:MinLength=1
+// +kubebuilder:validation:MaxLength=63
+type ResourceManagerTagValue string
 
 // ShieldedInstanceConfig defines the Shielded VM options for a GCE instance.
 type ShieldedInstanceConfig struct {

@@ -152,6 +152,21 @@ func TestGCENodeClassCRDSubnetRangeNamesUniqueViaCEL(t *testing.T) {
 	require.Contains(t, crdText, `self.all(x, self.exists_one(y, x == y))`)
 }
 
+func TestGCENodeClassCRDResourceManagerTags(t *testing.T) {
+	field, ok := specSchema(t).Properties["resourceManagerTags"]
+	require.True(t, ok)
+	require.Equal(t, "object", field.Type)
+	require.NotNil(t, field.MaxProperties)
+	require.Equal(t, int64(50), *field.MaxProperties)
+	require.Len(t, field.XValidations, 1)
+	require.Equal(t, "invalid resourceManagerTags key", field.XValidations[0].Message)
+
+	value := field.AdditionalProperties.Schema
+	require.Equal(t, `^(tagValues/[0-9]+|[^/]+)$`, value.Pattern)
+	require.NotNil(t, value.MaxLength)
+	require.Equal(t, int64(63), *value.MaxLength)
+}
+
 func TestGCENodeClassCRDRejectsZeroHugepages(t *testing.T) {
 	for _, name := range []string{"hugepageSize2m", "hugepageSize1g"} {
 		field := hugepagesSchema(t).Properties[name]
