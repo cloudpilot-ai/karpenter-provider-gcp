@@ -61,4 +61,4 @@ spec:
 
 Keys are `tagKeys/{tag_key_id}` or the namespaced `{org_id|project_id}/{tag_key_short_name}`. Values are `tagValues/{tag_value_id}` or the tag value short name. Up to 50 tags are supported.
 
-The Karpenter controller's service account needs `roles/resourcemanager.tagUser` on the tag values (or their tag key or a parent resource); otherwise instance creation fails. Tags are only bound at creation, so changing `resourceManagerTags` drifts existing nodes and replaces them.
+The Karpenter controller's service account needs `roles/resourcemanager.tagUser` on the tag values (or their tag key or a parent resource) and `compute.instances.createTagBinding` on the project (included in the [controller role](../../deploy/iam/karpenter-controller-role.yaml)); otherwise instance creation fails. Tags are only bound at creation, so changing `resourceManagerTags` drifts existing nodes and replaces them.

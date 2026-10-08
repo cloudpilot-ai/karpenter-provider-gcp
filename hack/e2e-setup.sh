@@ -54,6 +54,9 @@ GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 AR_REPO="${E2E_PREFIX}-images"
 ROUTER_NAME="${E2E_PREFIX}-router"
 NAT_NAME="${E2E_PREFIX}-nat"
+# Short names; RESOURCE_MANAGER_TAG_VALUE must match environment.ResourceManagerTagValue.
+RESOURCE_MANAGER_TAG_KEY="${E2E_PREFIX}-tag"
+RESOURCE_MANAGER_TAG_VALUE="e2e"
 IMAGE_REPO="${E2E_REGION}-docker.pkg.dev/${E2E_PROJECT_ID}/${AR_REPO}/karpenter"
 
 PRIMARY_CIDR="10.0.0.0/20"
@@ -224,6 +227,32 @@ gcloud iam service-accounts add-iam-policy-binding "${COMPUTE_DEFAULT_SA}" \
   --role roles/iam.serviceAccountUser \
   --member "serviceAccount:${GSA_EMAIL}" \
   --project "${E2E_PROJECT_ID}" \
+  --quiet >/dev/null
+
+# Resource manager tag for the GCENodeClass spec.resourceManagerTags e2e.
+TAG_KEY_NAMESPACED="${E2E_PROJECT_ID}/${RESOURCE_MANAGER_TAG_KEY}"
+if gcloud resource-manager tags keys describe "${TAG_KEY_NAMESPACED}" &>/dev/null; then
+  log "Reusing tag key ${TAG_KEY_NAMESPACED}"
+else
+  log "Creating tag key ${TAG_KEY_NAMESPACED}..."
+  gcloud resource-manager tags keys create "${RESOURCE_MANAGER_TAG_KEY}" \
+    --parent "projects/${E2E_PROJECT_ID}" \
+    --description "Karpenter e2e resourceManagerTags" \
+    --quiet >/dev/null
+fi
+if gcloud resource-manager tags values describe "${TAG_KEY_NAMESPACED}/${RESOURCE_MANAGER_TAG_VALUE}" &>/dev/null; then
+  log "Reusing tag value ${TAG_KEY_NAMESPACED}/${RESOURCE_MANAGER_TAG_VALUE}"
+else
+  log "Creating tag value ${TAG_KEY_NAMESPACED}/${RESOURCE_MANAGER_TAG_VALUE}..."
+  gcloud resource-manager tags values create "${RESOURCE_MANAGER_TAG_VALUE}" \
+    --parent "${TAG_KEY_NAMESPACED}" \
+    --quiet >/dev/null
+fi
+# Binding a tag to an instance needs tagValueBindings.create on the tag value.
+log "Binding tagUser on tag key ${TAG_KEY_NAMESPACED}..."
+gcloud resource-manager tags keys add-iam-policy-binding "${TAG_KEY_NAMESPACED}" \
+  --member "serviceAccount:${GSA_EMAIL}" \
+  --role roles/resourcemanager.tagUser \
   --quiet >/dev/null
 
 # Artifact Registry

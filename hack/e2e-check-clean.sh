@@ -95,6 +95,11 @@ if gcloud iam service-accounts describe "${GSA_EMAIL}" \
   report "Service account" "${GSA_EMAIL}"
 fi
 
+# Resource manager tag key
+if gcloud resource-manager tags keys describe "${E2E_PROJECT_ID}/${E2E_PREFIX}-tag" &>/dev/null; then
+  report "Resource manager tag key" "${E2E_PROJECT_ID}/${E2E_PREFIX}-tag"
+fi
+
 # Cloud NAT
 if gcloud compute routers nats describe "${NAT_NAME}" \
     --router "${ROUTER_NAME}" \

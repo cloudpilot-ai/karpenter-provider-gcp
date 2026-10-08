@@ -94,6 +94,8 @@ type Environment struct {
 	PodsRangeName      string
 	SmallPodsRangeName string
 	LargePodsRangeName string
+	// ResourceManagerTagKey is the short name of the project-scoped tag key created by e2e-setup.
+	ResourceManagerTagKey string
 
 	KubeClient    kubernetes.Interface
 	DynamicClient dynamic.Interface
@@ -144,20 +146,21 @@ func NewEnvironment() *Environment {
 	Expect(err).NotTo(HaveOccurred(), "creating GCP compute service client")
 
 	env := &Environment{
-		ProjectID:          mustEnv("PROJECT_ID"),
-		ClusterName:        mustEnv("CLUSTER_NAME"),
-		ClusterLocation:    mustEnv("CLUSTER_LOCATION"),
-		PodsRangeName:      mustEnv("PODS_RANGE_NAME"),
-		SmallPodsRangeName: os.Getenv("SMALL_PODS_RANGE_NAME"),
-		LargePodsRangeName: os.Getenv("LARGE_PODS_RANGE_NAME"),
-		KubeClient:         kubeClient,
-		DynamicClient:      dynamicClient,
-		MetricsClient:      metricsClient,
-		containerSvc:       containerSvc,
-		computeSvc:         computeSvc,
-		ownedNodePools:     make(map[string]struct{}),
-		ownedNodeClasses:   make(map[string]struct{}),
-		ownedNodeOverlays:  make(map[string]struct{}),
+		ProjectID:             mustEnv("PROJECT_ID"),
+		ClusterName:           mustEnv("CLUSTER_NAME"),
+		ClusterLocation:       mustEnv("CLUSTER_LOCATION"),
+		PodsRangeName:         mustEnv("PODS_RANGE_NAME"),
+		SmallPodsRangeName:    os.Getenv("SMALL_PODS_RANGE_NAME"),
+		LargePodsRangeName:    os.Getenv("LARGE_PODS_RANGE_NAME"),
+		ResourceManagerTagKey: os.Getenv("RESOURCE_MANAGER_TAG_KEY"),
+		KubeClient:            kubeClient,
+		DynamicClient:         dynamicClient,
+		MetricsClient:         metricsClient,
+		containerSvc:          containerSvc,
+		computeSvc:            computeSvc,
+		ownedNodePools:        make(map[string]struct{}),
+		ownedNodeClasses:      make(map[string]struct{}),
+		ownedNodeOverlays:     make(map[string]struct{}),
 	}
 
 	// Fast-fail: verify the cluster exists at the configured location before

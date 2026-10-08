@@ -4,6 +4,7 @@ stage: GA
 includedPermissions:
   # Compute Engine — instance lifecycle
   - compute.instances.create
+  - compute.instances.createTagBinding  # required by Instances.Insert when spec.resourceManagerTags is set
   - compute.instances.delete
   - compute.instances.get
   - compute.instances.list
