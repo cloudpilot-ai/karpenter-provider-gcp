@@ -453,7 +453,9 @@ Use `"true"` to select bare metal. A NodePool requirement constrains only that p
 
 #### Adopting the label on existing nodes
 
-Existing Nodes and NodeClaims do not receive this label automatically after an upgrade. `In ["false"]` rejects unlabeled legacy nodes, including VMs. Adding it to a NodePool marks those NodeClaims as drifted, subject to disruption controls. Pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
+No configuration changes are required when upgrading. This label does not change instance selection or cause drift unless you add requirements that use it.
+
+The following caveats apply only when adopting the new label on an existing pool. Existing Nodes and NodeClaims do not receive this label automatically. `In ["false"]` rejects unlabeled legacy nodes, including VMs. Adding it to a NodePool marks those NodeClaims as drifted, subject to disruption controls. Pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
 
 As an optional transition, use `NotIn ["true"]` to prevent new metal launches while accepting unlabeled legacy nodes. This also accepts existing unlabeled metal. It does not remove those nodes and is not equivalent to requiring a `"false"` label. Pods need `nodeAffinity` to express `NotIn`.
 
