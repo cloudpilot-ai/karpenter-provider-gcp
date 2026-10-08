@@ -9,9 +9,9 @@
 
 The optional `karpenter.k8s.gcp/instance-bare-metal` label does not change default provisioning behavior. Existing Nodes and NodeClaims do not receive it automatically.
 
-Use `NotIn ["true"]` to prevent new bare-metal launches without drifting unlabeled legacy VMs. This also accepts unlabeled legacy metal nodes; existing-node cleanup remains separate.
+Use `In ["false"]` to require VMs, or `In ["true"]` to require bare metal. Both reject unlabeled legacy nodes. Adding either requirement to a NodePool marks unlabeled legacy NodeClaims as drifted. Replacement follows normal disruption controls. Pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
 
-Adding `In ["false"]` to a NodePool marks all unlabeled legacy NodeClaims as drifted, including VMs. Replacement follows normal disruption controls. Positive pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
+As an optional transition, use `NotIn ["true"]` to prevent new bare-metal launches without drifting unlabeled legacy VMs. This also accepts unlabeled legacy metal nodes. It is not equivalent to requiring a `"false"` label. Existing-node cleanup remains separate.
 
 Remove NodePool and workload requirements using this label before downgrading to a controller that does not recognize it. See [bare-metal selection](docs/examples/advanced.md#bare-metal-selection).
 
