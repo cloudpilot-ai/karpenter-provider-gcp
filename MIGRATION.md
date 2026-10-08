@@ -11,7 +11,7 @@ No configuration changes are required when upgrading. The new `karpenter.k8s.gcp
 
 The following caveats apply only when adopting the new label on an existing pool. Existing Nodes and NodeClaims do not receive the label automatically.
 
-Use `In ["false"]` to require VMs, or `In ["true"]` to require bare metal. Both reject unlabeled legacy nodes. Adding either requirement to a NodePool marks unlabeled legacy NodeClaims as drifted. Replacement follows normal disruption controls. Pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
+Use `In ["false"]` to require VMs, or `In ["true"]` to require bare metal. Both reject unlabeled legacy nodes. Adding either requirement to a NodePool marks unlabeled legacy NodeClaims as drifted. Replacement follows normal disruption controls. Pods that explicitly select this label cannot use unlabeled existing Nodes. Karpenter may provision a new matching node even when those existing Nodes have spare capacity.
 
 ## v0.7.0
 

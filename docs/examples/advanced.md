@@ -455,7 +455,7 @@ Use `"true"` to select bare metal. A NodePool requirement constrains only that p
 
 No configuration changes are required when upgrading. This label does not change instance selection or cause drift unless you add requirements that use it.
 
-The following caveats apply only when adopting the new label on an existing pool. Existing Nodes and NodeClaims do not receive this label automatically. `In ["false"]` rejects unlabeled legacy nodes, including VMs. Adding it to a NodePool marks those NodeClaims as drifted, subject to disruption controls. Pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
+The following caveats apply only when adopting the new label on an existing pool. Existing Nodes and NodeClaims do not receive this label automatically. `In ["false"]` rejects unlabeled legacy nodes, including VMs. Adding it to a NodePool marks those NodeClaims as drifted, subject to disruption controls. Pods that explicitly select this label cannot use unlabeled existing Nodes. Karpenter may provision a new matching node even when those existing Nodes have spare capacity.
 
 ### Machine-family selection
 
