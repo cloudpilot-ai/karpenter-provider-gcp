@@ -13,10 +13,6 @@ The following caveats apply only when adopting the new label on an existing pool
 
 Use `In ["false"]` to require VMs, or `In ["true"]` to require bare metal. Both reject unlabeled legacy nodes. Adding either requirement to a NodePool marks unlabeled legacy NodeClaims as drifted. Replacement follows normal disruption controls. Pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
 
-As an optional transition, use `NotIn ["true"]` to prevent new bare-metal launches without drifting unlabeled legacy VMs. This also accepts unlabeled legacy metal nodes. It is not equivalent to requiring a `"false"` label. Existing-node cleanup remains separate.
-
-Remove NodePool and workload requirements using this label before downgrading to a controller that does not recognize it. See [bare-metal selection](docs/examples/advanced.md#bare-metal-selection).
-
 ## v0.7.0
 
 ### Multiple pod CIDR ranges on GCENodeClass

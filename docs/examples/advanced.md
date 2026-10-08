@@ -457,10 +457,6 @@ No configuration changes are required when upgrading. This label does not change
 
 The following caveats apply only when adopting the new label on an existing pool. Existing Nodes and NodeClaims do not receive this label automatically. `In ["false"]` rejects unlabeled legacy nodes, including VMs. Adding it to a NodePool marks those NodeClaims as drifted, subject to disruption controls. Pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
 
-As an optional transition, use `NotIn ["true"]` to prevent new metal launches while accepting unlabeled legacy nodes. This also accepts existing unlabeled metal. It does not remove those nodes and is not equivalent to requiring a `"false"` label. Pods need `nodeAffinity` to express `NotIn`.
-
-Remove requirements using this label before downgrading to a controller that does not recognize it.
-
 ### Machine-family selection
 
 For example, use `nodeAffinity` when a workload can run on any of several machine families:
