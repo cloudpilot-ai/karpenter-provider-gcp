@@ -38,6 +38,7 @@ func init() {
 		LabelInstanceSize,
 		LabelInstanceCPU,
 		LabelInstanceMemory,
+		LabelInstanceBareMetal,
 		LabelInstanceGPUName,
 		LabelInstanceGPUManufacturer,
 		LabelInstanceGPUCount,
@@ -143,6 +144,7 @@ var (
 	LabelInstanceSize                        = apis.Group + "/instance-size"
 	LabelInstanceCPU                         = apis.Group + "/instance-cpu"
 	LabelInstanceMemory                      = apis.Group + "/instance-memory"
+	LabelInstanceBareMetal                   = apis.Group + "/instance-bare-metal"
 	LabelInstanceGPUName                     = apis.Group + "/instance-gpu-name"
 	LabelInstanceGPUManufacturer             = apis.Group + "/instance-gpu-manufacturer"
 	LabelInstanceGPUCount                    = apis.Group + "/instance-gpu-count"

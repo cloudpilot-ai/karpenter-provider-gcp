@@ -5,6 +5,16 @@
 
 ## Unreleased
 
+### Adopting the bare-metal selector
+
+The optional `karpenter.k8s.gcp/instance-bare-metal` label does not change default provisioning behavior. Existing Nodes and NodeClaims do not receive it automatically.
+
+Use `NotIn ["true"]` to prevent new bare-metal launches without drifting unlabeled legacy VMs. This also accepts unlabeled legacy metal nodes; existing-node cleanup remains separate.
+
+Adding `In ["false"]` to a NodePool marks all unlabeled legacy NodeClaims as drifted, including VMs. Replacement follows normal disruption controls. Positive pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning.
+
+Remove NodePool and workload requirements using this label before downgrading to a controller that does not recognize it. See [bare-metal selection](docs/examples/advanced.md#bare-metal-selection).
+
 ## v0.7.0
 
 ### Multiple pod CIDR ranges on GCENodeClass

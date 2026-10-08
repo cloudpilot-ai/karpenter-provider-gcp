@@ -37,6 +37,10 @@ const (
 	LabelClusterLocationKey string = "goog-k8s-cluster-location"
 )
 
+func IsBareMetalInstanceType(name string) bool {
+	return strings.HasSuffix(name, "-metal")
+}
+
 func GetAllSingleValuedRequirementLabels(instanceType *cloudprovider.InstanceType) map[string]string {
 	labels := map[string]string{}
 	if instanceType == nil {

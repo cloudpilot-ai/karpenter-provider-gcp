@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -31,9 +33,35 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
+
+func TestInstanceToNodeClaimPropagatesBareMetalLabel(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	for _, tt := range []struct {
+		name      string
+		bareMetal string
+	}{
+		{name: "c4a-highmem-96-metal", bareMetal: "true"},
+		{name: "c4a-highmem-96", bareMetal: "false"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mt := &computepb.MachineType{
+				Name:      lo.ToPtr(tt.name),
+				GuestCpus: lo.ToPtr[int32](96),
+				MemoryMb:  lo.ToPtr[int32](768 * 1024),
+			}
+			it := instancetype.NewInstanceType(ctx, mt, &v1alpha1.GCENodeClass{}, "us-central1", karpcloudprovider.Offerings{}, 0)
+			require.NotNil(t, it)
+			nc := (&CloudProvider{}).instanceToNodeClaim(&instance.Instance{Type: tt.name, Location: "us-central1-a"}, it)
+			require.Equal(t, tt.bareMetal, nc.Labels[v1alpha1.LabelInstanceBareMetal],
+				"the computed selector must reach the NodeClaim so core can copy it to the Node")
+		})
+	}
+}
 
 func TestInstanceToNodeClaim_PropagatesClusterLocationLabel(t *testing.T) {
 	t.Parallel()

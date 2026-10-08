@@ -153,6 +153,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		// Well Known to Google Cloud
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", mt.GetGuestCpus())),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", mt.GetMemoryMb())),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceBareMetal, corev1.NodeSelectorOpIn, fmt.Sprint(utils.IsBareMetalInstanceType(mt.GetName()))),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceShape, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGeneration, corev1.NodeSelectorOpDoesNotExist),

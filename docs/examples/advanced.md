@@ -419,6 +419,25 @@ Common GCP instance labels:
 | `karpenter.k8s.gcp/instance-generation` | Machine type name | Parsed from standard machine family names; prefer `instance-family` when possible. |
 | `karpenter.k8s.gcp/instance-shape`      | Machine type name | Parsed from standard machine type names, for example `standard` or `highmem`.      |
 | `karpenter.k8s.gcp/instance-size`       | Machine type name | Parsed from standard machine type names.                                           |
+| `karpenter.k8s.gcp/instance-bare-metal` | Machine type name | `"true"` for names ending in `-metal`, otherwise `"false"`.                        |
+
+### Bare-metal selection
+
+To prevent new bare-metal launches, add this requirement to a NodePool's `spec.template.spec.requirements`:
+
+```yaml
+- key: karpenter.k8s.gcp/instance-bare-metal
+  operator: NotIn
+  values: ["true"]
+```
+
+The label follows the Compute Engine `-metal` naming convention, including bundled-SSD names such as `c4-standard-288-lssd-metal`. No bare-metal API field is available. The label does not change default instance selection or guarantee compatibility with a NodeClass's configuration.
+
+Use `In` with `["true"]` to select bare metal, or `["false"]` to require VMs. NodePools and pods can use this label. For pods, use `nodeAffinity` to express `NotIn`; `nodeSelector` supports only exact values. A NodePool requirement constrains only that pool. To prohibit metal for a workload across pools, constrain the pod or every eligible pool.
+
+Existing Nodes and NodeClaims do not receive this label automatically after an upgrade. `NotIn ["true"]` accepts unlabeled legacy nodes, including metal. It prevents new metal launches but does not remove existing metal nodes. `In ["false"]` rejects all unlabeled legacy nodes, including VMs. Adding it to a NodePool marks those NodeClaims as drifted, subject to disruption controls. Positive pod selectors also reject unlabeled legacy Nodes and can cause additional provisioning. Remove requirements using this label before downgrading to a controller that does not recognize it.
+
+### Machine-family selection
 
 For example, use `nodeAffinity` when a workload can run on any of several machine families:
 
