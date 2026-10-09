@@ -37,6 +37,12 @@ func TestTotalGiB(t *testing.T) {
 		{"z3 standard: 4 × 3000", "z3-highmem-88-standardlssd", 4, 12000},
 		{"z3 high: 2 × 3000", "z3-highmem-176-highlssd", 2, 6000},
 
+		{"z4d smallest shape", "z4d-highmem-8-highlssd", 1, 3500},
+		{"z4d live migration boundary", "z4d-highmem-192-standardlssd", 12, 42000},
+		{"z4d large highlssd", "z4d-highmem-192-highlssd", 24, 84000},
+		{"z4d large standardlssd", "z4d-highmem-384-standardlssd", 24, 84000},
+		{"z4d zero partitions", "z4d-highmem-8-highlssd", 0, 0},
+
 		{"c4d-highmem-8-lssd: 1 × 375", "c4d-highmem-8-lssd", 1, 375},
 		{"c4d-highmem-16-lssd: 1 × 375", "c4d-highmem-16-lssd", 1, 375},
 
@@ -75,6 +81,7 @@ func TestFamilySupportsConfigurableLocalSSDs(t *testing.T) {
 		{"c4-standard-8-lssd", false},
 		{"c4a-standard-4-lssd", false},
 		{"z3-highmem-22-standardlssd", false},
+		{"z4d-highmem-8-highlssd", false},
 		{"a3-highgpu-8g", false},
 
 		{"e2-standard-2", false},

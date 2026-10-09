@@ -68,6 +68,20 @@ func TestLabelsForInstanceType(t *testing.T) {
 	}, labels)
 }
 
+func TestLabelsForZ4D(t *testing.T) {
+	t.Parallel()
+
+	labels, ok := LabelsForInstanceType("z4d-highmem-8-highlssd")
+	require.True(t, ok)
+	require.Equal(t, map[string]string{
+		"disk-type.gke.io/hyperdisk-balanced":                   "true",
+		"disk-type.gke.io/hyperdisk-balanced-high-availability": "true",
+		"disk-type.gke.io/hyperdisk-extreme":                    "true",
+		"disk-type.gke.io/hyperdisk-throughput":                 "true",
+		"disk-type.gke.io/hyperdisk-ml":                         "true",
+	}, labels)
+}
+
 func TestAllLabels(t *testing.T) {
 	t.Parallel()
 

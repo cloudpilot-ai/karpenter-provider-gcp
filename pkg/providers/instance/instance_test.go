@@ -1077,6 +1077,7 @@ func TestRenderDiskProperties_SsdCountEmitsScratchDisks(t *testing.T) {
 		{name: "ssdCount=0 with 2 legacy entries → still 0 (legacy ignored)", instanceTypeName: "n2d-standard-8", ssdCount: 0, legacyEntries: 2, wantScratchCount: 0},
 		{name: "ssdCount=3 with 1 legacy entry → 3 (legacy ignored)", instanceTypeName: "n2d-standard-8", ssdCount: 3, legacyEntries: 1, wantScratchCount: 3},
 		{name: "bundled SKU never gets explicit SCRATCH", instanceTypeName: "z3-highmem-88-highlssd", ssdCount: 12, legacyEntries: 0, wantScratchCount: 0},
+		{name: "z4d bundled SSD is auto-attached", instanceTypeName: "z4d-highmem-8-highlssd", ssdCount: 1, legacyEntries: 0, wantScratchCount: 0},
 	}
 
 	for _, tc := range cases {
@@ -2474,6 +2475,38 @@ func TestOnHostMaintenancePolicy(t *testing.T) {
 		mt           *computepb.MachineType
 		want         string
 	}{
+		{
+			"z4d smallest shape requires MIGRATE",
+			newIT("z4d-highmem-8-highlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(1), "MIGRATE",
+		},
+		{
+			"z4d 42000 GiB boundary requires MIGRATE",
+			newIT("z4d-highmem-192-standardlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(12), "MIGRATE",
+		},
+		{
+			"z4d highlssd 84000 GiB requires TERMINATE",
+			newIT("z4d-highmem-192-highlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(24), "TERMINATE",
+		},
+		{
+			"z4d standardlssd 84000 GiB requires TERMINATE",
+			newIT("z4d-highmem-384-standardlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(24), "TERMINATE",
+		},
+		{
+			"z4d spot overrides MIGRATE",
+			newIT("z4d-highmem-8-highlssd", false), karpv1.CapacityTypeSpot, machineTypeWithBundledSSDs(1), "TERMINATE",
+		},
+		{
+			"z4d missing machine metadata falls back to MIGRATE",
+			newIT("z4d-highmem-192-highlssd", false), karpv1.CapacityTypeOnDemand, nil, "MIGRATE",
+		},
+		{
+			"z4d missing partition count falls back to MIGRATE",
+			newIT("z4d-highmem-192-highlssd", false), karpv1.CapacityTypeOnDemand, &computepb.MachineType{BundledLocalSsds: &computepb.BundledLocalSsds{}}, "MIGRATE",
+		},
+		{
+			"z4d metal keeps TERMINATE",
+			newIT("z4d-highmem-384-standardlssd-metal", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(24), "TERMINATE",
+		},
 		{
 			"z3 non-metal lssd ≤18 TiB on-demand requires MIGRATE",
 			newIT("z3-highmem-22-standardlssd", false), karpv1.CapacityTypeOnDemand, machineTypeWithBundledSSDs(2), "MIGRATE",

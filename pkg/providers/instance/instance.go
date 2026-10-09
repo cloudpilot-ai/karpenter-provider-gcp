@@ -1387,8 +1387,13 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 	}
 }
 
-// GCE requires z3 instances with more than 18 TiB of bundled local SSD to terminate on maintenance.
-const z3HighSsdGiBThreshold = 18 * 1024
+// GCE requires z3 and z4d instances above their bundled SSD limits to terminate on maintenance.
+// MachineType does not report these thresholds, so the provider uses the documented limits below.
+// https://cloud.google.com/compute/docs/storage-optimized-machines#maintenance_experience_for_z4d_instances
+const (
+	z3HighSsdGiBThreshold  = 18 * 1024
+	z4dHighSsdGiBThreshold = 42000
+)
 
 // onHostMaintenancePolicy returns TERMINATE for shapes that GCE cannot live-migrate.
 func onHostMaintenancePolicy(instanceType *cloudprovider.InstanceType, capacityType string, mt *computepb.MachineType) string {
@@ -1398,23 +1403,27 @@ func onHostMaintenancePolicy(instanceType *cloudprovider.InstanceType, capacityT
 	if instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0 {
 		return "TERMINATE"
 	}
-	if strings.HasPrefix(instanceType.Name, "z3-") && !utils.IsBareMetalInstanceType(instanceType.Name) {
-		if mt != nil {
-			if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil {
-				if localssd.TotalGiB(instanceType.Name, int(*bls.PartitionCount)) > z3HighSsdGiBThreshold {
-					return "TERMINATE"
-				}
-			}
-		}
-		return "MIGRATE"
-	}
 	if utils.IsBareMetalInstanceType(instanceType.Name) {
 		return "TERMINATE"
 	}
 	if strings.HasPrefix(instanceType.Name, "h4d-") {
 		return "TERMINATE"
 	}
-	return ""
+
+	var threshold int64
+	switch {
+	case strings.HasPrefix(instanceType.Name, "z3-"):
+		threshold = z3HighSsdGiBThreshold
+	case strings.HasPrefix(instanceType.Name, "z4d-"):
+		threshold = z4dHighSsdGiBThreshold
+	default:
+		return ""
+	}
+	partitions := mt.GetBundledLocalSsds().GetPartitionCount()
+	if localssd.TotalGiB(instanceType.Name, int(partitions)) > threshold {
+		return "TERMINATE"
+	}
+	return "MIGRATE"
 }
 
 // configureConfidentialInstance applies the NodeClass ConfidentialInstanceType
