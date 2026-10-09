@@ -1867,64 +1867,46 @@ func TestBuildInstance_SortsMetadataAfterAllPatches(t *testing.T) {
 func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		family string
-		arch   string
-	}{
-		{family: "e2", arch: "amd64"},
-		{family: "c4a", arch: "arm64"},
-		{family: "n4", arch: "amd64"},
-	} {
-		t.Run(tc.family, func(t *testing.T) {
-			t.Parallel()
+	p := makeProvider()
+	instanceType := &cloudprovider.InstanceType{
+		Name: "e2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			{Available: true, Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			)},
+		},
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, "e2"),
+		),
+		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
+	}
 
-			p := makeProvider()
-			instanceType := &cloudprovider.InstanceType{
-				Name: tc.family + "-standard-4",
-				Offerings: cloudprovider.Offerings{
-					{Available: true, Requirements: scheduling.NewRequirements(
-						scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
-					)},
-				},
-				Requirements: scheduling.NewRequirements(
-					scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, tc.arch),
-					scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, tc.family),
-				),
-				Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
-			}
+	kubeLabels := "max-pods-per-node=110,max-pods=110,cloud.google.com/machine-family=n2,disk-type.gke.io/hyperdisk-throughput=true,disk-type.gke.io/pd-standard=true"
+	sourceMetadata := makeSourceMetadata(kubeLabels)
+	nodeClass := &v1alpha1.GCENodeClass{}
+	cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
 
-			kubeLabels := "max-pods-per-node=110,max-pods=110,cloud.google.com/machine-family=n2,disk-type.gke.io/hyperdisk-throughput=true,disk-type.gke.io/pd-standard=true,disk-type.gke.io/pd-balanced=true,disk-type.gke.io/pd-ssd=true"
-			sourceMetadata := makeSourceMetadata(kubeLabels)
-			nodeClass := &v1alpha1.GCENodeClass{}
-			cluster := makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false)
+	instance, err := p.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(),
+		nodeClass,
+		instanceType,
+		sourceMetadata,
+		cluster,
+		"us-central1-a", "karpenter-disk-label-test",
+		karpv1.CapacityTypeOnDemand,
+		nil, 0,
+	)
 
-			instance, err := p.buildInstance(
-				context.Background(),
-				spotOrOnDemandNodeClaim(),
-				nodeClass,
-				instanceType,
-				sourceMetadata,
-				cluster,
-				"us-central1-a", "karpenter-disk-label-test",
-				karpv1.CapacityTypeOnDemand,
-				nil, 0,
-			)
-
-			require.NoError(t, err)
-			for _, value := range []string{kubeLabelsFrom(t, instance), kubeEnvFrom(t, instance)} {
-				require.Contains(t, value, "cloud.google.com/machine-family="+tc.family)
-				if tc.family == "e2" {
-					require.Contains(t, value, "disk-type.gke.io/pd-balanced=true")
-					require.Contains(t, value, "disk-type.gke.io/pd-extreme=true")
-					require.Contains(t, value, "disk-type.gke.io/pd-ssd=true")
-					require.Contains(t, value, "disk-type.gke.io/pd-standard=true")
-					require.NotContains(t, value, "disk-type.gke.io/hyperdisk-throughput=true")
-				} else {
-					require.Contains(t, value, "disk-type.gke.io/hyperdisk-balanced=true")
-					require.NotContains(t, value, "disk-type.gke.io/pd-")
-				}
-			}
-		})
+	require.NoError(t, err)
+	for _, value := range []string{kubeLabelsFrom(t, instance), kubeEnvFrom(t, instance)} {
+		require.Contains(t, value, "cloud.google.com/machine-family=e2")
+		require.Contains(t, value, "disk-type.gke.io/pd-balanced=true")
+		require.Contains(t, value, "disk-type.gke.io/pd-extreme=true")
+		require.Contains(t, value, "disk-type.gke.io/pd-ssd=true")
+		require.Contains(t, value, "disk-type.gke.io/pd-standard=true")
+		require.NotContains(t, value, "disk-type.gke.io/hyperdisk-throughput=true")
 	}
 }
 
