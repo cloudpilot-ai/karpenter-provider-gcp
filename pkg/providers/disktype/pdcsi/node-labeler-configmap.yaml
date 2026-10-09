@@ -78,9 +78,7 @@ data:
         "hyperdisk-balanced-high-availability": true,
         "hyperdisk-extreme": true,
         "hyperdisk-ml": true,
-        "hyperdisk-throughput": true,
-        "pd-balanced": true,
-        "pd-ssd": true
+        "hyperdisk-throughput": true
       },
       "c4d": {
         "hyperdisk-balanced": true,
@@ -210,9 +208,7 @@ data:
       "n4": {
         "hyperdisk-balanced": true,
         "hyperdisk-balanced-high-availability": true,
-        "hyperdisk-throughput": true,
-        "pd-balanced": true,
-        "pd-ssd": true
+        "hyperdisk-throughput": true
       },
       "n4a": {
         "hyperdisk-balanced": true,

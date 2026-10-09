@@ -55,6 +55,23 @@ func TestLabelsForFamily(t *testing.T) {
 	require.Equal(t, "true", labels["disk-type.gke.io/hyperdisk-throughput"])
 }
 
+func TestHyperdiskOnlyFamiliesExcludePersistentDisk(t *testing.T) {
+	t.Parallel()
+
+	for _, family := range []string{"c4a", "n4"} {
+		t.Run(family, func(t *testing.T) {
+			t.Parallel()
+
+			labels, ok := LabelsForFamily(family)
+			require.True(t, ok)
+			require.Equal(t, "true", labels["disk-type.gke.io/hyperdisk-balanced"])
+			for label := range labels {
+				require.NotContains(t, label, "disk-type.gke.io/pd-")
+			}
+		})
+	}
+}
+
 func TestLabelsForInstanceType(t *testing.T) {
 	t.Parallel()
 

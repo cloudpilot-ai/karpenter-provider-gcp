@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Corrected disk compatibility for C4A and N4
+
+New C4A and N4 nodes no longer advertise `disk-type.gke.io/pd-balanced` or `disk-type.gke.io/pd-ssd`. Karpenter excludes these families when workloads require either label.
+
+Existing Nodes and NodeClaims retain their old labels. Replace affected nodes or remove both unsupported labels from affected Nodes and NodeClaims before relying on disk topology for placement. This change does not migrate disks or add disk affinity to existing PersistentVolumes.
+
 ### Adopting the bare-metal selector
 
 No configuration changes are required when upgrading. The new `karpenter.k8s.gcp/instance-bare-metal` label does not change instance selection or cause drift unless you add requirements that use it.
