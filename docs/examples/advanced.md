@@ -272,7 +272,7 @@ localSsdMode: Ephemeral
 
 `localSsdMode` does not set how many disks a node gets. The machine type decides that.
 
-**Fixed-count machine types**, such as `c4d-standard-8-lssd` or `z3-highmem-8-highlssd`, include a set number of local SSDs. Select the machine type and the disks are attached:
+**Fixed-count machine types**, such as `c4d-standard-8-lssd`, `z3-highmem-8-highlssd`, or `z4d-highmem-8-highlssd`, include a set number of local SSDs. Select the machine type and the disks are attached:
 
 ```yaml
 nodeSelector:
@@ -299,7 +299,11 @@ nodeSelector:
 
 If the requirements allow more than one count, Karpenter does not launch the node. The supported counts depend on the machine family and vCPU count; see the GCE [general-purpose](https://cloud.google.com/compute/docs/general-purpose-machines) and [compute-optimized](https://cloud.google.com/compute/docs/compute-optimized-machines) machine family pages.
 
-In `Ephemeral` mode, Karpenter checks a Pod's `ephemeral-storage` request against the capacity of the selected disks, which is 375 GiB per disk on most machine types. The request does not choose the count. In `RawBlock` mode, `ephemeral-storage` reflects only the boot disk.
+In `Ephemeral` mode, Karpenter checks a Pod's `ephemeral-storage` request against the capacity of the selected disks. Most machine types provide 375 GiB per disk; Z3 provides 3,000 GiB and Z4D provides 3,500 GiB. The request does not choose the count. In `RawBlock` mode, `ephemeral-storage` reflects only the boot disk.
+
+Z4D supports only Hyperdisk. If you set a boot disk `category`, choose a Hyperdisk type such as `hyperdisk-balanced`.
+
+Karpenter sets `scheduling.onHostMaintenance` to `MIGRATE` for on-demand Z3 and Z4D virtual machine (non-bare-metal) nodes, so they live-migrate during host maintenance. Compute Engine cannot live-migrate Z3 shapes with more than 18 TiB of bundled local SSD or Z4D shapes with more than 42,000 GiB. Karpenter sets `TERMINATE` for those shapes and for Spot nodes.
 
 If you are upgrading from a version that accepted `spec.disks[].category: local-ssd`, see [`MIGRATION.md`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/MIGRATION.md).
 
