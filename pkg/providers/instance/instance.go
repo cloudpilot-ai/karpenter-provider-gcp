@@ -1391,7 +1391,7 @@ func onHostMaintenancePolicy(instanceType *cloudprovider.InstanceType, capacityT
 	if instanceType.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Len() > 0 {
 		return "TERMINATE"
 	}
-	if strings.HasPrefix(instanceType.Name, "z3-") && !strings.HasSuffix(instanceType.Name, "-metal") {
+	if strings.HasPrefix(instanceType.Name, "z3-") && !utils.IsBareMetalInstanceType(instanceType.Name) {
 		if mt != nil {
 			if bls := mt.GetBundledLocalSsds(); bls != nil && bls.PartitionCount != nil {
 				if localssd.TotalGiB(instanceType.Name, int(*bls.PartitionCount)) > z3HighSsdGiBThreshold {
@@ -1401,7 +1401,7 @@ func onHostMaintenancePolicy(instanceType *cloudprovider.InstanceType, capacityT
 		}
 		return "MIGRATE"
 	}
-	if strings.HasSuffix(instanceType.Name, "-metal") {
+	if utils.IsBareMetalInstanceType(instanceType.Name) {
 		return "TERMINATE"
 	}
 	if strings.HasPrefix(instanceType.Name, "h4d-") {

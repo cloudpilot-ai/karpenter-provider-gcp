@@ -23,6 +23,10 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
+func TestBareMetalLabelIsWellKnown(t *testing.T) {
+	require.True(t, karpv1.WellKnownLabels.Has(LabelInstanceBareMetal))
+}
+
 func TestKubeProxyReadinessLabelIsNotWellKnown(t *testing.T) {
 	require.False(t, karpv1.WellKnownLabels.Has(LabelGKEReadinessKubeProxyReady))
 }

@@ -558,6 +558,80 @@ func TestComputeRequirementsIncludesDiskTypeCompatibility(t *testing.T) {
 	assert.Error(t, requirements.Intersects(unsupportedVolumeRequirement))
 }
 
+func TestBareMetalInstanceRequirements(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	tests := []struct {
+		name      string
+		bareMetal string
+	}{
+		{name: "c4a-highmem-96-metal", bareMetal: "true"},
+		{name: "c4a-highmem-96", bareMetal: "false"},
+		{name: "c4-standard-288-metal", bareMetal: "true"},
+		{name: "c4-standard-288", bareMetal: "false"},
+		{name: "c4-standard-288-lssd-metal", bareMetal: "true"},
+		{name: "c4-standard-288-lssd", bareMetal: "false"},
+		{name: "z3-highmem-192-highlssd-metal", bareMetal: "true"},
+		{name: "n2-custom-4-16384", bareMetal: "false"},
+		{name: "a4x-maxgpu-4g-metal", bareMetal: "true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mt := &computepb.MachineType{
+				Name:      lo.ToPtr(tt.name),
+				GuestCpus: lo.ToPtr[int32](96),
+				MemoryMb:  lo.ToPtr[int32](768 * 1024),
+			}
+			it := NewInstanceType(ctx, mt, &v1alpha1.GCENodeClass{}, "us-central1", testOfferings(), 0)
+			require.NotNil(t, it)
+			require.Equal(t, []string{tt.bareMetal}, it.Requirements.Get(v1alpha1.LabelInstanceBareMetal).Values())
+			require.Equal(t, []string{"96"}, it.Requirements.Get(v1alpha1.LabelInstanceCPU).Values(),
+				"metal selection must not change the CPU selector")
+			require.Equal(t, []string{strings.Split(tt.name, "-")[0]}, it.Requirements.Get(v1alpha1.LabelInstanceFamily).Values())
+			require.NoError(t, it.Requirements.Compatible(scheduling.NewRequirements()),
+				"pools without a bare-metal requirement must retain both VMs and metal")
+			for _, value := range []string{"true", "false"} {
+				req := scheduling.NewRequirements(scheduling.NewRequirement(v1alpha1.LabelInstanceBareMetal, corev1.NodeSelectorOpIn, value))
+				require.Equal(t, tt.bareMetal == value, it.Requirements.IsCompatible(req))
+			}
+			excludeMetal := scheduling.NewRequirements(scheduling.NewRequirement(v1alpha1.LabelInstanceBareMetal, corev1.NodeSelectorOpNotIn, "true"))
+			require.Equal(t, tt.bareMetal == "false", it.Requirements.IsCompatible(excludeMetal))
+		})
+	}
+}
+
+func TestBareMetalRequirementLegacyCompatibility(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   []bool
+	}{
+		{name: "legacy node without label", labels: map[string]string{}, want: []bool{false, false, true}},
+		{name: "virtual machine", labels: map[string]string{v1alpha1.LabelInstanceBareMetal: "false"}, want: []bool{true, false, true}},
+		{name: "bare metal", labels: map[string]string{v1alpha1.LabelInstanceBareMetal: "true"}, want: []bool{false, true, false}},
+	}
+	selectors := []struct {
+		name     string
+		operator corev1.NodeSelectorOperator
+		value    string
+	}{
+		{name: "require VM", operator: corev1.NodeSelectorOpIn, value: "false"},
+		{name: "require metal", operator: corev1.NodeSelectorOpIn, value: "true"},
+		{name: "exclude labeled metal", operator: corev1.NodeSelectorOpNotIn, value: "true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			labels := scheduling.NewLabelRequirements(tt.labels)
+			for i, selector := range selectors {
+				t.Run(selector.name, func(t *testing.T) {
+					req := scheduling.NewRequirements(scheduling.NewRequirement(v1alpha1.LabelInstanceBareMetal, selector.operator, selector.value))
+					require.Equal(t, tt.want[i], labels.IsCompatible(req),
+						"drift compares persisted labels, so positive selectors reject unlabeled legacy VMs too")
+				})
+			}
+		})
+	}
+}
+
 func TestComputeRequirements(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -979,6 +1053,7 @@ func TestComputeRequirements(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.expected.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceBareMetal, corev1.NodeSelectorOpIn, "false"))
 			got := computeRequirements(tt.mt, tt.offerings, tt.region, tt.ssdCount)
 
 			// Validate keys present in got
