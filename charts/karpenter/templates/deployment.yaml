@@ -103,7 +103,7 @@ spec:
                   divisor: "0"
                   resource: limits.memory
             - name: FEATURE_GATES
-              value: "NodeRepair={{ .Values.controller.featureGates.nodeRepair }},ReservedCapacity={{ .Values.controller.featureGates.reservedCapacity }},SpotToSpotConsolidation={{ .Values.controller.featureGates.spotToSpotConsolidation }},NodeOverlay={{ .Values.controller.featureGates.nodeOverlay }},StaticCapacity={{ .Values.controller.featureGates.staticCapacity }},CapacityBuffer={{ .Values.controller.featureGates.capacityBuffer }}"
+              value: "NodeRepair={{ .Values.controller.featureGates.nodeRepair }},ReservedCapacity={{ .Values.controller.featureGates.reservedCapacity }},SpotToSpotConsolidation={{ .Values.controller.featureGates.spotToSpotConsolidation }},NodeOverlay={{ .Values.controller.featureGates.nodeOverlay }},StaticCapacity={{ .Values.controller.featureGates.staticCapacity }},CapacityBuffer={{ .Values.controller.featureGates.capacityBuffer }},TerminateFirstDrift={{ .Values.controller.featureGates.terminateFirstDrift }},TerminateFirstRepair={{ .Values.controller.featureGates.terminateFirstRepair }},PodDeletionCostManagement={{ .Values.controller.featureGates.podDeletionCostManagement }}"
             - name: DISABLE_CONTROLLER_WARMUP
               value: "{{ .Values.controller.disableControllerWarmup }}"
             {{- with .Values.controller.settings.batchMaxDuration }}
@@ -116,6 +116,12 @@ spec:
             {{- end }}
             - name: IGNORE_DRA_REQUESTS
               value: "{{ .Values.controller.settings.ignoreDRARequests }}"
+            - name: LEGACY_NODE_REPAIR
+              value: "{{ .Values.controller.settings.legacyNodeRepair }}"
+            {{- with .Values.controller.settings.schedulerConfig }}
+            - name: SCHEDULER_CONFIG
+              value: {{ . | toJson | quote }}
+            {{- end }}
             - name: PREFERENCE_POLICY
               value: "{{ .Values.controller.settings.preferencePolicy }}"
             {{- with .Values.controller.settings.vmMemoryOverheadPercent }}

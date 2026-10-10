@@ -63,6 +63,7 @@ chart-deps: ## Fetch Helm subchart archives pinned in charts/karpenter/Chart.loc
 chart-lint: chart-deps ## Lint the Helm charts (validates values.schema.json and templates)
 	helm lint charts/karpenter/
 	helm lint charts/karpenter-crd/
+	go test ./test/charts
 
 # Remove nojsonv2 once kubectl-validate no longer uses its legacy vendored JSON implementation.
 verify-crds: ## Validate generated CRDs with Kubernetes API server validation logic

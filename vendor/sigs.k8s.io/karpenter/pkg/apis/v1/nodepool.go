@@ -85,15 +85,16 @@ type Disruption struct {
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
-	// When replicas is set, ConsolidateAfter is simply ignored
+	// When replicas is set, ConsolidateAfter is simply ignored.
+	// +kubebuilder:default:="0s"
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
-	// +required
-	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
+	// +optional
+	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
 	//nolint:kubeapilinter
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
-	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified.
+	// algorithm.
 	// Valid values: "WhenEmpty", "WhenEmptyOrUnderutilized", "Balanced".
 	// When replicas is set, ConsolidationPolicy is simply ignored.
 	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
@@ -119,7 +120,7 @@ type Disruption struct {
 type Budget struct {
 	// reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, and Drifted.
+	// allowed reasons are Underutilized, Empty, Drifted, and Unhealthy.
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	// +listType=set
@@ -176,13 +177,16 @@ func (p ConsolidationPolicy) IsBalanced() bool {
 }
 
 // DisruptionReason defines valid reasons for disruption budgets.
-// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
+// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted,Unhealthy}
 type DisruptionReason string
 
 const (
 	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
+	// DisruptionReasonUnhealthy paces voluntary node repair through the shared disruption budget. Repair is ordered and
+	// pre-spins replacement capacity.
+	DisruptionReasonUnhealthy DisruptionReason = "Unhealthy"
 )
 
 type Limits v1.ResourceList

@@ -30,7 +30,7 @@ metadata:
 rules:
   # Read
   - apiGroups: [""]
-    resources: ["pods", "nodes", "persistentvolumes", "persistentvolumeclaims", "replicationcontrollers", "namespaces"]
+    resources: ["pods", "nodes", "persistentvolumes", "persistentvolumeclaims", "replicationcontrollers", "namespaces", "services"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses", "csinodes", "volumeattachments"]
@@ -66,6 +66,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["delete"]
+  {{- if .Values.controller.featureGates.podDeletionCostManagement }}
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["patch"]
+  {{- end }}
   # Write
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
