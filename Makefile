@@ -218,6 +218,11 @@ update-pdcsi-compatibility: ## Update vendored PDCSI disk compatibility data fro
 	@src="$$(cd $(PDCSI_DATA_DIR) && go list -mod=mod -m -f '{{ .Dir }}' $(PDCSI_MODULE))/$(PDCSI_NODE_LABELER_CONFIGMAP)"; \
 		test -f "$$src" || (echo "PDCSI node-labeler ConfigMap not found at $$src" >&2; exit 1); \
 		cp "$$src" pkg/providers/disktype/pdcsi/node-labeler-configmap.yaml
+	@if git apply --check pkg/providers/disktype/pdcsi/gen4-pd-compatibility.patch 2>/dev/null; then \
+		git apply pkg/providers/disktype/pdcsi/gen4-pd-compatibility.patch; \
+	else \
+		git apply --reverse --check pkg/providers/disktype/pdcsi/gen4-pd-compatibility.patch; \
+	fi
 
 update-pricing:
 	@tmpdir=$$(mktemp -d); \

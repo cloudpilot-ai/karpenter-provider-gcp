@@ -558,6 +558,33 @@ func TestComputeRequirementsIncludesDiskTypeCompatibility(t *testing.T) {
 	assert.Error(t, requirements.Intersects(unsupportedVolumeRequirement))
 }
 
+func TestComputeRequirementsRejectsPersistentDiskOnHyperdiskOnlyFamilies(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"c4a-standard-4", "n4-standard-4"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			requirements := computeRequirements(&computepb.MachineType{
+				Name:      lo.ToPtr(name),
+				GuestCpus: lo.ToPtr[int32](4),
+				MemoryMb:  lo.ToPtr[int32](16384),
+			}, nil, "us-central1", 0)
+
+			for _, diskType := range []string{"pd-balanced", "pd-ssd"} {
+				label := "disk-type.gke.io/" + diskType
+				assert.Equal(t, corev1.NodeSelectorOpDoesNotExist, requirements.Get(label).Operator())
+				assert.Error(t, requirements.Intersects(scheduling.NewRequirements(
+					scheduling.NewRequirement(label, corev1.NodeSelectorOpIn, "true"),
+				)))
+			}
+			assert.NoError(t, requirements.Intersects(scheduling.NewRequirements(
+				scheduling.NewRequirement("disk-type.gke.io/hyperdisk-balanced", corev1.NodeSelectorOpIn, "true"),
+			)))
+		})
+	}
+}
+
 func TestBareMetalInstanceRequirements(t *testing.T) {
 	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
 	tests := []struct {
