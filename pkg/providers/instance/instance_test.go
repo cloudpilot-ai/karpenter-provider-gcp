@@ -1864,6 +1864,50 @@ func TestBuildInstance_SortsMetadataAfterAllPatches(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestBuildInstance_ResourceManagerTags(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tags map[string]v1alpha1.ResourceManagerTagValue
+		want *compute.InstanceParams
+	}{
+		{
+			name: "unset leaves Params nil",
+			tags: nil,
+			want: nil,
+		},
+		{
+			name: "passes numeric and namespaced tags through to Params",
+			tags: map[string]v1alpha1.ResourceManagerTagValue{
+				"tagKeys/123":         "tagValues/456",
+				"my-project/firewall": "allow-ingress",
+			},
+			want: &compute.InstanceParams{ResourceManagerTags: map[string]string{
+				"tagKeys/123":         "tagValues/456",
+				"my-project/firewall": "allow-ingress",
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{ResourceManagerTags: tt.tags}}
+			instance, err := makeProvider().buildInstance(
+				context.Background(),
+				spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), makeSourceMetadata("max-pods-per-node=110,max-pods=110"),
+				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+				"us-central1-a", "karpenter-rmtags-test",
+				karpv1.CapacityTypeOnDemand,
+				nil, 0,
+			)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, instance.Params)
+		})
+	}
+}
+
 func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 	t.Parallel()
 

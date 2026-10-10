@@ -605,6 +605,29 @@ spec:
                 x-kubernetes-validations:
                 - message: preemptionNoticeDuration must not exceed 120s
                   rule: duration(self) <= duration('120s')
+              resourceManagerTags:
+                additionalProperties:
+                  description: |-
+                    ResourceManagerTagValue is a resource manager tag value, either `tagValues/{tag_value_id}`
+                    or a `{tag_value_short_name}` under a namespaced key.
+                  maxLength: 63
+                  minLength: 1
+                  pattern: ^(tagValues/[0-9]+|[^/]+)$
+                  type: string
+                description: |-
+                  ResourceManagerTags are GCP resource manager (secure) tags bound to the instance
+                  at creation. Unlike network tags, binding them is IAM-controlled, so they can be
+                  used as targets in network firewall policies, IAM conditions and organization policies.
+                  Keys are `tagKeys/{tag_key_id}` or `{org_id|project_id}/{tag_key_short_name}`; values are
+                  `tagValues/{tag_value_id}` or `{tag_value_short_name}`. Mirrors GKE node pool
+                  resource_manager_tags. The Karpenter service account needs roles/resourcemanager.tagUser
+                  on the tag values.
+                maxProperties: 50
+                type: object
+                x-kubernetes-validations:
+                - message: invalid resourceManagerTags key
+                  rule: self.all(k, k.matches('^tagKeys/[0-9]+$') || (!k.startsWith('tagKeys/')
+                    && k.matches('^[^/]+/[^/]+$')))
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance

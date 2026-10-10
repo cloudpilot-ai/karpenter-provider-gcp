@@ -48,6 +48,8 @@ GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 AR_REPO="${E2E_PREFIX}-images"
 ROUTER_NAME="${E2E_PREFIX}-router"
 NAT_NAME="${E2E_PREFIX}-nat"
+TAG_KEY_NAMESPACED="${E2E_PROJECT_ID}/${E2E_PREFIX}-tag"
+TAG_VALUE_NAMESPACED="${TAG_KEY_NAMESPACED}/e2e"
 
 if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
   gcloud auth activate-service-account \
@@ -126,6 +128,20 @@ if [ -n "${PROJECT_NUMBER}" ]; then
     --role roles/iam.serviceAccountUser \
     --project "${E2E_PROJECT_ID}" \
     --quiet || true
+fi
+
+# Resource manager tag. The value can't be deleted while instance bindings remain, so
+# this runs after the cluster (and its Karpenter instances) is gone and is best-effort.
+if gcloud resource-manager tags keys describe "${TAG_KEY_NAMESPACED}" &>/dev/null; then
+  log "Deleting resource manager tag ${TAG_KEY_NAMESPACED}..."
+  gcloud resource-manager tags keys remove-iam-policy-binding "${TAG_KEY_NAMESPACED}" \
+    --member "serviceAccount:${GSA_EMAIL}" \
+    --role roles/resourcemanager.tagUser \
+    --quiet >/dev/null || true
+  gcloud resource-manager tags values delete "${TAG_VALUE_NAMESPACED}" --quiet || \
+    log "WARNING: could not delete tag value ${TAG_VALUE_NAMESPACED} (bindings may still exist)"
+  gcloud resource-manager tags keys delete "${TAG_KEY_NAMESPACED}" --quiet || \
+    log "WARNING: could not delete tag key ${TAG_KEY_NAMESPACED}"
 fi
 
 # Service account
