@@ -28,7 +28,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `reasons` _[DisruptionReason](#disruptionreason) array_ | reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.<br />Otherwise, this will apply to each reason defined.<br />allowed reasons are Underutilized, Empty, and Drifted. |  | Enum: [Underutilized Empty Drifted] <br />MaxItems: 50 <br />Optional: \{\} <br /> |
+| `reasons` _[DisruptionReason](#disruptionreason) array_ | reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.<br />Otherwise, this will apply to each reason defined.<br />allowed reasons are Underutilized, Empty, Drifted, and Unhealthy. |  | Enum: [Underutilized Empty Drifted Unhealthy] <br />MaxItems: 50 <br />Optional: \{\} <br /> |
 | `nodes` _string_ | Nodes dictates the maximum number of NodeClaims owned by this NodePool<br />that can be terminating at once. This is calculated by counting nodes that<br />have a deletion timestamp set, or are actively being deleted by Karpenter.<br />This field is required when specifying a budget.<br />This cannot be of type intstr.IntOrString since kubebuilder doesn't support pattern<br />checking for int nodes for IntOrString nodes.<br />Ref: https://github.com/kubernetes-sigs/controller-tools/blob/55efe4be40394a288216dab63156b0a64fb82929/pkg/crd/markers/validation.go#L379-L388 | 10% | Pattern: `^((100\|[0-9]\{1,2\})%\|[0-9]+)$` <br /> |
 | `schedule` _string_ | Schedule specifies when a budget begins being active, following<br />the upstream cronjob syntax. If omitted, the budget is always active.<br />Timezones are not supported.<br />This field is required if Duration is set. |  | Pattern: `^(@(annually\|yearly\|monthly\|weekly\|daily\|midnight\|hourly))\|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$` <br />Optional: \{\} <br /> |
 | `duration` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | Duration determines how long a Budget is active since each Schedule hit.<br />Only minutes and hours are accepted, as cron does not work in seconds.<br />If omitted, the budget is always active.<br />This is required if Schedule is set.<br />This regex has an optional 0s at the end since the duration.String() always adds<br />a 0s at the end. |  | Pattern: `^((([0-9]+(h\|m))\|([0-9]+h[0-9]+m))(0s)?)$` <br />Type: string <br />Optional: \{\} <br /> |
@@ -65,8 +65,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `consolidateAfter` _[NillableDuration](#nillableduration)_ | ConsolidateAfter is the duration the controller will wait<br />before attempting to terminate nodes that are underutilized.<br />Refer to ConsolidationPolicy for how underutilization is considered.<br />When replicas is set, ConsolidateAfter is simply ignored |  | Pattern: `^(([0-9]+(s\|m\|h))+\|Never)$` <br />Schemaless: \{\} <br />Type: string <br />Required: \{\} <br /> |
-| `consolidationPolicy` _[ConsolidationPolicy](#consolidationpolicy)_ | ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation<br />algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified.<br />Valid values: "WhenEmpty", "WhenEmptyOrUnderutilized", "Balanced".<br />When replicas is set, ConsolidationPolicy is simply ignored. | WhenEmptyOrUnderutilized | Enum: [WhenEmpty WhenEmptyOrUnderutilized Balanced] <br />Optional: \{\} <br /> |
+| `consolidateAfter` _[NillableDuration](#nillableduration)_ | ConsolidateAfter is the duration the controller will wait<br />before attempting to terminate nodes that are underutilized.<br />Refer to ConsolidationPolicy for how underutilization is considered.<br />When replicas is set, ConsolidateAfter is simply ignored. | 0s | Pattern: `^(([0-9]+(s\|m\|h))+\|Never)$` <br />Schemaless: \{\} <br />Type: string <br />Optional: \{\} <br /> |
+| `consolidationPolicy` _[ConsolidationPolicy](#consolidationpolicy)_ | ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation<br />algorithm.<br />Valid values: "WhenEmpty", "WhenEmptyOrUnderutilized", "Balanced".<br />When replicas is set, ConsolidationPolicy is simply ignored. | WhenEmptyOrUnderutilized | Enum: [WhenEmpty WhenEmptyOrUnderutilized Balanced] <br />Optional: \{\} <br /> |
 | `budgets` _[Budget](#budget) array_ | Budgets is a list of Budgets.<br />If there are multiple active budgets, Karpenter uses<br />the most restrictive value. If left undefined,<br />this will default to one budget with a value to 10%. | [map[nodes:10%]] | MaxItems: 50 <br />Optional: \{\} <br /> |
 
 
@@ -77,7 +77,7 @@ _Underlying type:_ _string_
 DisruptionReason defines valid reasons for disruption budgets.
 
 _Validation:_
-- Enum: [Underutilized Empty Drifted]
+- Enum: [Underutilized Empty Drifted Unhealthy]
 
 _Appears in:_
 - [Budget](#budget)
@@ -87,6 +87,7 @@ _Appears in:_
 | `Underutilized` |  |
 | `Empty` |  |
 | `Drifted` |  |
+| `Unhealthy` | DisruptionReasonUnhealthy paces voluntary node repair through the shared disruption budget. Repair is ordered and<br />pre-spins replacement capacity.<br /> |
 
 
 #### Limits
@@ -326,7 +327,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `key` _string_ | The label key that the selector applies to. |  | Required: \{\} <br /> |
-| `operator` _[NodeSelectorOperator](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#nodeselectoroperator-v1-core)_ | Represents a key's relationship to a set of values.<br />Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte. |  | Enum: [Gte Lte] <br />Required: \{\} <br /> |
+| `operator` _[NodeSelectorOperator](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#nodeselectoroperator-v1-core)_ | Represents a key's relationship to a set of values.<br />Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte. |  | Enum: [In NotIn Exists DoesNotExist Gt Lt Gte Lte] <br />Required: \{\} <br /> |
 | `values` _string array_ | An array of string values. If the operator is In or NotIn,<br />the values array must be non-empty. If the operator is Exists or DoesNotExist,<br />the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values<br />array must have a single element, which will be interpreted as an integer.<br />This array is replaced during a strategic merge patch. |  | Optional: \{\} <br /> |
 | `minValues` _integer_ | This field is ALPHA and can be dropped or replaced at any time<br />MinValues is the minimum number of unique values required to define the flexibility of the specific requirement. |  | Maximum: 50 <br />Minimum: 1 <br />Optional: \{\} <br /> |
 
