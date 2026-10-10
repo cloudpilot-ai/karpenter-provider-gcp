@@ -125,28 +125,28 @@ func NewController[T Object](client client.Client, eventRecorder record.EventRec
 		maxConcurrentReconciles:     lo.Ternary(options.MaxConcurrentReconciles <= 0, 10, options.MaxConcurrentReconciles),
 		ConditionDuration: conditionDurationMetric(strings.ToLower(gvk.Kind), options.HistogramBuckets, lo.Map(
 			append(options.MetricLabels, lo.Keys(options.MetricFields)...),
-			func(k string, _ int) string { return toPrometheusLabel(k) })...),
+			func(k string, _ int) pmetrics.Label { return pmetrics.Label{Name: toPrometheusLabel(k)} })...),
 		ConditionCount: conditionCountMetric(strings.ToLower(gvk.Kind), lo.Map(
 			append(
 				append(lo.Keys(options.MetricFields), lo.Keys(options.GaugeMetricFields)...),
 				append(options.MetricLabels, options.GaugeMetricLabels...)...,
-			), func(k string, _ int) string { return toPrometheusLabel(k) })...),
+			), func(k string, _ int) pmetrics.Label { return pmetrics.Label{Name: toPrometheusLabel(k)} })...),
 		ConditionCurrentStatusSeconds: conditionCurrentStatusSecondsMetric(strings.ToLower(gvk.Kind), lo.Map(
 			append(
 				append(lo.Keys(options.MetricFields), lo.Keys(options.GaugeMetricFields)...),
 				append(options.MetricLabels, options.GaugeMetricLabels...)...,
-			), func(k string, _ int) string { return toPrometheusLabel(k) })...),
+			), func(k string, _ int) pmetrics.Label { return pmetrics.Label{Name: toPrometheusLabel(k)} })...),
 		ConditionTransitionsTotal: conditionTransitionsTotalMetric(strings.ToLower(gvk.Kind), lo.Map(
 			append(options.MetricLabels, lo.Keys(options.MetricFields)...),
-			func(k string, _ int) string { return toPrometheusLabel(k) })...),
+			func(k string, _ int) pmetrics.Label { return pmetrics.Label{Name: toPrometheusLabel(k)} })...),
 		TerminationCurrentTimeSeconds: terminationCurrentTimeSecondsMetric(strings.ToLower(gvk.Kind), lo.Map(
 			append(
 				append(lo.Keys(options.MetricFields), lo.Keys(options.GaugeMetricFields)...),
 				append(options.MetricLabels, options.GaugeMetricLabels...)...,
-			), func(k string, _ int) string { return toPrometheusLabel(k) })...),
+			), func(k string, _ int) pmetrics.Label { return pmetrics.Label{Name: toPrometheusLabel(k)} })...),
 		TerminationDuration: terminationDurationMetric(strings.ToLower(gvk.Kind), options.HistogramBuckets, lo.Map(
 			append(options.MetricLabels, lo.Keys(options.MetricFields)...),
-			func(k string, _ int) string { return toPrometheusLabel(k) })...),
+			func(k string, _ int) pmetrics.Label { return pmetrics.Label{Name: toPrometheusLabel(k)} })...),
 	}
 }
 
@@ -372,8 +372,9 @@ func (c *Controller[T]) reconcileFound(ctx context.Context, req reconcile.Reques
 		}
 		duration := condition.LastTransitionTime.Time.Sub(observedCondition.LastTransitionTime.Time).Seconds()
 		c.observeHistogram(c.ConditionDuration, ConditionDuration, duration, map[string]string{
-			pmetrics.LabelType:         observedCondition.Type,
-			MetricLabelConditionStatus: string(observedCondition.Status),
+			pmetrics.LabelType:           observedCondition.Type,
+			MetricLabelConditionStatus:   string(observedCondition.Status),
+			MetricLabelToConditionStatus: string(condition.Status),
 		}, c.toAdditionalMetricLabels(o))
 		c.eventRecorder.Event(o, v1.EventTypeNormal, condition.Type, fmt.Sprintf("Status condition transitioned, Type: %s, Status: %s -> %s, Reason: %s%s",
 			condition.Type,
