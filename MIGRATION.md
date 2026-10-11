@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+### New IAM permission required for resource manager tags: `compute.instances.createTagBinding`
+
+Setting the new `GCENodeClass.spec.resourceManagerTags` field requires the controller's service account to have `compute.instances.createTagBinding` on the project, which is now included in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). If you created the `karpenter_controller` custom role from an earlier version of that file, update it with `gcloud iam roles update` before you set `resourceManagerTags`; without it, instance creation fails for that NodeClass. The service account also needs `roles/resourcemanager.tagUser` on the tag values, their tag key, or a parent resource. No action is required if you don't use `resourceManagerTags`. See [Resource manager tags](docs/examples/networking.md#resource-manager-tags).
+
 ### Corrected disk compatibility for C4A and N4
 
 New C4A and N4 nodes no longer advertise `disk-type.gke.io/pd-balanced` or `disk-type.gke.io/pd-ssd`. Karpenter excludes these families when workloads require either label.
