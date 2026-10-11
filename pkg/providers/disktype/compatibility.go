@@ -74,6 +74,18 @@ func mustLoadCompatibility() map[string][]string {
 		panic(fmt.Sprintf("parsing machine-pd-compatibility.json: %v", err))
 	}
 
+	// PDCSI does not yet include Z4D. Prefer its entry when available.
+	// https://cloud.google.com/compute/docs/storage-optimized-machines#supported_disk_types_for_z4d
+	if _, ok := raw["z4d"]; !ok {
+		raw["z4d"] = map[string]bool{
+			"hyperdisk-balanced":                   true,
+			"hyperdisk-balanced-high-availability": true,
+			"hyperdisk-extreme":                    true,
+			"hyperdisk-throughput":                 true,
+			"hyperdisk-ml":                         true,
+		}
+	}
+
 	out := make(map[string][]string, len(raw))
 	for family, diskTypes := range raw {
 		labels := make([]string, 0, len(diskTypes))

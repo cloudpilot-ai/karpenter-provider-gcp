@@ -325,6 +325,17 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			expectedSSDCount: 4,
 		},
 		{
+			name:      "z4d bundled partition is 3500 GiB",
+			nodeClass: &v1alpha1.GCENodeClass{},
+			mt: &computepb.MachineType{
+				Name:             lo.ToPtr("z4d-highmem-8-highlssd"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
+			},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   3500,
+			expectedSSDCount: 1,
+		},
+		{
 			name:      "BundledLocalSsds PartitionCount=0 treated as no SSDs",
 			nodeClass: &v1alpha1.GCENodeClass{},
 			mt: &computepb.MachineType{
@@ -501,6 +512,28 @@ func TestNewInstanceTypeModeAware(t *testing.T) {
 			wantReservedGiB: 100,
 		},
 		{
+			name: "z4d RawBlock excludes bundled SSD from ephemeral capacity",
+			mt: &computepb.MachineType{
+				Name: lo.ToPtr("z4d-highmem-8-highlssd"), GuestCpus: lo.ToPtr[int32](8), MemoryMb: lo.ToPtr[int32](64512),
+				BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
+			},
+			mode:            v1alpha1.LocalSSDModeRawBlock,
+			count:           1,
+			wantCapGiB:      bootModeCapGiB,
+			wantReservedGiB: bootModeReservedGiB,
+		},
+		{
+			name: "z4d Ephemeral uses 3500 GiB SSD capacity",
+			mt: &computepb.MachineType{
+				Name: lo.ToPtr("z4d-highmem-8-highlssd"), GuestCpus: lo.ToPtr[int32](8), MemoryMb: lo.ToPtr[int32](64512),
+				BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
+			},
+			mode:            v1alpha1.LocalSSDModeEphemeral,
+			count:           1,
+			wantCapGiB:      3500,
+			wantReservedGiB: 50,
+		},
+		{
 			name: "z3-highmem-88 legacy SKU Ephemeral (12 partitions × 3000 GiB)",
 			mt: &computepb.MachineType{
 				Name: lo.ToPtr("z3-highmem-88"), GuestCpus: lo.ToPtr[int32](88), MemoryMb: lo.ToPtr[int32](720896),
@@ -582,6 +615,31 @@ func TestComputeRequirementsRejectsPersistentDiskOnHyperdiskOnlyFamilies(t *test
 				scheduling.NewRequirement("disk-type.gke.io/hyperdisk-balanced", corev1.NodeSelectorOpIn, "true"),
 			)))
 		})
+	}
+}
+
+func TestZ4DDiskTypeRequirements(t *testing.T) {
+	t.Parallel()
+
+	requirements := computeRequirements(&computepb.MachineType{
+		Name:             lo.ToPtr("z4d-highmem-8-highlssd"),
+		GuestCpus:        lo.ToPtr[int32](8),
+		MemoryMb:         lo.ToPtr[int32](64512),
+		BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
+	}, nil, "us-central1", 1)
+
+	require.Equal(t, []string{"1"}, requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Values())
+	for _, diskType := range []string{"hyperdisk-balanced", "hyperdisk-balanced-high-availability", "hyperdisk-extreme", "hyperdisk-throughput", "hyperdisk-ml"} {
+		volumeRequirement := scheduling.NewRequirements(
+			scheduling.NewRequirement("disk-type.gke.io/"+diskType, corev1.NodeSelectorOpIn, "true"),
+		)
+		require.NoError(t, requirements.Intersects(volumeRequirement), diskType)
+	}
+	for _, diskType := range []string{"pd-balanced", "pd-ssd", "pd-standard", "pd-extreme"} {
+		volumeRequirement := scheduling.NewRequirements(
+			scheduling.NewRequirement("disk-type.gke.io/"+diskType, corev1.NodeSelectorOpIn, "true"),
+		)
+		require.Error(t, requirements.Intersects(volumeRequirement), diskType)
 	}
 }
 

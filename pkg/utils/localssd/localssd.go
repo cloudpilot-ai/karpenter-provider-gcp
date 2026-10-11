@@ -108,8 +108,8 @@ type entry struct {
 // Source: https://github.com/Cyclenerd/google-cloud-pricing-cost-calculator/blob/master/build/gcp.yml
 // Cross-referenced with: https://cloud.google.com/compute/docs/disks/local-ssd
 var table = map[string]entry{
-	// z3 uses 3 TiB NVMe per partition; all other families use 375 GiB
-	"z3": {perPartGiB: 3000},
+	"z3":  {perPartGiB: 3000},
+	"z4d": {perPartGiB: 3500},
 
 	// Bare-metal variants use 3000 GiB per partition (not 375 GiB)
 	"c4-highmem-288-lssd-metal":     {totalGiB: 18000}, // 6 × 3000 GiB
