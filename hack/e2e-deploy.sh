@@ -17,6 +17,7 @@
 #   RELEASE_VERSION   published chart version to install (e.g. 0.3.2)
 #   E2E_PREFIX        resource name prefix (default: karpenter-e2e)
 #   E2E_REGION        GCP region (default: us-central1)
+#   E2E_NODE_SERVICE_ACCOUNT  node SA email (unset keeps the chart default)
 set -euo pipefail
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
@@ -64,6 +65,9 @@ HELM_COMMON_ARGS=(
   --wait
   --timeout 5m
 )
+if [[ -n "${E2E_NODE_SERVICE_ACCOUNT:-}" ]]; then
+  HELM_COMMON_ARGS+=(--set-string "controller.settings.defaultNodepoolServiceAccount=${E2E_NODE_SERVICE_ACCOUNT}")
+fi
 
 if [[ -n "${RELEASE_VERSION}" ]]; then
   # --- Published release mode ---

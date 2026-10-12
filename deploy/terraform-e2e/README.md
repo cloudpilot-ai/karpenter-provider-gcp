@@ -39,9 +39,24 @@ terraform -chdir=../terraform validate
 - **Pod ranges:** the committed small `/22` and large `/20` ranges are attached to GKE for multi-range networking tests. Each candidate needs at least 1,024 free IPs for the ranking test. Changing the prefix requires updating range names in `terraform.tfvars`.
 - **Resource Manager tags:** `${prefix}-tag` and its `e2e` value let tests verify `spec.resourceManagerTags` on provisioned instances. The controller receives `roles/resourcemanager.tagUser` only on that key, in addition to the canonical role's instance-side tag-binding permission.
 
-After provisioning, use a dedicated kubeconfig for this cluster. From the repository root, set `E2E_PROJECT_ID=planetscale-karp-gcp-e2e`, `E2E_REGION=asia-southeast1`, `E2E_LOCATION=asia-southeast1-b` and `E2E_PREFIX=tf-e2e-sgp`. Deploy with `make e2e-deploy`, then run `make e2e-tests E2E_SELECTION=standard GINKGO_PROCS=4` after approval. Make derives the pod-range and tag-key names from the prefix.
+After provisioning, use a dedicated kubeconfig for this cluster. From the repository root, set `E2E_PROJECT_ID=planetscale-karp-gcp-e2e`, `E2E_REGION=asia-southeast1`, `E2E_LOCATION=asia-southeast1-b` and `E2E_PREFIX=tf-e2e-sgp`. Select Terraform's dedicated node account for both local-image and release deployments:
+
+```sh
+export E2E_NODE_SERVICE_ACCOUNT="$(terraform -chdir=deploy/terraform-e2e output -raw node_service_account)"
+make e2e-deploy
+```
+
+Then run `make e2e-tests E2E_SELECTION=standard GINKGO_PROCS=4` after approval. Make derives the pod-range and tag-key names from the prefix. Legacy targets can leave `E2E_NODE_SERVICE_ACCOUNT` unset to retain the chart default.
 
 `standard` includes basic Local SSD tests but excludes GPU and extended Local SSD tests. Check available quota and capacity before increasing parallelism. Helm releases and per-run test resources are not managed by Terraform. `make e2e-setup` and `make e2e-teardown` are retired.
+
+## Retirement
+
+After destructive approval:
+
+1. Stop test runs and remove test workloads so they cannot trigger new nodes.
+2. Keep Karpenter running while removing test NodePools/NodeClaims. Wait for their VMs to disappear and check for orphaned VMs, disks and other per-run resources.
+3. Only then remove the controller, relax lifecycle guards and retire Terraform-owned infrastructure. Keep the shared state bucket available until retirement completes.
 
 ## Important limits
 

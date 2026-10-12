@@ -108,6 +108,7 @@ delete: ## Delete the controller from your kubeconfig cluster
 ut-test: ## Run unit tests
 	go test -race ./pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=.
+	bash hack/e2e-deploy-test.sh
 
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
 # between the setup script and the test binary.
@@ -120,6 +121,7 @@ E2E_SA_PATH      ?=
 E2E_LOCATION     ?=
 E2E_PREFIX       ?= karpenter-e2e
 E2E_REGION       ?= us-central1
+E2E_NODE_SERVICE_ACCOUNT ?=
 E2E_CLUSTER_NAME         ?= $(E2E_PREFIX)-cluster
 E2E_PODS_RANGE           ?= $(E2E_PREFIX)-pods
 E2E_SMALL_PODS_RANGE     ?= $(E2E_PREFIX)-pods-small
@@ -145,6 +147,7 @@ e2e-deploy: require-e2e-vars ## Clean e2e resources, then deploy karpenter; set 
 	E2E_PREFIX=$(E2E_PREFIX) \
 	E2E_REGION=$(E2E_REGION) \
 	E2E_LOCATION=$(E2E_LOCATION) \
+	E2E_NODE_SERVICE_ACCOUNT=$(E2E_NODE_SERVICE_ACCOUNT) \
 	RELEASE_VERSION=$(RELEASE_VERSION) \
 	./hack/e2e-deploy.sh
 
