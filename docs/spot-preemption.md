@@ -45,7 +45,7 @@ Changing `preemptionNoticeDuration` drifts existing nodes. GCE only accepts the 
 
 GKE Standard node pools already run their own node-problem-detector, and Karpenter's [node repair](node-repair.md) feature depends on the conditions it sets. Enabling `node-problem-detector.enabled` adds a second node-problem-detector alongside it.
 
-The two do not conflict — they set different conditions and the GKE-managed one cannot be reconfigured to add custom checks — but it is a second agent on the node, so it is opt-in rather than automatic. The detector only lands on nodes matching its node selector, which defaults to Spot capacity only.
+The two set different conditions, and this chart uses ports `20258` (Prometheus) and `20259` (server) to avoid the GKE-managed detector's ports `20257` and `20256`. The GKE-managed detector cannot be reconfigured to add custom checks. This is a second agent on the node, so it is opt-in rather than automatic. The detector only lands on nodes matching its node selector, which defaults to Spot capacity only.
 
 ## Detector configuration
 
@@ -91,6 +91,8 @@ A healthy node reports `False`. `Unknown` means the check itself is failing — 
 ```sh
 kubectl get events --field-selector reason=PreemptionNoticeReceived
 ```
+
+To assess whether the notice helped, check when workload pods leave the node and when their replacements become Ready. `Drained=True` measures completion of node draining, not workload recovery: Karpenter drains pods in priority groups, and a system pod with a long termination grace period can keep `Drained` pending after workloads have recovered.
 
 ## Fallback
 
