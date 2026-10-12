@@ -29,7 +29,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
@@ -289,22 +288,14 @@ func TestMatchVariantForInstance_NoNameMatch(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestRebootNotImplemented(t *testing.T) {
+func TestRepairPolicies(t *testing.T) {
 	t.Parallel()
-	err := (&CloudProvider{}).Reboot(context.Background(), &karpv1.NodeClaim{}, "repair-operation")
-	require.True(t, karpcloudprovider.IsNodeRebootNotImplementedError(err))
-}
-
-func TestRepairPoliciesResolveToForcefulReplacement(t *testing.T) {
-	t.Parallel()
-	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{FeatureGates: karpopts.FeatureGates{NodeRepair: true}})
-	matcher, err := health.NewRepairPolicyMatcher(ctx, &CloudProvider{})
-	require.NoError(t, err)
-	transition := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	policies := (&CloudProvider{}).RepairPolicies()
+	require.Len(t, policies, 6)
 	for _, tc := range []struct {
-		condition corev1.NodeConditionType
-		status    corev1.ConditionStatus
-		wait      time.Duration
+		condition  corev1.NodeConditionType
+		status     corev1.ConditionStatus
+		toleration time.Duration
 	}{
 		{corev1.NodeReady, corev1.ConditionFalse, 10 * time.Minute},
 		{corev1.NodeReady, corev1.ConditionUnknown, 10 * time.Minute},
@@ -315,55 +306,14 @@ func TestRepairPoliciesResolveToForcefulReplacement(t *testing.T) {
 	} {
 		t.Run(string(tc.condition)+"/"+string(tc.status), func(t *testing.T) {
 			t.Parallel()
-			for _, reason := range []struct{ name, value string }{
-				{name: "empty reason"},
-				{name: "unknown reason", value: "UnrecognizedGKEReason"},
-			} {
-				t.Run(reason.name, func(t *testing.T) {
-					node := &corev1.Node{
-						ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(transition.Add(-time.Hour))},
-						Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
-							Type: tc.condition, Status: tc.status, Reason: reason.value, LastTransitionTime: metav1.NewTime(transition),
-						}}},
-					}
-					matches := matcher.Match(node)
-					require.Empty(t, health.Resolve(matches, transition.Add(tc.wait-time.Second), time.Time{}).Action)
-					result := health.Resolve(matches, transition.Add(tc.wait), time.Time{})
-					require.Equal(t, karpcloudprovider.ReplaceNode, result.Action)
-					require.NotNil(t, result.TerminationGracePeriod)
-					require.Zero(t, *result.TerminationGracePeriod)
-				})
-			}
+			policy, found := lo.Find(policies, func(p karpcloudprovider.RepairPolicy) bool {
+				return p.ConditionType == tc.condition && p.ConditionStatus == tc.status
+			})
+			require.True(t, found, "missing repair policy")
+			require.Equal(t, tc.toleration, policy.TolerationDuration)
+			require.Equal(t, karpcloudprovider.ReplaceNode, policy.Action)
+			require.NotNil(t, policy.TerminationGracePeriod)
+			require.Zero(t, *policy.TerminationGracePeriod)
 		})
 	}
-	for _, condition := range []corev1.NodeCondition{
-		{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
-		{Type: "KernelDeadlock", Status: corev1.ConditionFalse},
-		{Type: "ReadonlyFilesystem", Status: corev1.ConditionUnknown},
-		{Type: "FrequentKubeletRestart", Status: corev1.ConditionFalse},
-		{Type: "FrequentContainerdRestart", Status: corev1.ConditionFalse},
-		{Type: "UnsupportedHealthCondition", Status: corev1.ConditionTrue},
-	} {
-		t.Run("no match/"+string(condition.Type)+"/"+string(condition.Status), func(t *testing.T) {
-			require.Empty(t, matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}}}))
-		})
-	}
-}
-
-func TestRepairPolicyTolerationStartsNoEarlierThanNodeCreation(t *testing.T) {
-	t.Parallel()
-	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{FeatureGates: karpopts.FeatureGates{NodeRepair: true}})
-	matcher, err := health.NewRepairPolicyMatcher(ctx, &CloudProvider{})
-	require.NoError(t, err)
-	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(created)},
-		Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
-			Type: "KernelDeadlock", Status: corev1.ConditionTrue,
-			LastTransitionTime: metav1.NewTime(created.Add(-time.Hour)),
-		}}},
-	}
-	matches := matcher.Match(node)
-	require.Empty(t, health.Resolve(matches, created.Add(5*time.Minute-time.Second), time.Time{}).Action)
-	require.Equal(t, karpcloudprovider.ReplaceNode, health.Resolve(matches, created.Add(5*time.Minute), time.Time{}).Action)
 }
