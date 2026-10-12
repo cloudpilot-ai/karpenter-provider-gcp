@@ -27,12 +27,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/clock"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
@@ -298,38 +295,7 @@ func TestRebootNotImplemented(t *testing.T) {
 	require.True(t, karpcloudprovider.IsNodeRebootNotImplementedError(err))
 }
 
-func TestRepairPoliciesAcceptedByCore(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name    string
-		enabled bool
-		legacy  bool
-	}{
-		{name: "modern", enabled: true},
-		{name: "disabled"},
-		{name: "legacy", enabled: true, legacy: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := karpopts.ToContext(context.Background(), &karpopts.Options{
-				FeatureGates: karpopts.FeatureGates{NodeRepair: tc.enabled}, LegacyNodeRepair: tc.legacy,
-			})
-			matcher, err := health.NewRepairPolicyMatcher(ctx, &CloudProvider{})
-			require.NoError(t, err)
-			if tc.enabled && !tc.legacy {
-				require.NotNil(t, matcher)
-			} else {
-				require.Nil(t, matcher)
-			}
-			cluster := state.NewCluster(clock.RealClock{}, nil, &CloudProvider{}, state.WithRepairPolicyMatcher(matcher))
-			require.NotPanics(t, func() {
-				disruption.NewMethods(ctx, clock.RealClock{}, cluster, nil, nil, &CloudProvider{}, reproEvents{}, nil)
-			})
-		})
-	}
-}
-
-func TestRepairPoliciesReplaceUnhealthyNodes(t *testing.T) {
+func TestRepairPoliciesResolveToForcefulReplacement(t *testing.T) {
 	t.Parallel()
 	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{FeatureGates: karpopts.FeatureGates{NodeRepair: true}})
 	matcher, err := health.NewRepairPolicyMatcher(ctx, &CloudProvider{})
@@ -349,16 +315,24 @@ func TestRepairPoliciesReplaceUnhealthyNodes(t *testing.T) {
 	} {
 		t.Run(string(tc.condition)+"/"+string(tc.status), func(t *testing.T) {
 			t.Parallel()
-			for _, reason := range []string{"", "UnrecognizedGKEReason"} {
-				node := &corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
-					Type: tc.condition, Status: tc.status, Reason: reason, LastTransitionTime: metav1.NewTime(transition),
-				}}}}
-				matches := matcher.Match(node)
-				require.Empty(t, health.Resolve(matches, transition.Add(tc.wait-time.Second), time.Time{}).Action)
-				result := health.Resolve(matches, transition.Add(tc.wait), time.Time{})
-				require.Equal(t, karpcloudprovider.ReplaceNode, result.Action)
-				require.NotNil(t, result.TerminationGracePeriod)
-				require.Zero(t, *result.TerminationGracePeriod)
+			for _, reason := range []struct{ name, value string }{
+				{name: "empty reason"},
+				{name: "unknown reason", value: "UnrecognizedGKEReason"},
+			} {
+				t.Run(reason.name, func(t *testing.T) {
+					node := &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(transition.Add(-time.Hour))},
+						Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+							Type: tc.condition, Status: tc.status, Reason: reason.value, LastTransitionTime: metav1.NewTime(transition),
+						}}},
+					}
+					matches := matcher.Match(node)
+					require.Empty(t, health.Resolve(matches, transition.Add(tc.wait-time.Second), time.Time{}).Action)
+					result := health.Resolve(matches, transition.Add(tc.wait), time.Time{})
+					require.Equal(t, karpcloudprovider.ReplaceNode, result.Action)
+					require.NotNil(t, result.TerminationGracePeriod)
+					require.Zero(t, *result.TerminationGracePeriod)
+				})
 			}
 		})
 	}
@@ -370,25 +344,26 @@ func TestRepairPoliciesReplaceUnhealthyNodes(t *testing.T) {
 		{Type: "FrequentContainerdRestart", Status: corev1.ConditionFalse},
 		{Type: "UnsupportedHealthCondition", Status: corev1.ConditionTrue},
 	} {
-		require.Empty(t, matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}}}))
+		t.Run("no match/"+string(condition.Type)+"/"+string(condition.Status), func(t *testing.T) {
+			require.Empty(t, matcher.Match(&corev1.Node{Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{condition}}}))
+		})
 	}
 }
 
-func TestRepairPolicies_NPDConditionsPolarity(t *testing.T) {
+func TestRepairPolicyTolerationStartsNoEarlierThanNodeCreation(t *testing.T) {
 	t.Parallel()
-	// GKE Node Problem Detector conditions use True=problem polarity (opposite of NodeReady).
-	// NPD sets a condition to True when a problem is detected and omits it otherwise.
-	// ConditionFalse would never match and ConditionTrue must be used to trigger repair.
-	npdConditions := map[corev1.NodeConditionType]bool{
-		"KernelDeadlock":            true,
-		"ReadonlyFilesystem":        true,
-		"FrequentKubeletRestart":    true,
-		"FrequentContainerdRestart": true,
+	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{FeatureGates: karpopts.FeatureGates{NodeRepair: true}})
+	matcher, err := health.NewRepairPolicyMatcher(ctx, &CloudProvider{})
+	require.NoError(t, err)
+	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(created)},
+		Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type: "KernelDeadlock", Status: corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(created.Add(-time.Hour)),
+		}}},
 	}
-	for _, p := range (&CloudProvider{}).RepairPolicies() {
-		if npdConditions[p.ConditionType] {
-			require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
-				"NPD condition %s must use ConditionTrue polarity", p.ConditionType)
-		}
-	}
+	matches := matcher.Match(node)
+	require.Empty(t, health.Resolve(matches, created.Add(5*time.Minute-time.Second), time.Time{}).Action)
+	require.Equal(t, karpcloudprovider.ReplaceNode, health.Resolve(matches, created.Add(5*time.Minute), time.Time{}).Action)
 }

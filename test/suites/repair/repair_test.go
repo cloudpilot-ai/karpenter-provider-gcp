@@ -19,7 +19,6 @@ package repair
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,25 +27,60 @@ import (
 )
 
 func TestReplacementOrdering(t *testing.T) {
-	original := &unstructured.Unstructured{Object: map[string]any{
-		"metadata": map[string]any{"uid": "original", "deletionTimestamp": metav1.Now().Format(time.RFC3339)},
+	originalDeleting := &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"uid": "original", "deletionTimestamp": "2026-01-01T00:05:00Z"},
 	}}
-	replacement := &unstructured.Unstructured{Object: map[string]any{
+	replacementPending := &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"uid": "replacement"},
+	}}
+	replacementInitialized := &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{"uid": "replacement"},
 		"status": map[string]any{"nodeName": "replacement-node", "conditions": []any{
 			map[string]any{"type": "Initialized", "status": "True"},
 		}},
 	}}
 	for _, tc := range []struct {
-		name   string
-		events []watch.Event
-		error  string
+		name      string
+		events    []watch.Event
+		wantError string
 	}{
-		{"early deletion admission", []watch.Event{{Type: watch.Modified, Object: original}}, "before replacement initialization"},
-		{"initialized replacement", []watch.Event{{Type: watch.Added, Object: replacement}, {Type: watch.Modified, Object: original}}, ""},
-		{"deleted replacement", []watch.Event{{Type: watch.Added, Object: replacement}, {Type: watch.Deleted, Object: replacement}, {Type: watch.Deleted, Object: original}}, "before replacement initialization"},
-		{"watch gap", nil, "watch closed"},
-		{"watch error", []watch.Event{{Type: watch.Error, Object: &metav1.Status{Status: "Failure", Message: "expired", Code: 410}}}, "watch failed"},
+		{
+			name: "original deletion before replacement initialization fails",
+			events: []watch.Event{
+				{Type: watch.Added, Object: replacementPending},
+				{Type: watch.Modified, Object: originalDeleting},
+			},
+			wantError: "before replacement initialization",
+		},
+		{
+			name: "replacement initializes before original deletion",
+			events: []watch.Event{
+				{Type: watch.Added, Object: replacementPending},
+				{Type: watch.Modified, Object: replacementInitialized},
+				{Type: watch.Modified, Object: originalDeleting},
+			},
+		},
+		{
+			name: "deleted replacement does not count as initialized capacity",
+			events: []watch.Event{
+				{Type: watch.Added, Object: replacementPending},
+				{Type: watch.Modified, Object: replacementInitialized},
+				{Type: watch.Deleted, Object: replacementInitialized},
+				{Type: watch.Deleted, Object: originalDeleting},
+			},
+			wantError: "before replacement initialization",
+		},
+		{
+			name:      "closed watch cannot prove repair ordering",
+			wantError: "watch closed",
+		},
+		{
+			name: "watch error cannot prove repair ordering",
+			events: []watch.Event{
+				{Type: watch.Error, Object: &metav1.Status{Status: "Failure", Message: "expired", Code: 410}},
+			},
+			wantError: "watch failed",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stream := watch.NewRaceFreeFake()
@@ -56,8 +90,8 @@ func TestReplacementOrdering(t *testing.T) {
 			}
 			stream.Stop()
 			node, err := waitForReplacement(context.Background(), stream, "original")
-			if tc.error != "" {
-				require.ErrorContains(t, err, tc.error)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
 			} else {
 				require.NoError(t, err)
 				require.Equal(t, "replacement-node", node)
