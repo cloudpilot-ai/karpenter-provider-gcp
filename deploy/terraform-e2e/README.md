@@ -23,9 +23,7 @@ collisions before provisioning. This root does not enable APIs or manage a
 GitHub identity. The cluster has deletion protection and the system pool has
 `prevent_destroy`; retirement requires a separate reviewed code change and
 explicit destructive approval. The module protects the system pool for all
-callers, independently of cluster deletion protection. A `moved` block preserves
-the pool's previous root-level state address when adopting the module layout;
-review the plan to confirm it does not recreate the pool.
+callers, independently of cluster deletion protection.
 
 ## Release channel and pod ranges
 
