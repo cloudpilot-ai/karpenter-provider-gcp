@@ -64,9 +64,8 @@ Offline checks from this directory:
 terraform fmt -check -recursive
 terraform init -backend=false -input=false -lockfile=readonly
 terraform validate
-terraform test
 terraform -chdir=../terraform init -backend=false -input=false
-terraform -chdir=../terraform test
+terraform -chdir=../terraform validate
 ```
 
 `terraform.tfvars.example` is a placeholder, not a deployable target. For an
