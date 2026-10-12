@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -297,6 +298,18 @@ func (e *Environment) ListNodeClaims(ctx context.Context) ([]unstructured.Unstru
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+// ListWatchNodeClaims opens a pool-scoped watch without a gap after the initial snapshot.
+func (e *Environment) ListWatchNodeClaims(ctx context.Context, nodePool string) (*unstructured.UnstructuredList, watch.Interface, error) {
+	options := metav1.ListOptions{LabelSelector: karpv1.NodePoolLabelKey + "=" + nodePool}
+	list, err := e.DynamicClient.Resource(nodeClaimGVR).List(ctx, options)
+	if err != nil {
+		return nil, nil, err
+	}
+	options.ResourceVersion = list.GetResourceVersion()
+	stream, err := e.DynamicClient.Resource(nodeClaimGVR).Watch(ctx, options)
+	return list, stream, err
 }
 
 // waitForControllerReady polls until the karpenter Deployment has all replicas

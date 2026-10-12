@@ -9,6 +9,30 @@
 
 Setting the new `GCENodeClass.spec.resourceManagerTags` field requires the controller's service account to have `compute.instances.createTagBinding` on the project, which is now included in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). If you created the `karpenter_controller` custom role from an earlier version of that file, update it with `gcloud iam roles update` before you set `resourceManagerTags`; without it, instance creation fails for that NodeClass. The service account also needs `roles/resourcemanager.tagUser` on the tag values, their tag key, or a parent resource. No action is required if you don't use `resourceManagerTags`. See [Resource manager tags](docs/examples/networking.md#resource-manager-tags).
 
+### Karpenter core v1.15: node repair and disruption metrics
+
+`NodeRepair` remains disabled by default. If you already enable it, repair now uses the modern voluntary disruption method: initialized-node repairs respect budgets applying to `Unhealthy` (including budgets with no `reasons`), the Node's `karpenter.sh/do-not-repair` annotation, and replacement feasibility. An all-reason `nodes: "0"` budget now blocks these repairs. Replacement capacity is initialized before the unhealthy NodeClaim is deleted; unavailable capacity or scheduling constraints can delay repair. GCP's condition tolerations and forceful, zero-grace termination after staging are unchanged.
+
+To retain the previous forceful repair controller, explicitly set:
+
+```yaml
+controller:
+  featureGates:
+    nodeRepair: true
+  settings:
+    legacyNodeRepair: true
+```
+
+Otherwise, review your disruption budgets before upgrading. Restrict consolidation-only budgets to `Empty`, `Underutilized` and `Drifted`, and adjust any remaining restrictive budgets applying to repair. You may then add an appropriate `Unhealthy` budget. The most restrictive matching budget wins: an `Unhealthy` budget cannot override an all-reason `nodes: "0"` budget. See [Node repair](docs/node-repair.md).
+
+Upgrade the Karpenter CRDs alongside the controller before using `Unhealthy` budget reasons. Helm does not upgrade CRDs in the controller chart's `crds/` directory; use the project's CRD upgrade procedure or upgrade the separate `karpenter-crd` release. Custom Kubernetes RBAC must now permit `get`, `list` and `watch` on Services; opting into `podDeletionCostManagement` also requires `patch` on Pods. No new GCP IAM permissions are required.
+
+Disruption metrics now use lowercase reason values and add `consolidation_policy` and `termination_mode` dimensions. Update dashboards, alerts and recording rules that filter old reason values or depend on the previous label set. Metric reason values are lowercase; NodePool budget reasons remain capitalized.
+
+`spec.disruption.consolidateAfter` is now optional and defaults to `0s`. Existing explicit values are unchanged. When adopting manifests that omit it, set a delay or `Never` if immediate consolidation eligibility is not intended.
+
+The new terminate-first and pod deletion-cost gates remain disabled by default. Dynamic terminate-first still requires reserved capacity, which GCP does not support; static NodePool node-limit handling is available. Native reboot and pre-registration CSI attachment-limit predictions are not implemented by this migration. See [Settings](docs/settings.md) for opt-in behavior and limitations.
+
 ### Corrected disk compatibility for C4A and N4
 
 New C4A and N4 nodes no longer advertise `disk-type.gke.io/pd-balanced` or `disk-type.gke.io/pd-ssd`. Karpenter excludes these families when workloads require either label.

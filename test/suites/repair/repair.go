@@ -18,6 +18,7 @@ package repair
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -26,7 +27,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
@@ -34,23 +40,22 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-// nodeRepairTimeout is the budget for node.health to detect the back-dated
-// KernelDeadlock condition and delete the NodeClaim. WaitForPodOnDifferentNode
-// then has the remaining ProvisioningTimeout to boot the replacement.
-const nodeRepairTimeout = 3 * time.Minute
+// Includes two short blocker observations and up to two minutes of event deduplication.
+const nodeRepairTimeout = 5 * time.Minute
 
 var env *environment.Environment
 var _ = BeforeEach(func() { env = environment.Current() })
 
 var _ = Describe("NodeRepair", Label("suite:repair"), func() {
 	BeforeEach(requireNodeRepairEnabled)
-	It("should replace a node whose KernelDeadlock condition has been True beyond the toleration",
+	It("should honor repair budgets and vetoes, then initialize a replacement before deleting the unhealthy node",
 		func(ctx SpecContext) {
 			runRepairTest(ctx, environment.TestCase{
 				CapacityType:        karpv1.CapacityTypeOnDemand,
 				Arch:                karpv1.ArchitectureAmd64,
 				Families:            []string{"n2"},
 				ConsolidationPolicy: "WhenEmpty",
+				DisruptionBudgets:   []map[string]any{{"nodes": "0"}},
 			})
 		}, SpecTimeout(nodeRepairTimeout+environment.ProvisioningTimeout))
 })
@@ -61,6 +66,10 @@ func requireNodeRepairEnabled() {
 		Get(context.Background(), environment.KarpenterDeployment, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred(), "failed to get karpenter deployment")
 	for _, c := range dep.Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			Expect(e.Name == "LEGACY_NODE_REPAIR" && e.Value == "true").To(BeFalse(),
+				"this spec requires modern repair; redeploy with controller.settings.legacyNodeRepair=false")
+		}
 		for _, e := range c.Env {
 			if e.Name == "FEATURE_GATES" {
 				Expect(strings.Contains(e.Value, "NodeRepair=true")).To(BeTrue(),
@@ -95,9 +104,17 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 	Expect(firstPod.Spec.NodeName).NotTo(BeEmpty())
 	originalNodeName = firstPod.Spec.NodeName
 
-	// Back-date by 6 min (1 min past the 5-min KernelDeadlock toleration) so
-	// node.health fires in ~30 s instead of waiting 5 real minutes.
-	// The hold goroutine reuses this fixed time so GKE can't reset the clock.
+	var original unstructured.Unstructured
+	Eventually(func(g Gomega) {
+		claims := poolClaims(ctx, name)
+		g.Expect(claims).To(HaveLen(1))
+		claim := nodeClaim(&claims[0])
+		g.Expect(claim.StatusConditions().Get(karpv1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+		original = claims[0]
+	}).WithTimeout(environment.NodeClaimLaunchTimeout).WithPolling(environment.DefaultPollInterval).Should(Succeed())
+
+	By("holding an eligible fault behind an all-reason zero budget")
+	// Backdate the fault to avoid waiting through the five-minute toleration.
 	transitionTime := metav1.NewTime(time.Now().Add(-6 * time.Minute))
 
 	GinkgoWriter.Printf("patching KernelDeadlock=True on node %s (transitionTime=%s)\n",
@@ -112,13 +129,131 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 		"KernelDeadlock", corev1.ConditionTrue, transitionTime,
 		"TestSimulation", "e2e repair test: simulated kernel deadlock")
 
+	expectNoRepair(ctx, name, original.GetUID())
+
+	By("observing the node veto before allowing Unhealthy disruptions")
+	_, err := env.KubeClient.CoreV1().Nodes().Patch(ctx, originalNodeName, types.MergePatchType,
+		[]byte(`{"metadata":{"annotations":{"karpenter.sh/do-not-repair":"true"}}}`), metav1.PatchOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, originalNodeName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(func(g Gomega) {
+		events, err := env.KubeClient.CoreV1().Events("").List(ctx, metav1.ListOptions{FieldSelector: "involvedObject.uid=" + string(node.UID)})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(events.Items).To(ContainElement(And(
+			HaveField("Reason", "DisruptionBlocked"),
+			HaveField("Message", `repair is blocked through the "karpenter.sh/do-not-repair" annotation`),
+		)))
+	}).WithTimeout(150 * time.Second).WithPolling(environment.DefaultPollInterval).Should(Succeed())
+	_, err = env.DynamicClient.Resource(schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}).Patch(ctx, name, types.MergePatchType,
+		[]byte(`{"spec":{"disruption":{"budgets":[{"nodes":"0","reasons":["Empty","Underutilized","Drifted"]},{"nodes":"100%","reasons":["Unhealthy"]}]}}}`), metav1.PatchOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	expectNoRepair(ctx, name, original.GetUID())
+
+	By("initializing the replacement before admitting original deletion")
+	watchCtx, cancel := context.WithTimeout(ctx, environment.ProvisioningTimeout)
+	defer cancel()
+	snapshot, stream, err := env.ListWatchNodeClaims(watchCtx, name)
+	Expect(err).NotTo(HaveOccurred())
+	defer stream.Stop()
+	Expect(snapshot.Items).To(HaveLen(1))
+	Expect(snapshot.Items[0].GetUID()).To(Equal(original.GetUID()))
+	Expect(snapshot.Items[0].GetDeletionTimestamp()).To(BeNil())
+	Expect(nodeClaim(&snapshot.Items[0]).StatusConditions().Get(karpv1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+	_, err = env.KubeClient.CoreV1().Nodes().Patch(ctx, originalNodeName, types.MergePatchType,
+		[]byte(`{"metadata":{"annotations":{"karpenter.sh/do-not-repair":null}}}`), metav1.PatchOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	replacementNode, err := waitForReplacement(watchCtx, stream, original.GetUID())
+	Expect(err).NotTo(HaveOccurred())
 	replacementPod := env.WaitForPodOnDifferentNode(ctx, name, originalNodeName, environment.ProvisioningTimeout)
-	Expect(replacementPod.Spec.NodeName).NotTo(Equal(originalNodeName),
-		"pod must move to a replacement node after KernelDeadlock repair")
+	Expect(replacementPod.Spec.NodeName).To(Equal(replacementNode),
+		"workload must recover on the replacement observed by the watch")
 
 	Expect(env.WaitForNodeRemoval(ctx, originalNodeName)).To(Succeed(),
 		"original node %s must be deleted after KernelDeadlock repair", originalNodeName)
 	originalNodeName = ""
+}
+
+func poolClaims(ctx context.Context, pool string) []unstructured.Unstructured {
+	claims, err := env.ListNodeClaims(ctx)
+	Expect(err).NotTo(HaveOccurred())
+	var scoped []unstructured.Unstructured
+	for _, claim := range claims {
+		if claim.GetLabels()[karpv1.NodePoolLabelKey] == pool {
+			scoped = append(scoped, claim)
+		}
+	}
+	return scoped
+}
+
+func nodeClaim(object *unstructured.Unstructured) *karpv1.NodeClaim {
+	claim := &karpv1.NodeClaim{}
+	Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, claim)).To(Succeed())
+	return claim
+}
+
+func expectNoRepair(ctx context.Context, pool string, uid types.UID) {
+	// Several nominal 10-second disruption passes; also reject replacement admission,
+	// since original survival alone would pass while a wrongly admitted replacement boots.
+	Consistently(func(g Gomega) {
+		claims := poolClaims(ctx, pool)
+		g.Expect(claims).To(HaveLen(1))
+		g.Expect(claims[0].GetUID()).To(Equal(uid))
+		g.Expect(claims[0].GetDeletionTimestamp()).To(BeNil())
+	}).WithTimeout(30 * time.Second).WithPolling(environment.DefaultPollInterval).Should(Succeed())
+}
+
+func waitForReplacement(ctx context.Context, stream watch.Interface, original types.UID) (string, error) {
+	initialized := map[types.UID]string{}
+	for {
+		claim, deleting, err := nextNodeClaim(ctx, stream)
+		if err != nil {
+			return "", err
+		}
+		if claim.UID == original {
+			if !deleting {
+				continue
+			}
+			if len(initialized) != 1 {
+				return "", fmt.Errorf("original deletion admitted before replacement initialization (active initialized replacements: %d)", len(initialized))
+			}
+			for _, nodeName := range initialized {
+				return nodeName, nil
+			}
+		}
+		delete(initialized, claim.UID)
+		if !deleting && claim.StatusConditions().Get(karpv1.ConditionTypeInitialized).IsTrue() && claim.Status.NodeName != "" {
+			initialized[claim.UID] = claim.Status.NodeName
+		}
+	}
+}
+
+func nextNodeClaim(ctx context.Context, stream watch.Interface) (*karpv1.NodeClaim, bool, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false, fmt.Errorf("waiting for repair replacement/deletion ordering: %w", ctx.Err())
+		case event, open := <-stream.ResultChan():
+			if !open {
+				return nil, false, fmt.Errorf("NodeClaim watch closed before repair ordering was established")
+			}
+			if event.Type == watch.Bookmark {
+				continue
+			}
+			if event.Type == watch.Error {
+				return nil, false, fmt.Errorf("NodeClaim watch failed: %w", apierrors.FromObject(event.Object))
+			}
+			object, ok := event.Object.(*unstructured.Unstructured)
+			if !ok {
+				return nil, false, fmt.Errorf("unexpected NodeClaim watch object %T", event.Object)
+			}
+			claim := &karpv1.NodeClaim{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, claim); err != nil {
+				return nil, false, fmt.Errorf("decoding watched NodeClaim: %w", err)
+			}
+			return claim, event.Type == watch.Deleted || !claim.DeletionTimestamp.IsZero(), nil
+		}
+	}
 }
 
 // holdNodeCondition re-patches the condition every 30 s with a fixed transitionTime.
