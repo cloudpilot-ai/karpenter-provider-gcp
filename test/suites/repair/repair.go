@@ -40,8 +40,8 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
 )
 
-// Includes two short blocker observations and up to two minutes of event deduplication.
-const nodeRepairTimeout = 5 * time.Minute
+// Includes the minimum node age, blocker observations and event deduplication.
+const nodeRepairTimeout = 10 * time.Minute
 
 var env *environment.Environment
 var _ = BeforeEach(func() { env = environment.Current() })
@@ -113,8 +113,16 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 		original = claims[0]
 	}).WithTimeout(environment.NodeClaimLaunchTimeout).WithPolling(environment.DefaultPollInterval).Should(Succeed())
 
+	By("waiting until the node is old enough for the KernelDeadlock policy")
+	originalNode, err := env.KubeClient.CoreV1().Nodes().Get(ctx, originalNodeName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	// Core clamps a backdated condition to Node creation; a fresh node still needs
+	// five minutes of age before either blocker observation exercises eligible repair.
+	Eventually(func() bool {
+		return !time.Now().Before(originalNode.CreationTimestamp.Add(5 * time.Minute))
+	}).WithTimeout(5 * time.Minute).WithPolling(environment.DefaultPollInterval).Should(BeTrue())
+
 	By("holding an eligible fault behind an all-reason zero budget")
-	// Backdate the fault to avoid waiting through the five-minute toleration.
 	transitionTime := metav1.NewTime(time.Now().Add(-6 * time.Minute))
 
 	GinkgoWriter.Printf("patching KernelDeadlock=True on node %s (transitionTime=%s)\n",
@@ -132,7 +140,7 @@ func runRepairTest(ctx context.Context, tc environment.TestCase) {
 	expectNoRepair(ctx, name, original.GetUID())
 
 	By("observing the node veto before allowing Unhealthy disruptions")
-	_, err := env.KubeClient.CoreV1().Nodes().Patch(ctx, originalNodeName, types.MergePatchType,
+	_, err = env.KubeClient.CoreV1().Nodes().Patch(ctx, originalNodeName, types.MergePatchType,
 		[]byte(`{"metadata":{"annotations":{"karpenter.sh/do-not-repair":"true"}}}`), metav1.PatchOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, originalNodeName, metav1.GetOptions{})
