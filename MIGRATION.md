@@ -9,6 +9,15 @@
 
 Setting the new `GCENodeClass.spec.resourceManagerTags` field requires the controller's service account to have `compute.instances.createTagBinding` on the project, which is now included in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). If you created the `karpenter_controller` custom role from an earlier version of that file, update it with `gcloud iam roles update` before you set `resourceManagerTags`; without it, instance creation fails for that NodeClass. The service account also needs `roles/resourcemanager.tagUser` on the tag values, their tag key, or a parent resource. No action is required if you don't use `resourceManagerTags`. See [Resource manager tags](docs/examples/networking.md#resource-manager-tags).
 
+### `deploy/terraform/` module creates a system node pool and sets a release channel
+
+If you provision infrastructure with [`deploy/terraform/`](deploy/terraform/), review the plan before you apply this version to an existing cluster. Two changes affect existing clusters:
+
+- **New system node pool.** The module now creates a node pool named `${common_name}-system` to run Karpenter and essential cluster workloads. Karpenter doesn't manage this pool. It defaults to one `n2-standard-2` node per zone, so the default regional cluster gets one node in each of its zones. Size it with `system_machine_type`, `system_node_count`, and `system_disk_size_gb`. The pool has `prevent_destroy = true`, so `terraform destroy` fails until you remove that lifecycle guard from `deploy/terraform/system_node_pool.tf`.
+- **Explicit release channel.** The cluster is now enrolled in the `release_channel` you set, which defaults to `STABLE`. If your cluster uses another channel, set `release_channel` to that channel to keep it.
+
+The module now sets `project` on each resource and doesn't declare its own `provider "google"` block, so you can call it as a module from your own configuration. Network, subnet, and cluster names still default to `common_name`, and the CIDR ranges keep their previous defaults. See [`deploy/terraform/README.md`](deploy/terraform/README.md) for the new inputs.
+
 ### Corrected disk compatibility for C4A and N4
 
 New C4A and N4 nodes no longer advertise `disk-type.gke.io/pd-balanced` or `disk-type.gke.io/pd-ssd`. Karpenter excludes these families when workloads require either label.
