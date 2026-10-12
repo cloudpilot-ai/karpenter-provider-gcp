@@ -175,6 +175,7 @@ controller:
 # for Spot preemption notices and sets the GCESpotPreempting node condition, which
 # Karpenter's interruption controller reacts to. Pair it with
 # `GCENodeClass.spec.preemptionNoticeDuration: 120s` for a two-minute drain window.
+# Uses ports 20258 (Prometheus) and 20259 (server) to avoid GKE's managed detector.
 # See docs/spot-preemption.md.
 node-problem-detector:
   # -- Deploy node-problem-detector with the Spot preemption plugin. Off by default:
@@ -211,6 +212,10 @@ node-problem-detector:
       memory: 64Mi
   # @ignored
   settings:
+    # Avoid the ports used by GKE's managed node-problem-detector.
+    prometheus_port: 20258
+    extraArgs:
+      - --port=20259
     # Run only the preemption plugin. The GKE-managed node-problem-detector already
     # covers the kernel and runtime log monitors on Standard node pools.
     log_monitors: []
