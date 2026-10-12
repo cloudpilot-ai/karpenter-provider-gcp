@@ -1,74 +1,30 @@
 # Persistent e2e environment
 
-This Terraform root defines a **new** persistent GKE e2e target for manual runs.
-It uses `../terraform` for the VPC, subnet, cluster, controller/node accounts,
-controller role and persistent system node pool. This root configures one
-30-GB system node of the selected machine type and adds NAT, the image registry
-and Resource Manager tag fixtures.
-The module reads controller permissions from
-`deploy/iam/karpenter-controller-role.yaml`. Existing local infrastructure is
-not imported or retired automatically. `make e2e-setup` and `make e2e-teardown`
-are retired; they print this path rather than touching GCP.
+Shared configuration is committed in `terraform.tfvars`:
 
-The image repository deletes **tagged and untagged** versions older than seven
-days, with no keep exception. If a controller image is deleted while its pod
-still runs, a later restart may fail to pull that digest; redeploy an image
-before relying on an older installation. Review the policy in the approved
-Terraform plan before applying; cleanup is asynchronous, not an exact-time TTL.
+- Project: `planetscale-karp-gcp-e2e`
+- Zone: `asia-southeast1-b`
+- Prefix: `tf-e2e-sgp`
+- System pool: one `n2-standard-2` node with a 30-GB boot disk
+- Release channel: `STABLE`; GKE selects and auto-upgrades Kubernetes versions
 
-The project and billing account must already exist. Confirm owner and permitted
-operations, enabled APIs, Singapore zone and machine availability (including
-GPU/ARM where needed), quota, budget, CIDR non-overlap and resource-name
-collisions before provisioning. This root does not enable APIs or manage a
-GitHub identity. The cluster has deletion protection and the system pool has
-`prevent_destroy`; retirement requires a separate reviewed code change and
-explicit destructive approval. The module protects the system pool for all
-callers, independently of cluster deletion protection.
+The [installation module](../terraform/README.md) creates the network, cluster, system pool and controller/node identities. This root adds NAT, an image registry and test tag fixtures. Controller permissions come from `deploy/iam/karpenter-controller-role.yaml`. APIs and the state bucket must already exist. Existing infrastructure is not imported automatically.
 
-## Release channel and pod ranges
+## Shared state
 
-`release_channel` defaults to `"STABLE"` in both this root and the reusable
-installation module. Select `"REGULAR"`, `"RAPID"` or `"EXTENDED"` when needed;
-there is no explicit Kubernetes version input. GKE selects the initial version
-and manages auto-upgrades within the channel. The system pool inherits the
-master version on creation. Verify actual control-plane and node versions
-before testing. Channel enrollment or changes can trigger upgrades, not
-downgrades, and require a maintenance window and explicit apply consent.
+The GCS backend uses bucket `planetscale-karp-gcp-e2e-tfstate` in the same project, with prefix `karpenter/e2e`. Use this backend and the default Terraform workspace so maintainers share one state. The bucket is managed separately; use versioning, uniform bucket-level access and public-access prevention. Keep state locking enabled.
 
-`additional_pod_ranges` maps subnet secondary range names to CIDRs and attaches
-those ranges to GKE. The shared configuration includes a small `/22` and a large `/20` for
-the multi-range networking tests. Review all ranges for overlap before applying.
-An empty map preserves a single pod range, but multi-range tests require both
-additional ranges. With the committed names, pass `E2E_PREFIX=tf-e2e-sgp` to
-Make; it derives `E2E_PODS_RANGE`, `E2E_SMALL_PODS_RANGE` and
-`E2E_LARGE_PODS_RANGE`. Override the latter two when using different map keys.
-Changing `prefix` also requires updating the map keys. Both candidate
-ranges need at least 1,024 free IPs for the ranking test.
+Authenticate with Application Default Credentials. Do not commit credentials, state, saved plans or local overrides; committed configuration is non-secret. From this directory, initialize the existing backend:
 
-The project-scoped `${prefix}-tag` key and its `e2e` value support the
-`resourceManagerTags` tests. The controller receives `roles/resourcemanager.tagUser`
-only on that key. This is separate from the instance-side tag-binding permission
-already supplied by the canonical controller role; the fixtures and their
-key-scoped grant are e2e-specific. Make derives `E2E_RESOURCE_MANAGER_TAG_KEY` from `E2E_PREFIX`
-and passes it to both test targets; use the Terraform prefix for the runner.
+```sh
+terraform init -input=false -lockfile=readonly
+```
 
-## State and validation
+Review a plan before applying. Bucket creation, imports, state migration, infrastructure changes and live e2e runs require separate approval. Coordinate maintenance with other users: Terraform state locking does not block tests or deployments.
 
-`terraform.tfvars` contains the shared non-secret target configuration for
-`planetscale-karp-gcp-e2e`. The GCS backend uses bucket
-`planetscale-karp-gcp-e2e-tfstate` in that project and prefix `karpenter/e2e`,
-so maintainers use the same state. The bucket must exist before backend
-initialization; it is not managed by this stack. Use object versioning,
-uniform bucket-level access and public-access prevention. The GCS backend
-provides state locking; do not disable it.
+## Offline validation
 
-Authenticate through Application Default Credentials, not committed keys.
-Keep credentials, state, saved plans and local overrides out of Git; the
-committed tfvars must contain only non-secret configuration. If resources
-already exist at the selected target, agree imports individually before
-applying; never allow an unreviewed replacement.
-
-Offline checks from this directory:
+These commands do not access the shared state or apply infrastructure:
 
 ```sh
 terraform fmt -check -recursive
@@ -78,53 +34,16 @@ terraform -chdir=../terraform init -backend=false -input=false
 terraform -chdir=../terraform validate
 ```
 
-For approved remote-state access, initialize the shared backend:
+## Test fixtures and runner
 
-```sh
-terraform init -input=false -lockfile=readonly
-```
+- **Pod ranges:** the committed small `/22` and large `/20` ranges are attached to GKE for multi-range networking tests. Each candidate needs at least 1,024 free IPs for the ranking test. Changing the prefix requires updating range names in `terraform.tfvars`.
+- **Resource Manager tags:** `${prefix}-tag` and its `e2e` value let tests verify `spec.resourceManagerTags` on provisioned instances. The controller receives `roles/resourcemanager.tagUser` only on that key, in addition to the canonical role's instance-side tag-binding permission.
 
-Do not override the backend bucket/prefix or use a separate workspace for this
-environment. Existing local state requires a separately reviewed migration;
-do not discard it or copy it manually. Inspect a private refresh/plan for
-resource additions, IAM breadth, replacements or deletes.
-Get **separate consent** for backend creation, each import/apply/destroy,
-GitHub settings and live e2e. A repeat plan must have no unexplained drift.
-Neither merging this code nor the offline checks authorizes a live operation.
+After provisioning, use a dedicated kubeconfig for this cluster. From the repository root, set `E2E_PROJECT_ID=planetscale-karp-gcp-e2e`, `E2E_REGION=asia-southeast1`, `E2E_LOCATION=asia-southeast1-b` and `E2E_PREFIX=tf-e2e-sgp`. Deploy with `make e2e-deploy`, then run `make e2e-tests E2E_SELECTION=standard GINKGO_PROCS=4` after approval. Make derives the pod-range and tag-key names from the prefix.
 
-Terraform backend locking does not exclude test/deploy clients. Before
-maintenance, agree a window, block new local/CI admission and verify active
-jobs have stopped. The runner's Lease covers only `make e2e-tests`; it cannot
-protect initial creation or an API outage. If ownership cannot be checked,
-stop rather than assuming the target is idle. Use a distinct kubeconfig for
-the sponsored cluster. After provisioning, deploy the controller from the
-checkout with `make e2e-deploy` and explicit `E2E_PROJECT_ID`, `E2E_REGION`,
-`E2E_LOCATION`, `E2E_PREFIX` and kubeconfig. Run tests only after separately
-approved deployment and source-alignment checks. Per-run Helm releases, tests,
-Karpenter-created nodes and GKE-managed firewall rules are not Terraform
-resources. CI runtime identity, WIF, protected workflow and token exchange
-belong to Phase 3; Phase 2 does not grant CI access.
+`standard` includes basic Local SSD tests but excludes GPU and extended Local SSD tests. Check available quota and capacity before increasing parallelism. Helm releases and per-run test resources are not managed by Terraform. `make e2e-setup` and `make e2e-teardown` are retired.
 
-## Standard + Local SSD capacity after #628
+## Important limits
 
-The runner's `standard` selection (`!suite:gpu`) includes #628's
-`suite:local-ssd` specs; do not start a second Local SSD runner. Start with
-`GINKGO_PROCS=4` and measure actual peak nodes, CPU/Local SSD usage and
-cleanup overlap. Only try 6 for speed after that evidence and cost/quota
-approval. A mixed-pool spec holds three nodes (8- and 4-vCPU N2D plus 2-vCPU
-N2). Using a deliberately conservative envelope of 14 vCPU and eight 375-GB
-N2D SSD partitions per worker, 25% reserve, and an example 2-vCPU system node:
-
-| Workers | All-family CPU | N2D CPU | N2D Local SSD |
-|---:|---:|---:|---:|
-| 4 | 73 vCPU | 60 vCPU | 15,000 GB |
-| 6 | 108 vCPU | 90 vCPU | 22,500 GB |
-| 8 (stretch) | 143 vCPU | 120 vCPU | 30,000 GB |
-
-These are **planning envelopes**, not measured quota requests. Recalculate
-for the actual system node, usage, other families, regional/all-regions CPU,
-per-family regional/zonal Local SSD, Hyperdisk/PD, addresses and zonal stock.
-Request only the gap between needed headroom plus current usage and the actual
-quota limit. Do not include capacity-constrained z3 or GPU in the standard
-baseline. References: [Compute allocation quotas](https://docs.cloud.google.com/compute/resource-usage)
-and [Local SSD quota by family](https://cloud.google.com/compute/docs/quotas/migrate-local-ssd-quota).
+- The cluster has deletion protection; the system pool has `prevent_destroy`. Pool replacement or retirement requires an explicit lifecycle-guard edit.
+- The registry deletes **all tagged and untagged images older than seven days**. A running controller may fail to restart after its image is deleted; redeploy a fresh image before relying on an older installation.
