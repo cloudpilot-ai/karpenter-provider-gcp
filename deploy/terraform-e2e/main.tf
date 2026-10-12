@@ -9,6 +9,9 @@ module "cluster" {
   google_region                 = var.region
   cluster_location              = var.location
   release_channel               = var.release_channel
+  system_machine_type           = var.system_machine_type
+  system_node_count             = 1
+  system_disk_size_gb           = 30
   additional_pod_ranges         = var.additional_pod_ranges
   common_name                   = var.prefix
   network_name                  = "${var.prefix}-vpc"

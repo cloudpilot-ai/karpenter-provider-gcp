@@ -36,6 +36,39 @@ variable "cluster_location" {
   description = "GKE zone or region; defaults to google_region."
 }
 
+variable "system_machine_type" {
+  type        = string
+  default     = "n2-standard-2"
+  nullable    = false
+  description = "Machine type for the persistent pool hosting Karpenter and cluster system workloads."
+  validation {
+    condition     = length(trimspace(var.system_machine_type)) > 0
+    error_message = "Set a non-empty system machine type."
+  }
+}
+
+variable "system_node_count" {
+  type        = number
+  default     = 1
+  nullable    = false
+  description = "System nodes per zone; regional clusters multiply this count by their node locations."
+  validation {
+    condition     = var.system_node_count >= 1 && floor(var.system_node_count) == var.system_node_count
+    error_message = "System node count must be a positive integer."
+  }
+}
+
+variable "system_disk_size_gb" {
+  type        = number
+  default     = 30
+  nullable    = false
+  description = "Boot disk size in GB for each system node."
+  validation {
+    condition     = var.system_disk_size_gb >= 10 && floor(var.system_disk_size_gb) == var.system_disk_size_gb
+    error_message = "System disk size must be an integer of at least 10 GB."
+  }
+}
+
 variable "release_channel" {
   type        = string
   default     = "STABLE"

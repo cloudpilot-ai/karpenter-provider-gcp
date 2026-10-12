@@ -1,8 +1,9 @@
 # Persistent e2e environment
 
 This Terraform root defines a **new** persistent GKE e2e target for manual runs.
-It uses `../terraform` for the VPC, subnet, cluster, controller/node accounts
-and controller role; this root adds the system node pool, NAT, image registry
+It uses `../terraform` for the VPC, subnet, cluster, controller/node accounts,
+controller role and persistent system node pool. This root configures one
+30-GB system node of the selected machine type and adds NAT, the image registry
 and Resource Manager tag fixtures.
 The module reads controller permissions from
 `deploy/iam/karpenter-controller-role.yaml`. Existing local infrastructure is
@@ -21,7 +22,10 @@ GPU/ARM where needed), quota, budget, CIDR non-overlap and resource-name
 collisions before provisioning. This root does not enable APIs or manage a
 GitHub identity. The cluster has deletion protection and the system pool has
 `prevent_destroy`; retirement requires a separate reviewed code change and
-explicit destructive approval.
+explicit destructive approval. The module protects the system pool for all
+callers, independently of cluster deletion protection. A `moved` block preserves
+the pool's previous root-level state address when adopting the module layout;
+review the plan to confirm it does not recreate the pool.
 
 ## Release channel and pod ranges
 
@@ -45,7 +49,9 @@ ranges need at least 1,024 free IPs for the ranking test.
 
 The project-scoped `${prefix}-tag` key and its `e2e` value support the
 `resourceManagerTags` tests. The controller receives `roles/resourcemanager.tagUser`
-only on that key. Make derives `E2E_RESOURCE_MANAGER_TAG_KEY` from `E2E_PREFIX`
+only on that key. This is separate from the instance-side tag-binding permission
+already supplied by the canonical controller role; the fixtures and their
+key-scoped grant are e2e-specific. Make derives `E2E_RESOURCE_MANAGER_TAG_KEY` from `E2E_PREFIX`
 and passes it to both test targets; use the Terraform prefix for the runner.
 
 ## State and validation
