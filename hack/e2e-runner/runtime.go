@@ -71,15 +71,39 @@ func verifyControllerCommit(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("checking deployed controller image: %w", err)
 	}
 	tagged := strings.SplitN(strings.TrimSpace(string(image)), "@", 2)[0]
-	if tag := tagged[strings.LastIndex(tagged, ":")+1:]; tag != "e2e-"+base {
-		return "", "", fmt.Errorf("deployed controller image %q does not match test commit %s", strings.TrimSpace(string(image)), commit)
+	tag := tagged[strings.LastIndex(tagged, ":")+1:]
+	release := tag != "e2e-"+base
+	var releaseHead string
+	if release {
+		if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`).MatchString(tag) {
+			return "", "", fmt.Errorf("deployed controller image %q does not match test commit %s", strings.TrimSpace(string(image)), commit)
+		}
+		if len(status) > 0 {
+			return "", "", fmt.Errorf("published release validation requires clean test sources")
+		}
+		head, err := exec.CommandContext(ctx, "git", "rev-parse", "HEAD").Output()
+		if err != nil {
+			return "", "", fmt.Errorf("reading full test commit: %w", err)
+		}
+		target, err := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}").Output()
+		if err != nil {
+			return "", "", fmt.Errorf("resolving release tag %s: %w", tag, err)
+		}
+		releaseHead = strings.TrimSpace(string(head))
+		if strings.TrimSpace(string(target)) != releaseHead {
+			return "", "", fmt.Errorf("release tag %s does not match test commit %s", tag, commit)
+		}
 	}
 	logs, err := exec.CommandContext(ctx, "kubectl", "-n", namespace, "logs", "deployment/"+deployment, "--tail=50").Output()
 	if err != nil {
 		return "", "", fmt.Errorf("checking controller binary commit: %w", err)
 	}
 	found := regexp.MustCompile(`"commit":"([0-9a-f]+)(-dirty)?"`).FindStringSubmatch(string(logs))
-	if len(found) == 0 || !strings.HasPrefix(base, found[1]) && !strings.HasPrefix(found[1], base) {
+	aligned := len(found) > 0 && (strings.HasPrefix(base, found[1]) || strings.HasPrefix(found[1], base))
+	if release && aligned {
+		aligned = len(found[1]) >= 7 && strings.HasPrefix(releaseHead, found[1]) && found[2] == ""
+	}
+	if !aligned {
 		return "", "", fmt.Errorf("controller binary commit in logs does not match test commit %s", commit)
 	}
 	return commit, found[1] + found[2], nil
