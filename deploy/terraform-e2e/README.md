@@ -34,13 +34,13 @@ before testing. Channel enrollment or changes can trigger upgrades, not
 downgrades, and require a maintenance window and explicit apply consent.
 
 `additional_pod_ranges` maps subnet secondary range names to CIDRs and attaches
-those ranges to GKE. The example includes a small `/22` and a large `/20` for
+those ranges to GKE. The shared configuration includes a small `/22` and a large `/20` for
 the multi-range networking tests. Review all ranges for overlap before applying.
 An empty map preserves a single pod range, but multi-range tests require both
-additional ranges. With the example names, pass `E2E_PREFIX=tf-e2e-sgp` to
+additional ranges. With the committed names, pass `E2E_PREFIX=tf-e2e-sgp` to
 Make; it derives `E2E_PODS_RANGE`, `E2E_SMALL_PODS_RANGE` and
 `E2E_LARGE_PODS_RANGE`. Override the latter two when using different map keys.
-Changing `prefix` also requires updating the example's map keys. Both candidate
+Changing `prefix` also requires updating the map keys. Both candidate
 ranges need at least 1,024 free IPs for the ranking test.
 
 The project-scoped `${prefix}-tag` key and its `e2e` value support the
@@ -50,13 +50,19 @@ and passes it to both test targets; use the Terraform prefix for the runner.
 
 ## State and validation
 
-A maintainer must bootstrap a separate, access-controlled GCS backend outside
-this stack, with versioning, retention/recovery, encryption and locking. Choose
-bucket/prefix and maintenance identity before first init. Keep real tfvars,
-backend config, state and saved plans private and untracked. Never grant test
-credentials access to the state or maintenance identity. If resources already
-exist at the selected target, agree imports individually before applying;
-never allow an unreviewed replacement.
+`terraform.tfvars` contains the shared non-secret target configuration for
+`planetscale-karp-gcp-e2e`. The GCS backend uses bucket
+`planetscale-karp-gcp-e2e-tfstate` in that project and prefix `karpenter/e2e`,
+so maintainers use the same state. The bucket must exist before backend
+initialization; it is not managed by this stack. Use object versioning,
+uniform bucket-level access and public-access prevention. The GCS backend
+provides state locking; do not disable it.
+
+Authenticate through Application Default Credentials, not committed keys.
+Keep credentials, state, saved plans and local overrides out of Git; the
+committed tfvars must contain only non-secret configuration. If resources
+already exist at the selected target, agree imports individually before
+applying; never allow an unreviewed replacement.
 
 Offline checks from this directory:
 
@@ -68,9 +74,16 @@ terraform -chdir=../terraform init -backend=false -input=false
 terraform -chdir=../terraform validate
 ```
 
-`terraform.tfvars.example` is a placeholder, not a deployable target. For an
-approved target only, initialize the private backend and inspect a private
-refresh/plan for resource additions, IAM breadth, replacements or deletes.
+For approved remote-state access, initialize the shared backend:
+
+```sh
+terraform init -input=false -lockfile=readonly
+```
+
+Do not override the backend bucket/prefix or use a separate workspace for this
+environment. Existing local state requires a separately reviewed migration;
+do not discard it or copy it manually. Inspect a private refresh/plan for
+resource additions, IAM breadth, replacements or deletes.
 Get **separate consent** for backend creation, each import/apply/destroy,
 GitHub settings and live e2e. A repeat plan must have no unexplained drift.
 Neither merging this code nor the offline checks authorizes a live operation.

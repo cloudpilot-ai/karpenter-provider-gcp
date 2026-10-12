@@ -8,7 +8,10 @@ terraform {
     }
   }
 
-  backend "gcs" {}
+  backend "gcs" {
+    bucket = "planetscale-karp-gcp-e2e-tfstate"
+    prefix = "karpenter/e2e"
+  }
 }
 
 provider "google" {

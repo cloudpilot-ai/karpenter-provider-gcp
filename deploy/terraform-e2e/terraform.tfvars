@@ -1,10 +1,10 @@
-# Copy to an ignored .tfvars only after the sponsored target is approved.
-project_id          = "replace-with-approved-project"
+# Shared non-secret configuration for the persistent e2e environment.
+project_id          = "planetscale-karp-gcp-e2e"
 region              = "asia-southeast1"
 location            = "asia-southeast1-b"
 prefix              = "tf-e2e-sgp"
-system_machine_type = "replace-with-approved-machine-type"
-release_channel     = "STABLE" # Default; GKE selects and auto-upgrades the version.
+system_machine_type = "n2-standard-2"
+release_channel     = "STABLE"
 primary_cidr        = "10.0.0.0/20"
 pods_cidr           = "10.4.0.0/14"
 services_cidr       = "10.8.0.0/20"
