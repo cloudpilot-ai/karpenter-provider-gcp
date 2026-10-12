@@ -4,8 +4,8 @@ run "defaults" {
   command = plan
 
   assert {
-    condition     = google_container_cluster.default.min_master_version == null
-    error_message = "Standalone installs must retain GKE's default version selection."
+    condition     = google_container_cluster.default.release_channel[0].channel == "STABLE"
+    error_message = "Clusters must use the stable release channel by default."
   }
 
   assert {
@@ -14,16 +14,16 @@ run "defaults" {
   }
 }
 
-run "version_136" {
+run "regular_channel" {
   command = plan
 
   variables {
-    kubernetes_version = "1.36"
+    release_channel = "REGULAR"
   }
 
   assert {
-    condition     = google_container_cluster.default.min_master_version == "1.36"
-    error_message = "The version input must also support 1.36."
+    condition     = google_container_cluster.default.release_channel[0].channel == "REGULAR"
+    error_message = "The requested release channel must reach the cluster."
   }
 }
 
@@ -87,15 +87,12 @@ run "additional_ranges" {
   }
 }
 
-run "version_135" {
+run "invalid_channel" {
   command = plan
 
   variables {
-    kubernetes_version = "1.35"
+    release_channel = "UNSPECIFIED"
   }
 
-  assert {
-    condition     = google_container_cluster.default.min_master_version == "1.35"
-    error_message = "The requested Kubernetes version must reach the GKE cluster."
-  }
+  expect_failures = [var.release_channel]
 }

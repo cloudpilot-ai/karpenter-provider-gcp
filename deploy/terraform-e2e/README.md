@@ -2,7 +2,8 @@
 
 This Terraform root defines a **new** persistent GKE e2e target for manual runs.
 It uses `../terraform` for the VPC, subnet, cluster, controller/node accounts
-and controller role; this root adds the system node pool, NAT and image registry.
+and controller role; this root adds the system node pool, NAT, image registry
+and Resource Manager tag fixtures.
 The module reads controller permissions from
 `deploy/iam/karpenter-controller-role.yaml`. Existing local infrastructure is
 not imported or retired automatically. `make e2e-setup` and `make e2e-teardown`
@@ -22,32 +23,30 @@ GitHub identity. The cluster has deletion protection and the system pool has
 `prevent_destroy`; retirement requires a separate reviewed code change and
 explicit destructive approval.
 
-## Kubernetes version and pod ranges
+## Release channel and pod ranges
 
-Set `kubernetes_version` explicitly to a minor such as `"1.35"` or `"1.36"`,
-or a full GKE version. Check availability in the approved zone before planning:
-
-```sh
-gcloud container get-server-config --project="$E2E_PROJECT_ID" \
-  --zone="$E2E_LOCATION" --format='yaml(validMasterVersions,channels)'
-```
-
-The input sets GKE's `min_master_version`, not a permanent version pin. GKE
-resolves a minor to an available patch and can auto-upgrade afterward. The
-system pool inherits the master version on creation. Verify the actual control
-plane and node versions before testing. GKE does not support downgrading an
-existing cluster from 1.36 to 1.35; use separately approved targets if both
-versions must remain available. Version upgrades require the same maintenance
-window and explicit apply consent as other infrastructure changes.
+`release_channel` defaults to `"STABLE"` in both this root and the reusable
+installation module. Select `"REGULAR"`, `"RAPID"` or `"EXTENDED"` when needed;
+there is no explicit Kubernetes version input. GKE selects the initial version
+and manages auto-upgrades within the channel. The system pool inherits the
+master version on creation. Verify actual control-plane and node versions
+before testing. Channel enrollment or changes can trigger upgrades, not
+downgrades, and require a maintenance window and explicit apply consent.
 
 `additional_pod_ranges` maps subnet secondary range names to CIDRs and attaches
-those ranges to GKE. The example includes a small `/24` and a large `/20` for
+those ranges to GKE. The example includes a small `/22` and a large `/20` for
 the multi-range networking tests. Review all ranges for overlap before applying.
 An empty map preserves a single pod range, but multi-range tests require both
 additional ranges. With the example names, pass `E2E_PREFIX=tf-e2e-sgp` to
 Make; it derives `E2E_PODS_RANGE`, `E2E_SMALL_PODS_RANGE` and
 `E2E_LARGE_PODS_RANGE`. Override the latter two when using different map keys.
-Changing `prefix` also requires updating the example's map keys.
+Changing `prefix` also requires updating the example's map keys. Both candidate
+ranges need at least 1,024 free IPs for the ranking test.
+
+The project-scoped `${prefix}-tag` key and its `e2e` value support the
+`resourceManagerTags` tests. The controller receives `roles/resourcemanager.tagUser`
+only on that key. Make derives `E2E_RESOURCE_MANAGER_TAG_KEY` from `E2E_PREFIX`
+and passes it to both test targets; use the Terraform prefix for the runner.
 
 ## State and validation
 

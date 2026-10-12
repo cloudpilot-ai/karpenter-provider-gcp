@@ -43,13 +43,14 @@ variable "system_machine_type" {
   }
 }
 
-variable "kubernetes_version" {
+variable "release_channel" {
   type        = string
+  default     = "STABLE"
   nullable    = false
-  description = "Requested minimum GKE master version, such as 1.35 or 1.36 (must be available in the approved location). Auto-upgrades still apply."
+  description = "GKE release channel; GKE selects and auto-upgrades the Kubernetes version."
   validation {
-    condition     = length(trimspace(var.kubernetes_version)) > 0
-    error_message = "Set an explicit Kubernetes minor or full GKE version."
+    condition     = contains(["STABLE", "REGULAR", "RAPID", "EXTENDED"], var.release_channel)
+    error_message = "Select STABLE, REGULAR, RAPID or EXTENDED."
   }
 }
 

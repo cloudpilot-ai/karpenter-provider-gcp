@@ -36,10 +36,15 @@ variable "cluster_location" {
   description = "GKE zone or region; defaults to google_region."
 }
 
-variable "kubernetes_version" {
+variable "release_channel" {
   type        = string
-  default     = null
-  description = "Minimum GKE master version (minor such as 1.35 or full GKE version); null uses GKE's default. Auto-upgrades still apply."
+  default     = "STABLE"
+  nullable    = false
+  description = "GKE release channel; GKE selects and auto-upgrades the Kubernetes version."
+  validation {
+    condition     = contains(["STABLE", "REGULAR", "RAPID", "EXTENDED"], var.release_channel)
+    error_message = "Select STABLE, REGULAR, RAPID or EXTENDED."
+  }
 }
 
 variable "primary_cidr" {

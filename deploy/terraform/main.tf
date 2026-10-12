@@ -46,8 +46,11 @@ resource "google_container_cluster" "default" {
   project = var.project_id
   name    = coalesce(var.cluster_name, var.common_name)
 
-  location           = coalesce(var.cluster_location, var.google_region)
-  min_master_version = var.kubernetes_version
+  location = coalesce(var.cluster_location, var.google_region)
+
+  release_channel {
+    channel = var.release_channel
+  }
 
   network    = google_compute_network.default.id
   subnetwork = google_compute_subnetwork.default.id
