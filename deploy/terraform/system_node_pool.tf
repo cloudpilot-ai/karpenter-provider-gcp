@@ -1,9 +1,10 @@
 resource "google_container_node_pool" "system" {
-  project    = var.project_id
-  name       = "${var.common_name}-system"
-  location   = google_container_cluster.default.location
-  cluster    = google_container_cluster.default.name
-  node_count = var.system_node_count
+  project        = var.project_id
+  name           = coalesce(var.system_node_pool_name, "${var.common_name}-system")
+  location       = google_container_cluster.default.location
+  cluster        = google_container_cluster.default.name
+  node_count     = var.system_node_count
+  node_locations = var.system_node_locations
 
   node_config {
     machine_type    = var.system_machine_type
@@ -18,7 +19,4 @@ resource "google_container_node_pool" "system" {
 
   depends_on = [google_project_iam_member.karpenter_node, google_project_iam_member.karpenter_node_ar_reader]
 
-  lifecycle {
-    prevent_destroy = true
-  }
 }

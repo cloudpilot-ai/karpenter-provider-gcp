@@ -11,10 +11,14 @@ Controller permissions come from `../iam/karpenter-controller-role.yaml`. The sy
 | `system_machine_type` | `n2-standard-2` | Machine type                           |
 | `system_node_count`   | `1`             | Nodes per zone, not the regional total |
 | `system_disk_size_gb` | `30`            | Boot disk size per node                |
+| `system_node_pool_name` | `${common_name}-system` | Pool name                     |
+| `system_node_locations` | Cluster defaults | Pool zones; pin one for one total node |
 
-The pool is named `${common_name}-system` and is not managed by Karpenter. Account for multiple zones when sizing regional clusters.
+The pool is not managed by Karpenter. Regional clusters multiply the node count by the pool's zones. Set `system_node_locations` independently of the cluster's `node_locations` to avoid multiplying persistent capacity.
 
-`prevent_destroy = true` protects the pool for every caller, independently of cluster deletion protection. Destroying or replacing it requires explicitly editing that lifecycle guard. It does not prevent deletion outside Terraform.
+`cluster_location` accepts a zone or region. `node_locations` selects default worker zones; omitted values retain GKE defaults. `controller_role_id` overrides the custom-role ID, which otherwise defaults to `${common_name}` with hyphens replaced by underscores, suffixed with `_controller`.
+
+Cluster deletion protection is configurable; the system pool has no hard-coded destruction guard.
 
 ## Resource Manager tags
 

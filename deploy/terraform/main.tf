@@ -46,7 +46,8 @@ resource "google_container_cluster" "default" {
   project = var.project_id
   name    = coalesce(var.cluster_name, var.common_name)
 
-  location = coalesce(var.cluster_location, var.google_region)
+  location       = coalesce(var.cluster_location, var.google_region)
+  node_locations = var.node_locations
 
   release_channel {
     channel = var.release_channel

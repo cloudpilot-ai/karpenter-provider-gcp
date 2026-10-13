@@ -31,7 +31,7 @@ resource "google_project_iam_member" "karpenter_node_ar_reader" {
 }
 
 resource "google_project_iam_custom_role" "karpenter_controller" {
-  role_id     = "${replace(var.common_name, "-", "_")}_controller"
+  role_id     = coalesce(var.controller_role_id, "${replace(var.common_name, "-", "_")}_controller")
   title       = local.iam_role.title
   description = local.iam_role.description
   permissions = local.iam_role.includedPermissions

@@ -36,6 +36,24 @@ variable "cluster_location" {
   description = "GKE zone or region; defaults to google_region."
 }
 
+variable "node_locations" {
+  type        = list(string)
+  default     = null
+  description = "Default worker zones; omitted uses GKE's defaults for the cluster location."
+}
+
+variable "system_node_pool_name" {
+  type        = string
+  default     = null
+  description = "Persistent system pool name; defaults to common_name-system."
+}
+
+variable "system_node_locations" {
+  type        = list(string)
+  default     = null
+  description = "System pool zones; omitted inherits the cluster's default node locations."
+}
+
 variable "system_machine_type" {
   type        = string
   default     = "n2-standard-2"
@@ -129,6 +147,12 @@ variable "control_plane_cidr" {
 variable "deletion_protection" {
   type    = bool
   default = false
+}
+
+variable "controller_role_id" {
+  type        = string
+  default     = null
+  description = "Controller custom role ID; defaults to common_name with hyphens replaced by underscores, suffixed with _controller."
 }
 
 variable "controller_service_account_id" {

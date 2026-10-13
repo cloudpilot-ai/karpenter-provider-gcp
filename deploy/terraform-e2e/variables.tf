@@ -18,19 +18,30 @@ variable "region" {
 
 variable "location" {
   type        = string
-  description = "Approved Singapore GKE zone (verify GPU/ARM availability and quota before provisioning)."
+  description = "Regional GKE control-plane location."
   validation {
-    condition     = can(regex("^asia-southeast1-[abc]$", var.location))
-    error_message = "Set an approved zone in asia-southeast1."
+    condition     = var.location == "asia-southeast1"
+    error_message = "The shared e2e cluster must be regional in asia-southeast1."
+  }
+}
+
+variable "node_locations" {
+  type        = list(string)
+  default     = ["asia-southeast1-a", "asia-southeast1-b", "asia-southeast1-c"]
+  nullable    = false
+  description = "Default worker zones available to Karpenter; the persistent system pool remains in asia-southeast1-b."
+  validation {
+    condition     = length(var.node_locations) > 0 && alltrue([for zone in var.node_locations : can(regex("^asia-southeast1-[abc]$", zone))])
+    error_message = "Select at least one worker zone in asia-southeast1."
   }
 }
 
 variable "prefix" {
   type        = string
-  description = "Dedicated e2e resource prefix, distinct from local test infrastructure."
+  description = "Shared e2e resource prefix, matching the former setup script."
   validation {
-    condition     = can(regex("^tf-e2e-[a-z0-9-]{1,9}[a-z0-9]$", var.prefix))
-    error_message = "Use the reserved tf-e2e- prefix with a 2–10 character lowercase suffix (at most 18 characters total)."
+    condition     = var.prefix == "karpenter-e2e"
+    error_message = "Use the shared karpenter-e2e resource names."
   }
 }
 
