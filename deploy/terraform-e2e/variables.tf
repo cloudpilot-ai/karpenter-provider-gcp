@@ -38,7 +38,7 @@ variable "node_locations" {
 
 variable "prefix" {
   type        = string
-  description = "Shared e2e resource prefix, matching the former setup script."
+  description = "Shared e2e resource prefix."
   validation {
     condition     = var.prefix == "karpenter-e2e"
     error_message = "Use the shared karpenter-e2e resource names."

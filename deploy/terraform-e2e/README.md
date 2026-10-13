@@ -5,7 +5,7 @@ Shared configuration is committed in `terraform.tfvars`:
 - Project: `planetscale-karp-gcp-e2e`
 - Regional control plane: `asia-southeast1`
 - Worker zones: `asia-southeast1-a`, `asia-southeast1-b`, `asia-southeast1-c`
-- Prefix: `karpenter-e2e`; resource names match the former setup script
+- Prefix: `karpenter-e2e`; resource names follow the established e2e naming
 - System pool: `default-pool`, one `n2-standard-2` node in `asia-southeast1-b` with a 30-GB boot disk
 - Release channel: `STABLE`; GKE selects and auto-upgrades Kubernetes versions
 
@@ -23,7 +23,12 @@ terraform init -input=false -lockfile=readonly
 
 Review a plan before applying. Bucket creation, imports, state migration, infrastructure changes and live e2e runs require separate approval. Coordinate maintenance with other users: Terraform state locking does not block tests or deployments.
 
-The existing state tracks the zonal, `tf-e2e-sgp`-named environment. These regional/legacy-name settings require a separately reviewed replacement plan, not a routine apply. The existing custom-role state address owns `tf_e2e_sgp_controller`; resolve that ownership before adopting the preserved `karpenter_controller` role. Do not import over the occupied address or delete the role blindly.
+The shared project already contains a `karpenter_controller` custom role. If Terraform reports that it already exists, adopt it instead of deleting it:
+
+```sh
+terraform import 'module.cluster.google_project_iam_custom_role.karpenter_controller' \
+  projects/planetscale-karp-gcp-e2e/roles/karpenter_controller
+```
 
 ## Offline validation
 
@@ -49,7 +54,7 @@ export E2E_NODE_SERVICE_ACCOUNT="$(terraform -chdir=deploy/terraform-e2e output 
 make e2e-deploy
 ```
 
-Then run `make e2e-tests E2E_SELECTION=standard GINKGO_PROCS=4` after approval. Make derives the pod-range and tag-key names from the prefix. Legacy targets can leave `E2E_NODE_SERVICE_ACCOUNT` unset to retain the chart default.
+Then run `make e2e-tests E2E_SELECTION=standard GINKGO_PROCS=4` after approval. Make derives the pod-range and tag-key names from the prefix.
 
 `standard` includes basic Local SSD tests but excludes GPU and extended Local SSD tests. Check available quota and capacity before increasing parallelism. Helm releases and per-run test resources are not managed by Terraform. `make e2e-setup` and `make e2e-teardown` are retired.
 
