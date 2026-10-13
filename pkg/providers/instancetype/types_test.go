@@ -18,6 +18,7 @@ package instancetype
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -427,6 +428,62 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			bootGiB, ssdGiB := calculateDiskConfigGiB(tt.nodeClass, tt.mt, tt.expectedSSDCount)
 			assert.Equal(t, tt.expectedBootGiB, bootGiB, "boot disk GiB mismatch")
 			assert.Equal(t, tt.expectedSSDGiB, ssdGiB, "total SSD GiB mismatch")
+		})
+	}
+}
+
+func TestNewInstanceTypeGPUCount(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	offerings := cloudprovider.Offerings{{
+		Available: true,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "asia-southeast1-b"),
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+		),
+	}}
+	oneGPU := scheduling.NewRequirements(
+		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, "1"),
+	)
+	for _, tc := range []struct {
+		name        string
+		machineType string
+		cpus        int32
+		counts      []int32
+		want        int64
+	}{
+		{name: "no GPUs", machineType: "n2-standard-4", cpus: 4, want: 0},
+		{name: "one GPU", machineType: "g2-standard-4", cpus: 4, counts: []int32{1}, want: 1},
+		{name: "two GPUs", machineType: "g2-standard-24", cpus: 24, counts: []int32{2}, want: 2},
+		{name: "four GPUs", machineType: "g2-standard-48", cpus: 48, counts: []int32{4}, want: 4},
+		{name: "eight GPUs", machineType: "g2-standard-96", cpus: 96, counts: []int32{8}, want: 8},
+		{name: "multiple accelerator records", machineType: "g2-standard-96", cpus: 96, counts: []int32{2, 6}, want: 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mt := &computepb.MachineType{
+				Name:      lo.ToPtr(tc.machineType),
+				GuestCpus: lo.ToPtr(tc.cpus),
+				MemoryMb:  lo.ToPtr(tc.cpus * 4096),
+			}
+			for _, count := range tc.counts {
+				mt.Accelerators = append(mt.Accelerators, &computepb.Accelerators{
+					GuestAcceleratorType:  lo.ToPtr("nvidia-l4"),
+					GuestAcceleratorCount: lo.ToPtr(count),
+				})
+			}
+			it := NewInstanceType(ctx, mt, &v1alpha1.GCENodeClass{}, "asia-southeast1", offerings, 0)
+			require.NotNil(t, it)
+			gpuCapacity := it.Capacity[v1alpha1.ResourceNVIDIAGPU]
+			assert.Equal(t, tc.want, gpuCapacity.Value())
+			if tc.want == 0 {
+				assert.Equal(t, corev1.NodeSelectorOpDoesNotExist, it.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Operator())
+			} else {
+				assert.Equal(t, fmt.Sprint(tc.want), it.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Any())
+			}
+			if tc.want == 1 {
+				assert.NoError(t, it.Requirements.Compatible(oneGPU))
+			} else {
+				assert.Error(t, it.Requirements.Compatible(oneGPU))
+			}
 		})
 	}
 }
