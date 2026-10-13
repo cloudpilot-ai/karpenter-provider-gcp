@@ -288,21 +288,32 @@ func TestMatchVariantForInstance_NoNameMatch(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestRepairPolicies_NPDConditionsPolarity(t *testing.T) {
+func TestRepairPolicies(t *testing.T) {
 	t.Parallel()
-	// GKE Node Problem Detector conditions use True=problem polarity (opposite of NodeReady).
-	// NPD sets a condition to True when a problem is detected and omits it otherwise.
-	// ConditionFalse would never match and ConditionTrue must be used to trigger repair.
-	npdConditions := map[corev1.NodeConditionType]bool{
-		"KernelDeadlock":            true,
-		"ReadonlyFilesystem":        true,
-		"FrequentKubeletRestart":    true,
-		"FrequentContainerdRestart": true,
-	}
-	for _, p := range (&CloudProvider{}).RepairPolicies() {
-		if npdConditions[p.ConditionType] {
-			require.Equal(t, corev1.ConditionTrue, p.ConditionStatus,
-				"NPD condition %s must use ConditionTrue polarity", p.ConditionType)
-		}
+	policies := (&CloudProvider{}).RepairPolicies()
+	require.Len(t, policies, 6)
+	for _, tc := range []struct {
+		condition  corev1.NodeConditionType
+		status     corev1.ConditionStatus
+		toleration time.Duration
+	}{
+		{corev1.NodeReady, corev1.ConditionFalse, 10 * time.Minute},
+		{corev1.NodeReady, corev1.ConditionUnknown, 10 * time.Minute},
+		{"KernelDeadlock", corev1.ConditionTrue, 5 * time.Minute},
+		{"ReadonlyFilesystem", corev1.ConditionTrue, 5 * time.Minute},
+		{"FrequentKubeletRestart", corev1.ConditionTrue, 30 * time.Minute},
+		{"FrequentContainerdRestart", corev1.ConditionTrue, 30 * time.Minute},
+	} {
+		t.Run(string(tc.condition)+"/"+string(tc.status), func(t *testing.T) {
+			t.Parallel()
+			policy, found := lo.Find(policies, func(p karpcloudprovider.RepairPolicy) bool {
+				return p.ConditionType == tc.condition && p.ConditionStatus == tc.status
+			})
+			require.True(t, found, "missing repair policy")
+			require.Equal(t, tc.toleration, policy.TolerationDuration)
+			require.Equal(t, karpcloudprovider.ReplaceNode, policy.Action)
+			require.NotNil(t, policy.TerminationGracePeriod)
+			require.Zero(t, *policy.TerminationGracePeriod)
+		})
 	}
 }

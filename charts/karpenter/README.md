@@ -101,10 +101,13 @@ serviceMonitor:
 | controller.env | list | `[]` |  |
 | controller.featureGates.capacityBuffer | bool | `false` | capacityBuffer is ALPHA and is disabled by default. Setting this to true enables CapacityBuffer support for pre-provisioning spare capacity. This provider does not install the CapacityBuffer CRD (GKE provides it natively starting at 1.35.2-gke.1842000) — enabling this on a cluster where the CRD isn't already installed fails at template render time. |
 | controller.featureGates.nodeOverlay | bool | `false` | nodeOverlay is ALPHA and is disabled by default. Setting this will allow the use of node overlay to impact scheduling decisions |
-| controller.featureGates.nodeRepair | bool | `false` | nodeRepair is ALPHA and is disabled by default. When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions. |
+| controller.featureGates.nodeRepair | bool | `false` | nodeRepair is ALPHA and is disabled by default. When enabled, Karpenter replaces nodes that fail GKE Node Problem Detector health conditions. Repairs respect disruption budgets and replacement capacity, but skip draining unhealthy nodes. |
+| controller.featureGates.podDeletionCostManagement | bool | `false` | podDeletionCostManagement is ALPHA and is disabled by default. Manages pod-deletion-cost annotations so ReplicaSet scale-down prefers nodes targeted for consolidation. When enabled, existing pod-deletion-cost annotations no longer influence Karpenter disruption costs. |
 | controller.featureGates.reservedCapacity | bool | `false` | reservedCapacity enables scheduling to reserved/committed GCP capacity. Disabled: the GCP provider does not yet implement GCE reservation support (#239). |
 | controller.featureGates.spotToSpotConsolidation | bool | `true` |  |
 | controller.featureGates.staticCapacity | bool | `false` | staticCapacity is ALPHA and is disabled by default. When enabled, a NodePool with spec.replicas set maintains a fixed number of nodes regardless of pod demand (static node pool). consolidationPolicy and consolidateAfter are ignored on static NodePools. |
+| controller.featureGates.terminateFirstDrift | bool | `false` | terminateFirstDrift is ALPHA and is disabled by default. Allows drift to terminate a node before launching its replacement on a capacity-constrained NodePool. |
+| controller.featureGates.terminateFirstRepair | bool | `false` | terminateFirstRepair is ALPHA and is disabled by default. Allows repair to terminate an unhealthy node before launching its replacement on a capacity-constrained NodePool. Only takes effect with nodeRepair enabled and legacyNodeRepair disabled. |
 | controller.healthProbe.port | int | `8081` |  |
 | controller.image.pullPolicy | string | `"IfNotPresent"` |  |
 | controller.image.repository | string | `"public.ecr.aws/cloudpilotai/gcp/karpenter"` |  |
@@ -122,9 +125,11 @@ serviceMonitor:
 | controller.settings.defaultNodePoolTemplateName | string | `""` | Pin the GKE node pool used as the bootstrap metadata source. When set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING. Leave empty to use automatic discovery (default-pool → first alphabetical RUNNING pool → fallback karpenter-fallback creation). |
 | controller.settings.defaultNodepoolServiceAccount | string | `""` | Default GCP service account email to attach to provisioned nodes. When set, overrides the Compute Engine default SA. Corresponds to the DEFAULT_NODEPOOL_SERVICE_ACCOUNT env var. Recommended: set to a dedicated SA with roles/container.nodeServiceAccount. Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount. |
 | controller.settings.ignoreDRARequests | bool | `true` | ignoreDRARequests controls whether Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations. Keep true unless the cluster has DRA drivers and resource claims that Karpenter should account for. |
+| controller.settings.legacyNodeRepair | bool | `false` | Run the legacy forceful node repair controller instead of budgeted voluntary repair. Only takes effect with nodeRepair enabled. Terminate-first repair is ignored in legacy mode. |
 | controller.settings.nodeLocation | string | `""` | The exact GCP cluster location for GKE API calls (e.g., us-central1-a for zonal, us-central1 for regional). If not set, defaults to 'clusterLocation' for backward compatibility. |
 | controller.settings.preferencePolicy | string | `"Respect"` | preferencePolicy controls how Karpenter handles soft scheduling preferences. `Respect` is the default; `Ignore` disregards preferred node/pod affinity and anti-affinity plus ScheduleAnyway topology spread constraints. |
 | controller.settings.projectID | string | `""` | The GCP project ID. |
+| controller.settings.schedulerConfig | object | `{}` | Optional kube-scheduler behavior to mirror during scheduling simulations. Supports podTopologySpread.defaultConstraints; leave empty unless matching a known cluster scheduler configuration. |
 | controller.settings.vmMemoryOverheadPercent | float | `0.065` | The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%. |
 | controller.strategy.rollingUpdate.maxUnavailable | int | `1` |  |
 | controller.terminationGracePeriodSeconds | int | `30` |  |

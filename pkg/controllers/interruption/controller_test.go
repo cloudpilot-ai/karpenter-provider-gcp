@@ -99,9 +99,11 @@ func TestDeleteNodeClaim_IncrementsDisruptedMetric(t *testing.T) {
 	}
 
 	labels := prometheus.Labels{
-		karpmetrics.ReasonLabel:       InterruptionReason,
-		karpmetrics.NodePoolLabel:     "test-pool",
-		karpmetrics.CapacityTypeLabel: karpv1.CapacityTypeSpot,
+		karpmetrics.ReasonLabel:              InterruptionReason,
+		karpmetrics.NodePoolLabel:            "test-pool",
+		karpmetrics.CapacityTypeLabel:        karpv1.CapacityTypeSpot,
+		karpmetrics.ConsolidationPolicyLabel: "",
+		karpmetrics.TerminationModeLabel:     karpmetrics.TerminationModeGraceful,
 	}
 	before := disruptedCounterValue(t, labels)
 
@@ -182,9 +184,11 @@ func TestHandleStoppingSpotInstances_DeletesShuttingDownKarpenterNode(t *testing
 	}
 
 	labels := prometheus.Labels{
-		karpmetrics.ReasonLabel:       InterruptionReason,
-		karpmetrics.NodePoolLabel:     "my-pool",
-		karpmetrics.CapacityTypeLabel: karpv1.CapacityTypeSpot,
+		karpmetrics.ReasonLabel:              InterruptionReason,
+		karpmetrics.NodePoolLabel:            "my-pool",
+		karpmetrics.CapacityTypeLabel:        karpv1.CapacityTypeSpot,
+		karpmetrics.ConsolidationPolicyLabel: "",
+		karpmetrics.TerminationModeLabel:     karpmetrics.TerminationModeGraceful,
 	}
 	before := disruptedCounterValue(t, labels)
 
@@ -247,9 +251,11 @@ func TestHandleStoppingSpotInstances_DeletesPreemptingNode(t *testing.T) {
 	}
 
 	labels := prometheus.Labels{
-		karpmetrics.ReasonLabel:       InterruptionReason,
-		karpmetrics.NodePoolLabel:     "preempt-pool",
-		karpmetrics.CapacityTypeLabel: karpv1.CapacityTypeSpot,
+		karpmetrics.ReasonLabel:              InterruptionReason,
+		karpmetrics.NodePoolLabel:            "preempt-pool",
+		karpmetrics.CapacityTypeLabel:        karpv1.CapacityTypeSpot,
+		karpmetrics.ConsolidationPolicyLabel: "",
+		karpmetrics.TerminationModeLabel:     karpmetrics.TerminationModeGraceful,
 	}
 	before := disruptedCounterValue(t, labels)
 

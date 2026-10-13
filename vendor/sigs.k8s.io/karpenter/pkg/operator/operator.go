@@ -62,10 +62,20 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/prediction"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
 var AppName = "karpenter"
+
+// build_info metric dimensions. These describe the build the running binary was
+// produced from.
+var (
+	buildVersion   = opmetrics.Label{Name: "version", Help: "The Karpenter version the binary was built from."}
+	buildGoVersion = opmetrics.Label{Name: "goversion", Help: "The Go version the binary was compiled with."}
+	buildGoArch    = opmetrics.Label{Name: "goarch", Help: "The target architecture the binary was compiled for."}
+	buildCommit    = opmetrics.Label{Name: "commit", Help: "The git commit the binary was built from."}
+)
 
 var (
 	BuildInfo = opmetrics.NewPrometheusGauge(
@@ -75,7 +85,8 @@ var (
 			Name:      "build_info",
 			Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
 		},
-		[]string{"version", "goversion", "goarch", "commit"},
+		[]opmetrics.Label{buildVersion, buildGoVersion, buildGoArch, buildCommit},
+		opmetrics.GA,
 	)
 )
 
@@ -101,6 +112,7 @@ type Operator struct {
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
 	InstanceTypeStore   *nodeoverlay.InstanceTypeStore
+	PredictionStore     *prediction.Store
 }
 
 type Options struct {
@@ -166,6 +178,10 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
 	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
+
+	if cfg := options.FromContext(ctx).SchedulerConfig; cfg != nil && cfg.PodTopologySpread != nil && len(cfg.PodTopologySpread.DefaultConstraints) != 0 {
+		log.FromContext(ctx).WithValues("default-topology-spread-constraints", cfg.PodTopologySpread.DefaultConstraints).Info("scheduler-config is set: applying these default topology spread constraints during scheduling to pods that declare none of their own")
+	}
 
 	// Manager
 	mgrOpts := ctrl.Options{
@@ -241,6 +257,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
+	predictionStore := prediction.NewStore()
 
 	return ctx, &Operator{
 		Manager:             mgr,
@@ -248,6 +265,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)), //nolint:staticcheck // SA1019: will be replaced by mgr.GetEventRecorder once events.Recorder is updated
 		Clock:               clock.RealClock{},
 		InstanceTypeStore:   instanceTypeStore,
+		PredictionStore:     predictionStore,
 	}
 }
 

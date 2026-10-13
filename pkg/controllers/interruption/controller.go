@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 
 	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
@@ -152,9 +153,11 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *karpv1.Node
 	log.FromContext(ctx).Info("initiating delete from interruption message", "nodeClaim", nodeClaim.Name)
 	c.recorder.Publish(interruptionevents.TerminatingOnInterruption(nodeClaim)...)
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       InterruptionReason,
-		metrics.NodePoolLabel:     nodeClaim.Labels[karpv1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: nodeClaim.Labels[karpv1.CapacityTypeLabelKey],
+		metrics.ReasonLabel:              InterruptionReason,
+		metrics.NodePoolLabel:            nodeClaim.Labels[karpv1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel:        nodeClaim.Labels[karpv1.CapacityTypeLabelKey],
+		metrics.ConsolidationPolicyLabel: "",
+		metrics.TerminationModeLabel:     nodeclaim.DisruptionTerminationMode(nodeClaim),
 	})
 	return nil
 }

@@ -318,6 +318,21 @@
               "type": "boolean",
               "description": "Enable CapacityBuffer support (alpha) for pre-provisioning spare capacity.",
               "default": false
+            },
+            "terminateFirstDrift": {
+              "type": "boolean",
+              "description": "Allow drift to terminate before replacement on capacity-constrained NodePools (alpha).",
+              "default": false
+            },
+            "terminateFirstRepair": {
+              "type": "boolean",
+              "description": "Allow repair to terminate before replacement on capacity-constrained NodePools (alpha). Only effective with nodeRepair enabled and legacyNodeRepair disabled.",
+              "default": false
+            },
+            "podDeletionCostManagement": {
+              "type": "boolean",
+              "description": "Manage pod-deletion-cost annotations for ReplicaSet scale-down (alpha).",
+              "default": false
             }
           }
         },
@@ -382,6 +397,29 @@
               "type": "boolean",
               "description": "When true, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.",
               "default": true
+            },
+            "legacyNodeRepair": {
+              "type": "boolean",
+              "description": "Use the legacy forceful node repair controller when nodeRepair is enabled. Terminate-first repair is ignored in this mode.",
+              "default": false
+            },
+            "schedulerConfig": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Optional scheduler behavior to mirror. Core validates topology spread constraints at startup.",
+              "default": {},
+              "properties": {
+                "podTopologySpread": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "defaultConstraints": {
+                      "type": "array",
+                      "items": { "type": "object" }
+                    }
+                  }
+                }
+              }
             },
             "preferencePolicy": {
               "type": "string",

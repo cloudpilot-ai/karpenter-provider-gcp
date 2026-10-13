@@ -6,14 +6,17 @@ Karpenter for GCP is configured via environment variables passed to the controll
 
 Feature gates control opt-in or experimental behaviors. They are passed as a comma-separated list via the `FEATURE_GATES` environment variable.
 
-| Feature Gate              | Helm value                                        | Default | Status | Description                                                                                                                                                                                    |
-|---------------------------|---------------------------------------------------|---------|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `NodeRepair`              | `controller.featureGates.nodeRepair`              | `false` | Alpha  | Automatically replaces nodes that fail GKE Node Problem Detector health checks.                                                                                                                |
-| `ReservedCapacity`        | `controller.featureGates.reservedCapacity`        | `false` | Beta   | Enables scheduling to reserved/committed GCP capacity. Disabled until GCE reservation support is implemented (see [#239](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/239)). |
-| `SpotToSpotConsolidation` | `controller.featureGates.spotToSpotConsolidation` | `true`  | Beta   | Allows consolidation to replace a Spot node with a cheaper Spot node (both single- and multi-node).                                                                                            |
-| `NodeOverlay`             | `controller.featureGates.nodeOverlay`             | `false` | Alpha  | Applies `NodeOverlay` resources to instance type scheduling decisions.                                                                                                                         |
-| `StaticCapacity`          | `controller.featureGates.staticCapacity`          | `false` | Alpha  | Enables NodePools with `spec.replicas` set to maintain a fixed number of nodes regardless of pod demand.                                                                                       |
-| `CapacityBuffer`          | `controller.featureGates.capacityBuffer`          | `false` | Alpha  | Enables `CapacityBuffer` resources to pre-provision spare capacity.                                                                                                                            |
+| Feature Gate                | Helm value                                          | Default | Status | Description                                                                                                                                                                                    |
+|-----------------------------|-----------------------------------------------------|---------|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NodeRepair`                | `controller.featureGates.nodeRepair`                | `false` | Alpha  | Replaces unhealthy nodes through budgeted repair; see [Node repair](node-repair.md).                                                                                                           |
+| `ReservedCapacity`          | `controller.featureGates.reservedCapacity`          | `false` | Beta   | Enables scheduling to reserved/committed GCP capacity. Disabled until GCE reservation support is implemented (see [#239](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/239)). |
+| `SpotToSpotConsolidation`   | `controller.featureGates.spotToSpotConsolidation`   | `true`  | Beta   | Allows consolidation to replace a Spot node with a cheaper Spot node (both single- and multi-node).                                                                                            |
+| `NodeOverlay`               | `controller.featureGates.nodeOverlay`               | `false` | Alpha  | Applies `NodeOverlay` resources to instance type scheduling decisions.                                                                                                                         |
+| `StaticCapacity`            | `controller.featureGates.staticCapacity`            | `false` | Alpha  | Enables NodePools with `spec.replicas` set to maintain a fixed number of nodes regardless of pod demand.                                                                                       |
+| `CapacityBuffer`            | `controller.featureGates.capacityBuffer`            | `false` | Alpha  | Enables `CapacityBuffer` resources to pre-provision spare capacity.                                                                                                                            |
+| `TerminateFirstDrift`       | `controller.featureGates.terminateFirstDrift`       | `false` | Alpha  | Allows delete-first drift when replacement capacity cannot be staged in supported constrained pools.                                                                                           |
+| `TerminateFirstRepair`      | `controller.featureGates.terminateFirstRepair`      | `false` | Alpha  | Allows delete-first modern repair in supported constrained pools; requires NodeRepair and legacy mode off.                                                                                     |
+| `PodDeletionCostManagement` | `controller.featureGates.podDeletionCostManagement` | `false` | Alpha  | Manages pod-deletion-cost annotations to favor consolidation targets during ReplicaSet scale-down.                                                                                             |
 
 Example Helm override to enable `NodeRepair`:
 
@@ -22,6 +25,14 @@ controller:
   featureGates:
     nodeRepair: true
 ```
+
+### Terminate-first disruption (Alpha)
+
+`terminateFirstDrift` and `terminateFirstRepair` permit a static NodePool at its node limit to delete the affected node before refilling capacity. This can temporarily reduce available capacity. Dynamic NodePools require reserved-capacity support for terminate-first fallback; GCP does not yet implement it ([#239](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/239)). These gates do not bypass disruption budgets or provide a general on-demand/Spot quota workaround. `terminateFirstRepair` is ignored when NodeRepair is disabled or legacy repair is enabled.
+
+### Pod deletion-cost management (Alpha)
+
+When `podDeletionCostManagement` is enabled, Karpenter manages `controller.kubernetes.io/pod-deletion-cost` annotations so ReplicaSet scale-down favors consolidation targets. Existing pod-deletion-cost annotations no longer influence Karpenter's disruption costs in this mode. The Helm chart grants Pod `patch` permission only when this gate is enabled; custom RBAC must grant it too.
 
 ### CapacityBuffer (Alpha)
 
@@ -37,14 +48,41 @@ controller:
 
 These options configure the controller's runtime behavior.
 
-| Option                        | Env var                     | Helm value                              | Default   | Description                                                                                                                                       |
-|-------------------------------|-----------------------------|-----------------------------------------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--disable-controller-warmup` | `DISABLE_CONTROLLER_WARMUP` | `controller.disableControllerWarmup`    | `true`    | When `false`, controllers pre-populate caches before winning leader election, reducing failover time. Set to `false` in production for better HA. |
-| `--log-level`                 | `LOG_LEVEL`                 | `logLevel`                              | `info`    | Controller log level (`debug`, `info`, `warn`, `error`).                                                                                          |
-| `--batch-max-duration`        | `BATCH_MAX_DURATION`        | `controller.settings.batchMaxDuration`  | `10s`     | Maximum time Karpenter batches incoming pods before provisioning.                                                                                 |
-| `--batch-idle-duration`       | `BATCH_IDLE_DURATION`       | `controller.settings.batchIdleDuration` | `1s`      | Idle time after the last pod event before Karpenter triggers provisioning.                                                                        |
-| `--ignore-dra-requests`       | `IGNORE_DRA_REQUESTS`       | `controller.settings.ignoreDRARequests` | `true`    | When `true`, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.                                          |
-| `--preference-policy`         | `PREFERENCE_POLICY`         | `controller.settings.preferencePolicy`  | `Respect` | How Karpenter handles soft scheduling preferences. Valid values are `Respect` and `Ignore`.                                                       |
+| Option                        | Env var                     | Helm value                              | Default            | Description                                                                                                                                       |
+|-------------------------------|-----------------------------|-----------------------------------------|--------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--disable-controller-warmup` | `DISABLE_CONTROLLER_WARMUP` | `controller.disableControllerWarmup`    | `true`             | When `false`, controllers pre-populate caches before winning leader election, reducing failover time. Set to `false` in production for better HA. |
+| `--log-level`                 | `LOG_LEVEL`                 | `logLevel`                              | `info`             | Controller log level (`debug`, `info`, `warn`, `error`).                                                                                          |
+| `--batch-max-duration`        | `BATCH_MAX_DURATION`        | `controller.settings.batchMaxDuration`  | `10s`              | Maximum time Karpenter batches incoming pods before provisioning.                                                                                 |
+| `--batch-idle-duration`       | `BATCH_IDLE_DURATION`       | `controller.settings.batchIdleDuration` | `1s`               | Idle time after the last pod event before Karpenter triggers provisioning.                                                                        |
+| `--ignore-dra-requests`       | `IGNORE_DRA_REQUESTS`       | `controller.settings.ignoreDRARequests` | `true`             | When `true`, Karpenter ignores pods' Dynamic Resource Allocation requests during scheduling simulations.                                          |
+| `--preference-policy`         | `PREFERENCE_POLICY`         | `controller.settings.preferencePolicy`  | `Respect`          | How Karpenter handles soft scheduling preferences. Valid values are `Respect` and `Ignore`.                                                       |
+| `--legacy-node-repair`        | `LEGACY_NODE_REPAIR`        | `controller.settings.legacyNodeRepair`  | `false`            | Runs the pre-v1.15 forceful repair controller; requires NodeRepair.                                                                               |
+| `--scheduler-config`          | `SCHEDULER_CONFIG`          | `controller.settings.schedulerConfig`   | `{}` (env omitted) | JSON-serialized scheduler behavior to mirror during scheduling simulations.                                                                       |
+
+### Legacy node repair
+
+Modern repair respects NodePool budgets and the Node's `karpenter.sh/do-not-repair` veto, and stages replacements before deletion. `legacyNodeRepair: true` restores forceful repair without those admission controls. Conditions and tolerations are unchanged. See [Node repair](node-repair.md) and the [migration guide](../MIGRATION.md).
+
+Native in-place reboot is not supported; current GCP repair policies always replace nodes. Reboot support is tracked in [#681](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/681).
+
+### Scheduler configuration
+
+Leave `schedulerConfig` empty unless matching a known cluster scheduler configuration. It accepts `podTopologySpread.defaultConstraints` for Karpenter's scheduling simulations; it does not reconfigure GKE's kube-scheduler. Mismatched defaults can produce different simulated and actual placement.
+
+```yaml
+controller:
+  settings:
+    schedulerConfig:
+      podTopologySpread:
+        defaultConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: ScheduleAnyway
+```
+
+### CSI attachment-limit predictions
+
+The GCP provider does not yet predict CSI volume attachment limits for new instance types ([#682](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/682)). Limits reported by registered nodes' `CSINode` objects still apply. The core upgrade does not add provider predictions.
 
 ### Preference policy
 
@@ -64,7 +102,7 @@ Dynamic Resource Allocation (DRA) is a Kubernetes API for requesting and sharing
 
 Karpenter ignores DRA requests during scheduling simulations by default (`controller.settings.ignoreDRARequests: true`). This preserves scheduling behavior for clusters without DRA drivers, the common case on GKE.
 
-Set `ignoreDRARequests` to `false` only when the cluster has DRA drivers installed and runs workloads that schedule against `ResourceClaim`s. When disabled, Karpenter registers the upstream device-allocation controller and accounts for already-published in-cluster DRA device availability. The GCP provider does not yet publish instance-type DRA device templates for provisioning new accelerator nodes.
+Set `ignoreDRARequests` to `false` only when the cluster has DRA drivers installed and runs workloads that schedule against `ResourceClaim`s. When disabled, Karpenter registers the upstream device-allocation controller and accounts for already-published in-cluster DRA device availability. The GCP provider does not yet publish instance-type DRA device templates for provisioning new accelerator nodes ([#524](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/524)).
 
 ```yaml
 controller:

@@ -73,6 +73,9 @@ func (f *fakeCloudProvider) GetInstanceTypes(_ context.Context, _ *karpv1.NodePo
 func (f *fakeCloudProvider) IsDrifted(_ context.Context, _ *karpv1.NodeClaim) (cloudprovider.DriftReason, error) {
 	panic("not implemented")
 }
+func (f *fakeCloudProvider) Reboot(_ context.Context, _ *karpv1.NodeClaim, _ string) error {
+	panic("not implemented")
+}
 func (f *fakeCloudProvider) GetSupportedNodeClasses() []status.Object { return nil }
 func (f *fakeCloudProvider) Name() string                             { return "fake" }
 func (f *fakeCloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
