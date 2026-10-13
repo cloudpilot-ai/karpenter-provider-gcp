@@ -5,7 +5,7 @@ resource "google_tags_tag_key" "e2e" {
 }
 
 resource "google_tags_tag_value" "e2e" {
-  parent     = google_tags_tag_key.e2e.name
+  parent     = google_tags_tag_key.e2e.id
   short_name = "e2e"
 }
 
