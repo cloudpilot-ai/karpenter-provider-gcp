@@ -47,6 +47,28 @@ GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 
 log() { echo "e2e-deploy: $*" >&2; }
 
+# The chart's controller.priorityClassName defaults to gmp-critical, a class the
+# GMP operator creates. Clusters without managed Prometheus have no GMP, so the
+# controller pod is otherwise rejected by the PriorityClass admission plugin.
+# Create it only when missing, so a GMP-managed class is never overwritten.
+# GMP leaves preemptionPolicy at its default; this fixture disables preemption
+# so the controller cannot evict test workloads.
+if kubectl get priorityclass gmp-critical >/dev/null 2>&1; then
+  log "Reusing gmp-critical PriorityClass"
+else
+  log "Creating gmp-critical PriorityClass (chart default; no GMP operator on this cluster)"
+  kubectl create -f - <<'MANIFEST'
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gmp-critical
+description: Used for GMP collector pods.
+value: 1000000000
+globalDefault: false
+preemptionPolicy: Never
+MANIFEST
+fi
+
 # Common helm values regardless of mode
 HELM_COMMON_ARGS=(
   --namespace karpenter-system

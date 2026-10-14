@@ -48,6 +48,7 @@ terraform -chdir=../terraform validate
 
 - **Pod ranges:** the committed small `/21` and large `/19` ranges are attached to GKE for multi-range networking tests. Each candidate needs at least 1,024 free IPs for the ranking test; both are at least twice that, so a few node allocations cannot drop a candidate below the threshold. This adds headroom but does not remove the controller's free-IP cache and status refresh latency. Changing the prefix requires updating range names in `terraform.tfvars`.
 - **Resource Manager tags:** `${prefix}-tag` and its `e2e` value let tests verify `spec.resourceManagerTags` on provisioned instances. The controller receives `roles/resourcemanager.tagUser` only on that key, in addition to the canonical role's instance-side tag-binding permission.
+- **`gmp-critical` PriorityClass:** the chart defaults `controller.priorityClassName` to `gmp-critical`, which only the GMP operator creates. `make e2e-deploy` creates it when the cluster has no GMP, otherwise the controller pod is rejected; an existing, GMP-managed class is never modified.
 
 After provisioning, use a dedicated kubeconfig for this cluster. From the repository root, set `E2E_PROJECT_ID=planetscale-karp-gcp-e2e`, `E2E_REGION=asia-southeast1`, `E2E_LOCATION=asia-southeast1` and `E2E_PREFIX=karpenter-e2e`. Select Terraform's dedicated node account for both local-image and release deployments:
 
