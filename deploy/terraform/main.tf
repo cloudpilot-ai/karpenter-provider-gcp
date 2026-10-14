@@ -53,6 +53,22 @@ resource "google_container_cluster" "default" {
     channel = var.release_channel
   }
 
+  # GKE bills Cloud Logging and Cloud Monitoring ingestion, and the managed
+  # Prometheus stack runs its own operator, alertmanager and rule-evaluator.
+  # Both are opt-in: installations replace them with their own stack or accept
+  # that the cluster has no telemetry.
+  logging_config {
+    enable_components = var.cloud_observability_enabled ? ["SYSTEM_COMPONENTS"] : []
+  }
+
+  monitoring_config {
+    enable_components = var.cloud_observability_enabled ? ["SYSTEM_COMPONENTS"] : []
+
+    managed_prometheus {
+      enabled = var.cloud_observability_enabled
+    }
+  }
+
   network    = google_compute_network.default.id
   subnetwork = google_compute_subnetwork.default.id
 

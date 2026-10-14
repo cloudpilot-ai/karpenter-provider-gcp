@@ -20,6 +20,10 @@ The pool is not managed by Karpenter. Regional clusters multiply the node count 
 
 Cluster deletion protection is configurable; the system pool has no hard-coded destruction guard.
 
+## Observability
+
+`cloud_observability_enabled` (default `false`) controls GKE-managed Cloud Logging and Cloud Monitoring components and managed Prometheus. When disabled the cluster reports no logs or metrics and the managed Prometheus operator is not deployed; enable it, or run your own stack, when the deployment needs cluster telemetry. GKE addons keep their platform defaults.
+
 ## Resource Manager tags
 
 The controller role grants instance-side tag-binding permission. To use `spec.resourceManagerTags`, separately grant access to the chosen tag keys or values. This module creates no tags or tag-user grants; test fixtures belong to the [e2e root](../terraform-e2e/README.md).

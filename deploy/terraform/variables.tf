@@ -149,6 +149,12 @@ variable "deletion_protection" {
   default = false
 }
 
+variable "cloud_observability_enabled" {
+  type        = bool
+  default     = false
+  description = "Enable GKE-managed Cloud Logging and Cloud Monitoring components and managed Prometheus. Disabled by default, matching previous module behaviour; enable it, or ship your own observability stack, when the deployment needs cluster telemetry."
+}
+
 variable "controller_role_id" {
   type        = string
   default     = null

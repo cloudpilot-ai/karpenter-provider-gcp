@@ -8,6 +8,7 @@ Shared configuration is committed in `terraform.tfvars`:
 - Prefix: `karpenter-e2e`; resource names follow the established e2e naming
 - System pool: `default-pool`, one `n2-standard-2` node in `asia-southeast1-b` with a 30-GB boot disk
 - Release channel: `STABLE`; GKE selects and auto-upgrades Kubernetes versions
+- Telemetry: all GKE-managed logging, monitoring and managed Prometheus components are disabled
 
 The [installation module](../terraform/README.md) creates the network, cluster, system pool and controller/node identities. This root adds NAT, an image registry and test tag fixtures. Controller permissions come from `deploy/iam/karpenter-controller-role.yaml`. APIs and the state bucket must already exist. Existing infrastructure is not imported automatically.
 
