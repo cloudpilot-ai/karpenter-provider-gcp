@@ -26,7 +26,7 @@ Cluster deletion protection is configurable; the system pool has no hard-coded d
 
 ## Datapath
 
-`datapath_provider` selects the cluster datapath. Set `ADVANCED_DATAPATH` for GKE Dataplane V2, which routes Services with Cilium/eBPF instead of kube-proxy and always enforces NetworkPolicy; `LEGACY_DATAPATH` keeps the iptables datapath. Leaving it unset uses the GKE default, which is the legacy datapath for new Standard clusters, so existing installations are unaffected. GKE can only choose the datapath when it creates a cluster, so changing this value replaces an existing cluster.
+`datapath_provider` selects the cluster datapath and defaults to `ADVANCED_DATAPATH`: GKE Dataplane V2 routes Services with Cilium/eBPF instead of kube-proxy and always enforces NetworkPolicy. Set `LEGACY_DATAPATH` to keep the iptables datapath. GKE can only choose the datapath when it creates a cluster, so an existing cluster is replaced when this value changes — review the plan before applying to an installation that already exists.
 
 ## Resource Manager tags
 

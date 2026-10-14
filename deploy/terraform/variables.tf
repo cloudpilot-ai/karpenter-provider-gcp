@@ -151,11 +151,11 @@ variable "deletion_protection" {
 
 variable "datapath_provider" {
   type        = string
-  default     = null
-  description = "Cluster datapath: ADVANCED_DATAPATH for GKE Dataplane V2, which routes Services with Cilium/eBPF instead of kube-proxy and always enforces NetworkPolicy, or LEGACY_DATAPATH for the iptables datapath. Omitted keeps the GKE default. Creation-time only: changing it replaces an existing cluster."
+  default     = "ADVANCED_DATAPATH"
+  description = "Cluster datapath: ADVANCED_DATAPATH for GKE Dataplane V2, which routes Services with Cilium/eBPF instead of kube-proxy and always enforces NetworkPolicy, or LEGACY_DATAPATH for the iptables datapath. Creation-time only: changing it replaces an existing cluster."
   validation {
-    condition     = var.datapath_provider == null || contains(["ADVANCED_DATAPATH", "LEGACY_DATAPATH"], var.datapath_provider)
-    error_message = "Select ADVANCED_DATAPATH or LEGACY_DATAPATH, or leave it unset for the GKE default."
+    condition     = contains(["ADVANCED_DATAPATH", "LEGACY_DATAPATH"], var.datapath_provider)
+    error_message = "Select ADVANCED_DATAPATH or LEGACY_DATAPATH."
   }
 }
 
