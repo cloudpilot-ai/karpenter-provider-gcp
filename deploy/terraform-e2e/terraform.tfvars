@@ -14,7 +14,8 @@ primary_cidr                = "10.0.0.0/20"
 pods_cidr                   = "10.4.0.0/14"
 services_cidr               = "10.8.0.0/20"
 control_plane_cidr          = "10.12.0.0/28"
+# Sizes match the retired setup script: small /22, large /20.
 additional_pod_ranges = {
-  karpenter-e2e-pods-small = "10.13.0.0/21"
-  karpenter-e2e-pods-large = "10.14.0.0/19"
+  karpenter-e2e-pods-small = "10.13.0.0/22"
+  karpenter-e2e-pods-large = "10.14.0.0/20"
 }

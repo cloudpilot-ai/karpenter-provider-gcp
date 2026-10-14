@@ -94,7 +94,7 @@ terraform -chdir=../terraform validate
 
 ## Test fixtures and runner
 
-- **Pod ranges:** the committed small `/21` and large `/19` ranges are attached to GKE for multi-range networking tests. Each candidate needs at least 1,024 free IPs for the ranking test; both are at least twice that, so a few node allocations cannot drop a candidate below the threshold. This adds headroom but does not remove the controller's free-IP cache and status refresh latency. Changing the prefix requires updating range names in `terraform.tfvars`.
+- **Pod ranges:** the committed small `/22` and large `/20` ranges are attached to GKE for multi-range networking tests, the sizes the retired setup script used. The ranking test needs both ranges to report at least 1,024 free IPs and the large range to be richer; the small range meets that floor only while it is unallocated, which the serial networking specs ensure by releasing their nodes before the check. A free-IP status refresh can still delay the check regardless of range size. Changing the prefix requires updating range names in `terraform.tfvars`.
 - **Resource Manager tags:** `${prefix}-tag` and its `e2e` value let tests verify `spec.resourceManagerTags` on provisioned instances. The controller receives `roles/resourcemanager.tagUser` only on that key, in addition to the canonical role's instance-side tag-binding permission.
 - **`gmp-critical` PriorityClass:** the chart defaults `controller.priorityClassName` to `gmp-critical`, which only the GMP operator creates. `make e2e-deploy` creates it when the cluster has no GMP, otherwise the controller pod is rejected; an existing, GMP-managed class is never modified.
 
