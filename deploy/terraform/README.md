@@ -24,6 +24,10 @@ Cluster deletion protection is configurable; the system pool has no hard-coded d
 
 `cloud_observability_enabled` (default `false`) controls GKE-managed Cloud Logging and Cloud Monitoring components and managed Prometheus. When disabled the cluster reports no logs or metrics and the managed Prometheus operator is not deployed; enable it, or run your own stack, when the deployment needs cluster telemetry. GKE addons keep their platform defaults.
 
+## Datapath
+
+`datapath_provider` selects the cluster datapath. Set `ADVANCED_DATAPATH` for GKE Dataplane V2, which routes Services with Cilium/eBPF instead of kube-proxy and always enforces NetworkPolicy; `LEGACY_DATAPATH` keeps the iptables datapath. Leaving it unset uses the GKE default, which is the legacy datapath for new Standard clusters, so existing installations are unaffected. GKE can only choose the datapath when it creates a cluster, so changing this value replaces an existing cluster.
+
 ## Resource Manager tags
 
 The controller role grants instance-side tag-binding permission. To use `spec.resourceManagerTags`, separately grant access to the chosen tag keys or values. This module creates no tags or tag-user grants; test fixtures belong to the [e2e root](../terraform-e2e/README.md).

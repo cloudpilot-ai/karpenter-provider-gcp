@@ -30,5 +30,6 @@ module "cluster" {
   private_nodes                 = true
   control_plane_cidr            = var.control_plane_cidr
   deletion_protection           = false
+  datapath_provider             = "ADVANCED_DATAPATH"
   cloud_observability_enabled   = false
 }

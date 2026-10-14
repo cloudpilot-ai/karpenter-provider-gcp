@@ -49,6 +49,11 @@ resource "google_container_cluster" "default" {
   location       = coalesce(var.cluster_location, var.google_region)
   node_locations = var.node_locations
 
+  # GKE Dataplane V2 (Cilium/eBPF) routes Services itself and always enforces
+  # NetworkPolicy. It can only be chosen when the cluster is created, so a
+  # cluster that already exists is replaced when this value changes.
+  datapath_provider = var.datapath_provider
+
   release_channel {
     channel = var.release_channel
   }
