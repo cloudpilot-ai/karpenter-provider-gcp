@@ -6,6 +6,16 @@ resource "google_container_node_pool" "system" {
   node_count     = var.system_node_count
   node_locations = var.system_node_locations
 
+  # GKE assigns a pod range at pool creation. With additional pod ranges attached
+  # to the cluster, the pool can otherwise occupy one of them and pin it, which
+  # blocks resizing or removing that range later.
+  dynamic "network_config" {
+    for_each = var.system_pod_range == null ? [] : [1]
+    content {
+      pod_range = var.system_pod_range
+    }
+  }
+
   node_config {
     machine_type    = var.system_machine_type
     disk_size_gb    = var.system_disk_size_gb

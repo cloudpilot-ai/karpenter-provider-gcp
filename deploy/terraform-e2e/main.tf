@@ -12,6 +12,7 @@ module "cluster" {
   node_locations                = var.node_locations
   system_node_pool_name         = "default-pool"
   system_node_locations         = var.system_node_locations
+  system_pod_range              = "${var.prefix}-pods"
   system_machine_type           = var.system_machine_type
   system_node_count             = 1
   system_disk_size_gb           = 30

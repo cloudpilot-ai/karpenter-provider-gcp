@@ -48,6 +48,12 @@ variable "system_node_pool_name" {
   description = "Persistent system pool name; defaults to common_name-system."
 }
 
+variable "system_pod_range" {
+  type        = string
+  default     = null
+  description = "Subnetwork secondary range name for the system pool's pods. Omitted lets GKE choose from the cluster's pod ranges, which can occupy a range reserved for other workloads and pin it to this pool."
+}
+
 variable "system_node_locations" {
   type        = list(string)
   default     = null

@@ -13,8 +13,11 @@ Controller permissions come from `../iam/karpenter-controller-role.yaml`. The sy
 | `system_disk_size_gb` | `30`            | Boot disk size per node                |
 | `system_node_pool_name` | `${common_name}-system` | Pool name                     |
 | `system_node_locations` | Cluster defaults | Pool zones; pin one for one total node |
+| `system_pod_range` | GKE's choice | Secondary range for the pool's pods |
 
 The pool is not managed by Karpenter. Regional clusters multiply the node count by the pool's zones. Set `system_node_locations` independently of the cluster's `node_locations` to avoid multiplying persistent capacity.
+
+GKE assigns the pool a pod range when the pool is created. If the cluster carries additional pod ranges, set `system_pod_range` to the cluster's own pod range so the pool cannot take one that other workloads are meant to use; changing it later replaces the pool, and an already-pinned additional range cannot be resized or removed until the pool moves off it.
 
 `cluster_location` accepts a zone or region. `node_locations` selects default worker zones; omitted values retain GKE defaults. `controller_role_id` overrides the custom-role ID, which otherwise defaults to `${common_name}` with hyphens replaced by underscores, suffixed with `_controller`.
 
