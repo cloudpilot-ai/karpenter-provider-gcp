@@ -10,10 +10,10 @@ terraform {
     }
   }
 
-  backend "gcs" {
-    bucket = "planetscale-karp-gcp-e2e-tfstate"
-    prefix = "karpenter/e2e"
-  }
+  # Backends cannot read variables. The shared target's bucket and prefix live in
+  # backend.hcl and are passed at init time, so a private environment can point at
+  # its own bucket with -backend-config=private.backend.hcl or use local state.
+  backend "gcs" {}
 }
 
 provider "google" {

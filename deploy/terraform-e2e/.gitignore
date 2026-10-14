@@ -7,6 +7,7 @@
 *.tfvars.json
 *.tfplan.*
 *.tfbackend
+*.backend.hcl
 # Terraform override files and per-user state (private environments)
 override.tf
 override.tf.json
