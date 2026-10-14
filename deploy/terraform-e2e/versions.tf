@@ -1,5 +1,7 @@
 terraform {
-  required_version = ">= 1.8.0"
+  # Input validation blocks reference other variables (cross-variable validation),
+  # which needs Terraform 1.9 or later.
+  required_version = ">= 1.9.0"
 
   required_providers {
     google = {

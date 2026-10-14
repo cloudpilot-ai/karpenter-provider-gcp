@@ -8,6 +8,8 @@ Shared configuration is committed in `terraform.tfvars`:
 - Prefix: `karpenter-e2e`; resource names follow the established e2e naming
 - System pool: `default-pool`, one `n2-standard-2` node in `asia-southeast1-b` with a 30-GB boot disk
 - Release channel: `STABLE`; GKE selects and auto-upgrades Kubernetes versions
+
+Private environments override these values and use their own state; see [Private environments](#private-environments).
 - Datapath: Dataplane V2 (`ADVANCED_DATAPATH`), so Cilium/eBPF routes Services and NetworkPolicy is always enforced
 - Telemetry: all GKE-managed logging, monitoring and managed Prometheus components are disabled
 
@@ -31,6 +33,41 @@ The shared project already contains a `karpenter_controller` custom role. If Ter
 terraform import 'module.cluster.google_project_iam_custom_role.karpenter_controller' \
   projects/planetscale-karp-gcp-e2e/roles/karpenter_controller
 ```
+
+## Private environments
+
+Maintainers can run their own copy of this environment in their own project, so CI costs stay on the sponsored project. The committed `terraform.tfvars` targets the shared cluster; a private environment overrides it and uses its own state.
+
+1. Create a gitignored `private.local.auto.tfvars`. Terraform loads `*.auto.tfvars` after `terraform.tfvars`, so these values win:
+
+    ```hcl
+    project_id            = "my-project"
+    region                = "us-east5"
+    location              = "us-east5"
+    node_locations        = ["us-east5-a", "us-east5-b", "us-east5-c"]
+    system_node_locations = ["us-east5-a"]
+    prefix                = "karpenter-e2e-my-e5"
+    controller_role_id    = "karpenter_e2e_my_e5_controller"
+
+    additional_pod_ranges = {
+      karpenter-e2e-my-e5-pods-small = "10.13.0.0/21"
+      karpenter-e2e-my-e5-pods-large = "10.14.0.0/19"
+    }
+    ```
+
+2. Keep the state local with a gitignored override file, then `terraform init -reconfigure`:
+
+    ```hcl
+    terraform {
+      backend "local" {
+        path = "/path/to/karpenter-e2e-my-e5.tfstate"
+      }
+    }
+    ```
+
+3. Keep environments apart: pointing `project_id` at the sponsored project requires `prefix = "karpenter-e2e"`, every other project needs its own prefix, and `controller_role_id` must be unique within a project because custom role IDs are project-scoped. The system pool's zones must also be part of `node_locations`.
+
+Telemetry stays off unless `cloud_observability_enabled = true`. Run tests against your cluster with your own kubeconfig and the same `E2E_*` variables listed above, taking `E2E_NODE_SERVICE_ACCOUNT` from `terraform output -raw node_service_account`.
 
 ## Offline validation
 

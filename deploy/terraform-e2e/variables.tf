@@ -1,6 +1,6 @@
 variable "project_id" {
   type        = string
-  description = "Existing sponsored GCP project; never use a local-test project."
+  description = "GCP project for this e2e environment. The sponsored project is reserved for the shared target; use your own project for a private environment."
   validation {
     condition     = can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.project_id))
     error_message = "Set an explicit valid GCP project ID."
@@ -9,19 +9,19 @@ variable "project_id" {
 
 variable "region" {
   type        = string
-  description = "Approved Singapore region."
+  description = "GCP region for the e2e environment."
   validation {
-    condition     = var.region == "asia-southeast1"
-    error_message = "The sponsored e2e target must be in asia-southeast1."
+    condition     = can(regex("^[a-z]+-[a-z]+[0-9]+$", var.region))
+    error_message = "Set a valid GCP region."
   }
 }
 
 variable "location" {
   type        = string
-  description = "Regional GKE control-plane location."
+  description = "GKE control-plane location, either a region or a zone."
   validation {
-    condition     = var.location == "asia-southeast1"
-    error_message = "The shared e2e cluster must be regional in asia-southeast1."
+    condition     = can(regex("^[a-z]+-[a-z]+[0-9]+(-[a-z])?$", var.location))
+    error_message = "Set a valid GCP region or zone."
   }
 }
 
@@ -29,20 +29,66 @@ variable "node_locations" {
   type        = list(string)
   default     = ["asia-southeast1-a", "asia-southeast1-b", "asia-southeast1-c"]
   nullable    = false
-  description = "Default worker zones available to Karpenter; the persistent system pool remains in asia-southeast1-b."
+  description = "Default worker zones available to Karpenter."
   validation {
-    condition     = length(var.node_locations) > 0 && alltrue([for zone in var.node_locations : can(regex("^asia-southeast1-[abc]$", zone))])
-    error_message = "Select at least one worker zone in asia-southeast1."
+    condition     = length(var.node_locations) > 0 && alltrue([for zone in var.node_locations : can(regex("^[a-z]+-[a-z]+[0-9]+-[a-z]$", zone))])
+    error_message = "Select at least one valid GCP worker zone."
+  }
+}
+
+variable "system_node_locations" {
+  type        = list(string)
+  default     = ["asia-southeast1-b"]
+  nullable    = false
+  description = "Zones for the persistent system node pool; one node is created per zone."
+  validation {
+    condition     = length(var.system_node_locations) > 0 && alltrue([for zone in var.system_node_locations : can(regex("^[a-z]+-[a-z]+[0-9]+-[a-z]$", zone))])
+    error_message = "Select at least one valid GCP system-pool zone."
+  }
+  # GKE requires pool zones to be part of the cluster's node locations.
+  validation {
+    condition     = alltrue([for zone in var.system_node_locations : contains(var.node_locations, zone)])
+    error_message = "Every system-pool zone must also appear in node_locations."
   }
 }
 
 variable "prefix" {
   type        = string
-  description = "Shared e2e resource prefix."
+  description = "Resource name prefix. Use a name unique to your project unless you are the shared target."
   validation {
-    condition     = var.prefix == "karpenter-e2e"
-    error_message = "Use the shared karpenter-e2e resource names."
+    condition     = can(regex("^[a-z][a-z0-9-]*$", var.prefix))
+    error_message = "Use a lowercase resource prefix starting with a letter."
   }
+  validation {
+    condition     = var.project_id != "planetscale-karp-gcp-e2e" || var.prefix == "karpenter-e2e"
+    error_message = "The sponsored project is reserved for the shared karpenter-e2e target; run a private environment in your own project."
+  }
+}
+
+variable "controller_role_id" {
+  type        = string
+  default     = "karpenter_controller"
+  description = "Custom project role ID for the controller. Use a distinct ID when another environment already owns this name in the same project."
+  validation {
+    condition     = can(regex("^[a-zA-Z][a-zA-Z0-9_.]{2,63}$", var.controller_role_id))
+    error_message = "Use a valid custom role ID."
+  }
+}
+
+variable "datapath_provider" {
+  type        = string
+  default     = "ADVANCED_DATAPATH"
+  description = "Cluster datapath: ADVANCED_DATAPATH for GKE Dataplane V2, or LEGACY_DATAPATH for kube-proxy."
+  validation {
+    condition     = contains(["ADVANCED_DATAPATH", "LEGACY_DATAPATH"], var.datapath_provider)
+    error_message = "Select ADVANCED_DATAPATH or LEGACY_DATAPATH."
+  }
+}
+
+variable "cloud_observability_enabled" {
+  type        = bool
+  default     = false
+  description = "Enable GKE-managed Cloud Logging and Cloud Monitoring components and managed Prometheus for this environment."
 }
 
 variable "system_machine_type" {

@@ -11,7 +11,7 @@ module "cluster" {
   release_channel               = var.release_channel
   node_locations                = var.node_locations
   system_node_pool_name         = "default-pool"
-  system_node_locations         = ["asia-southeast1-b"]
+  system_node_locations         = var.system_node_locations
   system_machine_type           = var.system_machine_type
   system_node_count             = 1
   system_disk_size_gb           = 30
@@ -21,7 +21,7 @@ module "cluster" {
   subnetwork_name               = "${var.prefix}-subnet"
   cluster_name                  = local.cluster_name
   controller_service_account_id = "${var.prefix}-karpenter"
-  controller_role_id            = "karpenter_controller"
+  controller_role_id            = var.controller_role_id
   primary_cidr                  = var.primary_cidr
   pods_cidr                     = var.pods_cidr
   services_cidr                 = var.services_cidr
@@ -30,6 +30,6 @@ module "cluster" {
   private_nodes                 = true
   control_plane_cidr            = var.control_plane_cidr
   deletion_protection           = false
-  datapath_provider             = "ADVANCED_DATAPATH"
-  cloud_observability_enabled   = false
+  datapath_provider             = var.datapath_provider
+  cloud_observability_enabled   = var.cloud_observability_enabled
 }
