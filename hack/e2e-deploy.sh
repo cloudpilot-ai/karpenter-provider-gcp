@@ -17,7 +17,15 @@
 #   RELEASE_VERSION   published chart version to install (e.g. 0.3.2)
 #   E2E_PREFIX        resource name prefix (default: karpenter-e2e)
 #   E2E_REGION        GCP region (default: us-central1)
+#   E2E_NODE_SERVICE_ACCOUNT  node SA email (unset keeps the chart default)
 set -euo pipefail
+
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+# A clean checkout has no vendored Helm subcharts. Check the pinned dependency
+# before cleanup, image publishing, or any GCP access (release charts do not use it).
+if [[ -z "${RELEASE_VERSION:-}" ]]; then
+  helm dependency build "${REPO_ROOT}/charts/karpenter"
+fi
 
 : "${E2E_PROJECT_ID:?E2E_PROJECT_ID must be set}"
 : "${E2E_LOCATION:?E2E_LOCATION must be set}"
@@ -35,11 +43,31 @@ CLUSTER_NAME="${E2E_PREFIX}-cluster"
 GSA_ID="${E2E_PREFIX}-karpenter"
 GSA_EMAIL="${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com"
 
-REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-
 "${REPO_ROOT}/hack/e2e-clean-env.sh"
 
 log() { echo "e2e-deploy: $*" >&2; }
+
+# The chart's controller.priorityClassName defaults to gmp-critical, a class the
+# GMP operator creates. Clusters without managed Prometheus have no GMP, so the
+# controller pod is otherwise rejected by the PriorityClass admission plugin.
+# Create it only when missing, so a GMP-managed class is never overwritten.
+# GMP leaves preemptionPolicy at its default; this fixture disables preemption
+# so the controller cannot evict test workloads.
+if kubectl get priorityclass gmp-critical >/dev/null 2>&1; then
+  log "Reusing gmp-critical PriorityClass"
+else
+  log "Creating gmp-critical PriorityClass (chart default; no GMP operator on this cluster)"
+  kubectl create -f - <<'MANIFEST'
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gmp-critical
+description: Used for GMP collector pods.
+value: 1000000000
+globalDefault: false
+preemptionPolicy: Never
+MANIFEST
+fi
 
 # Common helm values regardless of mode
 HELM_COMMON_ARGS=(
@@ -59,6 +87,9 @@ HELM_COMMON_ARGS=(
   --wait
   --timeout 5m
 )
+if [[ -n "${E2E_NODE_SERVICE_ACCOUNT:-}" ]]; then
+  HELM_COMMON_ARGS+=(--set-string "controller.settings.defaultNodepoolServiceAccount=${E2E_NODE_SERVICE_ACCOUNT}")
+fi
 
 if [[ -n "${RELEASE_VERSION}" ]]; then
   # --- Published release mode ---
@@ -97,8 +128,6 @@ else
       github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
   )"
   log "Image: ${IMAGE_REF}"
-
-  helm dependency build "${REPO_ROOT}/charts/karpenter"
 
   helm upgrade --install karpenter-crd "${REPO_ROOT}/charts/karpenter-crd" \
     --namespace karpenter-system \

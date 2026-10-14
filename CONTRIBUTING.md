@@ -161,30 +161,20 @@ export KUBECONFIG=/path/to/your/kubeconfig
 export E2E_SA_PATH=/path/to/service-account-key.json  # omit if using application-default credentials
 ```
 
-`E2E_PROJECT_ID` and `E2E_LOCATION` are required; Make rejects empty values. `KUBECONFIG` should point to the intended cluster (otherwise the usual kubectl default applies). With `E2E_SA_PATH`, Make sets `GOOGLE_APPLICATION_CREDENTIALS` for the tests; without it, use an authenticated `gcloud` session and application-default credentials. `E2E_REGION` defaults to `us-central1` for setup/deploy regardless of location, so set it explicitly for other regions. It is not used by `e2e-tests`.
-
-#### Required permissions
-
-The service account pointed to by `E2E_SA_PATH` must have the following IAM roles on the project:
-
-| Role | Why needed |
-|------|------------|
-| `roles/container.admin` | Create/delete/describe GKE clusters |
-| `roles/compute.networkAdmin` | Create/delete VPC and subnet |
-| `roles/compute.viewer` | List instances and disks (e2e-check-clean) |
-| `roles/iam.serviceAccountAdmin` | Create/delete the karpenter service account |
-| `roles/resourcemanager.projectIamAdmin` | Bind roles to the karpenter service account |
-| `roles/artifactregistry.admin` | Create/delete Artifact Registry repo and push images |
+`E2E_PROJECT_ID` and `E2E_LOCATION` are required; Make rejects empty values. `KUBECONFIG` should point to the intended cluster (otherwise the usual kubectl default applies). With `E2E_SA_PATH`, Make sets `GOOGLE_APPLICATION_CREDENTIALS` for the tests; without it, use an authenticated `gcloud` session and application-default credentials. `E2E_REGION` defaults to `us-central1` for deploy regardless of location, so set it explicitly for other regions. It is not used by `e2e-tests`.
 
 #### One-time cluster setup
 
-```bash
-make e2e-setup
-```
+Persistent infrastructure is managed through the reviewed Terraform maintenance
+procedure in [`deploy/terraform-e2e/README.md`](deploy/terraform-e2e/README.md).
+`make e2e-setup` is retired; it does not provision the cluster or deploy the
+controller. Obtain explicit approval for the target and Terraform operation;
+then use `make e2e-deploy` from the intended checkout after provisioning.
 
-This idempotently creates a GKE cluster, VPC, subnet, Cloud Router, Cloud NAT, service account, IAM bindings, Artifact Registry repo, and deploys karpenter via Helm.
-
-Cloud NAT is required for the `networking` suite: nodes provisioned with `enableExternalIPAccess: false` have no public IP and need NAT for outbound internet access.
+Terraform owns the cluster, VPC, subnet, Cloud Router/NAT, identities, IAM and
+Artifact Registry. The maintainer's Terraform credentials are separate from
+local deploy/test credentials. Cloud NAT is needed for private nodes to pull
+images and reach APIs.
 
 #### Deploy a new controller image
 
@@ -229,11 +219,11 @@ For one-spec debugging, `make e2e-test SUITE=provisioning FOCUS="amd64 on-demand
 
 The `/e2e` pull-request comment workflow is currently a placeholder; run local e2e using the commands above.
 
-#### Tear down all e2e infrastructure
+#### Retire e2e infrastructure
 
-```bash
-make e2e-teardown
-```
+`make e2e-teardown` is retired. Follow the separately approved retirement
+procedure in [`deploy/terraform-e2e/README.md`](deploy/terraform-e2e/README.md);
+normal test runs do not destroy the cluster.
 
 #### Check for orphaned resources (without deleting)
 

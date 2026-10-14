@@ -96,6 +96,6 @@ var _ = Describe("Custom Machine Type", Label("suite:customtype"), func() {
 			"node must be scheduled onto the registered custom machine type, not a predefined shape")
 		Expect(node.Labels[gcpv1alpha1.LabelInstanceFamily]).To(Equal("n2"))
 
-		env.WaitForKubeProxyRunning(ctx, provisionedNodeName)
+		env.WaitForDatapathAgentRunning(ctx, provisionedNodeName)
 	}, SpecTimeout(15*time.Minute))
 })
