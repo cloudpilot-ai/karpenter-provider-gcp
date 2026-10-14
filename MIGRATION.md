@@ -9,6 +9,16 @@
 
 Setting the new `GCENodeClass.spec.resourceManagerTags` field requires the controller's service account to have `compute.instances.createTagBinding` on the project, which is now included in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). If you created the `karpenter_controller` custom role from an earlier version of that file, update it with `gcloud iam roles update` before you set `resourceManagerTags`; without it, instance creation fails for that NodeClass. The service account also needs `roles/resourcemanager.tagUser` on the tag values, their tag key, or a parent resource. No action is required if you don't use `resourceManagerTags`. See [Resource manager tags](docs/examples/networking.md#resource-manager-tags).
 
+### `deploy/terraform/` module: Dataplane V2, system node pool, and release channel
+
+If you manage a cluster with [`deploy/terraform/`](deploy/terraform/), review `terraform plan` before you apply this version. Three changes affect clusters the module already created:
+
+- **Dataplane V2 by default.** `datapath_provider` defaults to `ADVANCED_DATAPATH` (GKE Dataplane V2), which routes Services with Cilium/eBPF instead of kube-proxy and always enforces NetworkPolicy. GKE sets the datapath only at cluster creation, so applying the new default replaces an existing cluster. To keep your cluster, set `datapath_provider = "LEGACY_DATAPATH"`.
+- **New system node pool.** The module now creates a node pool named `${common_name}-system` for Karpenter and essential cluster workloads. Karpenter doesn't manage it. It defaults to one `n2-standard-2` node per zone, so a regional cluster gets one node in each of its zones. To run fewer nodes, set `system_node_locations` to a single zone. Adjust size with `system_machine_type`, `system_node_count`, and `system_disk_size_gb`.
+- **Explicit release channel.** The cluster is enrolled in `release_channel`, which defaults to `STABLE`. If your cluster uses another channel, set `release_channel` to that channel to keep it.
+
+The module also no longer declares its own `provider "google"` block. Configure the provider in your root configuration when you call it as a module. Resource names, CIDR ranges, and the logging and monitoring settings keep their previous defaults. See [`deploy/terraform/README.md`](deploy/terraform/README.md) for all inputs.
+
 ### Karpenter core v1.15: node repair and disruption metrics
 
 `NodeRepair` remains disabled by default. If you already enable it, repair now uses the modern voluntary disruption method: initialized-node repairs respect budgets applying to `Unhealthy` (including budgets with no `reasons`), the Node's `karpenter.sh/do-not-repair` annotation, and replacement feasibility. An all-reason `nodes: "0"` budget now blocks these repairs. Replacement capacity is initialized before the unhealthy NodeClaim is deleted; unavailable capacity or scheduling constraints can delay repair. GCP's condition tolerations and forceful, zero-grace termination after staging are unchanged.
