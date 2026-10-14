@@ -17,15 +17,15 @@ The [installation module](../terraform/README.md) creates the network, cluster, 
 
 ## Shared state
 
-The GCS backend uses bucket `planetscale-karp-gcp-e2e-tfstate` in the same project, with prefix `karpenter/e2e`, both in the committed `backend.hcl`. Use this backend and the default Terraform workspace so maintainers share one state. The bucket is managed separately; use versioning, uniform bucket-level access and public-access prevention. Keep state locking enabled.
+The GCS backend uses bucket `planetscale-karp-gcp-e2e-tfstate` in the same project, with prefix `karpenter/e2e`. Use this backend and the default Terraform workspace so maintainers share one state. The bucket is managed separately; use versioning, uniform bucket-level access and public-access prevention. Keep state locking enabled.
 
 Authenticate with Application Default Credentials. Do not commit credentials, state, saved plans or local overrides; committed configuration is non-secret. From this directory, initialize the existing backend:
 
 ```sh
-terraform init -input=false -lockfile=readonly -backend-config=backend.hcl
+terraform init -input=false -lockfile=readonly
 ```
 
-Backends cannot read variables, so the bucket and prefix come from that file. Re-run with `-reconfigure` when they change.
+Variables come from `terraform.tfvars` automatically, but backends cannot read variables: a private environment overrides the state location at init time instead (see below).
 
 Review a plan before applying. Bucket creation, imports, state migration, infrastructure changes and live e2e runs require separate approval. Coordinate maintenance with other users: Terraform state locking does not block tests or deployments.
 
@@ -67,12 +67,13 @@ Maintainers can run their own copy of this environment in their own project, so 
     }
     ```
 
-    Or use your own bucket, passing a gitignored `private.backend.hcl`:
+    Or use your own bucket. A `-backend-config` file overrides the committed bucket and prefix, and Terraform's `*.gcs.tfbackend` naming is already gitignored:
 
     ```sh
     gcloud storage buckets create gs://my-e2e-tfstate --project=my-project --location=us-east5 \
       --uniform-bucket-level-access --public-access-prevention
-    terraform init -reconfigure -backend-config=private.backend.hcl
+    printf 'bucket = "my-e2e-tfstate"\nprefix = "karpenter/e2e-my-e5"\n' > private.gcs.tfbackend
+    terraform init -reconfigure -backend-config=private.gcs.tfbackend
     ```
 
 3. Keep environments apart: pointing `project_id` at the sponsored project requires `prefix = "karpenter-e2e"`, every other project needs its own prefix, and `controller_role_id` must be unique within a project because custom role IDs are project-scoped. The system pool's zones must also be part of `node_locations`.
