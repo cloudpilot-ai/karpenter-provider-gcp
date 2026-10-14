@@ -56,8 +56,8 @@ variable "prefix" {
   type        = string
   description = "Resource name prefix. Use a name unique to your project unless you are the shared target."
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]*$", var.prefix))
-    error_message = "Use a lowercase resource prefix starting with a letter."
+    condition     = can(regex("^[a-z][a-z0-9-]{0,19}$", var.prefix))
+    error_message = "Use a lowercase resource prefix starting with a letter and no longer than 20 characters."
   }
   validation {
     condition     = var.project_id != "planetscale-karp-gcp-e2e" || var.prefix == "karpenter-e2e"
