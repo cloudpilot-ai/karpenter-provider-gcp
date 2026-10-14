@@ -37,7 +37,7 @@ Key capabilities:
 
 - [Installation](getting-started/installation.md) — deploy Karpenter on a GKE cluster using Helm
 - [Quick start](getting-started/quick-start.md) — create your first NodePool and GCENodeClass, and trigger node provisioning
-- [Terraform](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/deploy/terraform) — provision the full GCP infrastructure (VPC, GKE cluster, service accounts) with Terraform
+- [Terraform](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/deploy/terraform) — provision the full GCP infrastructure (VPC, GKE cluster, system node pool, service accounts) with Terraform
 
 ## Features
 
