@@ -1201,19 +1201,44 @@ func (e *Environment) WaitForNodeClaimInitialized(ctx context.Context, nodePoolN
 	}).WithTimeout(GPUProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
 }
 
-// WaitForKubeProxyRunning polls until exactly one kube-proxy pod exists on the
-// given node, is Running/Ready, and resolves to an image matching the node arch.
-// GKE can expose kube-proxy as either a node-owned static/mirror pod
-// (component=kube-proxy) or an addonmanager-managed DaemonSet pod
-// (k8s-app=kube-proxy); a Karpenter node must not run both.
-func (e *Environment) WaitForKubeProxyRunning(ctx context.Context, nodeName string) {
+// dataplaneV2DatapathProvider is the GKE NetworkConfig.datapathProvider value
+// for Dataplane V2 clusters. GKE reports LEGACY_DATAPATH or omits the field on
+// clusters that still route Services with kube-proxy.
+const dataplaneV2DatapathProvider = "ADVANCED_DATAPATH"
+
+// WaitForDatapathAgentRunning polls until the networking agent the cluster's
+// datapath requires is Running/Ready on the given node.
+//
+// Dataplane V1 (iptables) uses kube-proxy. GKE exposes it as either a
+// node-owned static/mirror pod (component=kube-proxy) or an
+// addonmanager-managed DaemonSet pod (k8s-app=kube-proxy); a Karpenter node
+// must not run both.
+//
+// Dataplane V2 (Cilium/eBPF) removes kube-proxy entirely: the anetd DaemonSet
+// (k8s-app=cilium) routes Services instead, so a Karpenter node must run
+// exactly one cilium agent. Its image tag carries no architecture, so only
+// presence and readiness are asserted for it.
+func (e *Environment) WaitForDatapathAgentRunning(ctx context.Context, nodeName string) {
+	dataplaneV2 := e.usesDataplaneV2(ctx)
+
 	Eventually(func(g Gomega) {
+		fieldSelector := fmt.Sprintf("spec.nodeName=%s", nodeName)
+
+		if dataplaneV2 {
+			agentPods := e.daemonSetPodsOnNode(ctx, g, nodeName, "k8s-app=cilium", fieldSelector)
+			g.Expect(agentPods).To(HaveLen(1),
+				"expected exactly one cilium agent pod on node %s, got %v", nodeName, podNames(agentPods))
+			g.Expect(isRunningAndReady(&agentPods[0])).To(BeTrue(),
+				"cilium agent pod %s on %s is not Running/Ready (phase=%s)",
+				agentPods[0].Name, nodeName, agentPods[0].Status.Phase)
+			return
+		}
+
 		node, err := e.KubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		g.Expect(err).NotTo(HaveOccurred(), "getting node %s", nodeName)
 		arch := node.Labels[corev1.LabelArchStable]
 		g.Expect(arch).NotTo(BeEmpty(), "node %s has no %s label", nodeName, corev1.LabelArchStable)
 
-		fieldSelector := fmt.Sprintf("spec.nodeName=%s", nodeName)
 		staticPods, err := e.KubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
 			LabelSelector: "component=kube-proxy",
 			FieldSelector: fieldSelector,
@@ -1238,6 +1263,38 @@ func (e *Environment) WaitForKubeProxyRunning(ctx context.Context, nodeName stri
 			"kube-proxy pod %s on %s has images %s that do not match arch %s",
 			pod.Name, nodeName, kubeProxyImages(&pod), arch)
 	}).WithTimeout(ProvisioningTimeout).WithPolling(DefaultPollInterval).Should(Succeed())
+}
+
+// usesDataplaneV2 reports whether the cluster runs GKE Dataplane V2.
+func (e *Environment) usesDataplaneV2(ctx context.Context) bool {
+	cluster, err := e.GetCluster(ctx)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "getting the cluster to read its datapath")
+	if cluster.NetworkConfig == nil {
+		return false
+	}
+	return cluster.NetworkConfig.DatapathProvider == dataplaneV2DatapathProvider
+}
+
+// daemonSetPodsOnNode lists pods matching the labels on the given node, keeping
+// only DaemonSet-owned ones so a controller for the same component, which could
+// be scheduled onto a Karpenter node, cannot be mistaken for the per-node agent.
+func (e *Environment) daemonSetPodsOnNode(ctx context.Context, g Gomega, nodeName, labelSelector, fieldSelector string) []corev1.Pod {
+	pods, err := e.KubeClient.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+		FieldSelector: fieldSelector,
+	})
+	g.Expect(err).NotTo(HaveOccurred(), "listing %s pods on node %s", labelSelector, nodeName)
+
+	var agents []corev1.Pod
+	for _, pod := range pods.Items {
+		for _, owner := range pod.OwnerReferences {
+			if owner.Kind == "DaemonSet" {
+				agents = append(agents, pod)
+				break
+			}
+		}
+	}
+	return agents
 }
 
 func kubeProxyImageMatchesArch(pod *corev1.Pod, arch string) bool {

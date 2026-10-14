@@ -80,7 +80,7 @@ func runPinnedAliasTest(ctx context.Context, alias, expectedImageSubstring strin
 	Expect(existedBefore).To(BeFalse(), "expected a newly provisioned node, got a pre-existing one")
 	Expect(environment.IsNodeReady(node)).To(BeTrue(), "node %s is not Ready", node.Name)
 
-	env.WaitForKubeProxyRunning(ctx, provisionedNodeName)
+	env.WaitForDatapathAgentRunning(ctx, provisionedNodeName)
 }
 
 // runImageIDTest provisions a node using a GCENodeClass that selects an image
@@ -134,5 +134,5 @@ func runImageIDTest(ctx context.Context, imageFamily, imageID string) {
 	Expect(existedBefore).To(BeFalse(), "expected a newly provisioned node, got a pre-existing one")
 	Expect(environment.IsNodeReady(node)).To(BeTrue(), "node %s is not Ready", node.Name)
 
-	env.WaitForKubeProxyRunning(ctx, provisionedNodeName)
+	env.WaitForDatapathAgentRunning(ctx, provisionedNodeName)
 }

@@ -131,7 +131,7 @@ func (e *Environment) RunProvisioningTest(ctx context.Context, tc TestCase) {
 
 	e.assertEphemeralStorageAllocatable(ctx, provisionedNodeName, tc)
 
-	e.WaitForKubeProxyRunning(ctx, provisionedNodeName)
+	e.WaitForDatapathAgentRunning(ctx, provisionedNodeName)
 }
 
 func (e *Environment) assertEphemeralStorageAllocatable(ctx context.Context, nodeName string, tc TestCase) {
