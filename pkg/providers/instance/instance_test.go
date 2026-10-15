@@ -2970,8 +2970,10 @@ func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
 
 	nodeClaim := &karpv1.NodeClaim{}
 	nodeClaim.Name = "default-sgfkv"
+	cluster := makeCluster("projects/p/global/networks/default", "", "", false)
+	cluster.NetworkConfig.EnableMultiNetworking = true
 
-	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, nil, nil, nil, nil,
+	instance, zone, retryable, err := p.getOrCreateInstance(context.Background(), nodeClaim, &v1alpha1.GCENodeClass{}, makeNonGPUIT(), makeSourceMetadata(""), cluster,
 		"us-central1-c", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
 
 	require.NoError(t, err)

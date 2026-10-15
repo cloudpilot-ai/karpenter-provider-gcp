@@ -42,10 +42,11 @@ If the node never becomes `Ready`, check kubelet logs on the instance (via seria
 
 ### Multi-networking: registered Node has no PodCIDR
 
-With GKE multi-networking, a VM can have a valid alias CIDR while its Node remains `NotReady` with an empty `spec.podCIDR` and `NetworkPluginNotReady`. Check Node Events for `CIDRNotAvailable` from `cidrAllocator`:
+If a registered Node is `NotReady` with `NetworkPluginNotReady`, check whether `spec.podCIDR` is populated. Repeated `CIDRNotAvailable` Events from `cidrAllocator` point to Pod CIDR assignment rather than a VM creation failure:
 
 ```sh
 kubectl describe node <node>
+kubectl get node <node> -o jsonpath='{.spec.podCIDRs}{"\n"}'
 kubectl get node <node> --show-labels
 gcloud compute instances describe <vm> --project=<project> --zone=<zone> \
   --format='yaml(networkInterfaces.subnetwork,networkInterfaces.aliasIpRanges)'
@@ -53,11 +54,11 @@ kubectl get networks.networking.gke.io default -o yaml
 kubectl get gkenetworkparamsets.networking.gke.io <parametersRef-name> -o yaml
 ```
 
-Use the default Network's `spec.parametersRef.name` for the last command. The Node's `cloud.google.com/gke-np-default-subnet` and `cloud.google.com/gke-np-default-pod-range` labels must identify its actual primary subnet and alias range, not the bootstrap pool's range. Values are bare names, not resource URLs or CIDRs.
+Use the default Network's `spec.parametersRef.name` for the last command. Compare the VM's primary alias CIDR with the Node's PodCIDRs. The `cloud.google.com/gke-np-default-subnet` and `cloud.google.com/gke-np-default-pod-range` labels should identify that interface's actual subnet and range as bare names, not URLs or CIDRs.
 
-A range absent from GKENetworkParamSet is not necessarily unusable: GKE can register it when correctly labeled Nodes join. This failure does not require node auto-provisioning (NAP). Do not patch Node PodCIDRs or GKE-managed networking objects to hide it.
+If the alias exists but the Node has no PodCIDR, preserve these outputs and Node Events when investigating bootstrap or IPAM failures. GKENetworkParamSet membership is dynamic; a missing range entry alone does not prove that the range is unusable. Do not manually assign Node PodCIDRs or patch GKE-managed networking objects.
 
-Use a controller version containing the fix for [#686](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/686). Updating the controller affects new VMs; it does not repair existing unhealthy nodes in place. Replace affected uninitialized NodeClaims through your approved node lifecycle procedure.
+Controller bootstrap changes apply to newly created VMs, not existing nodes. Establish the cause before replacing affected nodes through your normal lifecycle procedure.
 
 ---
 
