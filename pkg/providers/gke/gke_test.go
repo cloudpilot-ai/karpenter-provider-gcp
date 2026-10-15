@@ -33,6 +33,26 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 )
 
+func TestIsMultiNetworkingEnabled(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		cluster *containerv1.Cluster
+		want    bool
+	}{
+		{name: "no cluster"},
+		{name: "no network config", cluster: &containerv1.Cluster{}},
+		{name: "disabled", cluster: &containerv1.Cluster{NetworkConfig: &containerv1.NetworkConfig{}}},
+		{name: "enabled", cluster: &containerv1.Cluster{NetworkConfig: &containerv1.NetworkConfig{EnableMultiNetworking: true}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, IsMultiNetworkingEnabled(tt.cluster))
+		})
+	}
+}
+
 func TestGetServerConfig_CacheHit(t *testing.T) {
 	var calls atomic.Int32
 

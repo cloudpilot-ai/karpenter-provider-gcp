@@ -95,7 +95,7 @@ func (p *DefaultProvider) setupPodNetwork(cluster *containerv1.Cluster, nodeClas
 	}
 	primary := interfaces[0]
 	primary.AliasIpRanges[0].SubnetworkRangeName = podRange
-	if !cluster.NetworkConfig.EnableMultiNetworking {
+	if !gke.IsMultiNetworkingEnabled(cluster) {
 		return interfaces, nil
 	}
 	subnetName := lastPathSegment(primary.Subnetwork)
