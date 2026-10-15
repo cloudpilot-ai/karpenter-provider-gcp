@@ -21,6 +21,9 @@ const (
 	MaxPodsPerNodeLabel  = "max-pods-per-node"
 	GKEProvisioningLabel = "gke-provisioning"
 
+	defaultPodSubnetLabel = "cloud.google.com/gke-np-default-subnet"
+	defaultPodRangeLabel  = "cloud.google.com/gke-np-default-pod-range"
+
 	UnregisteredTaintValue = "karpenter.sh/unregistered=true:NoExecute"
 
 	GKESecondaryBootDiskLabelPrefix = "cloud.google.com.node-restriction.kubernetes.io/gke-secondary-boot-disk-"

@@ -60,7 +60,7 @@ func TestBuildInstanceZ4DMaintenance(t *testing.T) {
 				makeSourceMetadata("max-pods-per-node=110,max-pods=110,disk-type.gke.io/pd-balanced=true"),
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 				"us-central1-a", "z4d-test", karpv1.CapacityTypeOnDemand,
-				machineTypeWithBundledSSDs(tc.partitions), int(tc.partitions),
+				machineTypeWithBundledSSDs(tc.partitions), int(tc.partitions), "pods",
 			)
 			require.NoError(t, err)
 			require.Equal(t, tc.policy, instance.Scheduling.OnHostMaintenance)

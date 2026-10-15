@@ -321,18 +321,6 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 	}
 }
 
-func TestSetPrimaryAliasRange(t *testing.T) {
-	t.Parallel()
-
-	instance := &compute.Instance{
-		NetworkInterfaces: []*compute.NetworkInterface{{
-			AliasIpRanges: []*compute.AliasIpRange{{SubnetworkRangeName: "first"}},
-		}},
-	}
-	setPrimaryAliasRange(instance, "second")
-	require.Equal(t, "second", instance.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName)
-}
-
 func TestIsIPSpaceExhausted(t *testing.T) {
 	t.Parallel()
 
@@ -1609,7 +1597,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
-		nil, 0,
+		nil, 0, "pods",
 	)
 	require.NoError(t, err)
 
@@ -1686,7 +1674,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 
 	require.NoError(t, err)
@@ -1741,7 +1729,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 
 	require.NoError(t, err)
@@ -1855,7 +1843,7 @@ func TestBuildInstance_SortsMetadataAfterAllPatches(t *testing.T) {
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-sort-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 	require.NoError(t, err)
 
@@ -1901,7 +1889,7 @@ func TestBuildInstance_ResourceManagerTags(t *testing.T) {
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 				"us-central1-a", "karpenter-rmtags-test",
 				karpv1.CapacityTypeOnDemand,
-				nil, 0,
+				nil, 0, "pods",
 			)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, instance.Params)
@@ -1941,7 +1929,7 @@ func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-disk-label-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 
 	require.NoError(t, err)
@@ -1967,7 +1955,7 @@ func TestBuildInstance_RebuildsGCELabelsWithoutTemplateIdentityLabelInheritance(
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-identity-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 
 	require.NoError(t, err)
@@ -2010,7 +1998,7 @@ func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
 				makeCluster("net", "subnet", "pods", false),
 				"us-central1-a", "karpenter-gpu-test",
 				karpv1.CapacityTypeOnDemand,
-				nil, 0,
+				nil, 0, "pods",
 			)
 			require.NoError(t, err)
 			kl := kubeLabelsFrom(t, instance)
@@ -2057,7 +2045,7 @@ func TestBuildInstance_GPUDriverVersionNotInjectedForNonGPU(t *testing.T) {
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -2079,7 +2067,7 @@ func TestBuildInstance_GPUDriverVersionOverridesTemplate(t *testing.T) {
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -2116,7 +2104,7 @@ func TestBuildInstance_NodePoolLabelDoesNotOverrideGPUDriverAtBootTime(t *testin
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -2189,7 +2177,7 @@ func TestBuildInstance_DoesNotCopyKubernetesSchedulingLabelsToGCELabels(t *testi
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-f", "karpenter-no-label-leak",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 
 	require.NoError(t, err)
@@ -2847,7 +2835,7 @@ func buildConfidentialInstance(t *testing.T, nc *v1alpha1.GCENodeClass) *compute
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-confidential-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0,
+		nil, 0, "pods",
 	)
 	require.NoError(t, err)
 	return instance
