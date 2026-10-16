@@ -30,18 +30,17 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Config env
-        run: |
-          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_AK }}" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SK }}" >> $GITHUB_ENV
-          echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_AK }}
+          aws-secret-access-key: ${{ secrets.AWS_SK }}
+          aws-region: us-east-1
 
-      - name: AWS CLI Init
-        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1.0.8
-
-      - name: Config ECR
-        run: |
-          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/cloudpilotai
+      - name: Log in to Amazon ECR Public
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+        with:
+          registry-type: public
 
       - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
 
@@ -49,7 +48,7 @@ jobs:
         with:
           cosign-release: v3.1.3
 
-      - name: Build, publish, and sign image
+      - name: Build and publish image
         id: image
         env:
           IMAGE_TAG: ${{ env.tag }}
@@ -61,14 +60,25 @@ jobs:
             echo 'Expected exactly one digest-qualified controller image from ko build' >&2
             exit 1
           }
+          echo "reference=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "digest=${IMAGE##*@}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$IMAGE" > "$RUNNER_TEMP/sboms/image-reference.txt"
+
+      - name: Sign image
+        env:
+          IMAGE: ${{ steps.image.outputs.reference }}
+        run: |
           # Public ECR: retain digest-derived .sig tags rather than OCI 1.1 referrers.
           cosign sign --yes --new-bundle-format=false --use-signing-config=false \
             --registry-referrers-mode=legacy "$IMAGE"
+
+      - name: Verify image signature
+        env:
+          IMAGE: ${{ steps.image.outputs.reference }}
+        run: |
           cosign verify --new-bundle-format=false --experimental-oci11=false \
             --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
-          echo "digest=${IMAGE##*@}" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$IMAGE" > "$RUNNER_TEMP/sboms/image-reference.txt"
 
       - name: Attest image build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -138,51 +148,81 @@ jobs:
           gpg_private_key: ${{ secrets.HELM_SIGNING_KEY_BASE64 }}
           passphrase: ${{ secrets.HELM_SIGNING_KEY_PASSPHRASE }}
 
-      - name: Package and sign charts
+      - name: Prepare Helm signing keyring
+        id: signing
         env:
           HELM_SIGNING_KEY_PASSPHRASE: ${{ secrets.HELM_SIGNING_KEY_PASSPHRASE }}
           HELM_SIGNING_KEY_FINGERPRINT: ${{ vars.HELM_SIGNING_KEY_FINGERPRINT }}
           IMPORTED_FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}
-          KEY_NAME: ${{ steps.gpg.outputs.name }}
         run: |
           set +x
           : "${HELM_SIGNING_KEY_PASSPHRASE:?passphrase required}"
           [[ "$HELM_SIGNING_KEY_FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]
           [[ "$IMPORTED_FINGERPRINT" == "$HELM_SIGNING_KEY_FINGERPRINT" ]]
-          KEYRING_DIR=$(mktemp -d)
-          trap 'rm -rf "$KEYRING_DIR"' EXIT
+          KEYRING_DIR=$(mktemp -d "$RUNNER_TEMP/helm-signing.XXXXXX")
+          echo "keyring=$KEYRING_DIR" >> "$GITHUB_OUTPUT"
+          CHARTS_DIR=$(mktemp -d "$RUNNER_TEMP/chart-release.XXXXXX")
+          echo "charts=$CHARTS_DIR" >> "$GITHUB_OUTPUT"
           printf '%s' "$HELM_SIGNING_KEY_PASSPHRASE" > "$KEYRING_DIR/passphrase"
-          # Helm needs a legacy keyring and selects the key by UID, not fingerprint.
+          # Helm needs an exported legacy keyring rather than GnuPG's .kbx database.
           gpg --batch --pinentry-mode loopback --passphrase-file "$KEYRING_DIR/passphrase" \
             --export-secret-keys "$IMPORTED_FINGERPRINT" > "$KEYRING_DIR/secring.gpg"
           gpg --batch --export "$IMPORTED_FINGERPRINT" > "$KEYRING_DIR/pubring.gpg"
-          mkdir -p charts/keys
-          gpg --batch --armor --export "$IMPORTED_FINGERPRINT" > "charts/keys/$IMPORTED_FINGERPRINT.asc"
-          for CHART in karpenter karpenter-crd; do
-            helm package "charts/$CHART" --version "$tag_semver" --app-version "$tag" \
-              --sign --key "$KEY_NAME" --keyring "$KEYRING_DIR/secring.gpg" \
-              --passphrase-file "$KEYRING_DIR/passphrase" --destination charts/
-            helm verify "charts/$CHART-$tag_semver.tgz" --keyring "$KEYRING_DIR/pubring.gpg"
-            printf '%s %s\n' "$CHART-$tag_semver.tgz" "$IMPORTED_FINGERPRINT" >> charts/signed-charts.txt
-          done
+
+      - name: Package and sign new chart versions
+        env:
+          KEYRING_DIR: ${{ steps.signing.outputs.keyring }}
+          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
+          KEY_NAME: ${{ steps.gpg.outputs.name }}
+        run: |
+          helm package charts/karpenter --version "$tag_semver" --app-version "$tag" \
+            --sign --key "$KEY_NAME" --keyring "$KEYRING_DIR/secring.gpg" \
+            --passphrase-file "$KEYRING_DIR/passphrase" --destination "$CHARTS_DIR"
+          helm package charts/karpenter-crd --version "$tag_semver" --app-version "$tag" \
+            --sign --key "$KEY_NAME" --keyring "$KEYRING_DIR/secring.gpg" \
+            --passphrase-file "$KEYRING_DIR/passphrase" --destination "$CHARTS_DIR"
+
+      - name: Verify chart signatures
+        env:
+          KEYRING_DIR: ${{ steps.signing.outputs.keyring }}
+          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
+        run: |
+          helm verify "$CHARTS_DIR/karpenter-$tag_semver.tgz" --keyring "$KEYRING_DIR/pubring.gpg"
+          helm verify "$CHARTS_DIR/karpenter-crd-$tag_semver.tgz" --keyring "$KEYRING_DIR/pubring.gpg"
+
+      - name: Record chart signing key
+        env:
+          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
+          FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}
+        run: |
+          mkdir -p "$CHARTS_DIR/keys"
+          gpg --batch --armor --export "$FINGERPRINT" > "$CHARTS_DIR/keys/$FINGERPRINT.asc"
+          printf '%s %s\n' "karpenter-$tag_semver.tgz" "$FINGERPRINT" > "$CHARTS_DIR/signed-charts.txt"
+          printf '%s %s\n' "karpenter-crd-$tag_semver.tgz" "$FINGERPRINT" >> "$CHARTS_DIR/signed-charts.txt"
 
       - name: Attest chart build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: charts/*.tgz
+          subject-path: |
+            ${{ steps.signing.outputs.charts }}/karpenter-${{ env.tag_semver }}.tgz
+            ${{ steps.signing.outputs.charts }}/karpenter-crd-${{ env.tag_semver }}.tgz
 
       - name: Update Helm repo index
+        env:
+          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
         run: |
           # Old .tgz files are intentionally absent here: --merge only preserves 'created'
           # timestamps for versions NOT found on disk. Running index before restoring old
           # archives ensures historical timestamps are copied from the Pages index as-is.
           if [ -f /tmp/merge-index.yaml ]; then
-            helm repo index charts/ --merge /tmp/merge-index.yaml
+            helm repo index "$CHARTS_DIR" --merge /tmp/merge-index.yaml
           else
-            helm repo index charts/
+            helm repo index "$CHARTS_DIR"
           fi
 
       - name: Restore previously published chart versions
+        env:
+          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
         run: |
           PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           if [ -f /tmp/merge-index.yaml ]; then
@@ -193,9 +233,9 @@ jobs:
               [ -z "${VERSIONS}" ] && continue
 
               echo "${VERSIONS}" | while read VERSION; do
-                if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
+                if [ ! -f "$CHARTS_DIR/${CHART}-${VERSION}.tgz" ]; then
                   echo "Pulling ${CHART} ${VERSION}..."
-                  helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination charts/ || \
+                  helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination "$CHARTS_DIR" || \
                     echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
                 fi
               done
@@ -203,7 +243,7 @@ jobs:
               # Fail rather than deploy an incomplete repo
               ACTUAL=0
               for V in ${VERSIONS}; do
-                [ -f "charts/${CHART}-${V}.tgz" ] && ACTUAL=$((ACTUAL + 1))
+                [ -f "$CHARTS_DIR/${CHART}-${V}.tgz" ] && ACTUAL=$((ACTUAL + 1))
               done
               EXPECTED=$(echo "${VERSIONS}" | grep -c .)
               if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
@@ -224,15 +264,15 @@ jobs:
             [[ "$ARCHIVE" =~ ^karpenter(-crd)?-[0-9][A-Za-z0-9.+-]*\.tgz$ ]]
             [[ "$FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]
             # A known-signed version must never silently become unsigned.
-            test -f "charts/$ARCHIVE"
-            if [ ! -f "charts/$ARCHIVE.prov" ]; then
-              curl --fail -sSL "$PAGES_URL/$ARCHIVE.prov" -o "charts/$ARCHIVE.prov"
+            test -f "$CHARTS_DIR/$ARCHIVE"
+            if [ ! -f "$CHARTS_DIR/$ARCHIVE.prov" ]; then
+              curl --fail -sSL "$PAGES_URL/$ARCHIVE.prov" -o "$CHARTS_DIR/$ARCHIVE.prov"
             fi
-            if [ ! -f "charts/keys/$FINGERPRINT.asc" ]; then
-              curl --fail -sSL "$PAGES_URL/keys/$FINGERPRINT.asc" -o "charts/keys/$FINGERPRINT.asc"
+            if [ ! -f "$CHARTS_DIR/keys/$FINGERPRINT.asc" ]; then
+              curl --fail -sSL "$PAGES_URL/keys/$FINGERPRINT.asc" -o "$CHARTS_DIR/keys/$FINGERPRINT.asc"
             fi
           done < "$PREVIOUS"
-          for ARCHIVE in charts/*.tgz; do
+          for ARCHIVE in "$CHARTS_DIR"/*.tgz; do
             [ -f "$ARCHIVE.prov" ] && continue
             HTTP_CODE=$(curl -sSL -o "$ARCHIVE.prov" -w '%{http_code}' "$PAGES_URL/$(basename "$ARCHIVE").prov")
             case "$HTTP_CODE" in
@@ -241,8 +281,8 @@ jobs:
               *) echo "Failed to restore $ARCHIVE.prov: HTTP $HTTP_CODE" >&2; exit 1 ;;
             esac
           done
-          sort -u "$PREVIOUS" charts/signed-charts.txt > "$RUNNER_TEMP/signed-charts.txt"
-          mv "$RUNNER_TEMP/signed-charts.txt" charts/signed-charts.txt
+          sort -u "$PREVIOUS" "$CHARTS_DIR/signed-charts.txt" > "$RUNNER_TEMP/signed-charts.txt"
+          mv "$RUNNER_TEMP/signed-charts.txt" "$CHARTS_DIR/signed-charts.txt"
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
@@ -250,8 +290,14 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: charts/
+          path: ${{ steps.signing.outputs.charts }}
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+      - name: Remove exported chart signing keyring
+        if: always() && steps.signing.outputs.keyring != ''
+        env:
+          KEYRING_DIR: ${{ steps.signing.outputs.keyring }}
+        run: rm -rf "$KEYRING_DIR"
