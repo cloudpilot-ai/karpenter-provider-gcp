@@ -54,7 +54,6 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/serviceaccount"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -108,16 +107,16 @@ type DefaultProvider struct {
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
 
-	clusterName            string
-	clusterLocation        string
-	region                 string
-	projectID              string
-	serviceAccountProvider serviceaccount.Provider
-	computeService         *compute.Service
+	clusterName           string
+	clusterLocation       string
+	region                string
+	projectID             string
+	defaultServiceAccount string
+	computeDefaultSA      string
+	computeService        *compute.Service
 }
 
-func NewProvider(clusterName, clusterLocation, region, projectID string,
-	serviceAccountProvider serviceaccount.Provider,
+func NewProvider(clusterName, clusterLocation, region, projectID, defaultServiceAccount, computeDefaultSA string,
 	computeService *compute.Service,
 	gkeProvider gke.Provider,
 	subnetProvider subnet.Provider,
@@ -138,7 +137,8 @@ func NewProvider(clusterName, clusterLocation, region, projectID string,
 		clusterLocation:          clusterLocation,
 		region:                   region,
 		projectID:                projectID,
-		serviceAccountProvider:   serviceAccountProvider,
+		defaultServiceAccount:    defaultServiceAccount,
+		computeDefaultSA:         computeDefaultSA,
 		computeService:           computeService,
 	}
 }
@@ -928,7 +928,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		return nil, fmt.Errorf("rendering instance metadata: %w", err)
 	}
 
-	serviceAccounts, err := p.setupServiceAccounts(ctx, nodeClass)
+	serviceAccounts, err := p.setupServiceAccounts(nodeClass)
 	if err != nil {
 		return nil, fmt.Errorf("setting up service accounts: %w", err)
 	}
@@ -1319,11 +1319,11 @@ func gpuInstanceMetadata(nodeClass *v1alpha1.GCENodeClass, instanceType *cloudpr
 }
 
 // setupServiceAccounts configures service accounts for the instance.
-func (p *DefaultProvider) setupServiceAccounts(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]*compute.ServiceAccount, error) {
-	serviceAccount, err := p.serviceAccountProvider.Resolve(ctx, nodeClass.Spec.ServiceAccount)
-	if err != nil {
-		return nil, err
-	}
+// Returns an error if no service account can be resolved, which means the project has
+// disabled the Compute Engine default SA and neither spec.serviceAccount nor
+// DEFAULT_NODEPOOL_SERVICE_ACCOUNT is set — nodes would fail to authenticate without an SA.
+func (p *DefaultProvider) setupServiceAccounts(nodeClass *v1alpha1.GCENodeClass) ([]*compute.ServiceAccount, error) {
+	serviceAccount := p.resolveServiceAccount(nodeClass)
 	if serviceAccount == "" {
 		return nil, fmt.Errorf("no service account available: spec.serviceAccount and DEFAULT_NODEPOOL_SERVICE_ACCOUNT are unset, and the Compute Engine default SA is unavailable for this project")
 	}
@@ -1752,4 +1752,16 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// resolveServiceAccount returns the service account email for the instance.
+// Priority: spec.serviceAccount → DEFAULT_NODEPOOL_SERVICE_ACCOUNT → Compute Engine default SA.
+func (p *DefaultProvider) resolveServiceAccount(nodeClass *v1alpha1.GCENodeClass) string {
+	if nodeClass.Spec.ServiceAccount != "" {
+		return nodeClass.Spec.ServiceAccount
+	}
+	if p.defaultServiceAccount != "" {
+		return p.defaultServiceAccount
+	}
+	return p.computeDefaultSA
 }

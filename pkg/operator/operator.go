@@ -43,7 +43,6 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/serviceaccount"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
@@ -63,7 +62,6 @@ type Operator struct {
 	InstanceProvider          instance.Provider
 	GKEProvider               gke.Provider
 	SubnetProvider            subnet.Provider
-	ServiceAccountProvider    serviceaccount.Provider
 	AuthOptions               *auth.Credential
 }
 
@@ -129,9 +127,9 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider, gkeProvider)
 
 	projectID := options.FromContext(ctx).ProjectID
-	serviceAccountProvider, err := serviceaccount.NewProvider(ctx, computeService, projectID, options.FromContext(ctx).NodePoolServiceAccount, clock.RealClock{})
+	computeDefaultSA, err := getComputeDefaultServiceAccount(ctx, computeService, projectID, options.FromContext(ctx).NodePoolServiceAccount)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to initialize service account provider")
+		log.FromContext(ctx).Error(err, "failed to get Compute Engine default service account")
 		os.Exit(1)
 	}
 
@@ -148,7 +146,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).ClusterLocation,
 		region,
 		projectID,
-		serviceAccountProvider,
+		options.FromContext(ctx).NodePoolServiceAccount,
+		computeDefaultSA,
 		computeService,
 		gkeProvider,
 		subnetProvider,
@@ -168,9 +167,19 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceProvider:          instanceProvider,
 		GKEProvider:               gkeProvider,
 		SubnetProvider:            subnetProvider,
-		ServiceAccountProvider:    serviceAccountProvider,
 		AuthOptions:               &auth,
 	}
+}
+
+func getComputeDefaultServiceAccount(ctx context.Context, computeService *compute.Service, projectID, configuredAccount string) (string, error) {
+	if configuredAccount != "" {
+		return "", nil
+	}
+	project, err := computeService.Projects.Get(projectID).Context(ctx).Do()
+	if err != nil {
+		return "", err
+	}
+	return project.DefaultServiceAccount, nil
 }
 
 func determineRegion(ctx context.Context, projectID, location string) (string, error) {
