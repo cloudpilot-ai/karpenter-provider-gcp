@@ -42,6 +42,17 @@ If the node never becomes `Ready`, check kubelet logs on the instance (via seria
 
 ---
 
+## Controller exits at startup
+
+If the Karpenter pod restarts repeatedly and its previous logs contain `failed to get Compute Engine default service account`, the controller couldn't read the project's Compute Engine default service account. The controller makes this lookup at startup when `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` is unset.
+
+To fix it, do one of the following:
+
+- Make sure the controller can reach the Compute Engine API and its service account has `compute.projects.get`. The [controller role](../deploy/iam/karpenter-controller-role.yaml) includes this permission.
+- Set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` (Helm: `controller.settings.defaultNodepoolServiceAccount`) to skip the lookup. See [Service account resolution](settings.md#service-account-resolution).
+
+---
+
 ## GCENodeClass not becoming Ready
 
 ```sh

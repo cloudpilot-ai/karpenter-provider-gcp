@@ -114,15 +114,15 @@ DRA is a Kubernetes-level feature. Review the [Kubernetes DRA documentation](htt
 
 ## GCP-specific Settings
 
-| Setting             | Env var                            | Helm value                                        | Required | Description                                                                                                                                                                                                                                                                                |
-|---------------------|------------------------------------|---------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Project ID          | `PROJECT_ID`                       | `controller.settings.projectID`                   | Yes      | GCP project where nodes are provisioned.                                                                                                                                                                                                                                                   |
-| Cluster name        | `CLUSTER_NAME`                     | `controller.settings.clusterName`                 | Yes      | GKE cluster name. Used to scope instance discovery.                                                                                                                                                                                                                                        |
-| Cluster location    | `CLUSTER_LOCATION`                 | `controller.settings.clusterLocation`             | Yes      | GKE cluster location (zone or region, e.g. `us-central1-f`).                                                                                                                                                                                                                               |
-| Node location       | `NODE_LOCATION`                    | `controller.settings.nodeLocation`                | No       | Override zone for node placement. Defaults to cluster location.                                                                                                                                                                                                                            |
-| VM memory overhead  | `VM_MEMORY_OVERHEAD_PERCENT`       | `controller.settings.vmMemoryOverheadPercent`     | No       | Fraction of node memory reserved for OS/kubelet overhead (e.g. `0.075` = 7.5%).                                                                                                                                                                                                            |
-| Bootstrap pool name | `DEFAULT_NODEPOOL_TEMPLATE_NAME`   | `controller.settings.defaultNodePoolTemplateName` | No       | Pin the GKE node pool used as the bootstrap metadata source. When set, Karpenter uses this pool exclusively. Leave empty to use automatic discovery (`default-pool` → first alphabetical RUNNING pool → `karpenter-fallback` creation). See [Bootstrap pool selection](bootstrap-pool.md). |
-| Default SA          | `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` | `controller.env`                                  | No       | Default service account for provisioned nodes (see [Service account resolution](#service-account-resolution)).                                                                                                                                                                             |
+| Setting             | Env var                            | Helm value                                          | Required | Description                                                                                                                                                                                                                                                                                |
+|---------------------|------------------------------------|-----------------------------------------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Project ID          | `PROJECT_ID`                       | `controller.settings.projectID`                     | Yes      | GCP project where nodes are provisioned.                                                                                                                                                                                                                                                   |
+| Cluster name        | `CLUSTER_NAME`                     | `controller.settings.clusterName`                   | Yes      | GKE cluster name. Used to scope instance discovery.                                                                                                                                                                                                                                        |
+| Cluster location    | `CLUSTER_LOCATION`                 | `controller.settings.clusterLocation`               | Yes      | GKE cluster location (zone or region, e.g. `us-central1-f`).                                                                                                                                                                                                                               |
+| Node location       | `NODE_LOCATION`                    | `controller.settings.nodeLocation`                  | No       | Override zone for node placement. Defaults to cluster location.                                                                                                                                                                                                                            |
+| VM memory overhead  | `VM_MEMORY_OVERHEAD_PERCENT`       | `controller.settings.vmMemoryOverheadPercent`       | No       | Fraction of node memory reserved for OS/kubelet overhead (e.g. `0.075` = 7.5%).                                                                                                                                                                                                            |
+| Bootstrap pool name | `DEFAULT_NODEPOOL_TEMPLATE_NAME`   | `controller.settings.defaultNodePoolTemplateName`   | No       | Pin the GKE node pool used as the bootstrap metadata source. When set, Karpenter uses this pool exclusively. Leave empty to use automatic discovery (`default-pool` → first alphabetical RUNNING pool → `karpenter-fallback` creation). See [Bootstrap pool selection](bootstrap-pool.md). |
+| Default SA          | `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` | `controller.settings.defaultNodepoolServiceAccount` | No       | Default service account for provisioned nodes (see [Service account resolution](#service-account-resolution)).                                                                                                                                                                             |
 
 ### Service account resolution
 
@@ -134,15 +134,16 @@ Karpenter resolves the service account for provisioned nodes in this order:
 
 If none are available, node provisioning fails.
 
+When `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` is unset, the controller looks up the project's Compute Engine default service account at startup. This lookup needs the `compute.projects.get` permission, which the [controller role](../deploy/iam/karpenter-controller-role.yaml) includes. If the lookup fails, the controller exits and Kubernetes restarts the pod to retry. This happens even when every GCENodeClass sets `spec.serviceAccount`. To skip the lookup, set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`.
+
 For production clusters, use a dedicated service account with minimal permissions ([`roles/container.nodeServiceAccount`](https://cloud.google.com/kubernetes-engine/docs/how-to/hardening-your-cluster#use_least_privilege_sa)). Set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` or `spec.serviceAccount` accordingly.
 
 Example Helm override:
 
 ```yaml
 controller:
-  env:
-    - name: DEFAULT_NODEPOOL_SERVICE_ACCOUNT
-      value: "my-node-sa@my-project.iam.gserviceaccount.com"
+  settings:
+    defaultNodepoolServiceAccount: "my-node-sa@my-project.iam.gserviceaccount.com"
 ```
 
 ## Security Contexts
