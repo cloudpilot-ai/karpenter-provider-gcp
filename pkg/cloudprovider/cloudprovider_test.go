@@ -239,6 +239,7 @@ func TestCreateMatchesAdoptedCountOutsideFilteredCandidates(t *testing.T) {
 
 	nodeClass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeServiceAccountReady)
 	claim := &karpv1.NodeClaim{Spec: karpv1.NodeClaimSpec{
 		NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"},
 		Resources:    karpv1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("80Gi")}},

@@ -75,6 +75,7 @@ func main() {
 			op.AuthOptions,
 			op.GKEProvider,
 			op.SubnetProvider,
+			op.ServiceAccountProvider,
 		)...).
 		Start(ctx)
 }

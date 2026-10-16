@@ -41,6 +41,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -49,6 +50,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/serviceaccount"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
 
@@ -305,7 +307,7 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 				w.WriteHeader(http.StatusBadRequest)
 				writeJSON(w, map[string]any{"error": map[string]any{"errors": []map[string]string{{"reason": tt.code}}}})
 			}))
-			p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+			p.serviceAccountProvider = makeProvider().serviceAccountProvider
 			c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
 			p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
 
@@ -394,7 +396,7 @@ func TestGetOrCreateInstanceResourceNotReady(t *testing.T) {
 			"errors":  []map[string]string{{"reason": "resourceNotReady"}},
 		}})
 	}))
-	p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+	p.serviceAccountProvider = makeProvider().serviceAccountProvider
 	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
 	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
 
@@ -1767,7 +1769,7 @@ func computeMetadataValues(values map[string]string) *compute.Metadata {
 }
 
 func makeProvider() *DefaultProvider {
-	return &DefaultProvider{computeDefaultSA: "123-compute@developer.gserviceaccount.com"}
+	return &DefaultProvider{serviceAccountProvider: lo.Must(serviceaccount.NewProvider(context.Background(), nil, "project", "123-compute@developer.gserviceaccount.com", clock.RealClock{}))}
 }
 
 func makeGPUIT() *cloudprovider.InstanceType {
@@ -2380,7 +2382,7 @@ func TestBuildInstanceTags(t *testing.T) {
 	}
 }
 
-func TestResolveServiceAccount(t *testing.T) {
+func TestSetupServiceAccountsPrecedence(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -2424,13 +2426,17 @@ func TestResolveServiceAccount(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			p := &DefaultProvider{
-				defaultServiceAccount: tc.defaultServiceAccount,
-				computeDefaultSA:      tc.computeDefaultSA,
-			}
+			p := &DefaultProvider{serviceAccountProvider: newServiceAccountProvider(t, tc.defaultServiceAccount, tc.computeDefaultSA)}
 			nodeClass := &v1alpha1.GCENodeClass{}
 			nodeClass.Spec.ServiceAccount = tc.specServiceAccount
-			require.Equal(t, tc.want, p.resolveServiceAccount(nodeClass))
+			accounts, err := p.setupServiceAccounts(context.Background(), nodeClass)
+			if tc.want == "" {
+				require.ErrorContains(t, err, "no service account available")
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, accounts, 1)
+			require.Equal(t, tc.want, accounts[0].Email)
 		})
 	}
 }
@@ -2438,12 +2444,25 @@ func TestResolveServiceAccount(t *testing.T) {
 func TestSetupServiceAccounts_ErrorWhenNoSAAvailable(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{}
+	p := &DefaultProvider{serviceAccountProvider: newServiceAccountProvider(t, "", "")}
 	nodeClass := &v1alpha1.GCENodeClass{}
 
-	_, err := p.setupServiceAccounts(nodeClass)
+	_, err := p.setupServiceAccounts(context.Background(), nodeClass)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no service account available")
+}
+
+func newServiceAccountProvider(t *testing.T, controllerAccount, projectAccount string) serviceaccount.Provider {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]string{"defaultServiceAccount": projectAccount})
+	}))
+	t.Cleanup(server.Close)
+	client, err := compute.NewService(context.Background(), option.WithEndpoint(server.URL+"/"), option.WithoutAuthentication())
+	require.NoError(t, err)
+	provider, err := serviceaccount.NewProvider(context.Background(), client, "project", controllerAccount, clock.RealClock{})
+	require.NoError(t, err)
+	return provider
 }
 
 func machineTypeWithBundledSSDs(count int32) *computepb.MachineType {

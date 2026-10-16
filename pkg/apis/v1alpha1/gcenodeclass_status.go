@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	ConditionTypeImagesReady = "ImagesReady"
+	ConditionTypeImagesReady         = "ImagesReady"
+	ConditionTypeServiceAccountReady = "ServiceAccountReady"
 )
 
 // GCENodeClassStatus contains the resolved state of the GCENodeClass
@@ -68,6 +69,7 @@ type Image struct {
 func (in *GCENodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	return status.NewReadyConditions(
 		ConditionTypeImagesReady,
+		ConditionTypeServiceAccountReady,
 	).For(in, opts...)
 }
 

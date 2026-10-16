@@ -46,6 +46,7 @@ import (
 	providernodepooltemplate "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/serviceaccount"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
@@ -64,9 +65,10 @@ func NewController(
 	authOptions *auth.Credential,
 	gkeProvider gke.Provider,
 	subnetProvider subnet.Provider,
+	serviceAccountProvider serviceaccount.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
-		nodeclassstatus.NewController(kubeClient, imageProvider, gkeProvider, subnetProvider),
+		nodeclassstatus.NewController(kubeClient, imageProvider, gkeProvider, subnetProvider, serviceAccountProvider),
 		nodepooltemplate.NewController(nodePoolTemplateProvider),
 		nodeclasstermination.NewController(kubeClient),
 		nodeclasshash.NewController(kubeClient),

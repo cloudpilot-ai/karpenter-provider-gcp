@@ -57,6 +57,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/serviceaccount"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
@@ -366,6 +367,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	off := corecloud.Offerings{&corecloud.Offering{Available: true, Price: 1, Requirements: scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"), scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand))}}
 	nclass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}, Spec: v1alpha1.GCENodeClassSpec{LocalSsdMode: config.mode, Disks: []v1alpha1.Disk{{Boot: true, SizeGiB: 100}}, ServiceAccount: "node@test"}, Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{{SourceImage: "projects/test/global/images/cos"}}}}
 	nclass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+	nclass.StatusConditions().SetTrue(v1alpha1.ConditionTypeServiceAccountReady)
 	if len(config.ssdCounts) == 0 {
 		config.ssdCounts = []int{2, 4}
 	}
@@ -481,7 +483,9 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	defer srv.Close()
 	svc, err := compute.NewService(ctx, googleoption.WithEndpoint(srv.URL+"/"), googleoption.WithoutAuthentication())
 	require.NoError(t, err)
-	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", svc, reproGKE{}, nil, typeProvider, reproTemplate{}, reproVersion{}, unavailableofferings.NewUnavailableOfferings())
+	saProvider, err := serviceaccount.NewProvider(ctx, svc, "test", "node@test", clock.RealClock{})
+	require.NoError(t, err)
+	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", saProvider, svc, reproGKE{}, nil, typeProvider, reproTemplate{}, reproVersion{}, unavailableofferings.NewUnavailableOfferings())
 	cp := New(kc, reproEvents{}, typeProvider, ip, nil)
 	if len(results.NewNodeClaims) > 0 {
 		generated := results.NewNodeClaims[0].ToNodeClaim()

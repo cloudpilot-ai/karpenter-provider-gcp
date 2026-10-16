@@ -43,6 +43,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/serviceaccount"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
@@ -62,6 +63,7 @@ type Operator struct {
 	InstanceProvider          instance.Provider
 	GKEProvider               gke.Provider
 	SubnetProvider            subnet.Provider
+	ServiceAccountProvider    serviceaccount.Provider
 	AuthOptions               *auth.Credential
 }
 
@@ -127,11 +129,10 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider, gkeProvider)
 
 	projectID := options.FromContext(ctx).ProjectID
-	computeDefaultSA := ""
-	if proj, err := computeService.Projects.Get(projectID).Context(ctx).Do(); err != nil {
-		log.FromContext(ctx).Error(err, "failed to get Compute Engine default service account; nodes without an explicit serviceAccount will fail to provision")
-	} else {
-		computeDefaultSA = proj.DefaultServiceAccount
+	serviceAccountProvider, err := serviceaccount.NewProvider(ctx, computeService, projectID, options.FromContext(ctx).NodePoolServiceAccount, clock.RealClock{})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to initialize service account provider")
+		os.Exit(1)
 	}
 
 	subnetClient, err := computeapi.NewSubnetworksRESTClient(ctx)
@@ -147,8 +148,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		options.FromContext(ctx).ClusterLocation,
 		region,
 		projectID,
-		options.FromContext(ctx).NodePoolServiceAccount,
-		computeDefaultSA,
+		serviceAccountProvider,
 		computeService,
 		gkeProvider,
 		subnetProvider,
@@ -168,6 +168,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceProvider:          instanceProvider,
 		GKEProvider:               gkeProvider,
 		SubnetProvider:            subnetProvider,
+		ServiceAccountProvider:    serviceAccountProvider,
 		AuthOptions:               &auth,
 	}
 }
