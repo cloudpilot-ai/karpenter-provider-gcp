@@ -56,6 +56,8 @@ jobs:
           export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
           IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
             --tags "$IMAGE_TAG" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms")
+          # ko includes the release tag before the digest; retain the immutable reference.
+          IMAGE=${IMAGE/":$IMAGE_TAG@"/@}
           [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]] || {
             echo 'Expected exactly one digest-qualified controller image from ko build' >&2
             exit 1
