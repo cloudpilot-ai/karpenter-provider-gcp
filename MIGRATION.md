@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Default node service account lookup failures now stop startup
+
+When `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` is unset, the controller now exits if the Compute Engine project lookup fails, rather than continuing with an unresolved default service account. Pod restarts retry the lookup. This also applies when every `GCENodeClass` sets `spec.serviceAccount`.
+
+Ensure the controller can reach the Compute Engine API and has the existing `compute.projects.get` permission, or set `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` (Helm: `controller.settings.defaultNodepoolServiceAccount`) to skip this lookup. NodeClass-level service accounts still take precedence. No new IAM permission is required.
+
 ### New IAM permission required for resource manager tags: `compute.instances.createTagBinding`
 
 Setting the new `GCENodeClass.spec.resourceManagerTags` field requires the controller's service account to have `compute.instances.createTagBinding` on the project, which is now included in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). If you created the `karpenter_controller` custom role from an earlier version of that file, update it with `gcloud iam roles update` before you set `resourceManagerTags`; without it, instance creation fails for that NodeClass. The service account also needs `roles/resourcemanager.tagUser` on the tag values, their tag key, or a parent resource. No action is required if you don't use `resourceManagerTags`. See [Resource manager tags](docs/examples/networking.md#resource-manager-tags).

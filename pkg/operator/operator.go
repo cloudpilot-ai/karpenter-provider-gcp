@@ -127,11 +127,10 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	imageProvider := imagefamily.NewDefaultProvider(computeService, versionProvider, gkeProvider)
 
 	projectID := options.FromContext(ctx).ProjectID
-	computeDefaultSA := ""
-	if proj, err := computeService.Projects.Get(projectID).Context(ctx).Do(); err != nil {
-		log.FromContext(ctx).Error(err, "failed to get Compute Engine default service account; nodes without an explicit serviceAccount will fail to provision")
-	} else {
-		computeDefaultSA = proj.DefaultServiceAccount
+	computeDefaultSA, err := getComputeDefaultServiceAccount(ctx, computeService, projectID, options.FromContext(ctx).NodePoolServiceAccount)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to get Compute Engine default service account")
+		os.Exit(1)
 	}
 
 	subnetClient, err := computeapi.NewSubnetworksRESTClient(ctx)
@@ -170,6 +169,17 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		SubnetProvider:            subnetProvider,
 		AuthOptions:               &auth,
 	}
+}
+
+func getComputeDefaultServiceAccount(ctx context.Context, computeService *compute.Service, projectID, configuredAccount string) (string, error) {
+	if configuredAccount != "" {
+		return "", nil
+	}
+	project, err := computeService.Projects.Get(projectID).Context(ctx).Do()
+	if err != nil {
+		return "", err
+	}
+	return project.DefaultServiceAccount, nil
 }
 
 func determineRegion(ctx context.Context, projectID, location string) (string, error) {
