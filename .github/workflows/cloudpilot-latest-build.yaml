@@ -6,13 +6,10 @@ on:
 
 jobs:
   latest-image-build-publish:
-    name: Image publish
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    name:  Image publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,39 +35,7 @@ jobs:
 
       - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: v3.1.3
-
-      - name: Build, publish, and sign image
-        id: image
+      - name: build and publish image
         run: |
           export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
-          IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
-            --tags latest --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms")
-          [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]] || {
-            echo 'Expected exactly one digest-qualified controller image from ko build' >&2
-            exit 1
-          }
-          # Public ECR: retain digest-derived .sig tags rather than OCI 1.1 referrers.
-          cosign sign --yes --new-bundle-format=false --use-signing-config=false \
-            --registry-referrers-mode=legacy "$IMAGE"
-          cosign verify --new-bundle-format=false --experimental-oci11=false \
-            --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
-          echo "digest=${IMAGE##*@}" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$IMAGE" > "$RUNNER_TEMP/sboms/image-reference.txt"
-
-      - name: Attest image build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-name: public.ecr.aws/cloudpilotai/gcp/karpenter
-          subject-digest: ${{ steps.image.outputs.digest }}
-          push-to-registry: false
-
-      - name: Retain SPDX SBOMs
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: latest-image-sboms
-          path: ${{ runner.temp }}/sboms/
-          if-no-files-found: error
+          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags latest
