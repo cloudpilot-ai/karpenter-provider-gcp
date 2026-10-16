@@ -155,6 +155,62 @@ helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
 
 > **Warning:** Service account keys are long-lived credentials. Prefer Workload Identity wherever possible.
 
+## Verify release artifacts (optional)
+
+Before you install a release, you can confirm that the controller image and Helm charts were built and published by this project's release workflow. Release images are signed with [Cosign](https://docs.sigstore.dev/cosign/) keyless signing, Helm charts are signed with a PGP key, and both have GitHub build provenance attestations. Earlier releases published before signing was introduced are unsigned.
+
+Set the release you want to verify:
+
+```sh
+export VERSION=<release-tag>   # e.g. v0.7.0
+```
+
+### Controller image
+
+Verify the image signature with Cosign. The certificate identity pins the signature to the release workflow run for that tag:
+
+```sh
+cosign verify public.ecr.aws/cloudpilotai/gcp/karpenter:${VERSION} \
+  --new-bundle-format=false --experimental-oci11=false \
+  --certificate-identity "https://github.com/cloudpilot-ai/karpenter-provider-gcp/.github/workflows/release-build.yaml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To check the build provenance attestation instead, use the GitHub CLI:
+
+```sh
+gh attestation verify oci://public.ecr.aws/cloudpilotai/gcp/karpenter:${VERSION} \
+  --repo cloudpilot-ai/karpenter-provider-gcp
+```
+
+### Helm charts
+
+Chart versions omit the leading `v` from the release tag. The chart repository publishes `signed-charts.txt`, which lists each signed chart archive and the fingerprint of the key that signed it, and the public keys under `keys/`. Download the key and convert it to the keyring format Helm reads:
+
+```sh
+export CHART_VERSION=${VERSION#v}
+export CHARTS_URL=https://cloudpilot-ai.github.io/karpenter-provider-gcp
+
+# Look up the signing key fingerprint for this chart version
+FINGERPRINT=$(curl -fsSL "${CHARTS_URL}/signed-charts.txt" | awk -v a="karpenter-${CHART_VERSION}.tgz" '$1 == a {print $2}')
+curl -fsSL "${CHARTS_URL}/keys/${FINGERPRINT}.asc" | gpg --dearmor > karpenter-gcp.gpg
+```
+
+Pull and verify both charts:
+
+```sh
+helm pull karpenter-provider-gcp/karpenter-crd --version "${CHART_VERSION}" --verify --keyring karpenter-gcp.gpg
+helm pull karpenter-provider-gcp/karpenter --version "${CHART_VERSION}" --verify --keyring karpenter-gcp.gpg
+```
+
+You can also pass `--verify --keyring karpenter-gcp.gpg` to the `helm upgrade --install` commands in [Step 2](#step-2--install-karpenter-with-helm) so Helm refuses to install a chart whose signature does not match.
+
+To check a downloaded chart's build provenance attestation:
+
+```sh
+gh attestation verify "karpenter-${CHART_VERSION}.tgz" --repo cloudpilot-ai/karpenter-provider-gcp
+```
+
 ## Upgrading
 
 See the [upgrade guide](upgrading.md).
