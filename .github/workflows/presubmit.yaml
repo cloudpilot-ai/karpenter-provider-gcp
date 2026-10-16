@@ -34,9 +34,5 @@ jobs:
           version: v2.13.1
           only-new-issues: true
 
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
-        with:
-          version: v4.3.0
-
       - name: Verify
         run: make ci

@@ -120,14 +120,17 @@ repository (or the existing `github-pages` environment):
 
 | Setting | Purpose |
 | --- | --- |
-| Secret `HELM_SIGNING_KEY_BASE64` | Base64-encoded, exported OpenPGP private signing key |
+| Secret `HELM_SIGNING_KEY_BASE64` | Base64-encoded ASCII-armored OpenPGP private signing key |
 | Secret `HELM_SIGNING_KEY_PASSPHRASE` | Nonempty passphrase protecting that key |
 | Variable `HELM_SIGNING_KEY_FINGERPRINT` | Uppercase, full 40-character primary fingerprint |
 
 Use a dedicated, passphrase-protected OpenPGP v4 signing key compatible with Helm
-(e.g. RSA). The helper validates the fingerprint, exports only that primary key,
-and gives Helm its actual UID selector. An isolated temporary keyring is removed
-on exit; no private key or passphrase is placed in the Pages directory.
+(e.g. RSA). Export it with `gpg --armor --export-secret-keys <fingerprint>` before
+base64 encoding. `crazy-max/ghaction-import-gpg` imports the key and removes it in
+its post-job cleanup. The packaging step checks the imported fingerprint, exports
+only that primary key into a temporary legacy keyring, and gives Helm its UID
+selector. Temporary exports are removed on exit; private keys and passphrases
+never enter the Pages directory.
 
 Publish the fingerprint through a trusted channel. Once the identity is chosen,
 maintainers can add the following real metadata to both charts for Artifact Hub's
@@ -150,15 +153,16 @@ flow; existing AWS publishing credentials remain unchanged.
   merging/enabling release tags; this change does not provision them.
 - The publishing jobs need `id-token: write`; GitHub build attestations also need
   `attestations: write`. The repository must support GitHub artifact attestations.
-- Local tests cover encrypted-key chart signing and restoration, strict image
-  references, and verification command construction. They do **not** validate
-  GitHub OIDC issuance, public Sigstore service availability, or Public ECR write
-  permissions. Validate these on an explicitly authorized upstream release.
+- Local validation does **not** establish GitHub OIDC issuance, public Sigstore
+  service availability, or Public ECR write permissions. Validate these on an
+  explicitly authorized upstream release.
 - Cosign's pinned legacy mode avoids depending on OCI 1.1 referrers, but still
   requires ECR permission to publish digest-derived signature tags and continued
   public Sigstore support for the legacy signature format.
 - Image and chart jobs are not atomic: an image can publish even if chart signing
   fails. Pages jobs are serialized to avoid concurrent snapshot replacement.
 
-Run the offline helper tests with `make signing-test` (Bash, Python 3, GnuPG, and
-Helm required). CI tests against the same Helm 4 version used for publication.
+Signing and restoration live directly in the publishing workflows. There are no
+additional Make targets or helper scripts. Use `actionlint` to validate workflow
+changes; exercise Helm packaging and restoration locally with disposable keys
+and a local HTTP server before changing their behavior.

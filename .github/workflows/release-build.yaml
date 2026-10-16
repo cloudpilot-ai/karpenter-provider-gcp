@@ -57,7 +57,17 @@ jobs:
           export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
           IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
             --tags "$IMAGE_TAG" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms")
-          bash hack/signing/sign-image.sh "$IMAGE"
+          [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]] || {
+            echo 'Expected exactly one digest-qualified controller image from ko build' >&2
+            exit 1
+          }
+          # Public ECR: retain digest-derived .sig tags rather than OCI 1.1 referrers.
+          cosign sign --yes --new-bundle-format=false --use-signing-config=false \
+            --registry-referrers-mode=legacy "$IMAGE"
+          cosign verify --new-bundle-format=false --experimental-oci11=false \
+            --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+          echo "digest=${IMAGE##*@}" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$IMAGE" > "$RUNNER_TEMP/sboms/image-reference.txt"
 
       - name: Attest image build provenance
@@ -121,12 +131,40 @@ jobs:
           # charts/ is not committed; helm package fails without the pinned subchart archives
           helm dependency build charts/karpenter
 
+      - name: Import chart signing key
+        id: gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.HELM_SIGNING_KEY_BASE64 }}
+          passphrase: ${{ secrets.HELM_SIGNING_KEY_PASSPHRASE }}
+
       - name: Package and sign charts
         env:
-          HELM_SIGNING_KEY_BASE64: ${{ secrets.HELM_SIGNING_KEY_BASE64 }}
           HELM_SIGNING_KEY_PASSPHRASE: ${{ secrets.HELM_SIGNING_KEY_PASSPHRASE }}
           HELM_SIGNING_KEY_FINGERPRINT: ${{ vars.HELM_SIGNING_KEY_FINGERPRINT }}
-        run: bash hack/signing/package-charts.sh "$tag_semver" "$tag" charts/
+          IMPORTED_FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}
+          KEY_NAME: ${{ steps.gpg.outputs.name }}
+        run: |
+          set +x
+          : "${HELM_SIGNING_KEY_PASSPHRASE:?passphrase required}"
+          [[ "$HELM_SIGNING_KEY_FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]
+          [[ "$IMPORTED_FINGERPRINT" == "$HELM_SIGNING_KEY_FINGERPRINT" ]]
+          KEYRING_DIR=$(mktemp -d)
+          trap 'rm -rf "$KEYRING_DIR"' EXIT
+          printf '%s' "$HELM_SIGNING_KEY_PASSPHRASE" > "$KEYRING_DIR/passphrase"
+          # Helm needs a legacy keyring and selects the key by UID, not fingerprint.
+          gpg --batch --pinentry-mode loopback --passphrase-file "$KEYRING_DIR/passphrase" \
+            --export-secret-keys "$IMPORTED_FINGERPRINT" > "$KEYRING_DIR/secring.gpg"
+          gpg --batch --export "$IMPORTED_FINGERPRINT" > "$KEYRING_DIR/pubring.gpg"
+          mkdir -p charts/keys
+          gpg --batch --armor --export "$IMPORTED_FINGERPRINT" > "charts/keys/$IMPORTED_FINGERPRINT.asc"
+          for CHART in karpenter karpenter-crd; do
+            helm package "charts/$CHART" --version "$tag_semver" --app-version "$tag" \
+              --sign --key "$KEY_NAME" --keyring "$KEYRING_DIR/secring.gpg" \
+              --passphrase-file "$KEYRING_DIR/passphrase" --destination charts/
+            helm verify "charts/$CHART-$tag_semver.tgz" --keyring "$KEYRING_DIR/pubring.gpg"
+            printf '%s %s\n' "$CHART-$tag_semver.tgz" "$IMPORTED_FINGERPRINT" >> charts/signed-charts.txt
+          done
 
       - name: Attest chart build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -147,38 +185,64 @@ jobs:
       - name: Restore previously published chart versions
         run: |
           PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          [ ! -f /tmp/merge-index.yaml ] && exit 0
+          if [ -f /tmp/merge-index.yaml ]; then
+            helm repo add karpenter-gcp "${PAGES_URL}" --force-update
 
-          helm repo add karpenter-gcp "${PAGES_URL}" --force-update
+            for CHART in karpenter karpenter-crd; do
+              VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json 2>/dev/null | jq -r '.[].version' || true)
+              [ -z "${VERSIONS}" ] && continue
 
-          for CHART in karpenter karpenter-crd; do
-            VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json 2>/dev/null | jq -r '.[].version' || true)
-            [ -z "${VERSIONS}" ] && continue
+              echo "${VERSIONS}" | while read VERSION; do
+                if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
+                  echo "Pulling ${CHART} ${VERSION}..."
+                  helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination charts/ || \
+                    echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
+                fi
+              done
 
-            echo "${VERSIONS}" | while read VERSION; do
-              if [ ! -f "charts/${CHART}-${VERSION}.tgz" ]; then
-                echo "Pulling ${CHART} ${VERSION}..."
-                helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination charts/ || \
-                  echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
+              # Fail rather than deploy an incomplete repo
+              ACTUAL=0
+              for V in ${VERSIONS}; do
+                [ -f "charts/${CHART}-${V}.tgz" ] && ACTUAL=$((ACTUAL + 1))
+              done
+              EXPECTED=$(echo "${VERSIONS}" | grep -c .)
+              if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
+                echo "ERROR: Expected ${EXPECTED} ${CHART} archives but only have ${ACTUAL}. Aborting."
+                exit 1
               fi
             done
+          fi
 
-            # Fail rather than deploy an incomplete repo
-            ACTUAL=0
-            for V in ${VERSIONS}; do
-              [ -f "charts/${CHART}-${V}.tgz" ] && ACTUAL=$((ACTUAL + 1))
-            done
-            EXPECTED=$(echo "${VERSIONS}" | grep -c .)
-            if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
-              echo "ERROR: Expected ${EXPECTED} ${CHART} archives but only have ${ACTUAL}. Aborting."
-              exit 1
+          PREVIOUS="$RUNNER_TEMP/previous-signed-charts.txt"
+          HTTP_CODE=$(curl -sSL -o "$PREVIOUS" -w '%{http_code}' "$PAGES_URL/signed-charts.txt")
+          case "$HTTP_CODE" in
+            200) ;;
+            404) : > "$PREVIOUS" ;;
+            *) echo "Failed to fetch signed chart history: HTTP $HTTP_CODE" >&2; exit 1 ;;
+          esac
+          while read -r ARCHIVE FINGERPRINT; do
+            [[ "$ARCHIVE" =~ ^karpenter(-crd)?-[0-9][A-Za-z0-9.+-]*\.tgz$ ]]
+            [[ "$FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]
+            # A known-signed version must never silently become unsigned.
+            test -f "charts/$ARCHIVE"
+            if [ ! -f "charts/$ARCHIVE.prov" ]; then
+              curl --fail -sSL "$PAGES_URL/$ARCHIVE.prov" -o "charts/$ARCHIVE.prov"
             fi
+            if [ ! -f "charts/keys/$FINGERPRINT.asc" ]; then
+              curl --fail -sSL "$PAGES_URL/keys/$FINGERPRINT.asc" -o "charts/keys/$FINGERPRINT.asc"
+            fi
+          done < "$PREVIOUS"
+          for ARCHIVE in charts/*.tgz; do
+            [ -f "$ARCHIVE.prov" ] && continue
+            HTTP_CODE=$(curl -sSL -o "$ARCHIVE.prov" -w '%{http_code}' "$PAGES_URL/$(basename "$ARCHIVE").prov")
+            case "$HTTP_CODE" in
+              200) ;;
+              404) rm "$ARCHIVE.prov" ;; # Old unsigned chart, absent from the signed history.
+              *) echo "Failed to restore $ARCHIVE.prov: HTTP $HTTP_CODE" >&2; exit 1 ;;
+            esac
           done
-
-      - name: Restore historical signatures and public keys
-        env:
-          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-        run: python3 hack/signing/restore-provenance.py "$PAGES_URL" charts/
+          sort -u "$PREVIOUS" charts/signed-charts.txt > "$RUNNER_TEMP/signed-charts.txt"
+          mv "$RUNNER_TEMP/signed-charts.txt" charts/signed-charts.txt
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
