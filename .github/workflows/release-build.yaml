@@ -226,12 +226,13 @@ jobs:
         env:
           CHARTS_DIR: ${{ steps.signing.outputs.charts }}
         run: |
+          set -euo pipefail
           PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           if [ -f /tmp/merge-index.yaml ]; then
             helm repo add karpenter-gcp "${PAGES_URL}" --force-update
 
             for CHART in karpenter karpenter-crd; do
-              VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json 2>/dev/null | jq -r '.[].version' || true)
+              VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json | jq -r '.[].version')
               [ -z "${VERSIONS}" ] && continue
 
               echo "${VERSIONS}" | while read VERSION; do
