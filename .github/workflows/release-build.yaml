@@ -217,6 +217,7 @@ jobs:
           FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}
         run: |
           mkdir -p "$CHARTS_DIR/keys"
+          cp charts/artifacthub-repo.yml "$CHARTS_DIR/"
           gpg --batch --armor --export "$FINGERPRINT" > "$CHARTS_DIR/keys/$FINGERPRINT.asc"
           printf '%s %s\n' "karpenter-$tag_semver.tgz" "$FINGERPRINT" > "$CHARTS_DIR/signed-charts.txt"
           printf '%s %s\n' "karpenter-crd-$tag_semver.tgz" "$FINGERPRINT" >> "$CHARTS_DIR/signed-charts.txt"
