@@ -81,7 +81,11 @@ Or set it per-NodeClass via `GCENodeClass.spec.serviceAccount: <email>`.
 export PROJECT_ID=<your-project-id>
 export CLUSTER_NAME=<your-cluster-name>
 export REGION=<your-region-or-zone>   # e.g. us-central1 or us-central1-f
+```
 
+To verify signatures and build provenance first, follow [Verify release artifacts](#verify-release-artifacts-optional) instead of the quick installation commands below.
+
+```sh
 helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
 helm repo update
 
@@ -154,6 +158,93 @@ helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
 ```
 
 > **Warning:** Service account keys are long-lived credentials. Prefer Workload Identity wherever possible.
+
+## Verify release artifacts (optional)
+
+You can verify release artifacts before installation. Controller images use keyless Cosign signatures; Helm charts use OpenPGP provenance. Both have GitHub build attestations. Releases published before signing was introduced are unsigned.
+
+These examples require [Cosign v3.1.3](https://github.com/sigstore/cosign/releases/tag/v3.1.3), [crane](https://github.com/google/go-containerregistry/tree/main/cmd/crane), GnuPG, Helm, and an authenticated [GitHub CLI](https://cli.github.com/). The Cosign flags select the legacy signature format used by this repository. Stop if any signature or attestation check fails.
+
+Replace `vX.Y.Z` with a signed release tag, including its leading `v`:
+
+```sh
+export VERSION="vX.Y.Z"
+export CHART_VERSION="${VERSION#v}"
+export REPOSITORY="cloudpilot-ai/karpenter-provider-gcp"
+export RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release-build.yaml"
+```
+
+### Verify the controller image
+
+Resolve the tag once and verify that immutable image digest against the release workflow and tag:
+
+```sh
+export IMAGE_REPOSITORY="public.ecr.aws/cloudpilotai/gcp/karpenter"
+IMAGE_DIGEST=$(crane digest "${IMAGE_REPOSITORY}:${VERSION}")
+IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+cosign verify "${IMAGE}" \
+  --new-bundle-format=false --experimental-oci11=false \
+  --certificate-identity "https://github.com/${RELEASE_WORKFLOW}@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+### Verify the Helm charts
+
+The project's signing-key fingerprint is `7D575660AC2C6650E263439577A23E34D5FE007A`. Trust this reviewed fingerprint, not a fingerprint supplied by an unverified chart repository. Import the downloaded public material into a temporary GnuPG home, then export **only** that trusted key for Helm:
+
+```sh
+export CHARTS_URL="https://cloudpilot-ai.github.io/karpenter-provider-gcp"
+export FINGERPRINT="7D575660AC2C6650E263439577A23E34D5FE007A"
+curl --fail --location "${CHARTS_URL}/keys/${FINGERPRINT}.asc" --output karpenter-signing-key.asc
+KEY_HOME=$(mktemp -d)
+gpg --homedir "${KEY_HOME}" --batch --import karpenter-signing-key.asc
+gpg --homedir "${KEY_HOME}" --batch --export "${FINGERPRINT}" > karpenter-signing-keyring.gpg
+rm -rf "${KEY_HOME}"
+
+helm repo add karpenter-provider-gcp "${CHARTS_URL}"
+helm repo update karpenter-provider-gcp
+helm pull karpenter-provider-gcp/karpenter-crd --version "${CHART_VERSION}" --verify --keyring karpenter-signing-keyring.gpg
+helm pull karpenter-provider-gcp/karpenter --version "${CHART_VERSION}" --verify --keyring karpenter-signing-keyring.gpg
+```
+
+Stop if either verification fails. For a release signed by another key, obtain its trusted fingerprint from the maintainers before changing the keyring; do not automatically trust keys listed in `signed-charts.txt`.
+
+### Verify build provenance
+
+Check that the same image digest and downloaded chart archives were built from the selected tag by the release workflow. GitHub CLI authentication is required:
+
+```sh
+gh attestation verify "oci://${IMAGE}" --repo "${REPOSITORY}" \
+  --signer-workflow "${RELEASE_WORKFLOW}" --source-ref "refs/tags/${VERSION}"
+gh attestation verify "karpenter-crd-${CHART_VERSION}.tgz" --repo "${REPOSITORY}" \
+  --signer-workflow "${RELEASE_WORKFLOW}" --source-ref "refs/tags/${VERSION}"
+gh attestation verify "karpenter-${CHART_VERSION}.tgz" --repo "${REPOSITORY}" \
+  --signer-workflow "${RELEASE_WORKFLOW}" --source-ref "refs/tags/${VERSION}"
+```
+
+Build provenance identifies the source and workflow; it does not establish reproducibility or absence of vulnerabilities.
+
+### Install the verified artifacts
+
+Use the verified local archives rather than downloading the charts again, and pin the controller to the verified image digest. With the cluster variables and Workload Identity settings from Steps 1–2:
+
+```sh
+helm upgrade --install karpenter-crd "./karpenter-crd-${CHART_VERSION}.tgz" \
+  --verify --keyring karpenter-signing-keyring.gpg
+helm upgrade --install karpenter "./karpenter-${CHART_VERSION}.tgz" \
+  --namespace karpenter-system --create-namespace \
+  --verify --keyring karpenter-signing-keyring.gpg \
+  --set "controller.settings.projectID=${PROJECT_ID}" \
+  --set "controller.settings.clusterLocation=${REGION}" \
+  --set "controller.settings.clusterName=${CLUSTER_NAME}" \
+  --set "credentials.enabled=false" \
+  --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=$GSA_NAME@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --set-string "controller.image.repository=${IMAGE_REPOSITORY}" \
+  --set-string "controller.image.tag=${VERSION}@${IMAGE_DIGEST}" \
+  --wait
+```
+
+Keep any additional values from Step 2, including the dedicated node service account setting when configured. The image reference includes both the release tag and digest (`repository:tag@sha256:...`); the digest determines which image is pulled. Continue with [Step 3 — Bind Workload Identity](#step-3--bind-workload-identity).
 
 ## Upgrading
 
