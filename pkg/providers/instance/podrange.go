@@ -19,6 +19,7 @@ package instance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
@@ -86,23 +88,34 @@ func rejectedPodRangeMessage(message, rangeName string) bool {
 		(strings.Contains(lower, "not found") || strings.Contains(lower, "not valid") || strings.Contains(lower, "does not exist"))
 }
 
-func setPrimaryAliasRange(instance *compute.Instance, rangeName string) {
-	if instance == nil || len(instance.NetworkInterfaces) == 0 {
-		return
+func (p *DefaultProvider) setupPodNetwork(cluster *containerv1.Cluster, nodeClass *v1alpha1.GCENodeClass, target *metadata.InstanceMetadata, podRange string) ([]*compute.NetworkInterface, error) {
+	interfaces := p.setupNetworkInterfaces(cluster, nodeClass)
+	if cluster.NetworkConfig == nil {
+		return interfaces, nil
 	}
-	iface := instance.NetworkInterfaces[0]
-	if len(iface.AliasIpRanges) == 0 {
-		return
+	primary := interfaces[0]
+	primary.AliasIpRanges[0].SubnetworkRangeName = podRange
+	if !gke.IsMultiNetworkingEnabled(cluster) {
+		return interfaces, nil
 	}
-	iface.AliasIpRanges[0].SubnetworkRangeName = rangeName
+	subnetName := lastPathSegment(primary.Subnetwork)
+	if subnetName == "" || podRange == "" {
+		return nil, fmt.Errorf("multi-networking requires a resolved primary subnet and pod secondary range")
+	}
+	// IPAM needs the target network identity, not the bootstrap pool's range.
+	for key, value := range map[string]string{defaultPodSubnetLabel: subnetName, defaultPodRangeLabel: podRange} {
+		target.SetKubeLabel(key, value)
+		target.SetRegistrationNodeLabel(key, value)
+	}
+	return interfaces, nil
 }
 
-func (p *DefaultProvider) invalidatePodRangeCaches(instance *compute.Instance, discovery bool) {
+func (p *DefaultProvider) invalidatePodRangeCaches(instance *compute.Instance, discovery, rejected bool) {
 	if len(instance.NetworkInterfaces) > 0 && instance.NetworkInterfaces[0] != nil {
 		iface := instance.NetworkInterfaces[0]
 		p.subnetProvider.Invalidate(iface.Network, iface.Subnetwork)
 	}
-	if discovery {
+	if discovery && rejected {
 		p.gkeProvider.InvalidateClusterConfig()
 	}
 }

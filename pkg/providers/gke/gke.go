@@ -44,6 +44,11 @@ const (
 	serverConfigCacheKey = "server-config"
 )
 
+// IsMultiNetworkingEnabled interprets the networking capability in the fetched cluster config.
+func IsMultiNetworkingEnabled(cluster *containerv1.Cluster) bool {
+	return cluster != nil && cluster.NetworkConfig != nil && cluster.NetworkConfig.EnableMultiNetworking
+}
+
 type Provider interface {
 	ResolveClusterZones(ctx context.Context) ([]string, error)
 	GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error)

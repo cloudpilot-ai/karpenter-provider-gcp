@@ -548,22 +548,17 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		}
 	}
 
-	instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount)
-	if err != nil {
-		return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
-	}
-	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), freeIPs)
-	discoveredRanges := len(nodeClass.PodSubnetRangeNames()) == 0
-	retryable, err := p.insertInstanceWithPodRanges(ctx, instance, instanceType, zone, capacityType, rangeNames, discoveredRanges)
-	if err != nil {
-		return nil, "", retryable, err
-	}
-	return instance, zone, false, nil
+	return p.createInstanceWithPodRanges(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount, freeIPs)
 }
 
-func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, instance *compute.Instance, instanceType *cloudprovider.InstanceType, zone, capacityType string, rangeNames []string, discoveredRanges bool) (bool, error) {
+func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, freeIPs map[string]int64) (*compute.Instance, string, bool, error) {
+	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), freeIPs)
+	discoveredRanges := len(nodeClass.PodSubnetRangeNames()) == 0
 	for i, rangeName := range rangeNames {
-		setPrimaryAliasRange(instance, rangeName)
+		instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount, rangeName)
+		if err != nil {
+			return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
+		}
 
 		var details insufficientCapacityDetails
 		var insufficient, rejected bool
@@ -580,12 +575,12 @@ func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, insta
 			}
 		}
 		if err == nil {
-			return false, nil
+			return instance, zone, false, nil
 		}
 
 		exhausted := isIPSpaceExhausted(details)
 		if exhausted || rejected {
-			p.invalidatePodRangeCaches(instance, discoveredRanges && rejected)
+			p.invalidatePodRangeCaches(instance, discoveredRanges, rejected)
 		}
 		if exhausted && i < len(rangeNames)-1 {
 			log.FromContext(ctx).Info("pod range IP space exhausted, trying next range",
@@ -600,10 +595,11 @@ func (p *DefaultProvider) insertInstanceWithPodRanges(ctx context.Context, insta
 			retryable = !exhausted
 		}
 		log.FromContext(ctx).Error(err, failureMessage, "instanceType", instanceType.Name, "zone", zone)
-		return handleResourceNotReadyError(err, retryable)
+		retryable, err = handleResourceNotReadyError(err, retryable)
+		return nil, "", retryable, err
 	}
 
-	return true, fmt.Errorf("no pod secondary ranges available")
+	return nil, "", true, fmt.Errorf("no pod secondary ranges available")
 }
 
 func handleResourceNotReadyError(err error, retryable bool) (bool, error) {
@@ -910,7 +906,7 @@ func (p *DefaultProvider) scratchDisk(zone string) *compute.AttachedDisk {
 	}
 }
 
-func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int) (*compute.Instance, error) {
+func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, podRange string) (*compute.Instance, error) {
 	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone, ssdCount)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
@@ -922,6 +918,10 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount)
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
+	}
+	interfaces, err := p.setupPodNetwork(clusterConfig, nodeClass, instanceMetadata, podRange)
+	if err != nil {
+		return nil, err
 	}
 	computeMetadata, err := instanceMetadata.ToComputeMetadata()
 	if err != nil {
@@ -937,7 +937,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		Name:              instanceName,
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
-		NetworkInterfaces: p.setupNetworkInterfaces(clusterConfig, nodeClass),
+		NetworkInterfaces: interfaces,
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          computeMetadata,
 		Labels:            instanceMetadata.ToComputeInstanceLabels(),
@@ -973,9 +973,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
 
-	if policy := onHostMaintenancePolicy(instanceType, capacityType, mt); policy != "" {
-		instance.Scheduling.OnHostMaintenance = policy
-	}
+	instance.Scheduling.OnHostMaintenance = onHostMaintenancePolicy(instanceType, capacityType, mt)
 
 	// Configure confidential instance
 	p.configureConfidentialInstance(instance, nodeClass)
