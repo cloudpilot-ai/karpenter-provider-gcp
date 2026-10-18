@@ -187,7 +187,7 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 	if len(mt.GetAccelerators()) > 0 {
 		gpuName := extractGPUName(mt)
 		requirements.Get(v1alpha1.LabelInstanceGPUName).Insert(gpuName)
-		requirements.Get(v1alpha1.LabelInstanceGPUCount).Insert(fmt.Sprintf("%d", len(mt.GetAccelerators())))
+		requirements.Get(v1alpha1.LabelInstanceGPUCount).Insert(fmt.Sprintf("%d", gpuCount(mt)))
 		// LabelGKEAccelerator is required by the NVIDIA device plugin DaemonSet's nodeAffinity;
 		// without it the device plugin will not schedule onto this node.
 		requirements.Get(v1alpha1.LabelGKEAccelerator).Insert(gpuName)
@@ -219,6 +219,14 @@ func localSSDCountRequirement(ssdCount int) *scheduling.Requirement {
 		corev1.NodeSelectorOpIn,
 		fmt.Sprintf("%d", ssdCount),
 	)
+}
+
+func gpuCount(mt *computepb.MachineType) int64 {
+	var count int64
+	for _, accelerator := range mt.GetAccelerators() {
+		count += int64(accelerator.GetGuestAcceleratorCount())
+	}
+	return count
 }
 
 func extractGPUName(mt *computepb.MachineType) string {
@@ -254,7 +262,7 @@ func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *
 		corev1.ResourceMemory:           *memory(ctx, mt),
 		corev1.ResourcePods:             *resource.NewQuantity(maxPods, resource.DecimalSI),
 		corev1.ResourceEphemeralStorage: *resource.NewQuantity(totalStorageBytes, resource.BinarySI),
-		v1alpha1.ResourceNVIDIAGPU:      *resource.NewQuantity(int64(len(mt.GetAccelerators())), resource.DecimalSI),
+		v1alpha1.ResourceNVIDIAGPU:      *resource.NewQuantity(gpuCount(mt), resource.DecimalSI),
 	}
 	return resourceList
 }
