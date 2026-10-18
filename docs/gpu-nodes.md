@@ -6,6 +6,16 @@ Karpenter can provision GPU-equipped GKE nodes for workloads that request `nvidi
 
 **Built-in GPU families** — `a2`, `a3`, `g2`, `a4`. These machine families have NVIDIA accelerators integrated into the machine type. Select them via `karpenter.k8s.gcp/instance-gpu-count`.
 
+The `karpenter.k8s.gcp/instance-gpu-count` label and the `nvidia.com/gpu` capacity of each instance type report the number of GPUs on the machine type. For example, `g2-standard-96` reports `8`. Use `operator: Exists` to allow any GPU machine type, or `operator: In` to require an exact GPU count:
+
+```yaml
+- key: karpenter.k8s.gcp/instance-gpu-count
+  operator: In
+  values: ["1"]
+```
+
+> **Note:** Earlier releases reported a count of `1` for every built-in GPU machine type. After upgrading, a requirement such as `instance-gpu-count In ["1"]` matches only single-GPU machine types, so Karpenter no longer launches multi-GPU machines such as `g2-standard-96` for it.
+
 > **Note:** Attached GPU instances (e.g. `n1-standard-*` + NVIDIA T4/P100/V100 accelerators) are not yet fully supported. Tracked in [#84](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/84).
 
 ## GKE GPU software stack labels
