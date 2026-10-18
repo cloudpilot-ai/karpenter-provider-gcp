@@ -40,6 +40,33 @@ kubectl describe node <karpenter-node-name>
 
 If the node never becomes `Ready`, check kubelet logs on the instance (via serial port or SSH if the node has a public IP or IAP access is configured).
 
+### Registered Node has no PodCIDR
+
+If a registered Node is `NotReady` with `NetworkPluginNotReady`, check whether `spec.podCIDR` is populated. Repeated `CIDRNotAvailable` Events from `cidrAllocator` point to Pod CIDR assignment rather than a VM creation failure:
+
+```sh
+kubectl describe node <node>
+kubectl get node <node> -o jsonpath='{.spec.podCIDRs}{"\n"}'
+kubectl get node <node> --show-labels
+gcloud compute instances describe <vm> --project=<project> --zone=<zone> \
+  --format='yaml(networkInterfaces.subnetwork,networkInterfaces.aliasIpRanges)'
+```
+
+Compare the VM's primary alias CIDR with the Node's PodCIDRs. If the alias exists but the Node has no PodCIDR, preserve these outputs and Node Events when investigating bootstrap or IPAM failures. Do not manually assign Node PodCIDRs.
+
+For multi-networking clusters, also inspect the default Network and its GKENetworkParamSet:
+
+```sh
+kubectl get networks.networking.gke.io default -o yaml
+kubectl get gkenetworkparamsets.networking.gke.io <parametersRef-name> -o yaml
+```
+
+Use the default Network's `spec.parametersRef.name` for the last command. In this mode, the `cloud.google.com/gke-np-default-subnet` and `cloud.google.com/gke-np-default-pod-range` labels should identify the primary interface's actual subnet and range as bare names, not URLs or CIDRs. Ordinary single-network nodes do not need these labels.
+
+GKENetworkParamSet membership is dynamic; a missing range entry alone does not prove that the range is unusable. Do not patch GKE-managed networking objects.
+
+Controller bootstrap changes apply to newly created VMs, not existing nodes. Establish the cause before replacing affected nodes through your normal lifecycle procedure.
+
 ---
 
 ## Controller exits at startup
