@@ -35,7 +35,7 @@ var _ = BeforeEach(func() { env = environment.Current() })
 var _ = Describe("GPU Node", Label("suite:gpu"), func() {
 	// This single It covers all GPU provisioning invariants on one node to avoid
 	// spinning up multiple expensive GPU instances.
-	It("should provision a GPU node with correct taint, labels, and allocatable GPU resource", func(ctx SpecContext) {
+	It("should provision a GPU node with correct taint and labels and run two pods using GPU time-sharing", func(ctx SpecContext) {
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "gpu-node")
 		suffix := environment.UniqueSuffix()
 		name := prefix + "-" + suffix
@@ -48,7 +48,10 @@ var _ = Describe("GPU Node", Label("suite:gpu"), func() {
 			env.DeleteNodeClass(cleanupCtx, name)
 		})
 
-		env.CreateNodeClassWithAutoGPUTaint(ctx, name, "default")
+		env.CreateNodeClassWithAutoGPUTaint(ctx, name, "default", &gcpv1alpha1.GPUSharingConfig{
+			Strategy:               gcpv1alpha1.GPUSharingStrategyTimeSharing,
+			MaxSharedClientsPerGPU: 2,
+		})
 		env.WaitForNodeClassReady(ctx, name)
 
 		env.CreateNodePool(ctx, name, name, environment.TestCase{
@@ -61,14 +64,44 @@ var _ = Describe("GPU Node", Label("suite:gpu"), func() {
 		})
 		env.WaitForNodePoolReady(ctx, name)
 
-		env.CreateDeploymentOnGPUNode(ctx, name, name, name)
+		sharingLabels := map[string]string{
+			gcpv1alpha1.LabelGKEGPUSharingStrategy:     "time-sharing",
+			gcpv1alpha1.LabelGKEMaxSharedClientsPerGPU: "2",
+		}
+		env.CreateDeploymentOnGPUNode(ctx, name, name, name, 2, sharingLabels)
 		env.WaitForNodeClaimLaunched(ctx, name)
 		env.WaitForNodeClaimInitialized(ctx, name)
 		pod := env.WaitForRunningPod(ctx, name)
 		Expect(pod.Spec.NodeName).NotTo(BeEmpty())
 
+		By("waiting for both shared-GPU pods to be running and ready on the same node")
+		Eventually(func(g Gomega) {
+			pods, err := env.KubeClient.CoreV1().Pods(environment.TestNamespace).List(ctx,
+				metav1.ListOptions{LabelSelector: "app=" + name})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(pods.Items).To(HaveLen(2))
+			for _, sharedPod := range pods.Items {
+				g.Expect(sharedPod.DeletionTimestamp).To(BeNil())
+				g.Expect(sharedPod.Spec.NodeName).To(Equal(pod.Spec.NodeName))
+				g.Expect(sharedPod.Status.Phase).To(Equal(corev1.PodRunning))
+				g.Expect(sharedPod.Status.Conditions).To(ContainElement(And(
+					HaveField("Type", corev1.PodReady),
+					HaveField("Status", corev1.ConditionTrue),
+				)))
+			}
+		}).WithTimeout(environment.ProvisioningTimeout).WithPolling(environment.DefaultPollInterval).Should(Succeed())
+
 		node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
+
+		By("asserting the device plugin advertises two shared GPUs")
+		capacity := node.Status.Capacity["nvidia.com/gpu"]
+		allocatable := node.Status.Allocatable["nvidia.com/gpu"]
+		Expect(capacity.Value()).To(Equal(int64(2)))
+		Expect(allocatable.Value()).To(Equal(int64(2)))
+		for key, value := range sharingLabels {
+			Expect(node.Labels).To(HaveKeyWithValue(key, value))
+		}
 
 		By("asserting autoGPUTaint: node has nvidia.com/gpu=present:NoSchedule taint")
 		var gpuTaint *corev1.Taint
