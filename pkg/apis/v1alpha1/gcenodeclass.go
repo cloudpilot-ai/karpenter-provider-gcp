@@ -148,6 +148,11 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:default=default
 	// +optional
 	GPUDriverVersion string `json:"gpuDriverVersion,omitempty"`
+	// GPUSharingConfig lets multiple containers share each physical GPU.
+	// Mirrors the GKE node pool guest_accelerator.gpu_sharing_config field.
+	// Ignored for non-GPU instance types.
+	// +optional
+	GPUSharingConfig *GPUSharingConfig `json:"gpuSharingConfig,omitempty"`
 	// LocalSsdMode exposes local SSDs as raw devices or kubelet ephemeral storage.
 	// +kubebuilder:default=RawBlock
 	// +optional
@@ -177,6 +182,28 @@ const (
 	// LocalSSDModeEphemeral uses local SSDs for kubelet ephemeral storage.
 	LocalSSDModeEphemeral LocalSSDMode = "Ephemeral"
 )
+
+// GPUSharingStrategy selects how containers share a physical GPU.
+// +kubebuilder:validation:Enum=TimeSharing
+type GPUSharingStrategy string
+
+const (
+	// GPUSharingStrategyTimeSharing time-slices each GPU between containers.
+	GPUSharingStrategyTimeSharing GPUSharingStrategy = "TimeSharing"
+)
+
+// GPUSharingConfig configures GPU sharing on GPU nodes.
+type GPUSharingConfig struct {
+	// Strategy is the GPU sharing strategy.
+	// +required
+	Strategy GPUSharingStrategy `json:"strategy"`
+	// MaxSharedClientsPerGPU is the number of containers that can share one
+	// physical GPU. The node advertises this many nvidia.com/gpu per GPU.
+	// +kubebuilder:validation:Minimum=2
+	// +kubebuilder:validation:Maximum=48
+	// +required
+	MaxSharedClientsPerGPU int32 `json:"maxSharedClientsPerGPU"`
+}
 
 // NetworkConfig holds network settings for provisioned nodes.
 // The shape mirrors the Terraform google_container_node_pool network_config block
@@ -589,6 +616,16 @@ func (in *GCENodeClass) GetMaxPods() int32 {
 		return *in.Spec.KubeletConfiguration.MaxPods
 	}
 	return KubeletMaxPods
+}
+
+// GKEValue returns the strategy as GKE spells it in node labels and kube-env.
+func (s GPUSharingStrategy) GKEValue() string {
+	switch s {
+	case GPUSharingStrategyTimeSharing:
+		return "time-sharing"
+	default:
+		return ""
+	}
 }
 
 // PodSubnetRangeNames returns the NodeClass-configured pod secondary range names.

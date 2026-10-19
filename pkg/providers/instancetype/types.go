@@ -52,7 +52,7 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 	if it == nil {
 		return nil
 	}
-	it.Requirements = computeRequirements(mt, offerings, region, ssdCount)
+	it.Requirements = computeRequirements(mt, offerings, region, ssdCount, nodeClass.Spec.GPUSharingConfig)
 	it.Offerings = offerings
 	return it
 }
@@ -133,7 +133,7 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 }
 
 //nolint:gocyclo
-func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offerings, region string, ssdCount int) scheduling.Requirements {
+func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offerings, region string, ssdCount int, gpuSharing *v1alpha1.GPUSharingConfig) scheduling.Requirements {
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, lo.FromPtr(mt.Name)),
@@ -163,6 +163,8 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUMemory, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelGKEAccelerator, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelGKEGPUSharingStrategy, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelGKEMaxSharedClientsPerGPU, corev1.NodeSelectorOpDoesNotExist),
 	)
 	requirements.Add(localSSDCountRequirement(ssdCount))
 	for _, label := range disktype.AllLabels() {
@@ -191,6 +193,10 @@ func computeRequirements(mt *computepb.MachineType, offerings cloudprovider.Offe
 		// LabelGKEAccelerator is required by the NVIDIA device plugin DaemonSet's nodeAffinity;
 		// without it the device plugin will not schedule onto this node.
 		requirements.Get(v1alpha1.LabelGKEAccelerator).Insert(gpuName)
+		if gpuSharing != nil {
+			requirements.Get(v1alpha1.LabelGKEGPUSharingStrategy).Insert(gpuSharing.Strategy.GKEValue())
+			requirements.Get(v1alpha1.LabelGKEMaxSharedClientsPerGPU).Insert(fmt.Sprintf("%d", gpuSharing.MaxSharedClientsPerGPU))
+		}
 	}
 
 	// The format looks like: n1-standard-1, the family is n1, the instance size is 1.
@@ -262,9 +268,17 @@ func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *
 		corev1.ResourceMemory:           *memory(ctx, mt),
 		corev1.ResourcePods:             *resource.NewQuantity(maxPods, resource.DecimalSI),
 		corev1.ResourceEphemeralStorage: *resource.NewQuantity(totalStorageBytes, resource.BinarySI),
-		v1alpha1.ResourceNVIDIAGPU:      *resource.NewQuantity(gpuCount(mt), resource.DecimalSI),
+		v1alpha1.ResourceNVIDIAGPU:      *resource.NewQuantity(gpuCount(mt)*gpuClientsPerGPU(nodeClass), resource.DecimalSI),
 	}
 	return resourceList
+}
+
+// gpuClientsPerGPU is how many nvidia.com/gpu the device plugin advertises per physical GPU.
+func gpuClientsPerGPU(nodeClass *v1alpha1.GCENodeClass) int64 {
+	if nodeClass == nil || nodeClass.Spec.GPUSharingConfig == nil || nodeClass.Spec.GPUSharingConfig.MaxSharedClientsPerGPU < 1 {
+		return 1
+	}
+	return int64(nodeClass.Spec.GPUSharingConfig.MaxSharedClientsPerGPU)
 }
 
 func cpu(mt *computepb.MachineType) *resource.Quantity {

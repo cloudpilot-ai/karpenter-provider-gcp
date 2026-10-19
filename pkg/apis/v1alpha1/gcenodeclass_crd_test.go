@@ -175,3 +175,20 @@ func TestGCENodeClassCRDRejectsZeroHugepages(t *testing.T) {
 		require.Equal(t, float64(1), *field.Minimum, "%s must reject 0", name)
 	}
 }
+
+func TestGCENodeClassCRDGPUSharingConfig(t *testing.T) {
+	sharing := specSchema(t).Properties["gpuSharingConfig"]
+	require.ElementsMatch(t, []string{"strategy", "maxSharedClientsPerGPU"}, sharing.Required)
+
+	var strategies []string
+	for _, value := range sharing.Properties["strategy"].Enum {
+		strategies = append(strategies, string(value.Raw))
+	}
+	require.Equal(t, []string{`"TimeSharing"`}, strategies)
+
+	clients := sharing.Properties["maxSharedClientsPerGPU"]
+	require.NotNil(t, clients.Minimum)
+	require.NotNil(t, clients.Maximum)
+	require.Equal(t, float64(2), *clients.Minimum)
+	require.Equal(t, float64(48), *clients.Maximum)
+}

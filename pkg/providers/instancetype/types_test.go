@@ -631,7 +631,7 @@ func TestComputeRequirementsIncludesDiskTypeCompatibility(t *testing.T) {
 			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"),
 			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
 		),
-	}}, "us-central1", 0)
+	}}, "us-central1", 0, nil)
 
 	assert.Equal(t, corev1.NodeSelectorOpIn, requirements.Get("disk-type.gke.io/pd-balanced").Operator())
 	assert.Equal(t, []string{"true"}, requirements.Get("disk-type.gke.io/pd-balanced").Values())
@@ -659,7 +659,7 @@ func TestComputeRequirementsRejectsPersistentDiskOnHyperdiskOnlyFamilies(t *test
 				Name:      lo.ToPtr(name),
 				GuestCpus: lo.ToPtr[int32](4),
 				MemoryMb:  lo.ToPtr[int32](16384),
-			}, nil, "us-central1", 0)
+			}, nil, "us-central1", 0, nil)
 
 			for _, diskType := range []string{"pd-balanced", "pd-ssd"} {
 				label := "disk-type.gke.io/" + diskType
@@ -683,7 +683,7 @@ func TestZ4DDiskTypeRequirements(t *testing.T) {
 		GuestCpus:        lo.ToPtr[int32](8),
 		MemoryMb:         lo.ToPtr[int32](64512),
 		BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
-	}, nil, "us-central1", 1)
+	}, nil, "us-central1", 1, nil)
 
 	require.Equal(t, []string{"1"}, requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Values())
 	for _, diskType := range []string{"hyperdisk-balanced", "hyperdisk-balanced-high-availability", "hyperdisk-extreme", "hyperdisk-throughput", "hyperdisk-ml"} {
@@ -1196,7 +1196,9 @@ func TestComputeRequirements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.expected.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceBareMetal, corev1.NodeSelectorOpIn, "false"))
-			got := computeRequirements(tt.mt, tt.offerings, tt.region, tt.ssdCount)
+			tt.expected.Add(scheduling.NewRequirement(v1alpha1.LabelGKEGPUSharingStrategy, corev1.NodeSelectorOpDoesNotExist))
+			tt.expected.Add(scheduling.NewRequirement(v1alpha1.LabelGKEMaxSharedClientsPerGPU, corev1.NodeSelectorOpDoesNotExist))
+			got := computeRequirements(tt.mt, tt.offerings, tt.region, tt.ssdCount, nil)
 
 			// Validate keys present in got
 			for key := range got {
@@ -1274,4 +1276,55 @@ func TestSSDCountVariantsAscending(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewInstanceTypeGPUTimeSharing(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUSharingConfig: &v1alpha1.GPUSharingConfig{
+		Strategy:               v1alpha1.GPUSharingStrategyTimeSharing,
+		MaxSharedClientsPerGPU: 4,
+	}}}
+	offerings := cloudprovider.Offerings{{
+		Available: true,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"),
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+		),
+	}}
+	sharedSelector := scheduling.NewRequirements(
+		scheduling.NewRequirement(v1alpha1.LabelGKEGPUSharingStrategy, corev1.NodeSelectorOpIn, "time-sharing"),
+		scheduling.NewRequirement(v1alpha1.LabelGKEMaxSharedClientsPerGPU, corev1.NodeSelectorOpIn, "4"),
+	)
+
+	t.Run("GPU machine advertises shared capacity", func(t *testing.T) {
+		mt := &computepb.MachineType{
+			Name:      lo.ToPtr("g2-standard-24"),
+			GuestCpus: lo.ToPtr[int32](24),
+			MemoryMb:  lo.ToPtr[int32](98304),
+			Accelerators: []*computepb.Accelerators{{
+				GuestAcceleratorType:  lo.ToPtr("nvidia-l4"),
+				GuestAcceleratorCount: lo.ToPtr[int32](2),
+			}},
+		}
+		it := NewInstanceType(ctx, mt, nodeClass, "us-central1", offerings, 0)
+		require.NotNil(t, it)
+		gpuCapacity := it.Capacity[v1alpha1.ResourceNVIDIAGPU]
+		assert.Equal(t, int64(8), gpuCapacity.Value())
+		assert.Equal(t, "2", it.Requirements.Get(v1alpha1.LabelInstanceGPUCount).Any())
+		assert.NoError(t, it.Requirements.Compatible(sharedSelector))
+	})
+
+	t.Run("non-GPU machine ignores sharing", func(t *testing.T) {
+		mt := &computepb.MachineType{
+			Name:      lo.ToPtr("n2-standard-4"),
+			GuestCpus: lo.ToPtr[int32](4),
+			MemoryMb:  lo.ToPtr[int32](16384),
+		}
+		it := NewInstanceType(ctx, mt, nodeClass, "us-central1", offerings, 0)
+		require.NotNil(t, it)
+		gpuCapacity := it.Capacity[v1alpha1.ResourceNVIDIAGPU]
+		assert.Equal(t, int64(0), gpuCapacity.Value())
+		assert.Equal(t, corev1.NodeSelectorOpDoesNotExist, it.Requirements.Get(v1alpha1.LabelGKEGPUSharingStrategy).Operator())
+		assert.Error(t, it.Requirements.Compatible(sharedSelector))
+	})
 }

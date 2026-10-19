@@ -111,6 +111,28 @@ func patchHugepagesKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha
 	}
 }
 
+// gpuSharingKubeEnvEntries are the kube-env entries GKE writes on shared-GPU node pools;
+// the GPU device plugin reads them to advertise MaxSharedClientsPerGPU replicas per GPU.
+var gpuSharingKubeEnvEntries = []string{
+	"GPU_SHARING_STRATEGY",
+	"MAX_SHARED_CLIENTS_PER_GPU",
+	"MAX_TIME_SHARED_CLIENTS_PER_GPU",
+}
+
+func patchGPUSharingKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, isGPUInstance bool) {
+	sharing := nodeClass.Spec.GPUSharingConfig
+	if !isGPUInstance || sharing == nil {
+		for _, key := range gpuSharingKubeEnvEntries {
+			target.UnsetKubeEnvEntry(key)
+		}
+		return
+	}
+	clients := fmt.Sprintf(`"%d"`, sharing.MaxSharedClientsPerGPU)
+	target.SetKubeEnvEntry("GPU_SHARING_STRATEGY", sharing.Strategy.GKEValue())
+	target.SetKubeEnvEntry("MAX_SHARED_CLIENTS_PER_GPU", clients)
+	target.SetKubeEnvEntry("MAX_TIME_SHARED_CLIENTS_PER_GPU", clients)
+}
+
 func applyInstanceTypeKubeReserved(config *kubeletconfig.KubeletConfiguration, instanceType *cloudprovider.InstanceType) {
 	mergeStringMap(&config.KubeReserved, map[string]string{
 		"cpu":               fmt.Sprintf("%dm", instanceType.Overhead.KubeReserved.Cpu().MilliValue()),

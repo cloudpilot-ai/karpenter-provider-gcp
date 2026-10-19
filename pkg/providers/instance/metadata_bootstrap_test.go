@@ -203,3 +203,72 @@ func TestBuildInstance_DropsStaleSourceHugepagesMetadata(t *testing.T) {
 	require.NotContains(t, kubeEnvFrom(t, instance), "HUGEPAGE_2M")
 	require.NotContains(t, kubeEnvFrom(t, instance), "HUGEPAGE_1G")
 }
+
+func timeSharingNodeClass(clients int32) *v1alpha1.GCENodeClass {
+	return &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUSharingConfig: &v1alpha1.GPUSharingConfig{
+		Strategy:               v1alpha1.GPUSharingStrategyTimeSharing,
+		MaxSharedClientsPerGPU: clients,
+	}}}
+}
+
+func TestBuildInstance_GPUTimeSharingMetadata(t *testing.T) {
+	provider := makeProvider()
+
+	instance, err := provider.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), timeSharingNodeClass(4), makeGPUIT(), makeSourceMetadata("max-pods-per-node=110"),
+		makeCluster("net", "subnet", "pods", false),
+		"us-central1-a", "karpenter-gpu-sharing-test",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+	)
+
+	require.NoError(t, err)
+	kubeEnv := kubeEnvFrom(t, instance)
+	require.Contains(t, kubeEnv, "GPU_SHARING_STRATEGY: time-sharing")
+	require.Contains(t, kubeEnv, `MAX_SHARED_CLIENTS_PER_GPU: "4"`)
+	require.Contains(t, kubeEnv, `MAX_TIME_SHARED_CLIENTS_PER_GPU: "4"`)
+	for _, labels := range []string{kubeLabelsFrom(t, instance), kubeEnv} {
+		require.Contains(t, labels, "cloud.google.com/gke-gpu-sharing-strategy=time-sharing")
+		require.Contains(t, labels, "cloud.google.com/gke-max-shared-clients-per-gpu=4")
+	}
+}
+
+func TestBuildInstance_GPUTimeSharingIgnoredForNonGPU(t *testing.T) {
+	provider := makeProvider()
+
+	instance, err := provider.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), timeSharingNodeClass(4), makeNonGPUIT(), makeSourceMetadata("max-pods-per-node=110"),
+		makeCluster("net", "subnet", "pods", false),
+		"us-central1-a", "karpenter-gpu-sharing-test",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+	)
+
+	require.NoError(t, err)
+	kubeEnv := kubeEnvFrom(t, instance)
+	require.NotContains(t, kubeEnv, "GPU_SHARING_STRATEGY")
+	require.NotContains(t, kubeEnv, "SHARED_CLIENTS_PER_GPU")
+	require.NotContains(t, kubeLabelsFrom(t, instance), "gke-gpu-sharing-strategy")
+}
+
+func TestBuildInstance_DropsStaleSourceGPUSharingMetadata(t *testing.T) {
+	provider := makeProvider()
+	sourceMetadata := computeMetadataValues(map[string]string{
+		metadata.KubeLabelsKey:    "max-pods-per-node=110",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "GPU_SHARING_STRATEGY: time-sharing\nMAX_SHARED_CLIENTS_PER_GPU: \"8\"\nMAX_TIME_SHARED_CLIENTS_PER_GPU: \"8\"\nKUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110\n",
+		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
+	})
+
+	instance, err := provider.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeGPUIT(), sourceMetadata,
+		makeCluster("net", "subnet", "pods", false),
+		"us-central1-a", "karpenter-gpu-sharing-test",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+	)
+
+	require.NoError(t, err)
+	kubeEnv := kubeEnvFrom(t, instance)
+	require.NotContains(t, kubeEnv, "GPU_SHARING_STRATEGY")
+	require.NotContains(t, kubeEnv, "SHARED_CLIENTS_PER_GPU")
+}

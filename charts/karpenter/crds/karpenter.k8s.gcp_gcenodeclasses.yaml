@@ -178,6 +178,29 @@ spec:
                 - latest
                 - disabled
                 type: string
+              gpuSharingConfig:
+                description: |-
+                  GPUSharingConfig lets multiple containers share each physical GPU.
+                  Mirrors the GKE node pool guest_accelerator.gpu_sharing_config field.
+                  Ignored for non-GPU instance types.
+                properties:
+                  maxSharedClientsPerGPU:
+                    description: |-
+                      MaxSharedClientsPerGPU is the number of containers that can share one
+                      physical GPU. The node advertises this many nvidia.com/gpu per GPU.
+                    format: int32
+                    maximum: 48
+                    minimum: 2
+                    type: integer
+                  strategy:
+                    description: Strategy is the GPU sharing strategy.
+                    enum:
+                    - TimeSharing
+                    type: string
+                required:
+                - maxSharedClientsPerGPU
+                - strategy
+                type: object
               imageFamily:
                 description: |-
                   ImageFamily dictates the instance template used when generating launch templates.

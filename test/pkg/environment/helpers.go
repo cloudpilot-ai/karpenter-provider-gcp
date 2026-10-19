@@ -404,7 +404,7 @@ func (e *Environment) CreateNodeClassWithPrivateNetwork(ctx context.Context, nam
 
 // CreateNodeClassWithAutoGPUTaint creates a GCENodeClass with autoGPUTaint: true
 // and the GKE GPU driver auto-install label set. Used by GPU e2e tests.
-func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name, gpuDriverVersion string) {
+func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name, gpuDriverVersion string, gpuSharingConfig *gcpv1alpha1.GPUSharingConfig) {
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
@@ -422,16 +422,27 @@ func (e *Environment) CreateNodeClassWithAutoGPUTaint(ctx context.Context, name,
 			"subnetRangeName": e.PodsRangeName,
 		},
 	}}
+	if gpuSharingConfig != nil {
+		Expect(unstructured.SetNestedMap(obj.Object, map[string]any{
+			"strategy":               string(gpuSharingConfig.Strategy),
+			"maxSharedClientsPerGPU": int64(gpuSharingConfig.MaxSharedClientsPerGPU),
+		}, "spec", "gpuSharingConfig")).To(Succeed())
+	}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
 	e.trackNodeClass(name)
 }
 
-// CreateDeploymentOnGPUNode creates a single-replica Deployment that requests
+// CreateDeploymentOnGPUNode creates a Deployment whose pods each request
 // one nvidia.com/gpu resource, ensuring the pod only schedules once the NVIDIA
 // device plugin has registered the GPU as allocatable (driver installed + plugin running).
-func (e *Environment) CreateDeploymentOnGPUNode(ctx context.Context, name, appLabel, nodePoolName string) {
-	replicas := int32(1)
+func (e *Environment) CreateDeploymentOnGPUNode(ctx context.Context, name, appLabel, nodePoolName string, replicas int32, nodeSelector map[string]string) {
+	selectors := map[string]string{}
+	for key, value := range nodeSelector {
+		selectors[key] = value
+	}
+	selectors[karpv1.NodePoolLabelKey] = nodePoolName
+	nodeSelector = selectors
 	zero := int64(0)
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: TestNamespace},
@@ -441,7 +452,7 @@ func (e *Environment) CreateDeploymentOnGPUNode(ctx context.Context, name, appLa
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": appLabel}},
 				Spec: corev1.PodSpec{
-					NodeSelector:                  map[string]string{karpv1.NodePoolLabelKey: nodePoolName},
+					NodeSelector:                  nodeSelector,
 					TerminationGracePeriodSeconds: &zero,
 					Tolerations: []corev1.Toleration{
 						{

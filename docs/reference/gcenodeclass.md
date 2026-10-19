@@ -218,6 +218,7 @@ _Appears in:_
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
 | `autoGPUTaint` _boolean_ | AutoGPUTaint, when true, automatically applies nvidia.com/gpu=present:NoSchedule<br />to any GPU node at provisioning time, regardless of the NodePool configuration.<br />Disabled by default to preserve backward compatibility. |  | Optional: \{\} <br /> |
 | `gpuDriverVersion` _string_ | GPUDriverVersion controls which NVIDIA driver version GKE installs on GPU nodes.<br />Mirrors the GKE node pool gpu_driver_installation_config.gpu_driver_version field.<br />Valid values: "default" (GKE-recommended stable), "latest" (newest, COS only),<br />"disabled" (skip automatic installation).<br />Ignored for non-GPU instance types. | default | Enum: [default latest disabled] <br />Optional: \{\} <br /> |
+| `gpuSharingConfig` _[GPUSharingConfig](#gpusharingconfig)_ | GPUSharingConfig lets multiple containers share each physical GPU.<br />Mirrors the GKE node pool guest_accelerator.gpu_sharing_config field.<br />Ignored for non-GPU instance types. |  | Optional: \{\} <br /> |
 | `localSsdMode` _[LocalSSDMode](#localssdmode)_ | LocalSsdMode exposes local SSDs as raw devices or kubelet ephemeral storage. | RawBlock | Enum: [RawBlock Ephemeral] <br />Optional: \{\} <br /> |
 | `preemptionNoticeDuration` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | PreemptionNoticeDuration is how long before shutdown GCE flips the<br />instance/preempted metadata key on a Spot VM. Unset (the default) gives no advance<br />notice: the key flips at the same moment the ACPI G2 Soft Off signal is sent.<br />"120s" gives a two-minute warning, letting Karpenter start draining before shutdown.<br />GCE currently accepts up to two minutes.<br />Only applies to Spot capacity; ignored for on-demand nodes.<br />Reading the notice requires an agent on the node that watches the metadata key<br />and sets the GCESpotPreempting condition — see docs/spot-preemption.md. |  | Pattern: `^([0-9]+(s\|m\|h))+$` <br />Type: string <br />Optional: \{\} <br /> |
 
@@ -238,6 +239,40 @@ _Appears in:_
 | `images` _[Image](#image) array_ | Image contains the current image that are available to the<br />cluster under the Image selectors. |  | Optional: \{\} <br /> |
 | `subnetRanges` _[SubnetRangeStatus](#subnetrangestatus) array_ | SubnetRanges contains the pod secondary IPv4 ranges considered for launch<br />and their Compute-reported free IPv4 address counts when known. |  | Optional: \{\} <br /> |
 | `conditions` _Condition array_ | Conditions contains signals for health and readiness |  | Optional: \{\} <br /> |
+
+
+#### GPUSharingConfig
+
+
+
+GPUSharingConfig configures GPU sharing on GPU nodes.
+
+
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `strategy` _[GPUSharingStrategy](#gpusharingstrategy)_ | Strategy is the GPU sharing strategy. |  | Enum: [TimeSharing] <br />Required: \{\} <br /> |
+| `maxSharedClientsPerGPU` _integer_ | MaxSharedClientsPerGPU is the number of containers that can share one<br />physical GPU. The node advertises this many nvidia.com/gpu per GPU. |  | Maximum: 48 <br />Minimum: 2 <br />Required: \{\} <br /> |
+
+
+#### GPUSharingStrategy
+
+_Underlying type:_ _string_
+
+GPUSharingStrategy selects how containers share a physical GPU.
+
+_Validation:_
+- Enum: [TimeSharing]
+
+_Appears in:_
+- [GPUSharingConfig](#gpusharingconfig)
+
+| Field | Description |
+| --- | --- |
+| `TimeSharing` | GPUSharingStrategyTimeSharing time-slices each GPU between containers.<br /> |
 
 
 #### HugepagesConfig
