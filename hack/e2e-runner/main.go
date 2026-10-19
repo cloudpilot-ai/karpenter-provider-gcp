@@ -94,7 +94,7 @@ func resolveLockID(override string) (string, error) {
 }
 
 func main() {
-	var selection, preset, reportPath, lockID string
+	var selection, preset, reportPath, lockID, releaseVersion string
 	cmd := &cobra.Command{
 		Use:          "e2e-runner",
 		Short:        "Run e2e features by preset or directory name",
@@ -130,7 +130,7 @@ func main() {
 					if err := os.Remove(reportPath); err != nil && !os.IsNotExist(err) {
 						return err
 					}
-					metadata.Commit, metadata.ControllerCommit, err = verifyControllerCommit(runCtx)
+					metadata.Commit, metadata.ControllerCommit, err = verifyControllerCommit(runCtx, releaseVersion)
 					if err != nil {
 						return err
 					}
@@ -168,6 +168,7 @@ func main() {
 	cmd.Flags().StringVar(&selection, "selection", "standard", "Preset (standard, gpu, all, provisioning) or comma-separated feature directories")
 	cmd.Flags().StringVar(&preset, "preset", "", "Deprecated alias for --selection")
 	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report to this path")
+	cmd.Flags().StringVar(&releaseVersion, "release-version", "", "Validate the deployed release instead of matching the test commit (with --report)")
 	cmd.Flags().StringVar(&lockID, "lock-id", "", "Lease holder ID (default: username@hostname:pid-<runner PID>)")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
