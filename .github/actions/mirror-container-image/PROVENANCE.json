@@ -1,0 +1,16 @@
+{
+  "files": {
+    ".gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+    "README.md": "b5fe5571d64a899c6cff98c7dbef1191c17051c8803896ac3bd09c9d1b5f2bf8",
+    "action.yml": "499200c10efe4c5505422ee25cd19d1979337f6a8c7447d69b15bd8d5f8ea862",
+    "graph.py": "a893476eef85c524df44b1c72e5dd9adb67a9693ee2a6428af339071efd4a4da",
+    "install-regctl.sh": "d8b6ab101bf60f2f87c0d2ac93b8e487604bbb32ebb1ff595d95a8b7e54c6639",
+    "mirror.py": "988ea6e39617ddbc98f58fee661f46f7fa119401ed5655cd27af6f76f240977a",
+    "registry.py": "1bf5f9b91b589a6e0fec86462f01cfba60ee8d374911709122b8a20bc917fd23",
+    "verify-images.sh": "9b2019f0eeeee9e8b7a13e8944b41e4238546bea297f249997159b7792984fcd"
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "382ca61026a042bd7249c860f8b936594cf7ca74",
+  "sourcePath": ".github/actions/mirror-container-image",
+  "sourceRepository": "https://github.com/cloudpilot-ai/onboard"
+}

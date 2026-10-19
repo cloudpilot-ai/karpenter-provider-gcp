@@ -1,0 +1,60 @@
+name: Mirror and verify a container image
+description: Copy an immutable OCI image and its artifacts, then verify anonymous access.
+inputs:
+  source-ref:
+    description: Source repository followed by @sha256 and the full index digest.
+    required: true
+  target-repository:
+    description: Destination registry and repository without a tag or digest.
+    required: true
+  immutable-tags-json:
+    description: JSON array of version tags; existing different digests are rejected.
+    required: true
+  mutable-tags-json:
+    description: JSON array of explicitly authorized channel tags.
+    default: '[]'
+outputs:
+  mirror-ref:
+    description: Verified destination repository and root digest.
+    value: ${{ steps.prepare.outputs.mirror-ref }}
+  digest:
+    description: Root digest including the sha256 prefix.
+    value: ${{ steps.prepare.outputs.digest }}
+  request-path:
+    description: Credential-free immutable request, saved before any registry write.
+    value: ${{ steps.prepare.outputs.request-path }}
+  receipt-path:
+    description: Verification receipt; consumers must require verified true and status complete.
+    value: ${{ steps.prepare.outputs.receipt-path }}
+runs:
+  using: composite
+  steps:
+    - name: Persist immutable mirror request
+      id: prepare
+      shell: bash
+      env:
+        MIRROR_SOURCE: ${{ inputs.source-ref }}
+        MIRROR_TARGET: ${{ inputs.target-repository }}
+        MIRROR_IMMUTABLE_TAGS: ${{ inputs.immutable-tags-json }}
+        MIRROR_MUTABLE_TAGS: ${{ inputs.mutable-tags-json }}
+      run: |
+        python3 "${GITHUB_ACTION_PATH}/mirror.py" prepare \
+          --source-ref "$MIRROR_SOURCE" --target-repository "$MIRROR_TARGET" \
+          --immutable-tags-json "$MIRROR_IMMUTABLE_TAGS" \
+          --mutable-tags-json "$MIRROR_MUTABLE_TAGS"
+    - name: Install checksum-pinned registry client
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: bash "${GITHUB_ACTION_PATH}/install-regctl.sh" "${RUNNER_TEMP}/mirror-container-image-tools"
+    - name: Copy and anonymously verify complete image graph
+      shell: bash
+      env:
+        MIRROR_REQUEST: ${{ steps.prepare.outputs.request-path }}
+        MIRROR_REPORT: ${{ steps.prepare.outputs.report-dir }}
+        MIRROR_REQUEST_SHA256: ${{ steps.prepare.outputs.request-sha256 }}
+      run: |
+        python3 "${GITHUB_ACTION_PATH}/mirror.py" run \
+          --request-file "$MIRROR_REQUEST" --report-dir "$MIRROR_REPORT" \
+          --request-sha256 "$MIRROR_REQUEST_SHA256" \
+          --regctl "${RUNNER_TEMP}/mirror-container-image-tools/regctl"

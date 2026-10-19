@@ -8,9 +8,26 @@ jobs:
   latest-image-build-publish:
     name:  Image publish
     runs-on: ubuntu-latest
+    concurrency:
+      group: optimizer-publish-${{ github.repository }}-latest
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
+      - name: Validate Alibaba Cloud mirror configuration
+        env:
+          ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY }}
+          ACR_USERNAME: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+        run: |
+          : "${ALIYUN_REGISTRY:?ALIYUN_REGISTRY is required}"
+          : "${ACR_USERNAME:?ALIYUN_REGISTRY_USERNAME is required}"
+          : "${ACR_PASSWORD:?ALIYUN_REGISTRY_PASSWORD is required}"
+          [[ "$ALIYUN_REGISTRY" =~ ^[a-z0-9]+([.-][a-z0-9]+)*$ ]] || {
+            echo 'ALIYUN_REGISTRY must be a registry hostname without a scheme or path' >&2
+            exit 1
+          }
+
       - uses: actions/checkout@v7
         with:
           submodules: true
@@ -35,7 +52,65 @@ jobs:
 
       - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
 
-      - name: build and publish image
+      - name: Build and publish image
+        id: image
         run: |
           export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
-          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags latest
+          IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller --tags latest)
+          IMAGE=${IMAGE/":latest@"/@}
+          [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]] || {
+            echo 'Expected exactly one digest-qualified controller image from ko build' >&2
+            exit 1
+          }
+          echo "reference=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Save mirror request before copying
+        id: mirror-request
+        env:
+          SOURCE_REF: ${{ steps.image.outputs.reference }}
+          TARGET_REPOSITORY: ${{ vars.ALIYUN_REGISTRY }}/cloudpilotai/karpenter-provider-gcp
+          IMAGE_TAG: latest
+        run: |
+          IMMUTABLE_TAGS='[]'
+          MUTABLE_TAGS='[]'
+          if [[ "$IMAGE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            IMMUTABLE_TAGS=$(jq -cn --arg tag "$IMAGE_TAG" '[$tag]')
+          else
+            MUTABLE_TAGS=$(jq -cn --arg tag "$IMAGE_TAG" '[$tag]')
+          fi
+          jq -n --arg source "$SOURCE_REF" --arg target "$TARGET_REPOSITORY" \
+            --argjson immutable "$IMMUTABLE_TAGS" --argjson mutable "$MUTABLE_TAGS" \
+            '{schemaVersion: 1, sourceRef: $source, targetRepository: $target,
+              immutableTags: $immutable, mutableTags: $mutable}' > "$RUNNER_TEMP/mirror-request.json"
+          echo "immutable-tags-json=$IMMUTABLE_TAGS" >> "$GITHUB_OUTPUT"
+          echo "mutable-tags-json=$MUTABLE_TAGS" >> "$GITHUB_OUTPUT"
+
+      # Release source refs may predate the delivery tool; load it from this workflow revision.
+      - name: Check out the reviewed mirror tool
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .mirror-tools
+          sparse-checkout: .github/actions/mirror-container-image
+          persist-credentials: false
+
+      - name: Mirror and verify Alibaba Cloud image
+        uses: ./.mirror-tools/.github/actions/mirror-container-image
+        with:
+          source-ref: ${{ steps.image.outputs.reference }}
+          target-repository: ${{ vars.ALIYUN_REGISTRY }}/cloudpilotai/karpenter-provider-gcp
+          immutable-tags-json: ${{ steps.mirror-request.outputs.immutable-tags-json }}
+          mutable-tags-json: ${{ steps.mirror-request.outputs.mutable-tags-json }}
+        env:
+          ACR_USERNAME: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+
+      - name: Retain mirror request and verification evidence
+        if: ${{ always() && steps.image.outputs.reference != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: container-mirror-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mirror-request.json
+            ${{ runner.temp }}/mirror-container-image/
+          if-no-files-found: error
