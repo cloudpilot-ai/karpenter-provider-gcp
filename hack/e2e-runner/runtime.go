@@ -40,7 +40,7 @@ func controllerTarget() (string, string) {
 	return namespace, deployment
 }
 
-func verifyControllerCommit(ctx context.Context) (string, string, error) {
+func verifyControllerCommit(ctx context.Context, releaseVersion string) (string, string, error) {
 	sha, err := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
 		return "", "", fmt.Errorf("reading test commit: %w", err)
@@ -71,7 +71,12 @@ func verifyControllerCommit(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("checking deployed controller image: %w", err)
 	}
 	tagged := strings.SplitN(strings.TrimSpace(string(image)), "@", 2)[0]
-	if tag := tagged[strings.LastIndex(tagged, ":")+1:]; tag != "e2e-"+base {
+	tag := tagged[strings.LastIndex(tagged, ":")+1:]
+	if releaseVersion != "" {
+		if tag != "v"+strings.TrimPrefix(releaseVersion, "v") {
+			return "", "", fmt.Errorf("deployed controller image %q does not match requested release %s", strings.TrimSpace(string(image)), releaseVersion)
+		}
+	} else if tag != "e2e-"+base {
 		return "", "", fmt.Errorf("deployed controller image %q does not match test commit %s", strings.TrimSpace(string(image)), commit)
 	}
 	logs, err := exec.CommandContext(ctx, "kubectl", "-n", namespace, "logs", "deployment/"+deployment, "--tail=50").Output()
@@ -79,7 +84,10 @@ func verifyControllerCommit(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("checking controller binary commit: %w", err)
 	}
 	found := regexp.MustCompile(`"commit":"([0-9a-f]+)(-dirty)?"`).FindStringSubmatch(string(logs))
-	if len(found) == 0 || !strings.HasPrefix(base, found[1]) && !strings.HasPrefix(found[1], base) {
+	if len(found) == 0 {
+		return "", "", fmt.Errorf("controller binary commit not found in logs")
+	}
+	if releaseVersion == "" && !strings.HasPrefix(base, found[1]) && !strings.HasPrefix(found[1], base) {
 		return "", "", fmt.Errorf("controller binary commit in logs does not match test commit %s", commit)
 	}
 	return commit, found[1] + found[2], nil
