@@ -1095,6 +1095,7 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	patchKubeEnvOSDistribution(target, nodeClass)
 	patchSecondaryBootDisksKubeEnv(target, nodeClass)
 	patchHugepagesKubeEnv(target, nodeClass)
+	patchGPUSharingKubeEnv(target, nodeClass, isGPUInstance)
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)
 		applyNodeClassKubeletConfig(config, nodeClass.Spec.KubeletConfiguration)
@@ -1308,6 +1309,10 @@ func gpuInstanceMetadata(nodeClass *v1alpha1.GCENodeClass, instanceType *cloudpr
 	labels[v1alpha1.LabelGKEGPUDriverVersion] = version
 	if cpu := instanceType.Capacity.Cpu(); cpu != nil && !cpu.IsZero() {
 		labels[v1alpha1.LabelGKECPUScalingLevel] = fmt.Sprintf("%d", cpu.Value())
+	}
+	if sharing := nodeClass.Spec.GPUSharingConfig; sharing != nil {
+		labels[v1alpha1.LabelGKEGPUSharingStrategy] = sharing.Strategy.GKEValue()
+		labels[v1alpha1.LabelGKEMaxSharedClientsPerGPU] = fmt.Sprintf("%d", sharing.MaxSharedClientsPerGPU)
 	}
 
 	if nodeClass.Spec.AutoGPUTaint {

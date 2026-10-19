@@ -88,6 +88,41 @@ tolerations:
     effect: NoSchedule
 ```
 
+## GPU time-sharing
+
+GKE can let several containers share one physical GPU by time-slicing it. Set `gpuSharingConfig` on a `GCENodeClass` to provision nodes the same way a GKE node pool with `gpu_sharing_config` does:
+
+```yaml
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: gpu-shared
+spec:
+  autoGPUTaint: true
+  gpuSharingConfig:
+    strategy: TimeSharing
+    maxSharedClientsPerGPU: 4
+  imageSelectorTerms:
+    - family: ContainerOptimizedOS
+      channel: cluster
+```
+
+On GPU instance types from this NodeClass, Karpenter:
+
+- writes `GPU_SHARING_STRATEGY`, `MAX_SHARED_CLIENTS_PER_GPU` and `MAX_TIME_SHARED_CLIENTS_PER_GPU` into kube-env, which the GKE NVIDIA device plugin reads;
+- labels the node with `cloud.google.com/gke-gpu-sharing-strategy=time-sharing` and `cloud.google.com/gke-max-shared-clients-per-gpu=<n>`;
+- schedules against `nvidia.com/gpu` capacity of GPU count × `maxSharedClientsPerGPU`. A `g2-standard-24` (2 × L4) with `maxSharedClientsPerGPU: 4` offers `nvidia.com/gpu: 8`.
+
+Workloads opt in with the same node selectors they use on GKE node pools, and request `nvidia.com/gpu: 1`:
+
+```yaml
+nodeSelector:
+  cloud.google.com/gke-gpu-sharing-strategy: time-sharing
+  cloud.google.com/gke-max-shared-clients-per-gpu: "4"
+```
+
+Only `TimeSharing` is supported. Time-sharing gives no memory or fault isolation between containers on the same GPU. The field is ignored for non-GPU instance types.
+
 ## Example
 
 See [`docs/examples/gpu.md`](examples/gpu.md) for a complete `GCENodeClass` + `NodePool` configuration.

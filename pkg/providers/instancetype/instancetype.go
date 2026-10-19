@@ -109,6 +109,7 @@ type staticInstanceType struct {
 	machineType  *computepb.MachineType
 	instanceType *cloudprovider.InstanceType
 	ssdCount     int
+	gpuSharing   *v1alpha1.GPUSharingConfig
 }
 
 func NewDefaultProvider(ctx context.Context, authOptions *auth.Credential, pricingProvider pricing.Provider,
@@ -174,7 +175,8 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) ([]staticInstanceType, error) {
 	kcHash, _ := hashstructure.Hash(nodeClass.Spec.KubeletConfiguration, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	disksHash, _ := hashstructure.Hash(nodeClass.Spec.Disks, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
-	key := fmt.Sprintf("%d-%d-%d-%s", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode)
+	gpuSharingHash, _ := hashstructure.Hash(nodeClass.Spec.GPUSharingConfig, hashstructure.FormatV2, nil)
+	key := fmt.Sprintf("%d-%d-%d-%s-%d", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode, gpuSharingHash)
 
 	if item, ok := p.staticInstanceTypesCache.Get(key); ok {
 		return item.([]staticInstanceType), nil
@@ -199,7 +201,7 @@ func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass 
 			if it == nil {
 				continue
 			}
-			instanceTypes = append(instanceTypes, staticInstanceType{machineType: mt, instanceType: it, ssdCount: ssdCount})
+			instanceTypes = append(instanceTypes, staticInstanceType{machineType: mt, instanceType: it, ssdCount: ssdCount, gpuSharing: nodeClass.Spec.GPUSharingConfig})
 		}
 	}
 	p.staticInstanceTypesCache.SetDefault(key, instanceTypes)
@@ -218,7 +220,7 @@ func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTyp
 
 		it := cached.instanceType.DeepCopy()
 		it.Offerings = offerings
-		it.Requirements = computeRequirements(cached.machineType, offerings, p.authOptions.Region, cached.ssdCount)
+		it.Requirements = computeRequirements(cached.machineType, offerings, p.authOptions.Region, cached.ssdCount, cached.gpuSharing)
 		instanceTypes = append(instanceTypes, it)
 	}
 	return instanceTypes

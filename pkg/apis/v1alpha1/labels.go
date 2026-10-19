@@ -53,6 +53,8 @@ func init() {
 		LabelGKEReadinessNodeLocalDNSReady,
 		LabelGKEAccelerator,
 		LabelGKECPUScalingLevel,
+		LabelGKEGPUSharingStrategy,
+		LabelGKEMaxSharedClientsPerGPU,
 	)
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(disktype.AllLabels()...)
 }
@@ -135,6 +137,11 @@ var (
 	// LabelGKECPUScalingLevel is used by GKE's NVIDIA device-plugin DaemonSets to
 	// select the small/medium/large plugin variant for GPU nodes.
 	LabelGKECPUScalingLevel = "cloud.google.com/gke-cpu-scaling-level"
+	// LabelGKEGPUSharingStrategy and LabelGKEMaxSharedClientsPerGPU are the labels GKE
+	// puts on shared-GPU nodes. Workloads select on them to land on a shared GPU.
+	// Corresponds to GCENodeClass.spec.gpuSharingConfig.
+	LabelGKEGPUSharingStrategy     = "cloud.google.com/gke-gpu-sharing-strategy"
+	LabelGKEMaxSharedClientsPerGPU = "cloud.google.com/gke-max-shared-clients-per-gpu"
 
 	LabelNodeClass                           = apis.Group + "/gcenodeclass"
 	LabelTopologyZoneID                      = "topology.k8s.gcp/zone-id"
