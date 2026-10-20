@@ -74,6 +74,16 @@ networkConfig:
   subnetwork: regions/us-central1/subnetworks/private-nodes
 ```
 
+## Dual-stack clusters
+
+On a dual-stack GKE cluster (stack type `IPV4_IPV6`), Karpenter gives each new node a dual-stack primary interface. This lets the node receive an IPv6 PodCIDR alongside its IPv4 range. Existing nodes keep their current interfaces.
+
+IPv6 access follows the primary subnetwork's IPv6 access type. This applies to the cluster subnetwork, a `networkConfig.subnetwork` override, and Shared VPC subnetworks. With external access, the node gets an external IPv6 address. With internal access, it gets an internal IPv6 address from the subnetwork.
+
+`enablePrivateNodes` controls only the external IPv4 address, as in GKE. To keep nodes off the public IPv6 internet, use a subnetwork with internal IPv6 access.
+
+Karpenter checks the subnetwork before it creates the VM. The launch fails if the subnetwork is not dual-stack or uses an unsupported IPv6 access type. On a dual-stack cluster, point any `networkConfig.subnetwork` override at a dual-stack subnetwork. The controller also needs `compute.subnetworks.get` on the subnetwork's project, or launches fail.
+
 ## Multi-interface nodes
 
 Use `additionalNetworkInterfaces` to attach secondary network interfaces. Each entry must specify a `subnetwork`. The `network` field is optional and defaults to the cluster's VPC. This mirrors the `additional_node_network_configs` block in the Terraform `google_container_node_pool` `network_config`.
@@ -91,14 +101,14 @@ Secondary interfaces inherit the `enablePrivateNodes` setting from the top level
 
 ## Relationship to `networkTags` and pod secondary ranges
 
-| Field                                                    | Scope                     | Purpose                           |
-|----------------------------------------------------------|---------------------------|-----------------------------------|
-| `networkTags`                                            | Instance (all interfaces) | GCP firewall rule targets         |
-| `networkConfig.subnetwork`                               | Primary interface         | Which subnetwork to attach        |
-| `networkConfig.enablePrivateNodes`                       | All interfaces            | Whether to assign an external IP  |
-| `networkConfig.additionalNetworkInterfaces[].network`    | Per secondary interface   | Which VPC network to attach       |
-| `networkConfig.additionalNetworkInterfaces[].subnetwork` | Per secondary interface   | Which subnetwork to attach        |
-| `subnetRangeName` / `subnetRangeNames`                   | Primary interface         | Secondary IP range(s) for pod IPs |
+| Field                                                    | Scope                     | Purpose                                    |
+|----------------------------------------------------------|---------------------------|--------------------------------------------|
+| `networkTags`                                            | Instance (all interfaces) | GCP firewall rule targets                  |
+| `networkConfig.subnetwork`                               | Primary interface         | Which subnetwork to attach                 |
+| `networkConfig.enablePrivateNodes`                       | All interfaces            | Whether to assign an external IPv4 address |
+| `networkConfig.additionalNetworkInterfaces[].network`    | Per secondary interface   | Which VPC network to attach                |
+| `networkConfig.additionalNetworkInterfaces[].subnetwork` | Per secondary interface   | Which subnetwork to attach                 |
+| `subnetRangeName` / `subnetRangeNames`                   | Primary interface         | Secondary IP range(s) for pod IPs          |
 
 When both pod-range fields are omitted, Karpenter discovers the cluster's default and additional pod ranges on its primary subnetwork. Either explicit field replaces that list completely. If `networkConfig.subnetwork` overrides the primary subnetwork, specify pod range names belonging to that subnetwork; discovery does not select ranges on separate subnetworks. Capacity reads use the effective primary subnetwork, including its Shared VPC host project; the controller needs `compute.subnetworks.get` there to report free-IP counts.
 
