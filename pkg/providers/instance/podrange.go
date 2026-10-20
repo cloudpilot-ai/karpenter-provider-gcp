@@ -35,6 +35,15 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
+const (
+	networkStackTypeDualStack    = "IPV4_IPV6"
+	ipv6AccessTypeExternal       = "EXTERNAL"
+	ipv6AccessTypeInternal       = "INTERNAL"
+	accessConfigTypeDirectIPv6   = "DIRECT_IPV6"
+	externalIPv6AccessConfigName = "external-ipv6"
+	networkTierPremium           = "PREMIUM"
+)
+
 // resolvedPodRangeNames returns the pod secondary range names to try at launch:
 // Explicit NodeClass ranges replace the default and additional cluster ranges.
 // A single empty string leaves SubnetworkRangeName unset so GKE can pick.
@@ -108,6 +117,38 @@ func (p *DefaultProvider) setupPodNetwork(cluster *containerv1.Cluster, nodeClas
 		target.SetRegistrationNodeLabel(key, value)
 	}
 	return interfaces, nil
+}
+
+func (p *DefaultProvider) configureDualStackNetwork(ctx context.Context, cluster *containerv1.Cluster, interfaces []*compute.NetworkInterface) error {
+	if cluster.IpAllocationPolicy == nil || cluster.IpAllocationPolicy.StackType != networkStackTypeDualStack {
+		return nil
+	}
+	if len(interfaces) == 0 {
+		return fmt.Errorf("dual-stack cluster requires a primary network interface")
+	}
+	primary := interfaces[0]
+	config, err := p.subnetProvider.GetNetworkConfig(ctx, primary.Network, primary.Subnetwork)
+	if err != nil {
+		return err
+	}
+	if config.StackType != networkStackTypeDualStack {
+		return fmt.Errorf("subnetwork %q has stack type %q, dual-stack cluster requires %s", primary.Subnetwork, config.StackType, networkStackTypeDualStack)
+	}
+	switch config.IPv6AccessType {
+	case ipv6AccessTypeExternal:
+		primary.Ipv6AccessConfigs = []*compute.AccessConfig{{
+			Name:        externalIPv6AccessConfigName,
+			Type:        accessConfigTypeDirectIPv6,
+			NetworkTier: networkTierPremium,
+		}}
+	case ipv6AccessTypeInternal:
+		// Compute assigns an internal IPv6 address from the subnetwork automatically.
+	default:
+		return fmt.Errorf("subnetwork %q has unsupported IPv6 access type %q", primary.Subnetwork, config.IPv6AccessType)
+	}
+	// Like GKE, enablePrivateNodes only controls IPv4 access configs.
+	primary.StackType = networkStackTypeDualStack
+	return nil
 }
 
 func (p *DefaultProvider) invalidatePodRangeCaches(instance *compute.Instance, discovery, rejected bool) {

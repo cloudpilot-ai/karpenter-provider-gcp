@@ -923,6 +923,9 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	if err != nil {
 		return nil, err
 	}
+	if err := p.configureDualStackNetwork(ctx, clusterConfig, interfaces); err != nil {
+		return nil, fmt.Errorf("configuring dual-stack networking: %w", err)
+	}
 	computeMetadata, err := instanceMetadata.ToComputeMetadata()
 	if err != nil {
 		return nil, fmt.Errorf("rendering instance metadata: %w", err)

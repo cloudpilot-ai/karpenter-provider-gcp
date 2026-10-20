@@ -31,7 +31,12 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
+
+func (emptySubnetProvider) GetNetworkConfig(context.Context, string, string) (subnet.NetworkConfig, error) {
+	return subnet.NetworkConfig{}, nil
+}
 
 func TestPodNetworkRequestContract(t *testing.T) {
 	t.Parallel()
