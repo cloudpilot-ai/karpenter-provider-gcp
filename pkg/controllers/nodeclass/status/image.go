@@ -31,22 +31,11 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 )
 
-// Condition reasons published on ImagesReady.
 const (
-	// imageResolutionFailedReason marks a NodeClass selector that cannot resolve: either a
-	// configuration error, e.g. an invalid version format or an unsupported family, or an Ubuntu
-	// catalog discovery miss with no usable image for an architecture. The Ubuntu case can clear
-	// without a configuration change once GCP publishes the image.
 	imageResolutionFailedReason = "ImageResolutionFailed"
-	// imageUnavailableReason marks a valid selector whose images are not published yet. The
-	// previous images are cleared because no usable image exists for the selector right now, and
-	// the resolution is retried shortly instead of waiting for another NodeClass event.
-	imageUnavailableReason = "ImageUnavailable"
-	// imageLookupFailedReason marks a Compute API failure while resolving images. The previous
-	// images stay in status for diagnosis, but they are not usable for new launches.
-	imageLookupFailedReason = "ImageLookupFailed"
-	// imagesNotFoundReason marks a selector that resolved but matched no image.
-	imagesNotFoundReason = "ImagesNotFound"
+	imageUnavailableReason      = "ImageUnavailable"
+	imageLookupFailedReason     = "ImageLookupFailed"
+	imagesNotFoundReason        = "ImagesNotFound"
 )
 
 type Image struct {
@@ -62,14 +51,12 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, imageResolutionFailedReason, imageConditionMessage(err))
 			return reconcile.Result{RequeueAfter: time.Minute}, nil
 		case imagefamily.IsImageUnavailableError(err):
-			// A confirmed no-usable-image result is not a stale selector: clearing the previous
-			// images keeps status from advertising a set Karpenter has already proven unusable.
+			// Confirmed unavailability invalidates the previous image set.
 			nodeClass.Status.Images = nil
 			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, imageUnavailableReason, imageConditionMessage(err))
 			return reconcile.Result{RequeueAfter: time.Minute}, nil
 		default:
-			// The Compute API may be transiently unavailable: publish a diagnostic condition but
-			// return the error so controller-runtime backs off as usual.
+			// Retain diagnostic status, but block launches and preserve infrastructure backoff.
 			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, imageLookupFailedReason, imageConditionMessage(err))
 			return reconcile.Result{}, err
 		}

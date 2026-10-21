@@ -55,28 +55,18 @@ func (c *CloudProvider) isImageDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v
 		}
 	}
 
-	// The running image is no longer published. Replace it only with an image this node can
-	// actually boot: images that are not ready are never a drift target, and a partial COS set
-	// (for example amd64 published while arm64 is still rolling out) is not a replacement for the
-	// variant this node runs. Static NodeClass drift is evaluated separately and stays reported.
+	// A partial image set must not drift nodes without a compatible replacement.
 	if !nodeClass.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady) {
 		return ""
 	}
-	replacementRequirements := imageReplacementRequirements(nodeClaim)
-	if !lo.ContainsBy(nodeClass.Status.Images, func(im v1alpha1.Image) bool {
-		return imagefamily.ImageCompatibleWithRequirements(im, replacementRequirements)
-	}) {
+	if _, ok := imagefamily.FindImage(nodeClass.Status.Images, imageReplacementRequirements(nodeClaim)); !ok {
 		return ""
 	}
 	return ImageDrift
 }
 
-// imageReplacementRequirements returns the requirements a replacement image has to satisfy for
-// nodeClaim. The node's labels describe the VM that is actually running, so they are authoritative:
-// spec requirements may be broader (a NodePool can allow several architectures or GPU counts), and
-// they are only consulted for a requirement the labels do not carry. A node whose architecture label
-// is known and whose labels carry no GPU count is a CPU node, so a GPU-only image is not one of its
-// replacements even when the spec's GPU requirement would admit one.
+// Actual labels take precedence over broad spec requirements. A known architecture with no
+// GPU-count label identifies a CPU node, even if the spec also permits GPU shapes.
 func imageReplacementRequirements(nodeClaim *karpv1.NodeClaim) scheduling.Requirements {
 	specRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	requirements := scheduling.NewRequirements()
@@ -91,11 +81,8 @@ func imageReplacementRequirements(nodeClaim *karpv1.NodeClaim) scheduling.Requir
 	case hasGPUCountLabel:
 		requirements.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, gpuCount))
 	case hasArchLabel:
-		// The actual variant is known to be CPU, so this takes precedence over a broad GPU spec
-		// requirement: a GPU image must never be a replacement for this node.
 		requirements.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist))
 	default:
-		// No actual variant information: fall back to the spec requirement.
 		if requirement, ok := specRequirements[v1alpha1.LabelInstanceGPUCount]; ok {
 			requirements.Add(requirement)
 		}

@@ -17,25 +17,31 @@ limitations under the License.
 package imagefamily
 
 import (
+	"github.com/samber/lo"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
-// ImageCompatibleWithRequirements reports whether a resolved image can back a node whose
-// requirements are the given requirements. Scheduling eligibility, new launches, boot disk
-// selection, and image drift share this comparison so an image is never selected where another
-// check would reject it. The direction and the undefined-label policy match boot disk rendering:
-// every requirement the node declares must accept the image's own requirements, and well-known
-// labels the image does not declare stay unconstrained.
-func ImageCompatibleWithRequirements(image v1alpha1.Image, requirements scheduling.Requirements) bool {
-	return scheduling.NewNodeSelectorRequirements(image.Requirements...).
-		Compatible(requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+// FindImage returns the first resolved image compatible with the node's requirements.
+func FindImage(images []v1alpha1.Image, requirements scheduling.Requirements) (v1alpha1.Image, bool) {
+	for _, image := range images {
+		if scheduling.NewNodeSelectorRequirements(image.Requirements...).Compatible(requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+			return image, true
+		}
+	}
+	return v1alpha1.Image{}, false
 }
 
-// ImagesReadyForLaunch reports whether the NodeClass currently publishes images a new node may
-// boot. The readiness condition, not the presence of images, is authoritative: a failed refresh can
-// leave an earlier selector's images in status for diagnosis, and those must never launch.
-func ImagesReadyForLaunch(nodeClass *v1alpha1.GCENodeClass) bool {
-	return nodeClass.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady) && len(nodeClass.Status.Images) > 0
+// FilterInstanceTypes keeps launchable types without modifying the catalog. Retained status
+// after a failed refresh is diagnostic only; it must not authorize new launches.
+func FilterInstanceTypes(nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+	if !nodeClass.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady) || len(nodeClass.Status.Images) == 0 {
+		return nil
+	}
+	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
+		_, ok := FindImage(nodeClass.Status.Images, instanceType.Requirements)
+		return ok
+	})
 }

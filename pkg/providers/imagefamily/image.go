@@ -39,30 +39,19 @@ import (
 	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
-// imageResolutionError marks a resolution failure the reconciler reports as a
-// status condition instead of returning for controller-runtime exponential
-// backoff: either a NodeClass configuration error (invalid version format,
-// unsupported family or architecture) or an Ubuntu catalog discovery miss with
-// no usable image for an architecture. An Ubuntu catalog miss is not a
-// configuration error and can clear on its own once GCP publishes the image.
+// imageResolutionError covers configuration failures and Ubuntu catalog misses.
+// Both are reported as conditions and retried rather than returned for backoff.
 type imageResolutionError struct{ msg string }
 
 func (e *imageResolutionError) Error() string { return e.msg }
 
-// IsImageResolutionError reports whether err is a resolution failure rather than
-// a transient infrastructure failure. It covers user-controlled NodeClass
-// configuration errors, and also Ubuntu catalog discovery misses, which can
-// resolve without a configuration change once the image is published.
+// IsImageResolutionError identifies configuration failures or Ubuntu catalog misses.
 func IsImageResolutionError(err error) bool {
 	var e *imageResolutionError
 	return errors.As(err, &e)
 }
 
-// imageUnavailableError marks a valid selector with no usable image currently published, for
-// example while COS images roll out variant by variant or before a promoted GKE build or pinned
-// milestone has a READY image. It is neither a configuration error nor an infrastructure failure:
-// the next refresh may resolve it without any user action, so the reconciler publishes
-// ImagesReady=False and retries shortly instead of backing off.
+// imageUnavailableError marks a valid selector with no usable image published yet.
 type imageUnavailableError struct{ msg string }
 
 func (e *imageUnavailableError) Error() string { return e.msg }
@@ -113,9 +102,7 @@ func NewDefaultProvider(computeService *compute.Service, versionProvider version
 	}
 }
 
-// List resolves the NodeClass image selector terms. A non-empty usable result is cached per
-// selector for imageCacheTTL so a staggered publication is picked up on a later refresh; errors
-// and empty results are not cached.
+// List caches non-empty successful resolutions per selector; failures and empty results retry.
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, error) {
 	p.Lock()
 	defer p.Unlock()
@@ -263,70 +250,50 @@ func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
 	return p.providers[family]
 }
 
-// ensureImagesAvailable checks the images a family resolved against the Compute API. COS "latest"
-// already validated every candidate while ranking the catalog, and its exact-build and milestone
-// selectors derive the arm64 and NVIDIA sibling names from one matched build, so a sibling GCP has
-// not published yet is omitted instead of failing the whole term. Every other family (Ubuntu, raw
-// image IDs) must resolve a complete set.
+// COS latest is already validated; exact COS siblings may be unavailable independently.
+// Preserve Ubuntu's existing lookup policy: omit 404s, but fail on non-READY images.
 func (p *DefaultProvider) ensureImagesAvailable(ctx context.Context, family, version string, ims Images) (Images, error) {
-	if family != v1alpha1.ImageFamilyContainerOptimizedOS {
-		return p.filterExistingImages(ctx, ims)
-	}
-	if version == "latest" {
+	cos := family == v1alpha1.ImageFamilyContainerOptimizedOS
+	if cos && version == "latest" {
 		return ims, nil
 	}
-	return p.filterUnavailableImages(ctx, ims)
-}
-
-// filterExistingImages keeps the images that exist and fails the term when any resolved image is
-// not READY. Families whose set must be complete (Ubuntu, raw IDs) use it.
-func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) (Images, error) {
 	var result Images
 	for _, im := range ims {
-		gceim, err := p.resolveImage(ctx, im.SourceImage)
+		img, err := p.resolveImage(ctx, im.SourceImage)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
 			return nil, err
 		}
-		if gceim == nil {
-			continue
-		}
-		if err := imageReady(gceim); err != nil {
-			return nil, err
-		}
-		result = append(result, im)
-	}
-	if len(ims) > 0 && len(result) == 0 {
-		return nil, &imageResolutionError{msg: fmt.Sprintf("%d candidate image(s) were resolved but none exist in GCP; verify the pinned version is available", len(ims))}
-	}
-	return result, nil
-}
-
-// filterUnavailableImages drops the images that are missing or not READY. COS derives its arm64
-// and NVIDIA sibling names from one matched build, so a sibling GCP has not published yet is
-// omitted without substituting another build or version; at least one image must remain, otherwise
-// the exact target is unpublished rather than misconfigured.
-func (p *DefaultProvider) filterUnavailableImages(ctx context.Context, ims Images) (Images, error) {
-	var result Images
-	for _, im := range ims {
-		gceim, err := p.resolveImage(ctx, im.SourceImage)
+		eligible, err := imageEligible(img, family)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
 			return nil, err
 		}
-		if gceim == nil || !imageUsable(gceim) {
-			continue
+		if eligible {
+			result = append(result, im)
 		}
-		result = append(result, im)
 	}
 	if len(result) == 0 {
-		return nil, &imageUnavailableError{msg: fmt.Sprintf("%d derived COS image(s) were checked but none exist and are READY in GCP yet", len(ims))}
+		if cos {
+			return nil, &imageUnavailableError{msg: fmt.Sprintf("%d derived COS image(s) were checked but none exist and are READY in GCP yet", len(ims))}
+		}
+		if len(ims) > 0 {
+			return nil, &imageResolutionError{msg: fmt.Sprintf("%d candidate image(s) were resolved but none exist in GCP; verify the pinned version is available", len(ims))}
+		}
 	}
 	return result, nil
 }
 
-// imageReady requires a READY image. A listed image that is still PENDING is a publication lag, not
-// an infrastructure failure, so the error is classified as unavailable and retried shortly.
+func imageEligible(img *compute.Image, family string) (bool, error) {
+	if img == nil {
+		return false, nil
+	}
+	if family == v1alpha1.ImageFamilyContainerOptimizedOS {
+		return imageUsable(img), nil
+	}
+	return true, imageReady(img)
+}
+
+// Non-READY images are retried as publication failures, not infrastructure errors.
 func imageReady(img *compute.Image) error {
 	if img.Status != "READY" {
 		return &imageUnavailableError{msg: fmt.Sprintf("image %s is not ready (status: %s)", img.Name, img.Status)}
@@ -334,8 +301,7 @@ func imageReady(img *compute.Image) error {
 	return nil
 }
 
-// imageUsable reports whether img can back a node: GCP requires READY before an image can be
-// used, and this provider also excludes deprecated images that GCP would still allow.
+// COS excludes deprecated images even though GCP permits using them.
 func imageUsable(img *compute.Image) bool {
 	if img.Status != "READY" {
 		return false
@@ -358,9 +324,7 @@ func (p *DefaultProvider) resolveImage(ctx context.Context, sourceImage string) 
 	return lookupImage(ctx, p.computeService, projectID, imageName)
 }
 
-// lookupImage fetches one image by project and name. A typed 404 response is reported as
-// (nil, nil) because the image does not exist; every other failure, including permission,
-// rate-limit, server, and transport errors, is returned so callers cannot mistake it for absence.
+// lookupImage treats only a typed 404 as absence; other API failures must not trigger fallback.
 func lookupImage(ctx context.Context, service *compute.Service, projectID, imageName string) (*compute.Image, error) {
 	image, err := service.Images.Get(projectID, imageName).Context(ctx).Do()
 	if err != nil {

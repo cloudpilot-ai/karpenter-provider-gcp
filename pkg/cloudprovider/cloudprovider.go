@@ -275,22 +275,7 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 	if err != nil {
 		return nil, err
 	}
-	return instanceTypesForImages(nodeClass, instanceTypesForScheduling(nodePool, instanceTypes)), nil
-}
-
-// instanceTypesForImages keeps the instance types at least one resolved image can back. A NodeClass
-// without ready images exposes no scheduling candidates, so a stale image status left by an earlier
-// selector never becomes eligible. The catalog itself stays unfiltered: existing VMs are reconciled
-// and adopted against it.
-func instanceTypesForImages(nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
-	if !imagefamily.ImagesReadyForLaunch(nodeClass) {
-		return nil
-	}
-	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
-		return lo.ContainsBy(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
-			return imagefamily.ImageCompatibleWithRequirements(image, instanceType.Requirements)
-		})
-	})
+	return imagefamily.FilterInstanceTypes(nodeClass, instanceTypesForScheduling(nodePool, instanceTypes)), nil
 }
 
 func (c *CloudProvider) getAllInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {

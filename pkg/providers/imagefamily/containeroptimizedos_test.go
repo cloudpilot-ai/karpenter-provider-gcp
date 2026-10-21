@@ -198,72 +198,46 @@ func TestResolveImages_COS_LatestNoUsableCandidateIsUnavailable(t *testing.T) {
 	require.True(t, IsImageUnavailableError(err), "expected an unavailable error, got %v", err)
 }
 
-func TestResolveImages_COS_LatestLookupMissingFallsBackToOlderImage(t *testing.T) {
+func TestResolveImages_COS_ValidatesListedCandidates(t *testing.T) {
 	const (
 		newest = "gke-1351-gke1396004-cos-125-19216-104-126-c-pre"
 		older  = "gke-1351-gke1390000-cos-125-19216-100-100-c-pre"
 	)
-	catalog := &imageCatalog{
-		pages: [][]*compute.Image{{{Name: newest, Status: "READY"}, {Name: older, Status: "READY"}}},
-		// The newest image was deleted between listing and lookup.
-		lookup: func(name string) (*compute.Image, int) {
-			if name == newest {
-				return nil, http.StatusNotFound
+	for _, tc := range []struct {
+		name    string
+		image   *compute.Image
+		status  int
+		wantErr bool
+	}{
+		{"vanished", nil, http.StatusNotFound, false},
+		{"pending", &compute.Image{Name: newest, Status: "PENDING"}, 0, false},
+		{"deprecated", &compute.Image{Name: newest, Status: "READY", Deprecated: &compute.DeprecationStatus{State: "DEPRECATED"}}, 0, false},
+		{"permission failure", nil, http.StatusForbidden, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := &imageCatalog{
+				pages: [][]*compute.Image{{{Name: newest, Status: "READY"}, {Name: older, Status: "READY"}}},
+				lookup: func(name string) (*compute.Image, int) {
+					if name == newest {
+						return tc.image, tc.status
+					}
+					return nil, 0
+				},
 			}
-			return nil, 0
-		},
-	}
-	srv := imageCatalogServer(t, catalog)
-	defer srv.Close()
-
-	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
-	got, err := p.ResolveImages(context.Background(), "latest")
-	require.NoError(t, err)
-	require.Equal(t, []string{"projects/gke-node-images/global/images/" + older}, imageSources(got))
-}
-
-func TestResolveImages_COS_LatestLookupNotReadyFallsBackToOlderImage(t *testing.T) {
-	const (
-		newest = "gke-1351-gke1396004-cos-125-19216-104-126-c-pre"
-		older  = "gke-1351-gke1390000-cos-125-19216-100-100-c-pre"
-	)
-	catalog := &imageCatalog{
-		pages: [][]*compute.Image{{{Name: newest, Status: "READY"}, {Name: older, Status: "READY"}}},
-		// The listed status is stale: the image is still PENDING.
-		lookup: func(name string) (*compute.Image, int) {
-			if name == newest {
-				return &compute.Image{Name: newest, Status: "PENDING"}, 0
+			srv := imageCatalogServer(t, catalog)
+			t.Cleanup(srv.Close)
+			p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
+			got, err := p.ResolveImages(context.Background(), "latest")
+			if tc.wantErr {
+				require.Error(t, err)
+				require.False(t, IsImageUnavailableError(err))
+				require.False(t, IsImageResolutionError(err))
+				return
 			}
-			return nil, 0
-		},
+			require.NoError(t, err)
+			require.Equal(t, []string{"projects/gke-node-images/global/images/" + older}, imageSources(got))
+		})
 	}
-	srv := imageCatalogServer(t, catalog)
-	defer srv.Close()
-
-	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
-	got, err := p.ResolveImages(context.Background(), "latest")
-	require.NoError(t, err)
-	require.Equal(t, []string{"projects/gke-node-images/global/images/" + older}, imageSources(got))
-}
-
-func TestResolveImages_COS_LatestLookupFailurePropagates(t *testing.T) {
-	catalog := &imageCatalog{
-		pages: [][]*compute.Image{{
-			{Name: "gke-1351-gke1396004-cos-125-19216-104-126-c-pre", Status: "READY"},
-			{Name: "gke-1351-gke1390000-cos-125-19216-100-100-c-pre", Status: "READY"},
-		}},
-		// A permission failure is not absence: it must not silently select an older image.
-		lookup: func(string) (*compute.Image, int) { return nil, http.StatusForbidden },
-	}
-	srv := imageCatalogServer(t, catalog)
-	defer srv.Close()
-
-	p := &ContainerOptimizedOS{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.35.1"}}
-	_, err := p.ResolveImages(context.Background(), "latest")
-	require.Error(t, err)
-	require.ErrorContains(t, err, "validating COS image")
-	require.False(t, IsImageUnavailableError(err))
-	require.False(t, IsImageResolutionError(err))
 }
 
 func TestResolveMilestoneBaseCOSImage_SkipsPending(t *testing.T) {

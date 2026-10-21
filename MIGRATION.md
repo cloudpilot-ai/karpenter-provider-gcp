@@ -7,15 +7,9 @@
 
 ### Container-Optimized OS images are ranked per variant
 
-For `family: ContainerOptimizedOS` with `version: latest`, each published variant (amd64 CPU, arm64 CPU, and amd64 NVIDIA) is now resolved independently, and the newest `READY`, non-deprecated image is selected for that variant. When the newest candidate is still `PENDING`, an older image for the cluster's Kubernetes patch version is used instead of failing. Previously the arm64 and NVIDIA image names were derived from one amd64 image, so a sibling variant GCP had not published made the whole selector fail.
+COS `latest` now selects the newest usable image independently for amd64 CPU, arm64 CPU, and NVIDIA, falling back to older compatible catalog entries during publication. `ImagesReady=True` can contain a partial set: only supported instance types launch, and image drift waits for a compatible replacement. Channel and version pins remain exact; Ubuntu selection is unchanged.
 
-Operator-visible effects:
-
-- A `GCENodeClass` can become `ImagesReady=True` with a partial image set. Instance types that no published image can boot are not scheduled and start no new nodes until GCP publishes the missing variant. Existing nodes keep running and are only replaced once a compatible image is published.
-- `ImagesReady=False` now uses the reasons `ImageUnavailable` (valid selector, no usable image published yet; `status.images` is cleared and resolution is retried after one minute), `ImageLookupFailed` (Compute API failure; retried with the controller's normal error backoff, and any images left in `status.images` are diagnostic only), in addition to `ImageResolutionFailed` and `ImagesNotFound`.
-- Resolution results are still refreshed at most every five minutes per selector; failures and empty results are retried sooner.
-
-No API, CRD, or schema changes and no action is required. `channel:` terms and version pins still resolve their exact build or version. Ubuntu image selection is unchanged: both architectures must resolve from the catalog, and an image that disappears before the final lookup is dropped from the published set. See [Image selection](docs/image-selection.md#container-optimized-os-variants).
+No API changes or migration action required. See [COS image selection](docs/image-selection.md#container-optimized-os-variants) and [readiness conditions](docs/troubleshooting.md#gcenodeclass-not-becoming-ready), including the new `ImageUnavailable` and `ImageLookupFailed` reasons.
 
 ### Default node service account lookup failures now stop startup
 

@@ -88,22 +88,16 @@ kubectl describe gcenodeclass <name>
 
 Check `status.conditions`. The `ImagesReady` condition shows whether Karpenter can resolve the configured image.
 
-**Common causes:**
+Use the condition message and [available-image commands](image-management.md#finding-available-versions) to distinguish configuration errors from publication delays:
 
-- **Invalid version format** — Pinned versions must match the family's format: `milestone.build.build.build` for ContainerOptimizedOS (e.g. `125.19216.104.126`), `vYYYYMMDD` for Ubuntu (e.g. `v20260416`). Invalid formats are rejected at admission.
+| Reason                  | Meaning                                                                                  | Action / retry                                                                                                         |
+|-------------------------|------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `ImageResolutionFailed` | Invalid selector, or no usable catalog image for a required Ubuntu architecture.         | Check the selector and published versions. Retries every minute; Ubuntu publication can recover without a spec change. |
+| `ImageUnavailable`      | No usable COS candidate or a selected image is not `READY`; previous images are cleared. | Wait for publication; retries every minute.                                                                            |
+| `ImageLookupFailed`     | API lookup failed; previous images remain diagnostic only.                               | Check permissions/API availability; retries with controller error backoff.                                             |
+| `ImagesNotFound`        | No images matched, for example a missing raw ID; previous images are cleared.            | Verify the image ID; retries every minute.                                                                             |
 
-- **Unsupported family** — Only `ContainerOptimizedOS` and `Ubuntu` are supported.
-
-The `ImagesReady` condition reason tells you which of these applies and whether anything is required from you:
-
-| Reason                  | What it means                                                                                                                                                                                                                                                                                                                                           | What to do                                                                                                                                                                                                                                                                                      |
-|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `ImageResolutionFailed` | The selector cannot resolve: either an unsupported version format or family (a configuration error), or an Ubuntu architecture with no usable image in the catalog (an image that is still `PENDING` is not usable). The Ubuntu case needs no configuration change and clears once GCP publishes the image.                                             | Check the condition message and verify the version with the `gcloud compute images list` commands in [Image management](image-management.md#finding-available-versions). A missing Ubuntu image needs no action: resolution is retried every minute and completes once GCP publishes the image. |
-| `ImageUnavailable`      | The selector is valid but GCP has no usable image published yet, for example a `latest` term whose newest candidates are still `PENDING`, an exact channel build or milestone pin whose COS image is not published yet, a raw image ID whose image is not `READY`, or an image that is no longer ready on the final lookup. `status.images` is cleared. | Wait: resolution is retried every minute and completes without action once GCP finishes publishing.                                                                                                                                                                                             |
-| `ImageLookupFailed`     | A Compute API call failed (permissions, rate limits, or a transient server error). Images left in `status.images` are from the previous successful resolution and are diagnostic only — they cannot launch nodes.                                                                                                                                       | Verify the controller's Compute API permissions. Resolution is retried with the controller's normal error backoff.                                                                                                                                                                              |
-| `ImagesNotFound`        | The selector resolved but matched nothing, for example a raw image ID that does not exist yet. `status.images` is cleared.                                                                                                                                                                                                                              | Confirm the image ID exists and is published. Resolution is retried every minute.                                                                                                                                                                                                               |
-
-For Container-Optimized OS, `ImagesReady=True` with only some of the amd64 CPU, arm64 CPU, and NVIDIA variants published is expected. See [arm64 or GPU nodes not launching with ContainerOptimizedOS](#arm64-or-gpu-nodes-not-launching-with-containeroptimizedos).
+While `ImagesReady` is not `True`, no new nodes can use retained status. For COS, `True` may represent a partial set; see [missing arm64/GPU variants](#arm64-or-gpu-nodes-not-launching-with-containeroptimizedos).
 
 Example using the recommended structured fields:
 
@@ -215,15 +209,13 @@ The default `ContainerOptimizedOS` and `Ubuntu` images work for CPU Confidential
 
 ## arm64 or GPU nodes not launching with ContainerOptimizedOS
 
-`ImagesReady=True` means Karpenter found at least one usable Container-Optimized OS variant, not that every variant is published. GKE publishes the amd64 CPU, arm64 CPU, and NVIDIA images independently, so one variant can lag behind the others.
-
-List the variants currently published for the NodeClass:
+A ready COS NodeClass can lack an arm64 or NVIDIA variant. Inspect its resolved images:
 
 ```sh
 kubectl get gcenodeclass <name> -o jsonpath='{range .status.images[*]}{.sourceImage}{"\n"}{end}'
 ```
 
-If no `-cos-arm64-` or `-c-nvda` image is listed, that variant is not available yet: Karpenter schedules only instance types that a published image can boot, and a NodeClaim that no published image can back fails with an insufficient-capacity error naming the image problem. Existing nodes keep running and are not replaced toward an image they cannot boot. Resolution refreshes every five minutes while it is succeeding and retries every minute while it cannot publish, so the missing variant appears automatically once GCP publishes it. To confirm what GCP has published, see [Image management](image-management.md#finding-available-versions).
+If `-cos-arm64-` or `-c-nvda` is absent, matching instance types are not launchable yet. Check [available images](image-management.md#finding-available-versions); successful resolution refreshes every five minutes. See [COS variant selection](image-selection.md#container-optimized-os-variants) for fallback and drift behavior.
 
 ## arm64 provisioning not available
 

@@ -35,12 +35,10 @@ import (
 // cosImageProject is the GCP project that owns all Container-Optimized OS GKE images.
 const cosImageProject = "gke-node-images"
 
-// broadCOSImageFilter bounds COS discovery to every GKE image when the cluster's Kubernetes
-// version is unavailable. Only the patch scope is dropped; variant classification still applies.
+// Drop only the patch scope when the cluster version is unavailable.
 const broadCOSImageFilter = `name=gke-*`
 
-// cosVariant identifies one published Container-Optimized OS variant. GKE publishes the
-// variants independently, so "latest" ranks each one separately.
+// GKE publishes COS variants independently.
 type cosVariant int
 
 const (
@@ -52,10 +50,7 @@ const (
 // cosVariantOrder is the stable order of published Images.
 var cosVariantOrder = []cosVariant{cosVariantAMD64CPU, cosVariantARM64CPU, cosVariantAMD64NVIDIA}
 
-// Supported COS image names, one anchored pattern per variant. Specialised builds published in
-// the same project (kmod, gvisor, -test, cgpv1/cgroup v1, and other variants) match none of
-// them, so they are never selected as a node image. A cgpv1 (cgroup v1) image would also crash
-// the kubelet: GKE 1.29+ clusters run cgroup v2 and the kubelet sets --fail-cgroupv1=true.
+// Anchored names exclude specialized builds, including cgroup-v1 images incompatible with GKE 1.29+.
 var (
 	cosAMD64CPUNameRe    = regexp.MustCompile(`^gke-\d+-gke\d+-cos-\d+-\d+-\d+-\d+-c-pre$`)
 	cosARM64CPUNameRe    = regexp.MustCompile(`^gke-\d+-gke\d+-cos-arm64-\d+-\d+-\d+-\d+-c-pre$`)
@@ -116,15 +111,13 @@ func ParseGKEVersion(v string) (k8sKey, build string, ok bool) {
 	return strings.ReplaceAll(base, ".", ""), parts[1], true
 }
 
-// resolveExactBuildCOSImage selects the amd64 CPU COS image for one GKE build without
-// filtering on the server. A miss must not fall back to a different build: a build GCP has not
-// published a usable image for yet is reported as unavailable so the reconciler retries shortly.
+// Exact builds never fall back to another build when publication is incomplete.
 func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8sKey, build string) (string, error) {
 	prefix := fmt.Sprintf("gke-%s-gke%s-", k8sKey, build)
 	var best *compute.Image
 	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
-		variant, ok := classifyCOSImage(img.Name)
-		if ok && variant == cosVariantAMD64CPU && strings.HasPrefix(img.Name, prefix) && imageUsable(img) {
+		variant, ok := usableCOSVariant(img, prefix)
+		if ok && variant == cosVariantAMD64CPU {
 			best = img
 			return true
 		}
@@ -141,37 +134,42 @@ func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8
 	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, best.Name), nil
 }
 
-// resolveLatestCOSImages returns one usable image per COS variant, ranked independently.
-// Candidates are visited newest first; a candidate that is still PENDING, is deprecated, or
-// disappears between listing and lookup is skipped so an older eligible image is selected
-// instead. Variants without an eligible image are omitted. The scan stops as soon as every variant
-// has a usable candidate, and otherwise continues to the end of the catalog: an unpublished
-// optional variant must not cap the fallback depth and there is no last-known-good history to fall
-// back to.
+// Select the newest validated image per variant, continuing to older candidates during publication.
 func (c *ContainerOptimizedOS) resolveLatestCOSImages(ctx context.Context) (Images, error) {
 	filter := c.buildImageFilter(ctx)
-	ranking := &cosRanking{
-		service:  c.computeService,
-		scope:    cosImageNameScope(filter),
-		selected: make(map[cosVariant]*compute.Image, len(cosVariantOrder)),
-	}
+	scope := cosImageNameScope(filter)
+	selected := make(map[cosVariant]*compute.Image, len(cosVariantOrder))
+	var lookupErr error
 	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
-		return ranking.visit(ctx, img)
+		variant, ok := usableCOSVariant(img, scope)
+		if !ok || selected[variant] != nil {
+			return false
+		}
+		candidate, err := lookupImage(ctx, c.computeService, cosImageProject, img.Name)
+		if err != nil {
+			lookupErr = fmt.Errorf("validating COS image %s: %w", img.Name, err)
+			return true
+		}
+		// The listing may be stale; do not let a vanished or unusable candidate displace an older one.
+		if candidate != nil && imageUsable(candidate) {
+			selected[variant] = candidate
+		}
+		return len(selected) == len(cosVariantOrder)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing COS GKE images in %s: %w", cosImageProject, err)
 	}
-	if ranking.err != nil {
-		return nil, ranking.err
+	if lookupErr != nil {
+		return nil, lookupErr
 	}
-	if len(ranking.selected) == 0 {
+	if len(selected) == 0 {
 		return nil, &imageUnavailableError{msg: fmt.Sprintf(
 			"no usable ContainerOptimizedOS image is published in %s for filter %s: "+
 				"no READY, non-deprecated COS image matches the selected build yet", cosImageProject, filter)}
 	}
-	images := make(Images, 0, len(ranking.selected))
+	images := make(Images, 0, len(selected))
 	for _, variant := range cosVariantOrder {
-		if img := ranking.selected[variant]; img != nil {
+		if img := selected[variant]; img != nil {
 			images = append(images, Image{
 				SourceImage:  fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, img.Name),
 				Requirements: cosVariantRequirements(variant),
@@ -181,32 +179,9 @@ func (c *ContainerOptimizedOS) resolveLatestCOSImages(ctx context.Context) (Imag
 	return images, nil
 }
 
-// cosRanking accumulates the newest usable image per COS variant during one catalog scan.
-type cosRanking struct {
-	service  *compute.Service
-	scope    string
-	selected map[cosVariant]*compute.Image
-	err      error
-}
-
-// visit ranks one listed image. It reports whether the scan can stop, either because every
-// variant has a candidate or because a lookup failed.
-func (r *cosRanking) visit(ctx context.Context, img *compute.Image) bool {
+func usableCOSVariant(img *compute.Image, scope string) (cosVariant, bool) {
 	variant, ok := classifyCOSImage(img.Name)
-	if !ok || !strings.HasPrefix(img.Name, r.scope) || !imageUsable(img) || r.selected[variant] != nil {
-		return false
-	}
-	listed, err := lookupImage(ctx, r.service, cosImageProject, img.Name)
-	if err != nil {
-		r.err = fmt.Errorf("validating COS image %s: %w", img.Name, err)
-		return true
-	}
-	if listed == nil || !imageUsable(listed) {
-		// Deleted or no longer READY since it was listed: keep ranking older candidates.
-		return false
-	}
-	r.selected[variant] = listed
-	return len(r.selected) == len(cosVariantOrder)
+	return variant, ok && strings.HasPrefix(img.Name, scope) && imageUsable(img)
 }
 
 // classifyCOSImage maps a COS image name to its supported publication variant.
@@ -241,17 +216,14 @@ func cosVariantRequirements(variant cosVariant) scheduling.Requirements {
 	}
 }
 
-// resolveMilestoneBaseCOSImage returns the newest usable amd64 CPU COS image for the cluster patch.
-// Only the milestone pin path uses it, as the name template the pinned milestone is substituted
-// into; channel and "latest" selection do not derive one image from another. Without a usable base
-// the pin cannot be constructed yet, which is a publication lag rather than a configuration error.
+// Milestone pins retain the existing name-template construction from an amd64 CPU base.
 func (c *ContainerOptimizedOS) resolveMilestoneBaseCOSImage(ctx context.Context) (string, error) {
 	filter := c.buildImageFilter(ctx)
 	scope := cosImageNameScope(filter)
 	var best *compute.Image
 	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
-		variant, ok := classifyCOSImage(img.Name)
-		if ok && variant == cosVariantAMD64CPU && strings.HasPrefix(img.Name, scope) && imageUsable(img) {
+		variant, ok := usableCOSVariant(img, scope)
+		if ok && variant == cosVariantAMD64CPU {
 			best = img
 			return true
 		}
