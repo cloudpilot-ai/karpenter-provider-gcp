@@ -40,10 +40,17 @@ const (
 
 type Provider interface {
 	GetFreeIPCounts(ctx context.Context, network, subnetwork string) (map[string]int64, error)
+	GetNetworkConfig(ctx context.Context, network, subnetwork string) (NetworkConfig, error)
 	Invalidate(network, subnetwork string)
 }
 
-// SubnetworksClient reads subnet utilization from the Compute API.
+// NetworkConfig describes the subnetwork's IP stack and IPv6 address access type.
+type NetworkConfig struct {
+	StackType      string
+	IPv6AccessType string
+}
+
+// SubnetworksClient reads subnet configuration and utilization from the Compute API.
 type SubnetworksClient interface {
 	Get(context.Context, *computepb.GetSubnetworkRequest, ...gax.CallOption) (*computepb.Subnetwork, error)
 }
@@ -57,9 +64,10 @@ type DefaultProvider struct {
 }
 
 type snapshot struct {
-	counts    map[string]int64
-	err       error
-	expiresAt time.Time
+	counts        map[string]int64
+	networkConfig NetworkConfig
+	err           error
+	expiresAt     time.Time
 }
 
 func NewProvider(client SubnetworksClient, region string, clock clock.PassiveClock) Provider {
@@ -67,20 +75,30 @@ func NewProvider(client SubnetworksClient, region string, clock clock.PassiveClo
 }
 
 func (p *DefaultProvider) GetFreeIPCounts(ctx context.Context, network, subnetwork string) (map[string]int64, error) {
+	cached, err := p.getSnapshot(ctx, network, subnetwork)
+	return maps.Clone(cached.counts), err
+}
+
+func (p *DefaultProvider) GetNetworkConfig(ctx context.Context, network, subnetwork string) (NetworkConfig, error) {
+	cached, err := p.getSnapshot(ctx, network, subnetwork)
+	return cached.networkConfig, err
+}
+
+func (p *DefaultProvider) getSnapshot(ctx context.Context, network, subnetwork string) (snapshot, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return snapshot{}, err
 	}
 	target, err := resolveTarget(network, subnetwork, p.region)
 	if err != nil {
-		return nil, err
+		return snapshot{}, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return snapshot{}, err
 	}
 	if cached, ok := p.cache[target]; ok && p.clock.Now().Before(cached.expiresAt) {
-		return maps.Clone(cached.counts), cached.err
+		return cached, cached.err
 	}
 	delete(p.cache, target)
 
@@ -91,12 +109,12 @@ func (p *DefaultProvider) GetFreeIPCounts(ctx context.Context, network, subnetwo
 		Views: ptr.To("WITH_UTILIZATION"),
 	})
 	if err != nil {
-		err = fmt.Errorf("getting free IPs for %s: %w", target, err)
+		err = fmt.Errorf("getting subnetwork %s: %w", target, err)
 		// A canceled caller must not put other callers into the failure cooldown.
 		if ctx.Err() == nil {
 			p.cache[target] = snapshot{err: err, expiresAt: p.clock.Now().Add(failureTTL)}
 		}
-		return nil, err
+		return snapshot{}, err
 	}
 	counts := map[string]int64{}
 	for _, entry := range response.GetUtilizationDetails().GetIpv4Utilizations() {
@@ -104,11 +122,19 @@ func (p *DefaultProvider) GetFreeIPCounts(ctx context.Context, network, subnetwo
 			counts[entry.GetRangeName()] = *entry.TotalFreeIp
 		}
 	}
-	p.cache[target] = snapshot{counts: counts, expiresAt: p.clock.Now().Add(cacheTTL)}
-	return maps.Clone(counts), nil
+	cached := snapshot{
+		counts: counts,
+		networkConfig: NetworkConfig{
+			StackType:      response.GetStackType(),
+			IPv6AccessType: response.GetIpv6AccessType(),
+		},
+		expiresAt: p.clock.Now().Add(cacheTTL),
+	}
+	p.cache[target] = cached
+	return cached, nil
 }
 
-// Invalidate discards all range counts for the affected subnetwork.
+// Invalidate discards cached configuration and range counts for the affected subnetwork.
 func (p *DefaultProvider) Invalidate(network, subnetwork string) {
 	target, err := resolveTarget(network, subnetwork, p.region)
 	if err != nil {
