@@ -15,6 +15,12 @@ Ensure the controller can reach the Compute Engine API and has the existing `com
 
 Setting the new `GCENodeClass.spec.resourceManagerTags` field requires the controller's service account to have `compute.instances.createTagBinding` on the project, which is now included in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml). If you created the `karpenter_controller` custom role from an earlier version of that file, update it with `gcloud iam roles update` before you set `resourceManagerTags`; without it, instance creation fails for that NodeClass. The service account also needs `roles/resourcemanager.tagUser` on the tag values, their tag key, or a parent resource. No action is required if you don't use `resourceManagerTags`. See [Resource manager tags](docs/examples/networking.md#resource-manager-tags).
 
+### Persistent disks now carry Karpenter ownership labels: `compute.disks.setLabels` required for all NodeClasses
+
+New persistent disks created from `spec.disks`, including the boot disk, now carry the same Karpenter labels as their VM: `karpenter-sh-nodepool`, `karpenter-k8s-gcp-gcenodeclass`, `goog-k8s-cluster-name`, and `goog-k8s-cluster-location`. Use them to attribute disk costs or find disks by NodePool, NodeClass, or cluster. These labels take precedence over `spec.labels` entries with the same keys. Existing disks are not relabeled.
+
+**Action required:** every NodeClass now creates labeled disks, so the controller's service account needs `compute.disks.setLabels` even when `spec.labels` is empty. If you created the `karpenter_controller` custom role without it, update the role from [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml) before upgrading; otherwise, provisioning fails.
+
 ### `deploy/terraform/` module: Dataplane V2, system node pool, and release channel
 
 If you manage a cluster with [`deploy/terraform/`](deploy/terraform/), review `terraform plan` before you apply this version. Three changes affect clusters the module already created:
