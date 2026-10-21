@@ -817,7 +817,7 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int,
+	nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int,
 ) ([]*compute.AttachedDisk, error) {
 	disks := nodeClass.Spec.Disks
 	sort.Slice(disks, func(i, j int) bool {
@@ -830,9 +830,14 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 			continue
 		}
 		// Create a new disk configuration for each disk to avoid sharing references
+		diskLabels := maps.Clone(nodeClass.Spec.Labels)
+		if diskLabels == nil {
+			diskLabels = make(map[string]string)
+		}
+		maps.Copy(diskLabels, p.karpenterGCEIdentityLabels(nodeClaim, nodeClass))
 		initParams := &compute.AttachedDiskInitializeParams{
 			DiskSizeGb: int64(disk.SizeGiB),
-			Labels:     maps.Clone(nodeClass.Spec.Labels),
+			Labels:     diskLabels,
 		}
 		if disk.Category != "" {
 			initParams.DiskType = fmt.Sprintf("projects/%s/zones/%s/diskTypes/%s", p.projectID, zone, disk.Category)
@@ -907,7 +912,7 @@ func (p *DefaultProvider) scratchDisk(zone string) *compute.AttachedDisk {
 }
 
 func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, podRange string) (*compute.Instance, error) {
-	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClass, zone, ssdCount)
+	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClaim, nodeClass, zone, ssdCount)
 	if err != nil {
 		return nil, fmt.Errorf("rendering disk properties: %w", err)
 	}
@@ -1464,21 +1469,29 @@ func (p *DefaultProvider) configureAdvancedMachineFeatures(instance *compute.Ins
 // Kubernetes node labels are rebuilt separately in bootstrap metadata and must
 // not be copied to GCE instance labels.
 func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, clusterID string, ssdCount int) {
+	maps.Copy(instance.Labels, p.karpenterGCEIdentityLabels(nodeClaim, nodeClass))
 	if id, ok := clusterIDBase32(clusterID); ok {
 		instance.Labels["goog-gke-cluster-id-base32"] = id
 	}
 	instance.Labels["goog-gke-cost-management"] = ""
 	instance.Labels["goog-gke-node"] = ""
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodePoolKey)] = nodeClaim.Labels[karpv1.NodePoolLabelKey]
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey)] = nodeClass.Name
-
 	// Do not set goog-k8s-node-pool-name. That is GKE-managed node pool identity;
 	// Karpenter ownership is tracked with karpenter.sh/nodepool instead.
-	// LabelClusterNameKey is used by the syncInstances API filter; LabelClusterLocationKey
-	// is checked by belongsToCluster to distinguish same-named clusters in different locations.
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterNameKey)] = p.clusterName
-	instance.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)] = p.clusterLocation
 	instance.Labels[utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)] = strconv.Itoa(ssdCount)
+}
+
+// karpenterGCEIdentityLabels returns the Karpenter ownership and cluster labels shared by
+// the GCE VM and its persistent disks. GCE label keys cannot contain slashes,
+// so use the same normalized keys as the instance label representation.
+// LabelClusterNameKey is used by the syncInstances API filter; LabelClusterLocationKey
+// is checked by belongsToCluster to distinguish same-named clusters in different locations.
+func (p *DefaultProvider) karpenterGCEIdentityLabels(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) map[string]string {
+	return map[string]string{
+		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey):     nodeClaim.Labels[karpv1.NodePoolLabelKey],
+		utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey): nodeClass.Name,
+		utils.LabelClusterNameKey:                               p.clusterName,
+		utils.LabelClusterLocationKey:                           p.clusterLocation,
+	}
 }
 
 func clusterIDBase32(clusterID string) (string, bool) {

@@ -947,7 +947,7 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-ssd", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -958,17 +958,39 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
 	t.Parallel()
 
-	p := &DefaultProvider{projectID: "my-project"}
+	p := &DefaultProvider{projectID: "my-project", clusterName: "my-cluster", clusterLocation: "us-central1"}
 	nodeClass := bootDiskNodeClass("pd-balanced", nil, nil)
-	nodeClass.Spec.Labels = map[string]string{"env": "dev"}
+	nodeClass.Name = "test-nodeclass"
+	nodeClass.Spec.Labels = map[string]string{
+		"env":                         "dev",
+		utils.LabelClusterNameKey:     "wrong-cluster",
+		utils.LabelClusterLocationKey: "wrong-location",
+	}
 	nodeClass.Spec.Disks = append(nodeClass.Spec.Disks, v1alpha1.Disk{SizeGiB: 20, Category: "pd-ssd"})
+	nodeClaim := spotOrOnDemandNodeClaim()
+	nodeClaim.Labels = map[string]string{karpv1.NodePoolLabelKey: "test-pool"}
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 	require.Len(t, disks, 2)
-	for _, disk := range disks {
-		require.Equal(t, map[string]string{"env": "dev"}, disk.InitializeParams.Labels)
+	wantLabels := map[string]string{
+		"env": "dev",
+		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey):     "test-pool",
+		utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey): "test-nodeclass",
+		utils.LabelClusterNameKey:                               "my-cluster",
+		utils.LabelClusterLocationKey:                           "us-central1",
 	}
+	for _, disk := range disks {
+		require.Equal(t, wantLabels, disk.InitializeParams.Labels)
+	}
+	instance := &compute.Instance{Labels: make(map[string]string)}
+	p.setupInstanceLabels(instance, nodeClaim, nodeClass, "", 0)
+	for _, key := range []string{utils.LabelClusterNameKey, utils.LabelClusterLocationKey} {
+		require.Equal(t, instance.Labels[key], disks[0].InitializeParams.Labels[key])
+		require.Equal(t, instance.Labels[key], disks[1].InitializeParams.Labels[key])
+	}
+	require.Equal(t, "wrong-cluster", nodeClass.Spec.Labels[utils.LabelClusterNameKey])
+	require.Equal(t, "wrong-location", nodeClass.Spec.Labels[utils.LabelClusterLocationKey])
 
 	// Neither the NodeClass nor another disk's labels should change when one disk is modified.
 	disks[0].InitializeParams.Labels["env"] = "changed"
@@ -976,10 +998,15 @@ func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
 	require.Equal(t, "dev", disks[1].InitializeParams.Labels["env"])
 
 	nodeClass.Spec.Labels = nil
-	disks, err = p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err = p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
-	require.Nil(t, disks[0].InitializeParams.Labels)
-	require.Nil(t, disks[1].InitializeParams.Labels)
+	require.Equal(t, map[string]string{
+		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey):     "test-pool",
+		utils.SanitizeGCELabelValue(utils.LabelGCENodeClassKey): "test-nodeclass",
+		utils.LabelClusterNameKey:                               "my-cluster",
+		utils.LabelClusterLocationKey:                           "us-central1",
+	}, disks[0].InitializeParams.Labels)
+	require.Equal(t, disks[0].InitializeParams.Labels, disks[1].InitializeParams.Labels)
 	require.Nil(t, p.scratchDisk("us-central1-a").InitializeParams.Labels)
 }
 
@@ -989,7 +1016,7 @@ func TestRenderDiskProperties_OmitsEmptyDiskCategory(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1002,7 +1029,7 @@ func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-extreme", ptr.To(int64(5000)), nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1016,7 +1043,7 @@ func TestRenderDiskProperties_SetsProvisionedThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-throughput", nil, ptr.To(int64(500)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1030,7 +1057,7 @@ func TestRenderDiskProperties_SetsBothIOPSAndThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-balanced", ptr.To(int64(10000)), ptr.To(int64(400)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1093,7 +1120,7 @@ func TestRenderDiskProperties_SsdCountEmitsScratchDisks(t *testing.T) {
 			it := amd64InstanceType()
 			it.Name = tc.instanceTypeName
 			p := &DefaultProvider{projectID: "my-project"}
-			disks, err := p.renderDiskProperties(it, nc, "us-central1-a", tc.ssdCount)
+			disks, err := p.renderDiskProperties(it, spotOrOnDemandNodeClaim(), nc, "us-central1-a", tc.ssdCount)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantScratchCount, countScratch(disks),
 				"expected %d SCRATCH local-SSD disks", tc.wantScratchCount)
@@ -1137,7 +1164,7 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 		},
 	}
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 2)
