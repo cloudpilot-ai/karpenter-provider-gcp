@@ -31,6 +31,24 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 )
 
+// Condition reasons published on ImagesReady.
+const (
+	// imageResolutionFailedReason marks a NodeClass selector that cannot resolve: either a
+	// configuration error, e.g. an invalid version format or an unsupported family, or an Ubuntu
+	// catalog discovery miss with no usable image for an architecture. The Ubuntu case can clear
+	// without a configuration change once GCP publishes the image.
+	imageResolutionFailedReason = "ImageResolutionFailed"
+	// imageUnavailableReason marks a valid selector whose images are not published yet. The
+	// previous images are cleared because no usable image exists for the selector right now, and
+	// the resolution is retried shortly instead of waiting for another NodeClass event.
+	imageUnavailableReason = "ImageUnavailable"
+	// imageLookupFailedReason marks a Compute API failure while resolving images. The previous
+	// images stay in status for diagnosis, but they are not usable for new launches.
+	imageLookupFailedReason = "ImageLookupFailed"
+	// imagesNotFoundReason marks a selector that resolved but matched no image.
+	imagesNotFoundReason = "ImagesNotFound"
+)
+
 type Image struct {
 	imageProvider imagefamily.Provider
 }
@@ -39,21 +57,28 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 	images, err := i.imageProvider.List(ctx, nodeClass)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "listing images")
-		if imagefamily.IsImageResolutionError(err) {
-			msg := err.Error()
-			if len([]rune(msg)) > 256 {
-				msg = string([]rune(msg)[:256])
-			}
-			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageResolutionFailed", msg)
+		switch {
+		case imagefamily.IsImageResolutionError(err):
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, imageResolutionFailedReason, imageConditionMessage(err))
 			return reconcile.Result{RequeueAfter: time.Minute}, nil
+		case imagefamily.IsImageUnavailableError(err):
+			// A confirmed no-usable-image result is not a stale selector: clearing the previous
+			// images keeps status from advertising a set Karpenter has already proven unusable.
+			nodeClass.Status.Images = nil
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, imageUnavailableReason, imageConditionMessage(err))
+			return reconcile.Result{RequeueAfter: time.Minute}, nil
+		default:
+			// The Compute API may be transiently unavailable: publish a diagnostic condition but
+			// return the error so controller-runtime backs off as usual.
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, imageLookupFailedReason, imageConditionMessage(err))
+			return reconcile.Result{}, err
 		}
-		return reconcile.Result{}, err
 	}
 
 	if len(images) == 0 {
 		nodeClass.Status.Images = nil
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImagesNotFound", "ImageSelector did not match any Images")
-		return reconcile.Result{}, nil
+		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, imagesNotFoundReason, "ImageSelector did not match any Images")
+		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	nodeClass.Status.Images = lo.Map(images, func(image imagefamily.Image, _ int) v1alpha1.Image {
@@ -75,4 +100,13 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
 
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+// imageConditionMessage bounds a failure message to the 256-rune limit of a condition message.
+func imageConditionMessage(err error) string {
+	message := err.Error()
+	if len([]rune(message)) > 256 {
+		return string([]rune(message)[:256])
+	}
+	return message
 }

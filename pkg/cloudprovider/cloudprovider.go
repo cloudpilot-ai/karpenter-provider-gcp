@@ -42,6 +42,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	cloudproviderevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider/events"
 	gcperrors "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/errors"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -253,8 +254,9 @@ func (c *CloudProvider) LivenessProbe(req *http.Request) error {
 }
 
 // GetInstanceTypes returns the instance types the scheduler may use for a NodePool.
-// Non-zero configurable SSD counts require the count label on the NodePool;
-// existing instances are reconciled against the unfiltered catalog.
+// Non-zero configurable SSD counts require the count label on the NodePool, and a type must be
+// bootable with one of the resolved images; existing instances are reconciled against the
+// unfiltered catalog.
 func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
 	if err != nil {
@@ -273,7 +275,22 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 	if err != nil {
 		return nil, err
 	}
-	return instanceTypesForScheduling(nodePool, instanceTypes), nil
+	return instanceTypesForImages(nodeClass, instanceTypesForScheduling(nodePool, instanceTypes)), nil
+}
+
+// instanceTypesForImages keeps the instance types at least one resolved image can back. A NodeClass
+// without ready images exposes no scheduling candidates, so a stale image status left by an earlier
+// selector never becomes eligible. The catalog itself stays unfiltered: existing VMs are reconciled
+// and adopted against it.
+func instanceTypesForImages(nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+	if !imagefamily.ImagesReadyForLaunch(nodeClass) {
+		return nil
+	}
+	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
+		return lo.ContainsBy(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
+			return imagefamily.ImageCompatibleWithRequirements(image, instanceType.Requirements)
+		})
+	})
 }
 
 func (c *CloudProvider) getAllInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {

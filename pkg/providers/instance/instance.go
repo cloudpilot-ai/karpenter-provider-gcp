@@ -430,7 +430,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		return p.adoptExistingInstance(ctx, existingInstance, p.getCapacityType(nodeClaim, instanceTypes)), nil
 	}
 
-	launchInstanceTypes, err := validateLaunchInstanceTypes(launchInstanceTypes, rejectedConfigurable)
+	launchInstanceTypes, err := launchCandidates(nodeClass, launchInstanceTypes, rejectedConfigurable)
 	if err != nil {
 		return nil, err
 	}
@@ -679,6 +679,36 @@ func instanceTypesForLaunch(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudp
 	return filtered, rejectedConfigurable
 }
 
+// launchCandidates applies the local SSD launch rules and the resolved images to the candidates.
+// Only new launches call it, so an earlier VM is adopted before an image gap can reject the claim.
+func launchCandidates(nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType, rejectedConfigurable bool) ([]*cloudprovider.InstanceType, error) {
+	candidates, err := validateLaunchInstanceTypes(instanceTypes, rejectedConfigurable)
+	if err != nil {
+		return nil, err
+	}
+	candidates = instanceTypesForImages(nodeClass, candidates)
+	if len(candidates) == 0 {
+		// No offering is at fault, so nothing is marked unavailable.
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf(
+			"no instance type is compatible with any image resolved for node class %s", nodeClass.Name))
+	}
+	return candidates, nil
+}
+
+// instanceTypesForImages keeps the new-launch candidates that at least one resolved image can back.
+// Images that are not ready are not usable: a status left behind by an earlier selector must never
+// boot a VM. Existing VMs are adopted before this filter is applied.
+func instanceTypesForImages(nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+	if !imagefamily.ImagesReadyForLaunch(nodeClass) {
+		return nil
+	}
+	return lo.Filter(instanceTypes, func(instanceType *cloudprovider.InstanceType, _ int) bool {
+		return lo.ContainsBy(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
+			return imagefamily.ImageCompatibleWithRequirements(image, instanceType.Requirements)
+		})
+	})
+}
+
 func requestedLocalSSDCount(nodeClaim *karpv1.NodeClaim) (int, bool, bool) {
 	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	countRequirement, hasCount := requirements[v1alpha1.LabelInstanceLocalSsdCount]
@@ -861,8 +891,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 
 		if disk.Boot {
 			targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
-				reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
-				return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+				return imagefamily.ImageCompatibleWithRequirements(image, instanceType.Requirements)
 			})
 			if !found {
 				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)

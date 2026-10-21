@@ -28,6 +28,16 @@ Sample output:
 125.19216.109.133
 ```
 
+The filter above lists the amd64 CPU variant only. arm64 CPU images are named `...-cos-arm64-<version>-c-pre` and NVIDIA GPU images `...-cos-<version>-c-nvda`. `version: latest` ranks all three variants separately, so a new node can receive a different date per variant: the newest amd64 date above is not selected while it is still `PENDING`, and an older `READY` date is used instead. To list every variant, drop the `-c-pre` suffix from the filter and keep the `-c-pre`/`-c-nvda` suffixes in the output:
+
+```bash
+gcloud compute images list \
+  --project=gke-node-images \
+  --filter="name~'^gke-1351-gke[0-9]+-cos-.*-(c-pre|c-nvda)$' AND NOT deprecated:* AND status=READY" \
+  --format="value(name)" \
+  | sort
+```
+
 **Ubuntu** — replace `1-35` with your K8s minor version (e.g. 1.35.x → 1-35):
 
 ```bash
@@ -154,6 +164,26 @@ disruption:
       reasons:
         - Drifted
 ```
+
+For an overview of how Karpenter ranks images when GKE publishes variants at different times, and for the `ImagesReady` condition reasons, see [Image selection: Container-Optimized OS variants](image-selection.md#container-optimized-os-variants).
+
+## How image refreshes and failures are handled
+
+Karpenter resolves a NodeClass's image selector terms and publishes the usable images in `status.images`. A successful resolution is cached per selector for up to five minutes, so a newly published image is picked up on the next refresh rather than immediately, and an image GCP deletes or deprecates just after publication can still be selected for a few minutes. Failures and empty results are never cached, because the next refresh may succeed.
+
+`ImagesReady` reports what Karpenter can currently publish:
+
+| Reason                  | Meaning                                                                                                                                                                                                                                                                                       | Retry                    |
+|-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------|
+| *(condition `True`)*    | At least one usable image is published. For Container-Optimized OS this can be a partial set of the amd64 CPU, arm64 CPU, and NVIDIA variants.                                                                                                                                                | Every 5 minutes          |
+| `ImageResolutionFailed` | The selector cannot resolve. Either it is a configuration error, for example an unsupported version format or an unsupported family, or an Ubuntu architecture has no usable image in the catalog yet. The Ubuntu case needs no configuration change: it clears once GCP publishes the image. | Every 1 minute           |
+| `ImageUnavailable`      | The selector is valid but GCP has no usable image published yet, for example a `latest` term whose newest candidates are still `PENDING`, an exact channel build or milestone pin whose COS image is not published yet, or a raw image ID that is not `READY`. `status.images` is cleared.    | Every 1 minute           |
+| `ImageLookupFailed`     | A Compute API call failed (permissions, rate limits, or a transient server error). Any images left in `status.images` are from the previous successful resolution and are diagnostic only.                                                                                                    | Controller error backoff |
+| `ImagesNotFound`        | The selector resolved but matched nothing, for example a raw image ID that does not exist yet. `status.images` is cleared.                                                                                                                                                                    | Every 1 minute           |
+
+While `ImagesReady` is not `True`, Karpenter exposes no instance types for the NodeClass and starts no new nodes from the images left in status. Existing nodes keep running and are only replaced once a published image is compatible with them.
+
+For Ubuntu both architectures must resolve from the catalog: if either has no usable image, including one that is still `PENDING`, the term fails and the NodeClass does not become ready from a single architecture alone. The final per-image lookup that validates a published set can still drop an architecture whose image has disappeared by then, so a published set is not a guarantee that every image still exists a moment later.
 
 ## Relationship to GKE Cluster Upgrades
 
