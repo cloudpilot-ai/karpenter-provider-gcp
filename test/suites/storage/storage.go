@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -34,7 +35,7 @@ var env *environment.Environment
 var _ = BeforeEach(func() { env = environment.Current() })
 
 var _ = Describe("Disk Selection", Label("suite:storage"), func() {
-	It("should inherit GCENodeClass labels on the persistent boot disk", func(ctx SpecContext) {
+	DescribeTable("persistent boot disk labels", func(ctx SpecContext, labels map[string]string) {
 		name := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "boot-disk-labels") + "-" + environment.UniqueSuffix()
 		var provisionedNodeName string
 		DeferCleanup(func(ctx context.Context) {
@@ -46,9 +47,10 @@ var _ = Describe("Disk Selection", Label("suite:storage"), func() {
 			env.DeleteNodeClass(ctx, name)
 		})
 
-		labels := map[string]string{"environment": "storage-test", "disk-owner": "karpenter"}
 		env.CreateNodeClass(ctx, name, gcpv1alpha1.ImageFamilyContainerOptimizedOS)
-		env.AddNodeClassLabels(ctx, name, labels)
+		if len(labels) > 0 {
+			env.AddNodeClassLabels(ctx, name, labels)
+		}
 		env.WaitForNodeClassReady(ctx, name)
 		env.CreateNodePool(ctx, name, name, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
@@ -68,10 +70,37 @@ var _ = Describe("Disk Selection", Label("suite:storage"), func() {
 
 		disk, err := env.GetGCEBootDisk(ctx, node.Spec.ProviderID)
 		Expect(err).NotTo(HaveOccurred())
-		for key, value := range labels {
-			Expect(disk.Labels).To(HaveKeyWithValue(key, value))
+		instance, err := env.GetGCEInstance(ctx, node.Spec.ProviderID)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Controller-owned identity must be present even without user labels and
+		// must override conflicting NodeClass labels on both the VM and disk.
+		expectedLabels := map[string]string{}
+		maps.Copy(expectedLabels, labels)
+		maps.Copy(expectedLabels, map[string]string{
+			"karpenter-sh-nodepool":          name,
+			"karpenter-k8s-gcp-gcenodeclass": name,
+			"goog-k8s-cluster-name":          env.ClusterName,
+			"goog-k8s-cluster-location":      env.ClusterLocation,
+		})
+		for key, value := range expectedLabels {
+			Expect(disk.Labels).To(HaveKeyWithValue(key, value), "expected boot disk %s to have %s=%s", disk.Name, key, value)
+			Expect(instance.Labels).To(HaveKeyWithValue(key, value), "expected VM %s to have the same %s label as its boot disk", instance.Name, key)
 		}
-	}, SpecTimeout(15*time.Minute))
+	},
+		Entry("inherits custom labels alongside Karpenter and cluster identity", map[string]string{
+			"environment": "storage-test",
+			"disk-owner":  "karpenter",
+		}, SpecTimeout(15*time.Minute)),
+		Entry("adds Karpenter and cluster identity without user labels", map[string]string(nil), SpecTimeout(15*time.Minute)),
+		Entry("controller identity overrides conflicting user labels", map[string]string{
+			"environment":                    "storage-test",
+			"karpenter-sh-nodepool":          "wrong-pool",
+			"karpenter-k8s-gcp-gcenodeclass": "wrong-nodeclass",
+			"goog-k8s-cluster-name":          "wrong-cluster",
+			"goog-k8s-cluster-location":      "wrong-location",
+		}, SpecTimeout(15*time.Minute)),
+	)
 
 	It("should use the machine-series default when disk category is omitted", func(ctx SpecContext) {
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "default-disk")
