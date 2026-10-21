@@ -49,10 +49,10 @@ kubectl describe node <node>
 kubectl get node <node> -o jsonpath='{.spec.podCIDRs}{"\n"}'
 kubectl get node <node> --show-labels
 gcloud compute instances describe <vm> --project=<project> --zone=<zone> \
-  --format='yaml(networkInterfaces.subnetwork,networkInterfaces.aliasIpRanges)'
+  --format='yaml(networkInterfaces.subnetwork,networkInterfaces.aliasIpRanges,networkInterfaces.stackType)'
 ```
 
-Compare the VM's primary alias CIDR with the Node's PodCIDRs. If the alias exists but the Node has no PodCIDR, preserve these outputs and Node Events when investigating bootstrap or IPAM failures. Do not manually assign Node PodCIDRs.
+Compare the VM's primary alias CIDR with the Node's PodCIDRs. On a dual-stack cluster, the Node needs both an IPv4 and an IPv6 PodCIDR, and the VM's primary interface must have stack type `IPV4_IPV6`. See [Dual-stack clusters](networking/private-nodes.md#dual-stack-clusters). If the alias exists but the Node has no PodCIDR, preserve these outputs and Node Events when investigating bootstrap or IPAM failures. Do not manually assign Node PodCIDRs.
 
 For multi-networking clusters, also inspect the default Network and its GKENetworkParamSet:
 
