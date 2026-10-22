@@ -123,6 +123,12 @@ nodeSelector:
 
 Only `TimeSharing` is supported. Time-sharing gives no memory or fault isolation between containers on the same GPU. The field is ignored for non-GPU instance types.
 
+## GKE Sandbox GPUs
+
+Set `spec.sandboxConfig.type: GVISOR` to opt in to [sandbox nodes](sandbox-nodes.md). Sandbox GPU capacity requires real public COS sandbox GPU images (including Arm64 where published), compatible built-in GPU models, whole-GPU capacity and `default`/`latest` drivers. `disabled` drivers, GPU time-sharing, fractional GPUs and V100/P100 are unsupported. This does not add attached-GPU support.
+
+Both the selected image and effective bootstrap/kubelet release must meet the [sandbox GPU model/version floors](sandbox-nodes.md#gpu-compatibility), and the complete bootstrap consumers must match a reviewed compatibility profile. A GKE version floor alone is not sufficient. Pods use a safely configured `runtimeClassName: gvisor`; GPU driver/device-plugin DaemonSets must tolerate the permanent sandbox taint as well as any GPU taint. No live CUDA acceptance has yet been performed for reconstructed sandbox nodes.
+
 ## Example
 
 See [`docs/examples/gpu.md`](examples/gpu.md) for a complete `GCENodeClass` + `NodePool` configuration.

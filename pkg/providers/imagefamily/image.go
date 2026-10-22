@@ -34,6 +34,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/sandbox"
 	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
@@ -68,6 +69,9 @@ type DefaultProvider struct {
 	gkeProvider     gke.Provider
 	versionProvider versionprovider.Provider
 
+	installerResolver interface {
+		ResolveInstaller(context.Context, string, string) (*v1alpha1.SandboxInstaller, error)
+	}
 	providers map[string]ImageFamily
 }
 
@@ -78,10 +82,11 @@ func NewDefaultProvider(computeService *compute.Service, versionProvider version
 	ubuntu2404 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2404"}
 	ubuntu2204 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2204"}
 	return &DefaultProvider{
-		cache:           cache.New(imageCacheTTL, imageCacheCleanupInterval),
-		computeService:  computeService,
-		gkeProvider:     gkeProvider,
-		versionProvider: versionProvider,
+		installerResolver: sandbox.SharedResolver(),
+		cache:             cache.New(imageCacheTTL, imageCacheCleanupInterval),
+		computeService:    computeService,
+		gkeProvider:       gkeProvider,
+		versionProvider:   versionProvider,
 		providers: map[string]ImageFamily{
 			v1alpha1.ImageFamilyContainerOptimizedOS: cos,
 			v1alpha1.ImageFamilyUbuntu2404:           ubuntu2404,
@@ -95,18 +100,28 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	p.Lock()
 	defer p.Unlock()
 
+	if err := nodeClass.ValidateSandbox(); err != nil {
+		return nil, &imageResolutionError{msg: err.Error()}
+	}
+
 	hash, err := hashstructure.Hash(nodeClass.Spec.ImageSelectorTerms, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	if err != nil {
 		return nil, err
 	}
-	cacheKey := fmt.Sprintf("%d", hash)
+	cacheKey := fmt.Sprintf("%d:sandbox=%t", hash, nodeClass.SandboxEnabled())
 	if images, ok := p.cache.Get(cacheKey); ok {
 		return images.(Images), nil
 	}
 
 	var result Images
 	for _, term := range nodeClass.Spec.ImageSelectorTerms {
-		imgs, err := p.resolveImageFromTerm(ctx, term)
+		var imgs Images
+		var err error
+		if nodeClass.SandboxEnabled() {
+			imgs, err = p.resolveSandboxTerm(ctx, term)
+		} else {
+			imgs, err = p.resolveImageFromTerm(ctx, term)
+		}
 		if err != nil {
 			return nil, err
 		}

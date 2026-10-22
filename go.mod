@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	cloud.google.com/go/compute v1.69.0
 	github.com/awslabs/operatorpkg v0.0.0-20261002163259-5e8ed3699dea
+	github.com/google/cel-go v0.29.2
 	github.com/googleapis/gax-go/v2 v2.24.1
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/onsi/ginkgo/v2 v2.33.0
@@ -65,7 +66,6 @@ require (
 	github.com/go-openapi/swag/typeutils v0.27.1 // indirect
 	github.com/go-openapi/swag/yamlutils v0.27.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/google/cel-go v0.29.2 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect

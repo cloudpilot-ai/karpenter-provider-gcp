@@ -29,7 +29,12 @@ import (
 // GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
 // This will contain the configuration necessary to launch instances in GCP.
 // +kubebuilder:validation:XValidation:message="subnetRangeName and subnetRangeNames are mutually exclusive",rule="!(has(self.subnetRangeName) && has(self.subnetRangeNames))"
+// +kubebuilder:validation:XValidation:message="GVISOR requires only ContainerOptimizedOS selectors and imageFamily",rule="!has(self.sandboxConfig) || ((!has(self.imageFamily) || self.imageFamily == 'ContainerOptimizedOS') && self.imageSelectorTerms.all(t, (!has(t.family) || t.family == 'ContainerOptimizedOS') && (!has(t.alias) || t.alias.startsWith('ContainerOptimizedOS@'))))"
+// +kubebuilder:validation:XValidation:message="GVISOR does not support GPU time-sharing",rule="!has(self.sandboxConfig) || !has(self.gpuSharingConfig)"
 type GCENodeClassSpec struct {
+	// SandboxConfig enables GKE Sandbox. Omission provisions ordinary nodes.
+	// +optional
+	SandboxConfig *SandboxConfig `json:"sandboxConfig,omitempty"`
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
 	// +optional
@@ -170,6 +175,47 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="preemptionNoticeDuration must not exceed 120s",rule="duration(self) <= duration('120s')"
 	// +optional
 	PreemptionNoticeDuration *metav1.Duration `json:"preemptionNoticeDuration,omitempty"`
+}
+
+// SandboxType selects the supported GKE sandbox runtime.
+// +kubebuilder:validation:Enum=GVISOR
+type SandboxType string
+
+const SandboxTypeGVISOR SandboxType = "GVISOR"
+
+// SandboxConfig mirrors the GKE sandbox_config object.
+type SandboxConfig struct {
+	// Type is the sandbox runtime. Only GVISOR is supported.
+	// +required
+	Type SandboxType `json:"type"`
+}
+
+// SandboxEnabled reports whether this class requests gVisor.
+func (in *GCENodeClass) SandboxEnabled() bool {
+	return in.Spec.SandboxConfig != nil && in.Spec.SandboxConfig.Type == SandboxTypeGVISOR
+}
+
+// ValidateSandbox checks all selectors, including legacy aliases. Explicit IDs
+// still require authoritative public-image validation during resolution.
+func (in *GCENodeClass) ValidateSandbox() error {
+	if in.Spec.SandboxConfig == nil {
+		return nil
+	}
+	if !in.SandboxEnabled() {
+		return fmt.Errorf("sandboxConfig.type must be GVISOR")
+	}
+	if in.Spec.ImageFamily != nil && *in.Spec.ImageFamily != ImageFamilyContainerOptimizedOS {
+		return fmt.Errorf("GVISOR requires ContainerOptimizedOS imageFamily")
+	}
+	for _, term := range in.Spec.ImageSelectorTerms {
+		if (term.Family != "" && term.Family != ImageFamilyContainerOptimizedOS) || (term.Alias != "" && !strings.HasPrefix(term.Alias, "ContainerOptimizedOS@")) { //nolint:staticcheck
+			return fmt.Errorf("GVISOR requires only ContainerOptimizedOS image selectors")
+		}
+	}
+	if in.Spec.GPUSharingConfig != nil {
+		return fmt.Errorf("GVISOR does not support GPU time-sharing")
+	}
+	return nil
 }
 
 // LocalSSDMode controls how local SSDs are exposed to workloads.

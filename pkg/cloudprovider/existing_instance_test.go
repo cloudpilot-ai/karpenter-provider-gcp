@@ -85,7 +85,7 @@ func TestGetExistingInstanceWithoutCatalogType(t *testing.T) {
 	}}}}
 	provider := New(
 		reproClient{nodePool: nodePool, nodeClass: &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}}},
-		reproEvents{}, reproTypes{}, &lifecycleInstances{instances: []*instance.Instance{inst}}, nil,
+		reproEvents{}, reproTypes{}, &lifecycleInstances{instances: []*instance.Instance{inst}}, nil, nil,
 	)
 	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{})
 
@@ -124,7 +124,7 @@ func TestGarbageCollectionWithUnknownInstanceTypes(t *testing.T) {
 		reproClient: reproClient{nodePool: pool, nodeClass: &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}}},
 		nodeClaims:  []karpv1.NodeClaim{{ObjectMeta: metav1.ObjectMeta{Name: "backed"}, Status: karpv1.NodeClaimStatus{ProviderID: backedID}}},
 	}
-	provider := New(kc, reproEvents{}, reproTypes{variants: []*corecloud.InstanceType{knownType}}, instances, nil)
+	provider := New(kc, reproEvents{}, reproTypes{variants: []*corecloud.InstanceType{knownType}}, instances, nil, nil)
 	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{})
 
 	listed, err := provider.List(ctx)
@@ -190,7 +190,7 @@ func TestExistingInstanceLookupPropagatesAPIErrors(t *testing.T) {
 		{name: "Kubernetes API", kubeClient: unavailableKubeClient{err: apiErr}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := New(tt.kubeClient, reproEvents{}, tt.catalog, &lifecycleInstances{instances: []*instance.Instance{inst}, err: tt.instanceErr}, nil)
+			provider := New(tt.kubeClient, reproEvents{}, tt.catalog, &lifecycleInstances{instances: []*instance.Instance{inst}, err: tt.instanceErr}, nil, nil)
 			ctx := karpopts.ToContext(context.Background(), &karpopts.Options{})
 			got, err := provider.Get(ctx, "gce://test-project/us-central1-a/custom-node")
 			require.ErrorIs(t, err, apiErr)

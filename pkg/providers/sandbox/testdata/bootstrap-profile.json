@@ -1,0 +1,11 @@
+{
+  "source": "https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.6-gke.1250001/kubernetes-manifests.tar.gz",
+  "archiveSHA256": "e8282f2b799b7147de5b1388d8f7b276be0eecec1e1ae5bbf3901ba7a68652b8",
+  "schema": "gke-gvisor-20260323",
+  "policy": "native-xemu-smt-nftables-v1",
+  "members": {
+    "kubernetes/gci-trusty/gke-internal-configure-helper.sh": "6a226be6586034739d88a1a3fcc80846e8549947b5a85a9c8711763b5f916a34",
+    "kubernetes/gci-trusty/installable.py": "20c1dbcdd7dcfd595f24864d1eff8d11445bb2f13fe9c2c23d55dbd1a85b5201",
+    "kubernetes/gci-trusty/gci-configure-helper.sh": "227d4173c54efa5bfc1cc1f65d4723775b0f282d56fac2e586d19a2ac04f4a55"
+  }
+}

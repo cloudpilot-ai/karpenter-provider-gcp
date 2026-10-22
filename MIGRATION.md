@@ -5,6 +5,20 @@
 
 ## Unreleased
 
+### Opt-in GKE Sandbox and boot-disk read permission
+
+Omitting `GCENodeClass.spec.sandboxConfig` preserves ordinary capacity. Before opting in with `sandboxConfig: {type: GVISOR}`, upgrade both the controller and CRDs using the [CRD upgrade procedure](docs/getting-started/upgrading.md). Helm does not upgrade CRDs in the controller chart's `crds/` directory.
+
+**Existing minimal controller IAM custom roles need `compute.disks.get`** before using sandbox adoption/drift. The permission is now declared in [`deploy/iam/karpenter-controller-role.yaml`](deploy/iam/karpenter-controller-role.yaml) and is used to read the actual boot disk's source image. The [`deploy/terraform/`](deploy/terraform/) module sources that file; existing deployments still require their normal reviewed IAM update. Without the permission, factual image/adoption/drift comparisons can fail. Ordinary provisioning does not gain a sandbox disk/profile dependency. No new RuntimeClass Kubernetes RBAC is required.
+
+Sandboxing requires public GKE COS images, a matching immutable public installer, access to `gke.gcr.io` and public GKE artifact mirrors, and a GKE- or administrator-owned RuntimeClass with handler `gvisor`, the runtime selector and permanent-taint toleration. Pods normally use `runtimeClassName: gvisor`; custom class names with the same contract work. Karpenter does not own RuntimeClasses or add a second Pod overhead charge. Keep the ordinary system pool; creating a native sandbox pool is **not** a product prerequisite.
+
+**Plan GKE upgrades around strict compatibility:** the effective source bootstrap/kubelet release must match accepted **complete** consumer hashes. Unknown schemas block new sandbox provisioning and can require a reviewed controller compatibility-profile update after a GKE upgrade. Matching helpers is not discovery of native hardware/security policy. The initial fixture was reviewed at `1.35.6-gke.1250001`; this is not an all-release support claim. No reconstructed-node boot/isolation/CUDA acceptance has yet been performed.
+
+For new GitOps NodePools, explicitly declare both canonical runtime template fields as shown in [GitOps ownership](docs/sandbox-nodes.md#gitops-ownership). Preexisting identical fields remain user-owned; remove both when disabling or switching to an ordinary NodeClass. Auto-added fields are independently tracked by the top-level `karpenter.k8s.gcp/sandbox-ownership` annotation and only still-owned values are removed. Preserve unrelated fields and controller ownership records; do not broadly ignore all labels/taints or forge the annotation. Missing/conflicting persisted runtime fields gate scheduling instead of being repaired by the scheduler.
+
+Enabling/disabling changes NodeClass identity and can rotate nodes under normal disruption controls. Runtime/installer/bootstrap-profile identity is persisted on VMs for adoption and drift; changing the NodeClass does not convert existing VMs in place. Remove user-owned runtime scheduling fields and migrate Pods before disabling or downgrading to a controller without sandbox support. Ubuntu/mixed images, GPU time-sharing and unsupported GPU models/drivers/fractional capacity cannot be used with gVisor. See [Sandbox nodes](docs/sandbox-nodes.md) for exact image/GPU prerequisites, diagnostics and the [minimal example](docs/examples/sandbox.md). MicroVM support is deferred to [#707](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/707) (GKE 1.37+); do not configure it as a sandbox type.
+
 ### Default node service account lookup failures now stop startup
 
 When `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` is unset, the controller now exits if the Compute Engine project lookup fails, rather than continuing with an unresolved default service account. Pod restarts retry the lookup. This also applies when every `GCENodeClass` sets `spec.serviceAccount`.

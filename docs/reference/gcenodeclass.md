@@ -200,6 +200,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `sandboxConfig` _[SandboxConfig](#sandboxconfig)_ | SandboxConfig enables GKE Sandbox. Omission provisions ordinary nodes. |  | Optional: \{\} <br /> |
 | `serviceAccount` _string_ | ServiceAccount is the GCP IAM service account email to assign to the instance |  | Pattern: `^[^@]+@(developer\.gserviceaccount\.com\|[^@]+\.iam\.gserviceaccount\.com)$` <br />Optional: \{\} <br /> |
 | `disks` _[Disk](#disk) array_ | Disk defines the disks to attach to the provisioned instance. |  | MaxItems: 10 <br />Optional: \{\} <br /> |
 | `imageSelectorTerms` _[ImageSelectorTerm](#imageselectorterm) array_ | ImageSelectorTerms is a list of or image selector terms. The terms are ORed. |  | MaxItems: 30 <br />MinItems: 1 <br />Required: \{\} <br /> |
@@ -307,6 +308,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `sandboxInstaller` _[SandboxInstaller](#sandboxinstaller)_ | SandboxInstaller binds the immutable runtime artifact to this image. |  | Optional: \{\} <br /> |
 | `sourceImage` _string_ | SourceImage represents the source image, format like projects/gke-node-images/global/images/gke-1309-gke1046000-cos-113-18244-291-9-c-pre |  | Required: \{\} <br /> |
 | `requirements` _[NodeSelectorRequirement](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#nodeselectorrequirement-v1-core) array_ | Requirements of the Image to be utilized on an instance type |  | Required: \{\} <br /> |
 
@@ -466,6 +468,56 @@ _Validation:_
 _Appears in:_
 - [GCENodeClassSpec](#gcenodeclassspec)
 
+
+
+#### SandboxConfig
+
+
+
+SandboxConfig mirrors the GKE sandbox_config object.
+
+
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `type` _[SandboxType](#sandboxtype)_ | Type is the sandbox runtime. Only GVISOR is supported. |  | Enum: [GVISOR] <br />Required: \{\} <br /> |
+
+
+#### SandboxInstaller
+
+
+
+SandboxInstaller is a public, content-verified gVisor installer identity.
+
+
+
+_Appears in:_
+- [Image](#image)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `version` _string_ | Version is the dated installer tag derived from the image label. |  | Required: \{\} <br /> |
+| `digest` _string_ | Digest is the sha256 digest of the validated OCI manifest or index. |  | Pattern: `^sha256:[a-f0-9]\{64\}$` <br />Required: \{\} <br /> |
+
+
+#### SandboxType
+
+_Underlying type:_ _string_
+
+SandboxType selects the supported GKE sandbox runtime.
+
+_Validation:_
+- Enum: [GVISOR]
+
+_Appears in:_
+- [SandboxConfig](#sandboxconfig)
+
+| Field | Description |
+| --- | --- |
+| `GVISOR` |  |
 
 
 #### SecondaryBootDiskMode
