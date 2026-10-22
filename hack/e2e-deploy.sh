@@ -1,6 +1,159 @@
 #!/usr/bin/env bash
-# Shared-target entry point: the trusted coordinator owns the Lease throughout.
-set -euo pipefail
-REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-cd "${REPO_ROOT}"
-exec go run ./hack/e2e-runner local-deploy "$@"
+# Local/release deployment. Standalone execution acquires the canonical Lease.
+# Sourcing only defines the phase used by the Lease-holding local coordinator.
+#
+# Two modes:
+#   RELEASE_VERSION unset  — build image from local source (ko) and deploy
+#                            from local chart files. Used for feature branches.
+#   RELEASE_VERSION=X.Y.Z  — install the published Helm chart at that version.
+#                            No local build. Used to validate published releases.
+#
+# Required env vars:
+#   E2E_PROJECT_ID                  GCP project ID
+#   E2E_LOCATION                    GCP location (zone or region)
+#
+# Optional env vars:
+#   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
+#                                   (not needed if `gcloud auth login` is already active)
+#   RELEASE_VERSION   published chart version to install (e.g. 0.3.2)
+#   E2E_PREFIX        resource name prefix (default: karpenter-e2e)
+#   E2E_REGION        GCP region (default: us-central1)
+#   E2E_NODE_SERVICE_ACCOUNT  node SA email (unset keeps the chart default)
+e2e_deploy() (
+  set -euo pipefail
+
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # A clean checkout has no vendored Helm subcharts. Check the pinned dependency
+  # before image publishing (release charts do not use it).
+  if [[ -z "${RELEASE_VERSION:-}" ]]; then
+    helm dependency build "${REPO_ROOT}/charts/karpenter"
+  fi
+
+  : "${E2E_PROJECT_ID:?E2E_PROJECT_ID must be set}"
+  : "${E2E_LOCATION:?E2E_LOCATION must be set}"
+
+  if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null)"
+    : "${ACTIVE_ACCOUNT:?No active gcloud login found and GOOGLE_APPLICATION_CREDENTIALS is not set. Run 'gcloud auth login' or set GOOGLE_APPLICATION_CREDENTIALS.}"
+  fi
+
+  E2E_PREFIX="${E2E_PREFIX:-karpenter-e2e}"
+  E2E_REGION="${E2E_REGION:-us-central1}"
+  RELEASE_VERSION="${RELEASE_VERSION:-}"
+
+  CLUSTER_NAME="${E2E_CLUSTER_NAME:-${E2E_PREFIX}-cluster}"
+  GSA_ID="${E2E_PREFIX}-karpenter"
+  GSA_EMAIL="${E2E_CONTROLLER_SERVICE_ACCOUNT:-${GSA_ID}@${E2E_PROJECT_ID}.iam.gserviceaccount.com}"
+
+  expected_context="gke_${E2E_PROJECT_ID}_${E2E_LOCATION}_${CLUSTER_NAME}"
+  current_context="$(kubectl config current-context)"
+  if [[ "${current_context}" != "${expected_context}" ]]; then
+    echo "ERROR: refusing deployment: context ${current_context} is not ${expected_context}" >&2
+    exit 1
+  fi
+
+  log() { echo "e2e-deploy: $*" >&2; }
+
+  # The chart's controller.priorityClassName defaults to gmp-critical, a class the
+  # GMP operator creates. Clusters without managed Prometheus have no GMP, so the
+  # controller pod is otherwise rejected by the PriorityClass admission plugin.
+  # Create it only when missing, so a GMP-managed class is never overwritten.
+  # GMP leaves preemptionPolicy at its default; this fixture disables preemption
+  # so the controller cannot evict test workloads.
+  if kubectl get priorityclass gmp-critical >/dev/null 2>&1; then
+    log "Reusing gmp-critical PriorityClass"
+  else
+    log "Creating gmp-critical PriorityClass (chart default; no GMP operator on this cluster)"
+    kubectl create -f - <<'MANIFEST'
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gmp-critical
+description: Used for GMP collector pods.
+value: 1000000000
+globalDefault: false
+preemptionPolicy: Never
+MANIFEST
+  fi
+
+  # Common helm values regardless of mode
+  HELM_COMMON_ARGS=(
+    --namespace karpenter-system
+    --create-namespace
+    --set logLevel=debug
+    --set controller.settings.projectID="${E2E_PROJECT_ID}"
+    --set controller.settings.clusterName="${CLUSTER_NAME}"
+    --set controller.settings.clusterLocation="${E2E_LOCATION}"
+    --set controller.featureGates.spotToSpotConsolidation=true
+    --set controller.featureGates.nodeRepair=true
+    --set controller.featureGates.nodeOverlay=true
+    --set controller.featureGates.staticCapacity=true
+    --set "serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account=${GSA_EMAIL}"
+    --set controller.replicaCount=1
+    --set credentials.enabled=false
+    --wait
+    --timeout 5m
+  )
+  if [[ -n "${E2E_NODE_SERVICE_ACCOUNT:-}" ]]; then
+    HELM_COMMON_ARGS+=(--set-string "controller.settings.defaultNodepoolServiceAccount=${E2E_NODE_SERVICE_ACCOUNT}")
+  fi
+
+  if [[ -n "${RELEASE_VERSION}" ]]; then
+    # --- Published release mode ---
+    log "Installing published release ${RELEASE_VERSION} from Helm repo..."
+    helm repo add karpenter-gcp "https://cloudpilot-ai.github.io/karpenter-provider-gcp" --force-update
+    helm repo update karpenter-gcp
+
+    helm upgrade --install karpenter-crd karpenter-gcp/karpenter-crd \
+      --version "${RELEASE_VERSION}" \
+      --namespace karpenter-system \
+      --create-namespace \
+      --wait \
+      --timeout 2m
+
+    helm upgrade --install karpenter karpenter-gcp/karpenter \
+      --version "${RELEASE_VERSION}" \
+      "${HELM_COMMON_ARGS[@]}"
+
+    log "Deploy complete. karpenter ${RELEASE_VERSION} installed from published chart."
+  else
+    # --- Local build mode ---
+    AR_REPO="${E2E_PREFIX}-images"
+    IMAGE_REPO="${E2E_IMAGE_REPOSITORY:-${E2E_REGION}-docker.pkg.dev/${E2E_PROJECT_ID}/${AR_REPO}/karpenter}"
+
+    log "Authenticating Docker to Artifact Registry..."
+    gcloud auth configure-docker "${E2E_REGION}-docker.pkg.dev" --quiet
+
+    log "Building and pushing karpenter image with ko..."
+    KO_IMAGE_TAG="e2e-$(git rev-parse --short HEAD 2>/dev/null || echo latest)"
+    IMAGE_REF="$(
+      KO_DOCKER_REPO="${IMAGE_REPO}" \
+      GOFLAGS="" \
+        ko build --bare \
+        --platform linux/amd64 \
+        --tags "${KO_IMAGE_TAG}" \
+        github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
+    )"
+    log "Image: ${IMAGE_REF}"
+
+    helm upgrade --install karpenter-crd "${REPO_ROOT}/charts/karpenter-crd" \
+      --namespace karpenter-system \
+      --create-namespace \
+      --wait \
+      --timeout 2m
+
+    # Local tests verify the e2e-SHA image tag; digest pinning is CI prepared-mode only.
+    helm upgrade --install karpenter "${REPO_ROOT}/charts/karpenter" \
+      --set controller.image.repository="${IMAGE_REPO}" \
+      --set controller.image.tag="${KO_IMAGE_TAG}" \
+      "${HELM_COMMON_ARGS[@]}"
+
+    log "Deploy complete. IMAGE_REF=${IMAGE_REF}"
+  fi
+)
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  set -euo pipefail
+  cd "$(dirname "${BASH_SOURCE[0]}")/.."
+  exec go run ./hack/e2e-runner local-deploy "$@"
+fi

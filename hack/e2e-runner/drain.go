@@ -224,6 +224,12 @@ func drainOwned(ctx context.Context, o *leaseOwner, t lifecycleTarget) error {
 			return fmt.Errorf("maintenance-required: incomplete CR drain: %w", err)
 		}
 	}
+	return verifyDrained(ctx, o, t, d)
+}
+
+// Read-only completion proof shared by prepared CI and the local Bash cleanup.
+// Captured cloud identities must disappear before the old controller is replaced.
+func verifyDrained(ctx context.Context, o *leaseOwner, t lifecycleTarget, d drainInventory) error {
 	for {
 		if err := o.confirm(ctx); err != nil {
 			return err

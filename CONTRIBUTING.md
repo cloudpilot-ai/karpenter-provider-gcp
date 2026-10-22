@@ -156,12 +156,12 @@ Run from the checkout containing the deployed controller. Export these variables
 ```bash
 export E2E_PROJECT_ID=<gcp-project-id>
 export E2E_LOCATION=<zone-or-region>  # e.g. us-central1-f or us-central1
-export E2E_REGION=<matching-region>  # needed by setup/deploy; e.g. us-central1
+export E2E_REGION=<matching-region>  # needed by deploy; e.g. us-central1
 export KUBECONFIG=/path/to/your/kubeconfig
 export E2E_SA_PATH=/path/to/service-account-key.json  # omit if using application-default credentials
 ```
 
-`E2E_PROJECT_ID` and `E2E_LOCATION` are required; Make rejects empty values. `KUBECONFIG` should point to the intended cluster (otherwise the usual kubectl default applies). With `E2E_SA_PATH`, Make sets `GOOGLE_APPLICATION_CREDENTIALS` for the tests; without it, use an authenticated `gcloud` session and application-default credentials. `E2E_REGION` defaults to `us-central1` for deploy regardless of location, so set it explicitly for other regions. It is not used by `e2e-tests`.
+`E2E_PROJECT_ID` and `E2E_LOCATION` are required; Make rejects empty values. `KUBECONFIG` should point to the intended cluster (otherwise the usual kubectl default applies). With `E2E_SA_PATH`, Make sets `GOOGLE_APPLICATION_CREDENTIALS` for the tests; without it, use an authenticated `gcloud` session and application-default credentials. `E2E_REGION` defaults to `us-central1` for deploy regardless of location, so set it explicitly for other regions. The unchanged cleanup recipe does not forward it; local cleanup derives a missing region from `E2E_LOCATION`. Prepared CI requires an explicit region. It is not used by `e2e-tests`.
 
 #### One-time cluster setup
 
@@ -211,13 +211,19 @@ Inputs for `make e2e-tests` (in addition to the prerequisites above):
 
 `SUITE` and `FOCUS` apply only to the separate `e2e-test` target, not `e2e-tests`. Explicit GPU selections (`gpu`, `all`, or a list containing `gpu`) need enough GPU quota and capacity.
 
-The runner verifies the deployed controller matches the test checkout, acquires the canonical Kubernetes Lease (overlapping runs fail fast), and writes the ignored report and controller log. Native JSON/JUnit are retained in an adjacent private directory. Supported deploy and cleanup commands use the same Lease. Abandoned holders or a maintenance-required marker block automatic recovery, even after expiry; follow the [maintenance exclusion procedure](hack/e2e-runner/README.md). Inspect reports and logs even when tests fail; a startup failure may leave no report.
+The runner verifies the deployed controller matches the test checkout, acquires the canonical Kubernetes Lease (overlapping runs fail fast), and writes the ignored report and controller log. Native JSON/JUnit are retained in an adjacent private directory. Supported deploy and cleanup commands use the same Lease. Their original sourceable Bash scripts own local mutations; Go holds the Lease and shares read-only ownership/cloud verification with prepared CI, proving old resources disappeared before deployment. Sourcing the scripts alone does nothing; standalone execution invokes the coordinator. Cleanup preserves the owned test namespace and bootstrap RBAC. `E2E_LOCK_ID` applies to `make e2e-tests`; direct deploy/cleanup scripts accept `--lock-id`. Abandoned holders or a maintenance-required marker block automatic recovery, even after expiry; follow the [maintenance exclusion procedure](hack/e2e-runner/README.md). Inspect reports and logs even when tests fail; a startup failure may leave no report.
 
 For one-spec debugging, `make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"` remains available, but it bypasses the Lease and report: do not use it on a shared cluster. Run a focused Ginkgo spec through `hack/e2e-runner` instead if locking is required.
 
 #### On-demand PR e2e
 
 Upstream maintainers can use the manual PR E2E workflow after its separately approved operational activation. It captures one PR head SHA and supports individually enabled `standard`, `gpu`, and `full` presets with 20 global workers. The pipeline is disabled by default; no `/e2e` ChatOps trigger is implemented. See the [configuration, security and activation guide](hack/e2e-ci/README.md).
+
+The unchanged upstream Makefile does **not** run offline pipeline/security tests in `make ci`/presubmit. Run them separately (no cloud target required):
+
+```bash
+go test -race ./hack/e2e-ci/... ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
+```
 
 #### Retire e2e infrastructure
 

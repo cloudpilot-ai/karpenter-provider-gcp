@@ -50,7 +50,9 @@ func loadLifecycleTarget(prepared bool) (t lifecycleTarget, err error) {
 			t.Prefix = "karpenter-e2e"
 		}
 		if t.Region == "" {
-			t.Region = "us-central1"
+			// The upstream Make cleanup recipe forwards location, not region.
+			// GCP zones append a single letter to the regional location.
+			t.Region = regexp.MustCompile(`-[a-z]$`).ReplaceAllString(t.Location, "")
 		}
 		if t.Cluster == "" {
 			t.Cluster = t.Prefix + "-cluster"

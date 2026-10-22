@@ -629,12 +629,11 @@ func TestLocalDeployAndCleanupContendWithPreparedOwner(t *testing.T) {
 	setLifecycleTargetEnv(t, target)
 	serveLeaseBoundary(t, client)
 	if err := withOwnedLease(context.Background(), client, "prepared-ci", true, func(context.Context, *leaseOwner) error {
-		for _, name := range []string{"local-deploy", "local-clean-env"} {
-			cmd := newRunnerCommand()
-			cmd.SetArgs([]string{name, "--lock-id", "local-user"})
-			err := cmd.Execute()
-			if err == nil || !strings.Contains(err.Error(), "prepared-ci") {
-				t.Fatalf("%s: %v", name, err)
+		for _, script := range []string{"e2e-deploy.sh", "e2e-clean-env.sh"} {
+			cmd := exec.Command("bash", filepath.Join("..", script), "--lock-id", "local-user")
+			output, err := cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), "prepared-ci") {
+				t.Fatalf("%s: %v\n%s", script, err, output)
 			}
 		}
 		return nil

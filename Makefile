@@ -29,7 +29,7 @@ help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 presubmit: toolchain verify ci ## Run all steps in the developer loop
-ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test e2e-offline-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
+ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
 	cd hack/tools && go install tool
@@ -110,9 +110,6 @@ ut-test: ## Run unit tests
 	go test -race ./pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=.
 
-e2e-offline-test: ## Cloud-free CI authorization, handoff, lifecycle, reporting and identity regressions
-	go test -race ./hack/e2e-ci/... ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
-
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent
 # between the setup script and the test binary.
 # E2E_PROJECT_ID and E2E_LOCATION must be set explicitly — no defaults.
@@ -141,9 +138,7 @@ e2e-setup: ## Use deploy/terraform-e2e/ for persistent e2e infrastructure
 	@echo "e2e-setup is retired; see deploy/terraform-e2e/README.md for the approved Terraform maintenance procedure" >&2; exit 1
 
 e2e-clean-env: require-e2e-vars ## Remove leftover e2e Kubernetes resources (preserves cluster and controller)
-	$(E2E_GAC_ENV_ABS) \
-	E2E_PROJECT_ID=$(E2E_PROJECT_ID) E2E_LOCATION=$(E2E_LOCATION) E2E_REGION=$(E2E_REGION) E2E_PREFIX=$(E2E_PREFIX) \
-	./hack/e2e-clean-env.sh --lock-id="$(E2E_LOCK_ID)"
+	E2E_PROJECT_ID=$(E2E_PROJECT_ID) E2E_LOCATION=$(E2E_LOCATION) E2E_PREFIX=$(E2E_PREFIX) ./hack/e2e-clean-env.sh
 
 RELEASE_VERSION ?=
 e2e-deploy: require-e2e-vars ## Clean e2e resources, then deploy karpenter; set RELEASE_VERSION=X.Y.Z to install the published chart instead
@@ -154,7 +149,7 @@ e2e-deploy: require-e2e-vars ## Clean e2e resources, then deploy karpenter; set 
 	E2E_LOCATION=$(E2E_LOCATION) \
 	E2E_NODE_SERVICE_ACCOUNT=$(E2E_NODE_SERVICE_ACCOUNT) \
 	RELEASE_VERSION=$(RELEASE_VERSION) \
-	./hack/e2e-deploy.sh --lock-id="$(E2E_LOCK_ID)"
+	./hack/e2e-deploy.sh
 
 require-e2e-vars: ## Fail fast if required e2e variables are not set
 	@test -n "$(E2E_PROJECT_ID)"  || (echo "ERROR: E2E_PROJECT_ID is not set"  >&2 && exit 1)
@@ -181,7 +176,7 @@ e2e-tests: require-e2e-vars ## Run selected features (E2E_SELECTION=standard|gpu
 
 FOCUS ?=
 SUITE ?=
-e2e-test: require-e2e-vars ## UNSUPPORTED on shared CI target (bypasses Lease); run a feature directory or focused spec (SUITE=<name>, FOCUS="<substring>", GINKGO_PROCS=N)
+e2e-test: require-e2e-vars ## Run a feature directory or focused spec (SUITE=<name>, FOCUS="<substring>", GINKGO_PROCS=N)
 	$(E2E_GAC_ENV_ABS) \
 	PROJECT_ID=$(E2E_PROJECT_ID) \
 	CLUSTER_NAME=$(E2E_CLUSTER_NAME) \
@@ -239,7 +234,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run ut-test e2e-offline-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

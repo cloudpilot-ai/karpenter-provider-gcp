@@ -105,7 +105,7 @@ export E2E_NODE_SERVICE_ACCOUNT="$(terraform -chdir=deploy/terraform-e2e output 
 make e2e-deploy
 ```
 
-Then run `make e2e-tests E2E_SELECTION=standard GINKGO_PROCS=4` after approval. Make derives the pod-range and tag-key names from the prefix.
+Then run `make e2e-tests E2E_SELECTION=standard GINKGO_PROCS=4` after approval. Make derives the pod-range and tag-key names from the prefix. Local deploy/cleanup retain their Bash mutation bodies under one canonical Lease held by Go; shared read-only ownership inventory and cloud disappearance proof precede controller replacement. Cleanup preserves the owned test namespace/bootstrap RBAC. The unchanged Make cleanup recipe omits `E2E_REGION`, so local cleanup derives it from `E2E_LOCATION`; non-US deploys must still set `E2E_REGION` explicitly. Prepared CI never derives missing target configuration.
 
 `standard` includes basic Local SSD tests but excludes GPU and extended Local SSD tests. Check available quota and capacity before increasing parallelism. Helm releases and per-run test resources are not managed by Terraform. `make e2e-setup` and `make e2e-teardown` are retired.
 
@@ -218,3 +218,9 @@ terraform -chdir="$scratch/deploy/terraform-e2e" test -filter=tests/ci-identity.
 ```
 
 All test runs specify `command = plan` with a mocked Google provider, not live plans or applies. The provider version stays pinned; no upgrades. `go test ./deploy/terraform-e2e` also audits the bootstrap and, when installed, uses real Helm to render the current RBAC templates/values without unrelated subchart dependencies; it checks the current roles are covered without bind/escalate and unrelated permission expansion is denied. If Helm is absent that source-render audit is explicitly skipped, never installed implicitly. These checks do not prove real CEL/token exchange, IAM permission support, Kubernetes admission/RBAC or long-lived auth refresh. Those remain separately approved activation checks.
+
+Offline pipeline/security regressions are not wired into the unchanged upstream `make ci`/presubmit. From the repository root, run them explicitly:
+
+```sh
+go test -race ./hack/e2e-ci/... ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
+```
