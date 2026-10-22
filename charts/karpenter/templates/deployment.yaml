@@ -51,7 +51,11 @@ spec:
       {{- end }}
       containers:
         - name: karpenter
+          {{- if .Values.controller.image.digest }}
+          image: "{{ .Values.controller.image.repository }}@{{ .Values.controller.image.digest }}"
+          {{- else }}
           image: "{{ .Values.controller.image.repository }}:{{ default .Chart.AppVersion .Values.controller.image.tag }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
           {{- with .Values.securityContext }}
           securityContext:

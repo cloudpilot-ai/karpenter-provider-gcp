@@ -1,0 +1,14 @@
+title: Karpenter E2E Runtime Reader
+description: Read-only target inspection for the trusted e2e coordinator and PR tests.
+stage: GA
+includedPermissions:
+  # Trusted target preflight, deletion confirmation and test assertions.
+  - compute.instances.get
+  - compute.instances.list
+  - compute.instances.listEffectiveTags
+  - compute.disks.get
+  - compute.disks.list
+  - compute.subnetworks.get
+  # Cluster discovery/get-credentials and node-pool reads share clusters.get.
+  - container.clusters.get
+  - container.getServerConfig

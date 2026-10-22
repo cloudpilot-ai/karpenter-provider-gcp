@@ -182,14 +182,14 @@ images and reach APIs.
 make e2e-deploy
 ```
 
-Builds the controller image with `ko` and runs `helm upgrade --install`. Before deploying, it removes only resources labeled `karpenter-e2e/owned=true` and the dedicated test namespace; inspect legacy unlabeled leftovers manually.
+Builds the controller image with `ko` and runs `helm upgrade --install` under the shared e2e Lease. Before deploying, it drains proven-owned test resources while preserving the owned test namespace and bootstrap RBAC. Unknown or unlabeled leftovers require explicit maintenance; they are not adopted automatically.
 
 #### Run end-to-end tests
 
 Before choosing concurrency, check available addresses, SSD, regional CPUs, and all-regions CPUs. `GINKGO_PROCS` caps **concurrent specs across the whole run**, not per feature.
 
 ```bash
-make e2e-tests                                                 # standard: all non-GPU features
+make e2e-tests                                                 # standard: excludes GPU and extended local SSD
 make e2e-tests E2E_SELECTION=drift GINKGO_PROCS=1              # one feature
 make e2e-tests E2E_SELECTION=drift,storage GINKGO_PROCS=2 \
   E2E_REPORT=.pi/drift-storage.md                               # custom ignored report
@@ -200,24 +200,24 @@ Inputs for `make e2e-tests` (in addition to the prerequisites above):
 
 | Input | Default | Purpose |
 |-------|---------|---------|
-| `E2E_SELECTION` | `standard` | `standard` (non-GPU), `gpu`, `all`, `provisioning`, one feature directory, or a comma-separated list such as `drift,storage`. |
+| `E2E_SELECTION` | `standard` | `standard` (excludes GPU and extended local SSD), `gpu`, `all`, `provisioning`, one feature directory, or a comma-separated list such as `drift,storage`. |
 | `GINKGO_PROCS` | `4` | Global limit on concurrently running specs; choose based on quota. |
 | `E2E_REPORT` | `e2e-report.md` | Markdown report path; the companion controller log uses the same basename with `.karpenter.log`. Keep a nonempty path to retain commit checks and reporting. |
 | `E2E_LOCK_ID` | `username@hostname:pid-<runner PID>` | Lease holder identity; override when a stable CI identity is useful. |
 | `E2E_PREFIX` | `karpenter-e2e` | Base name for the default cluster and pods range. |
 | `E2E_CLUSTER_NAME` / `E2E_PODS_RANGE` | `<prefix>-cluster` / `<prefix>-pods` | Override when testing an existing cluster with different names. |
-| `E2E_KARPENTER_NAMESPACE` / `E2E_KARPENTER_DEPLOYMENT` | `karpenter-system` / `karpenter` | Override the controller target for commit checks, logs, and the Lease namespace. |
+| `E2E_KARPENTER_NAMESPACE` / `E2E_KARPENTER_DEPLOYMENT` | `karpenter-system` / `karpenter` | Override the controller target for commit checks and logs; the shared Lease remains in `karpenter-system`. |
 | `E2E_PRESET` | unset | Legacy alias for `E2E_SELECTION`; do not set both. |
 
 `SUITE` and `FOCUS` apply only to the separate `e2e-test` target, not `e2e-tests`. Explicit GPU selections (`gpu`, `all`, or a list containing `gpu`) need enough GPU quota and capacity.
 
-The runner verifies the deployed controller matches the test checkout, acquires a Kubernetes Lease (overlapping test runs fail fast), and writes the ignored report and controller log. It releases the Lease on normal exit or interruption; after a forced kill, the Lease expires within ten minutes. Setup, deploy, and cleanup are **not** covered by this test Lease. Inspect the report and log even when tests fail; a startup failure may leave no report.
+The runner verifies the deployed controller matches the test checkout, acquires the canonical Kubernetes Lease (overlapping runs fail fast), and writes the ignored report and controller log. Native JSON/JUnit are retained in an adjacent private directory. Supported deploy and cleanup commands use the same Lease. Abandoned holders or a maintenance-required marker block automatic recovery, even after expiry; follow the [maintenance exclusion procedure](hack/e2e-runner/README.md). Inspect reports and logs even when tests fail; a startup failure may leave no report.
 
 For one-spec debugging, `make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"` remains available, but it bypasses the Lease and report: do not use it on a shared cluster. Run a focused Ginkgo spec through `hack/e2e-runner` instead if locking is required.
 
 #### On-demand PR e2e
 
-The `/e2e` pull-request comment workflow is currently a placeholder; run local e2e using the commands above.
+Upstream maintainers can use the manual PR E2E workflow after its separately approved operational activation. It captures one PR head SHA and supports individually enabled `standard`, `gpu`, and `full` presets with 20 global workers. The pipeline is disabled by default; no `/e2e` ChatOps trigger is implemented. See the [configuration, security and activation guide](hack/e2e-ci/README.md).
 
 #### Retire e2e infrastructure
 

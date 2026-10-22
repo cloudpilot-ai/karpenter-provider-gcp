@@ -1,20 +1,28 @@
 ### E2E Test Results
+{{with .Outcome}}
+<p><strong>Lifecycle:</strong> {{.Overall}} | <strong>Infrastructure:</strong> {{.Infrastructure}} | <strong>Tests:</strong> {{.Tests}} | <strong>Native reports:</strong> {{.Reports}} | <strong>Cleanup:</strong> {{.Cleanup}} | <strong>Maintenance required:</strong> {{.MaintenanceRequired}}</p>
+<p><strong>Selection:</strong> {{.Requested}} → {{.Resolved}} | <strong>Workers:</strong> {{.Workers}} | <strong>Executed:</strong> {{.Counts.Executed}}</p>
+<p><strong>Trusted SHA:</strong> {{.Source.Dispatch.WorkflowSHA}} | <strong>Invocation:</strong> {{.Source.Dispatch.RunID}}/{{.Source.Dispatch.RunAttempt}} | <strong>PR:</strong> {{.Source.PRNumber}}</p>
+<p><strong>Diagnostics:</strong> {{.Diagnostics}} | <strong>Artifact:</strong> {{.Artifact}} | <strong>Publication:</strong> {{.Publication}}</p>
+{{end}}
 
-<p><strong>Test commit:</strong> {{.Commit}} | <strong>Controller commit:</strong> {{.ControllerCommit}} | <strong>Total duration:</strong> {{.Duration}}</p>
-<p><strong>Controller resources:</strong> {{.Resources}}</p>
+<p><strong>Test commit:</strong> {{public .Commit}} | <strong>Controller commit:</strong> {{public .ControllerCommit}} | <strong>Total duration:</strong> {{public .Duration}}</p>
+{{if .ControllerDigest}}<p><strong>Controller image digest:</strong> {{public .ControllerDigest}}</p>
+{{end}}<p><strong>Controller resources:</strong> {{public .Resources}}</p>
 {{if .LogsUnavailable}}<p><strong>Controller logs:</strong> unavailable</p>
 {{end}}
-<table>
+{{if .Omitted}}<p>{{.Omitted}} additional spec rows omitted from this bounded summary. See safely exported evidence for details.</p>
+{{end}}<table>
 <thead><tr><th>Suite</th><th>Result</th><th>Duration</th></tr></thead>
 <tbody>
 {{range .Suites}}<tr>
 <td><details>
-<summary>{{.Name}} — {{.Passed}} passed, {{.Failed}} failed{{if .Skipped}}, {{.Skipped}} skipped{{end}}{{if .Pending}}, {{.Pending}} pending{{end}}</summary>
+<summary>{{public .Name}} — {{.Passed}} passed, {{.Failed}} failed{{if .Skipped}}, {{.Skipped}} skipped{{end}}{{if .Pending}}, {{.Pending}} pending{{end}}</summary>
 <ul>
-{{range .Specs}}<li>{{.Result}} · {{.Name}} ({{.Duration}})</li>
+{{range .Specs}}<li>{{.Result}} · {{public .Name}} ({{public .Duration}})</li>
 {{end}}</ul>
 </details></td>
-<td>{{.Result}}</td><td>{{.Duration}}</td>
+<td>{{.Result}}</td><td>{{public .Duration}}</td>
 </tr>
 {{end}}</tbody>
 </table>
