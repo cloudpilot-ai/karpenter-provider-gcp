@@ -217,12 +217,14 @@ For one-spec debugging, `make e2e-test SUITE=provisioning FOCUS="amd64 on-demand
 
 #### On-demand PR e2e
 
-Upstream maintainers can use the manual PR E2E workflow after its separately approved operational activation. It captures one PR head SHA and supports individually enabled `standard`, `gpu`, and `full` presets with 20 global workers. The pipeline is disabled by default; no `/e2e` ChatOps trigger is implemented. See the [configuration, security and activation guide](hack/e2e-ci/README.md).
+Upstream maintainers can use the manual PR E2E workflow after its separately approved operational activation. It captures one PR head SHA and supports individually enabled `standard`, `gpu`, and `full` presets with 20 global workers. The pipeline is disabled by default; no `/e2e` ChatOps trigger is implemented. See the [workflow and evidence guide](hack/e2e-runner/README.md#manual-pr-workflow) and [identity/bootstrap activation gates](deploy/terraform-e2e/README.md#opt-in-manual-ci-identity-not-activated).
 
 The unchanged upstream Makefile does **not** run offline pipeline/security tests in `make ci`/presubmit. Run them separately (no cloud target required):
 
 ```bash
-go test -race ./hack/e2e-ci/... ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
+node --test .github/scripts/e2e/*_test.cjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts/e2e -p '*_test.py'
+go test -race ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
 ```
 
 #### Retire e2e infrastructure

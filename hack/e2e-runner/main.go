@@ -173,7 +173,7 @@ func newRunnerCommand() *cobra.Command {
 	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report here; retain native JSON/JUnit in an adjacent private directory")
 	cmd.Flags().StringVar(&releaseVersion, "release-version", "", "Validate the deployed release instead of matching the test commit (with --report)")
 	cmd.Flags().StringVar(&lockID, "lock-id", "", "Lease holder ID (default: username@hostname:pid-<runner PID>)")
-	cmd.AddCommand(newRenderCommand(), newExportCommand(), newValidateTargetCommand(), newPreparedCommand(), newLocalLifecycleCommand(true), newLocalLifecycleCommand(false))
+	cmd.AddCommand(newValidateTargetCommand(), newPreparedCommand(), newLocalLifecycleCommand(true), newLocalLifecycleCommand(false))
 	return cmd
 }
 

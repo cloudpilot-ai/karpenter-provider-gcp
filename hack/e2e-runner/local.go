@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,7 +71,7 @@ func runLocalLifecycle(ctx context.Context, owner *leaseOwner, target lifecycleT
 		return err
 	}
 	cleanup, stop := context.WithTimeout(ctx, 10*time.Minute)
-	err = cleanLocalEnvironment(cleanup, owner, target, strings.TrimSpace(string(root)))
+	err = cleanLocalEnvironment(cleanup, owner, target, strings.TrimSpace(string(root)), nil)
 	stop()
 	if err != nil {
 		// Cancellation never starts a second cleanup. Only confirmed ownership
@@ -95,7 +96,7 @@ func runLocalLifecycle(ctx context.Context, owner *leaseOwner, target lifecycleT
 	return owner.confirm(ctx)
 }
 
-func cleanLocalEnvironment(ctx context.Context, owner *leaseOwner, target lifecycleTarget, root string) error {
+func cleanLocalEnvironment(ctx context.Context, owner *leaseOwner, target lifecycleTarget, root string, environment []string) error {
 	inventory, err := inspectDrain(ctx, target)
 	if err != nil {
 		return err
@@ -109,6 +110,12 @@ func cleanLocalEnvironment(ctx context.Context, owner *leaseOwner, target lifecy
 	}
 	shell := exec.CommandContext(ctx, "bash", args...)
 	shell.Stdin, shell.Stdout, shell.Stderr = os.Stdin, os.Stdout, os.Stderr
+	shell.Env = environment
+	if environment != nil {
+		sink := &limitedWriter{Writer: io.Discard, Remaining: 2 << 20}
+		shell.Stdout, shell.Stderr = sink, sink
+	}
+
 	if err := runIsolated(shell); err != nil {
 		return fmt.Errorf("maintenance-required: local cleanup: %w", err)
 	}

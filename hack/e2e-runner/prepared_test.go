@@ -17,16 +17,10 @@ limitations under the License.
 package main
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"html"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,8 +30,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2/reporters"
 	"github.com/onsi/ginkgo/v2/types"
-
-	e2eci "github.com/cloudpilot-ai/karpenter-provider-gcp/hack/e2e-ci"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestPreparedSelection(t *testing.T) {
@@ -67,11 +60,11 @@ func TestPreparedSelection(t *testing.T) {
 	}
 }
 
-func TestNativeReportsRejectZeroExecutedTests(t *testing.T) {
+func TestJSONReportsRejectZeroExecutedTests(t *testing.T) {
 	dir := t.TempDir()
 	report := types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStateSkipped}}}
 	writeNativeFixture(t, dir, report)
-	if _, _, err := readNativeReports(dir); err == nil {
+	if _, _, err := readJSONReports(filepath.Join(dir, "results.json")); err == nil {
 		t.Fatal("all-skipped report accepted as executed tests")
 	}
 }
@@ -132,41 +125,12 @@ case "$*" in
  *) exit 97 ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(strings.ReplaceAll(script, "$CONTROLLER_FIXTURE", dir)), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CONTROLLER_FIXTURE", dir)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
-
-func TestPreparedExecutionPersistsNativeReports(t *testing.T) {
-	bundle, source, image := preparedFixture(t)
-	fakeController(t, image, strings.Split(image, "@")[1], source.HeadSHA)
-	t.Setenv("PROJECT_ID", "fixture-pass")
-	t.Setenv("GITHUB_TOKEN", "must-not-reach-tests")
-	output := filepath.Join(t.TempDir(), "run")
-	outcome, err := executePrepared(context.Background(), preparedExecution{Bundle: bundle, Source: source, Image: image, Workers: 20, OutputDir: output})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rendered, readErr := os.ReadFile(filepath.Join(output, "report.md"))
-	if readErr != nil || !strings.Contains(html.UnescapeString(string(rendered)), strings.Split(image, "@")[1]) {
-		t.Fatalf("report omitted exact image digest: %s %v", rendered, readErr)
-	}
-	if outcome.Tests != statePassed || outcome.Reports != statePassed || outcome.Counts.Executed != 1 || outcome.Cleanup != stateNotRun || outcome.Overall() != stateIncomplete {
-		t.Fatalf("%+v", outcome)
-	}
-	for _, name := range []string{"results.json", "junit.xml", "outcome.json", "report.md", "suite.log"} {
-		info, err := os.Stat(filepath.Join(output, name))
-		if err != nil || info.Size() == 0 {
-			t.Fatalf("%s not durable: %v", name, err)
-		}
-	}
-}
-
-var nativeOnce sync.Once
-var nativeCLI, nativeSuite []byte
-var nativeErr error
 
 func nativeExecutables(t *testing.T) ([]byte, []byte) {
 	t.Helper()
@@ -197,259 +161,20 @@ func nativeExecutables(t *testing.T) ([]byte, []byte) {
 	return nativeCLI, nativeSuite
 }
 
-func preparedFixture(t *testing.T) (*e2eci.Bundle, e2eci.Frozen, string) {
-	t.Helper()
-	source := e2eci.Frozen{Schema: 1, BaseRepositoryID: e2eci.RepositoryID, PRNumber: 7, HeadRepositoryID: 3, HeadRepository: "contributor/fork", HeadSHA: strings.Repeat("a", 40), Dispatch: e2eci.Dispatch{
-		Repository: e2eci.Repository, Ref: "refs/heads/main", WorkflowRef: e2eci.Repository + "/" + e2eci.WorkflowPath + "@refs/heads/main", WorkflowSHA: strings.Repeat("b", 40), Event: "workflow_dispatch", Actor: "maintainer", ActorID: 1, RunID: 9, RunAttempt: 1, PR: "7", Preset: "standard",
-	}}
-	cli, suite := nativeExecutables(t)
-	oci, digest := controllerArchive(t, source.HeadSHA)
-	files := map[string][]byte{e2eci.TestBinary: suite, e2eci.GinkgoBinary: cli, e2eci.ControllerArchive: oci, e2eci.ControllerChart: []byte("previously validated chart"), e2eci.CRDChart: []byte("previously validated CRDs")}
-	b := &e2eci.Bundle{Root: t.TempDir(), Manifest: e2eci.Manifest{Schema: 1, Source: source, Platform: "linux/amd64", GinkgoVersion: "v2.33.0", Outcome: "success"}}
-	for name, data := range files {
-		if err := os.WriteFile(filepath.Join(b.Root, name), data, 0700); err != nil {
-			t.Fatal(err)
-		}
-		h := sha256.Sum256(data)
-		b.Manifest.Files = append(b.Manifest.Files, e2eci.FileDigest{Name: name, Size: int64(len(data)), SHA256: hex.EncodeToString(h[:])})
-	}
-	return b, source, "example.invalid/controller@" + digest
-}
-
-func controllerArchive(t *testing.T, sha string) ([]byte, string) {
-	t.Helper()
-	files := map[string][]byte{"oci-layout": []byte(`{"imageLayoutVersion":"1.0.0"}`)}
-	blob := func(data []byte, media string) map[string]any {
-		hash := sha256.Sum256(data)
-		digest := hex.EncodeToString(hash[:])
-		files["blobs/sha256/"+digest] = data
-		return map[string]any{"mediaType": media, "digest": "sha256:" + digest, "size": len(data)}
-	}
-	marshal := func(value any) []byte {
-		data, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return data
-	}
-	config := blob([]byte(`{"architecture":"amd64","os":"linux","config":{"Labels":{"org.opencontainers.image.revision":"`+sha+`"}}}`), "application/vnd.oci.image.config.v1+json")
-	layer := blob([]byte("opaque image layer"), "application/vnd.oci.image.layer.v1.tar+gzip")
-	image := blob(marshal(map[string]any{"schemaVersion": 2, "config": config, "layers": []any{layer}}), "application/vnd.oci.image.manifest.v1+json")
-	files["index.json"] = marshal(map[string]any{"schemaVersion": 2, "manifests": []any{image}})
-	var out bytes.Buffer
-	tw := tar.NewWriter(&out)
-	for name, data := range files {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(data)), Typeflag: tar.TypeReg, Mode: 0600}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write(data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return out.Bytes(), image["digest"].(string)
-}
-
-func TestNativeReportsRejectTrailingJUnitData(t *testing.T) {
-	dir := t.TempDir()
-	writeNativeFixture(t, dir, types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStatePassed, LeafNodeText: "passed"}}})
-	f, err := os.OpenFile(filepath.Join(dir, "junit.xml"), os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("<unexpected/>trailing"); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := readNativeReports(dir); err == nil {
-		t.Fatal("trailing JUnit corruption accepted")
-	}
-}
-
-func TestPreparedExecutionFailureAndSelections(t *testing.T) {
-	for _, tc := range []struct {
-		preset, project string
-		executed        int
-		want            outcomeState
-	}{
-		{"standard", "fixture-fail", 1, stateFailed},
-		{"gpu", "fixture-pass", 1, statePassed},
-		{"full", "fixture-pass", 3, statePassed},
-	} {
-		t.Run(tc.preset, func(t *testing.T) {
-			bundle, source, image := preparedFixture(t)
-			source.Dispatch.Preset = tc.preset
-			bundle.Manifest.Source = source
-			fakeController(t, image, strings.Split(image, "@")[1], source.HeadSHA)
-			t.Setenv("PROJECT_ID", tc.project)
-			dir := filepath.Join(t.TempDir(), "run")
-			outcome, err := executePrepared(context.Background(), preparedExecution{Bundle: bundle, Source: source, Image: image, Workers: 20, OutputDir: dir})
-			if (err != nil) != (tc.want != statePassed) || outcome.Tests != tc.want || outcome.Counts.Executed != tc.executed || outcome.Reports != statePassed {
-				t.Fatalf("%+v %v", outcome, err)
-			}
-			if _, err := os.Stat(filepath.Join(dir, "report.md")); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
-func TestPreparedExecutionCancellationKillsChildrenAndPersists(t *testing.T) {
-	bundle, source, image := preparedFixture(t)
-	fakeController(t, image, strings.Split(image, "@")[1], source.HeadSHA)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { cancel(); w.WriteHeader(http.StatusNoContent) }))
-	defer server.Close()
-	t.Setenv("PROJECT_ID", server.URL)
-	dir := filepath.Join(t.TempDir(), "run")
-	outcome, err := executePrepared(ctx, preparedExecution{Bundle: bundle, Source: source, Image: image, Workers: 20, OutputDir: dir})
-	if err == nil || outcome.Tests != stateCancelled || outcome.Overall() != stateCancelled {
-		t.Fatalf("%+v %v", outcome, err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "outcome.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"tests": "cancelled"`) {
-		t.Fatalf("cancellation not durable: %s", data)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "report.md")); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func replacePreparedFile(t *testing.T, b *e2eci.Bundle, name string, data []byte) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(b.Root, name), data, 0700); err != nil {
-		t.Fatal(err)
-	}
-	hash := sha256.Sum256(data)
-	for i := range b.Manifest.Files {
-		if b.Manifest.Files[i].Name == name {
-			b.Manifest.Files[i].Size = int64(len(data))
-			b.Manifest.Files[i].SHA256 = hex.EncodeToString(hash[:])
-		}
-	}
-}
-
-func TestPreparedExecutionNeverAcceptsAbsentCorruptOrZeroReports(t *testing.T) {
-	for _, mode := range []string{"missing", "corrupt", "zero", "early-failure"} {
-		t.Run(mode, func(t *testing.T) {
-			bundle, source, image := preparedFixture(t)
-			fakeController(t, image, strings.Split(image, "@")[1], source.HeadSHA)
-			fixture := t.TempDir()
-			writeNativeFixture(t, fixture, types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStateSkipped}}})
-			script := "#!/bin/sh\nfor arg in \"$@\";do case \"$arg\" in --output-dir=*) dir=${arg#*=};;esac;done\n"
-			switch mode {
-			case "corrupt":
-				script += "printf '{broken' > \"$dir/results.json\"\n"
-			case "zero":
-				script += fmt.Sprintf("cp %q/results.json \"$dir/results.json\"\ncp %q/junit.xml \"$dir/junit.xml\"\n", fixture, fixture)
-			case "early-failure":
-				script += "exit 7\n"
-			}
-			replacePreparedFile(t, bundle, e2eci.GinkgoBinary, []byte(script))
-			dir := filepath.Join(t.TempDir(), "run")
-			outcome, err := executePrepared(context.Background(), preparedExecution{Bundle: bundle, Source: source, Image: image, Workers: 20, OutputDir: dir})
-			if err == nil || outcome.Tests == statePassed || outcome.Reports == statePassed || outcome.Overall() == statePassed {
-				t.Fatalf("%+v %v", outcome, err)
-			}
-			for _, name := range []string{"outcome.json", "report.md"} {
-				if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-					t.Fatal(err)
-				}
-			}
-		})
-	}
-}
-
-func TestPreparedExecutionRejectsChangedInputsBeforeControllerOrTests(t *testing.T) {
-	for _, mode := range []string{"source", "digest", "workers", "test-binary", "chart", "symlink", "duplicate", "platform"} {
-		t.Run(mode, func(t *testing.T) {
-			bundle, source, image := preparedFixture(t)
-			workers := 20
-			switch mode {
-			case "source":
-				source.HeadSHA = strings.Repeat("d", 40)
-			case "digest":
-				image = "example.invalid/controller@sha256:" + strings.Repeat("d", 64)
-			case "workers":
-				workers = 19
-			case "test-binary":
-				if err := os.WriteFile(filepath.Join(bundle.Root, e2eci.TestBinary), []byte("changed"), 0700); err != nil {
-					t.Fatal(err)
-				}
-			case "chart":
-				if err := os.WriteFile(filepath.Join(bundle.Root, e2eci.ControllerChart), []byte("changed"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "symlink":
-				path := filepath.Join(bundle.Root, e2eci.TestBinary)
-				if err := os.Remove(path); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink("/not/a/binary", path); err != nil {
-					t.Fatal(err)
-				}
-			case "duplicate":
-				bundle.Manifest.Files[1] = bundle.Manifest.Files[0]
-			case "platform":
-				bundle.Manifest.Platform = "darwin/arm64"
-			}
-			t.Setenv("PATH", t.TempDir())
-			dir := filepath.Join(t.TempDir(), "run")
-			outcome, err := executePrepared(context.Background(), preparedExecution{Bundle: bundle, Source: source, Image: image, Workers: workers, OutputDir: dir})
-			if err == nil || outcome.Infrastructure != stateFailed || outcome.Tests != stateNotRun {
-				t.Fatalf("%+v %v", outcome, err)
-			}
-			if _, err := os.Stat(filepath.Join(dir, "suite.log")); !os.IsNotExist(err) {
-				t.Fatalf("test process may have launched: %v", err)
-			}
-		})
-	}
-}
-
-func TestPreparedExecutionRejectsReusedOutput(t *testing.T) {
-	bundle, source, image := preparedFixture(t)
-	dir := t.TempDir()
-	writeNativeFixture(t, dir, types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStatePassed}}})
-	if _, err := executePrepared(context.Background(), preparedExecution{Bundle: bundle, Source: source, Image: image, Workers: 20, OutputDir: dir}); err == nil {
-		t.Fatal("reused output accepted stale native success")
-	}
-}
-
-func TestNativeReportValidation(t *testing.T) {
-	for _, mode := range []string{"missing-json", "missing-junit", "corrupt-json", "corrupt-junit", "disagree", "oversized", "symlink", "empty-array"} {
+func TestJSONReportValidation(t *testing.T) {
+	for _, mode := range []string{"missing-json", "corrupt-json", "oversized", "symlink", "empty-array", "incomplete-state", "suite-limit", "spec-limit"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			report := types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStatePassed, LeafNodeText: "native passed"}}}
 			writeNativeFixture(t, dir, report)
-			jsonPath, junitPath := filepath.Join(dir, "results.json"), filepath.Join(dir, "junit.xml")
+			jsonPath := filepath.Join(dir, "results.json")
 			switch mode {
 			case "missing-json":
 				if err := os.Remove(jsonPath); err != nil {
 					t.Fatal(err)
 				}
-			case "missing-junit":
-				if err := os.Remove(junitPath); err != nil {
-					t.Fatal(err)
-				}
 			case "corrupt-json":
 				if err := os.WriteFile(jsonPath, []byte("{"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "corrupt-junit":
-				if err := os.WriteFile(junitPath, []byte("<invalid>"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "disagree":
-				report.SpecReports[0].State = types.SpecStateFailed
-				if err := reporters.GenerateJUnitReport(report, junitPath); err != nil {
 					t.Fatal(err)
 				}
 			case "oversized":
@@ -467,8 +192,26 @@ func TestNativeReportValidation(t *testing.T) {
 				if err := os.WriteFile(jsonPath, []byte("[]"), 0600); err != nil {
 					t.Fatal(err)
 				}
+			case "incomplete-state":
+				report.SpecReports[0].State = types.SpecStateInvalid
+				if err := reporters.GenerateJSONReport(report, jsonPath); err != nil {
+					t.Fatal(err)
+				}
+			case "suite-limit":
+				data, err := json.Marshal(make([]types.Report, 65))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(jsonPath, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "spec-limit":
+				report.SpecReports = make(types.SpecReports, maxNativeSpecs+1)
+				if err := reporters.GenerateJSONReport(report, jsonPath); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if _, _, err := readNativeReports(dir); err == nil {
+			if _, _, err := readJSONReports(filepath.Join(dir, "results.json")); err == nil {
 				t.Fatal("invalid native evidence accepted")
 			}
 		})
@@ -512,5 +255,343 @@ func TestPreparedControllerRejectsUnreadyOrMismatchedDesiredState(t *testing.T) 
 				t.Fatal("misaligned controller accepted")
 			}
 		})
+	}
+}
+
+var nativeOnce sync.Once
+var nativeCLI, nativeSuite []byte
+var nativeErr error
+
+func preparedFixture(t *testing.T) (preparedExecution, string) {
+	t.Helper()
+	cli, suite := nativeExecutables(t)
+	root := t.TempDir()
+	input := preparedExecution{SourceSHA: strings.Repeat("a", 40), Selection: "standard", ControllerArchive: filepath.Join(root, "controller-image.tar"), ControllerChart: filepath.Join(root, "controller-chart.tgz"), CRDChart: filepath.Join(root, "crd-chart.tgz"), TestBinary: filepath.Join(root, "e2e.test"), GinkgoBinary: filepath.Join(root, "ginkgo"), OutputDir: filepath.Join(t.TempDir(), "results")}
+	for path, data := range map[string][]byte{input.ControllerArchive: []byte("preauth-validated raw archive"), input.ControllerChart: []byte("previously validated chart"), input.CRDChart: []byte("previously validated CRDs"), input.TestBinary: suite, input.GinkgoBinary: cli} {
+		if err := os.WriteFile(path, data, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return input, "example.invalid/controller@sha256:" + strings.Repeat("b", 64)
+}
+
+func fixtureCheckout(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+type runtimeVerdict struct {
+	SourceSHA string `json:"source_sha"`
+	TestExit  *int   `json:"test_exit"`
+	CleanupOK bool   `json:"cleanup_ok"`
+}
+
+func TestPreparedExecutionNativeSelectionsAndFailure(t *testing.T) {
+	for _, tc := range []struct {
+		selection, project string
+		executed           int
+		fails              bool
+	}{
+		{"standard", "fixture-pass", 1, false}, {"gpu", "fixture-pass", 1, false}, {"full", "fixture-pass", 3, false}, {"standard", "fixture-fail", 1, true},
+	} {
+		t.Run(tc.selection+tc.project, func(t *testing.T) {
+			input, _ := preparedFixture(t)
+			input.Selection = tc.selection
+			if err := os.Mkdir(input.OutputDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			exit, err := executePrepared(context.Background(), input, []string{"PROJECT_ID=" + tc.project})
+			if (err != nil) != tc.fails || exit == nil || (*exit != 0) != tc.fails {
+				t.Fatalf("exit=%v err=%v", exit, err)
+			}
+			_, counts, err := readJSONReports(filepath.Join(input.OutputDir, "results.json"))
+			if err != nil || counts.Executed != tc.executed {
+				t.Fatalf("counts=%+v err=%v", counts, err)
+			}
+			junit, err := os.ReadFile(filepath.Join(input.OutputDir, "junit.xml"))
+			if err != nil || len(junit) == 0 {
+				t.Fatalf("missing generated private JUnit: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(input.OutputDir, "suite.log"))
+			if err != nil || len(data) == 0 {
+				t.Fatalf("missing private suite log: %s %v", data, err)
+			}
+		})
+	}
+}
+
+func TestPreparedExecutionCannotPassWithoutNativeEvidence(t *testing.T) {
+	for _, mode := range []string{"missing", "corrupt", "zero", "failed-suite", "early-failure"} {
+		t.Run(mode, func(t *testing.T) {
+			input, _ := preparedFixture(t)
+			if err := os.Mkdir(input.OutputDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			script := "#!/bin/sh\n"
+			switch mode {
+			case "corrupt":
+				script += "echo '{broken' > results.json\n"
+			case "zero":
+				writeNativeFixture(t, input.OutputDir, types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStateSkipped}}})
+			case "failed-suite":
+				writeNativeFixture(t, input.OutputDir, types.Report{SuiteSucceeded: false, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStatePassed}}})
+			case "early-failure":
+				script += "exit 7\n"
+			}
+			if err := os.WriteFile(input.GinkgoBinary, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			exit, err := executePrepared(context.Background(), input, []string{})
+			if err == nil || exit == nil {
+				t.Fatalf("missing failure: %v %v", exit, err)
+			}
+		})
+	}
+}
+
+func TestPreparedCommandNeutralFlagsAndFinalVerdict(t *testing.T) {
+	target, input, client, _ := lifecycleFixture(t)
+	setLifecycleTargetEnv(t, target)
+	serveLeaseBoundary(t, client)
+	t.Setenv("GITHUB_TOKEN", "must-not-enter-runtime")
+	command := newRunnerCommand()
+	command.SetArgs([]string{"prepared", "--source-sha", input.SourceSHA, "--selection", input.Selection, "--controller-archive", input.ControllerArchive, "--controller-chart", input.ControllerChart, "--crd-chart", input.CRDChart, "--test-binary", input.TestBinary, "--ginkgo-binary", input.GinkgoBinary, "--results-dir", input.OutputDir, "--lock-id", "neutral-cli"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	verdict := readRuntimeVerdict(t, input.OutputDir)
+	if verdict.SourceSHA != input.SourceSHA || verdict.TestExit == nil || *verdict.TestExit != 0 || !verdict.CleanupOK {
+		t.Fatalf("%+v", verdict)
+	}
+}
+
+func TestPreparedCommandRejectsReusedOutputAndInvalidFilesBeforeCloud(t *testing.T) {
+	for _, mode := range []string{"reused-output", "bad-sha", "bad-selection", "symlink-file", "missing-file", "artifact-results-overlap"} {
+		t.Run(mode, func(t *testing.T) {
+			input, _ := preparedFixture(t)
+			switch mode {
+			case "reused-output":
+				if err := os.Mkdir(input.OutputDir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				writeNativeFixture(t, input.OutputDir, types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStatePassed}}})
+			case "bad-sha":
+				input.SourceSHA = "aaaaaaa"
+			case "bad-selection":
+				input.Selection = "all"
+			case "symlink-file":
+				original := input.TestBinary
+				input.TestBinary += "-link"
+				if err := os.Symlink(original, input.TestBinary); err != nil {
+					t.Fatal(err)
+				}
+			case "missing-file":
+				input.CRDChart += "-missing"
+			case "artifact-results-overlap":
+				input.OutputDir = filepath.Join(filepath.Dir(input.TestBinary), "results")
+			}
+			t.Setenv("PATH", t.TempDir())
+			client := &memoryLeaseClient{}
+			if err := runPreparedLifecycle(context.Background(), client, "ci", lifecycleTarget{}, input); err == nil {
+				t.Fatal("unsafe input accepted")
+			}
+			if client.lease != nil {
+				t.Fatal("attempted acquisition before input validation")
+			}
+		})
+	}
+}
+
+func TestPreparedCredentialsAndArtifactRootsAreIsolated(t *testing.T) {
+	for _, mode := range []string{"adc-in-artifacts", "kubeconfig-in-results", "config-contains-artifacts", "symlink-alias", "temp-in-results"} {
+		t.Run(mode, func(t *testing.T) {
+			input, _ := preparedFixture(t)
+			switch mode {
+			case "adc-in-artifacts":
+				t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", filepath.Join(filepath.Dir(input.TestBinary), "adc.json"))
+			case "kubeconfig-in-results":
+				t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "safe")+string(os.PathListSeparator)+filepath.Join(input.OutputDir, "kubeconfig"))
+			case "config-contains-artifacts":
+				t.Setenv("CLOUDSDK_CONFIG", filepath.Dir(input.TestBinary))
+			case "symlink-alias":
+				alias := filepath.Join(t.TempDir(), "artifacts")
+				if err := os.Symlink(filepath.Dir(input.TestBinary), alias); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", filepath.Join(alias, "adc.json"))
+			case "temp-in-results":
+				t.Setenv("TMPDIR", input.OutputDir)
+			}
+			if err := validatePreparedExecution(&input); err == nil {
+				t.Fatal("overlapping credentials/artifact/results paths accepted")
+			}
+		})
+	}
+}
+
+func TestValidateTargetRemainsCloudFree(t *testing.T) {
+	target, _, _, _ := lifecycleFixture(t)
+	setLifecycleTargetEnv(t, target)
+	t.Setenv("PATH", t.TempDir())
+	command := newRunnerCommand()
+	command.SetArgs([]string{"validate-target"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("E2E_REGION", "")
+	command = newRunnerCommand()
+	command.SetArgs([]string{"validate-target"})
+	if err := command.Execute(); err == nil {
+		t.Fatal("preauth validation derived missing region")
+	}
+}
+
+func TestPreparedShellFailureDoesNotLaunchTests(t *testing.T) {
+	for _, mode := range []string{"helm-failure", "wrong-digest", "malformed-reference"} {
+		t.Run(mode, func(t *testing.T) {
+			target, input, client, dir := lifecycleFixture(t)
+			switch mode {
+			case "helm-failure":
+				if err := os.WriteFile(filepath.Join(dir, "fail-helm"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "wrong-digest":
+				if err := os.WriteFile(filepath.Join(dir, "digest"), []byte("sha256:"+strings.Repeat("0", 64)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "malformed-reference":
+				if err := os.WriteFile(filepath.Join(dir, "digest"), []byte("sha256:"+strings.Repeat("b", 64)+"\ninjected"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := runPreparedLifecycle(context.Background(), client, "ci", target, input); err == nil {
+				t.Fatal("failed deployment/identity passed")
+			}
+			verdict := readRuntimeVerdict(t, input.OutputDir)
+			if verdict.TestExit != nil || !verdict.CleanupOK {
+				t.Fatalf("%+v", verdict)
+			}
+			if _, err := os.Stat(filepath.Join(input.OutputDir, "suite.log")); !os.IsNotExist(err) {
+				t.Fatal("tests launched after deployment/identity failure")
+			}
+		})
+	}
+}
+
+func TestPreparedMaintenanceBlockCannotPass(t *testing.T) {
+	target, input, client, dir := lifecycleFixture(t)
+	client.lease.Annotations = map[string]string{maintenanceKey: "incomplete-drain"}
+	if err := runPreparedLifecycle(context.Background(), client, "ci", target, input); !errors.Is(err, errTargetMaintenance) {
+		t.Fatalf("%v", err)
+	}
+	verdict := readRuntimeVerdict(t, input.OutputDir)
+	if verdict.TestExit != nil || verdict.CleanupOK {
+		t.Fatalf("%+v", verdict)
+	}
+	operations, _ := os.ReadFile(filepath.Join(dir, "operations"))
+	for _, mutation := range []string{"push ", "upgrade ", "delete "} {
+		if strings.Contains(string(operations), mutation) {
+			t.Fatalf("blocked target mutated: %s", operations)
+		}
+	}
+}
+
+func TestPreparedTestFailureRemainsPrimaryWhenCleanupFails(t *testing.T) {
+	target, input, client, dir := lifecycleFixture(t)
+	if err := os.WriteFile(input.GinkgoBinary, []byte("#!/bin/sh\nexit 7\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "incomplete"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := runPreparedLifecycle(context.Background(), client, "ci", target, input)
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 7 {
+		t.Fatalf("primary test exit lost: %v", err)
+	}
+	verdict := readRuntimeVerdict(t, input.OutputDir)
+	if verdict.TestExit == nil || *verdict.TestExit != 7 || verdict.CleanupOK {
+		t.Fatalf("%+v", verdict)
+	}
+	lease, _ := client.Get(context.Background(), leaseName, metav1.GetOptions{})
+	if lease.Annotations[maintenanceKey] != "incomplete-drain" {
+		t.Fatal("failed cleanup did not fence next run")
+	}
+}
+
+func TestPreparedNativeResultsProjectWithTrustedHelper(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 required for trusted projector integration")
+	}
+	target, input, client, _ := lifecycleFixture(t)
+	if err := runPreparedLifecycle(context.Background(), client, "ci", target, input); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "public")
+	command := exec.Command(python, filepath.Join(fixtureCheckout(t), ".github/scripts/e2e/project.py"), "--private", input.OutputDir, "--public", output, "--source-sha", input.SourceSHA, "--preset", input.Selection)
+	if data, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("project real native/runtime evidence: %v %s", err, data)
+	}
+	data, err := os.ReadFile(filepath.Join(output, "summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary struct {
+		SourceSHA string `json:"source_sha"`
+		Executed  int    `json:"executed"`
+		TestsOK   bool   `json:"tests_ok"`
+		CleanupOK bool   `json:"cleanup_ok"`
+	}
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.SourceSHA != input.SourceSHA || summary.Executed != 1 || !summary.TestsOK || !summary.CleanupOK {
+		t.Fatalf("projector rejected native runner evidence: %s", data)
+	}
+}
+
+func TestPreparedExecutionUsesJSONNotPrivateJUnit(t *testing.T) {
+	input, _ := preparedFixture(t)
+	if err := os.Mkdir(input.OutputDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeNativeFixture(t, input.OutputDir, types.Report{SuiteSucceeded: true, SpecReports: types.SpecReports{{LeafNodeType: types.NodeTypeIt, State: types.SpecStatePassed}}})
+	if err := os.WriteFile(filepath.Join(input.OutputDir, "junit.xml"), []byte("not authoritative XML"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(input.GinkgoBinary, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	exit, err := executePrepared(context.Background(), input, []string{})
+	if err != nil || exit == nil || *exit != 0 {
+		t.Fatalf("valid JSON rejected because of private JUnit: exit=%v err=%v", exit, err)
+	}
+}
+
+func TestPrivateEvidenceRefusesExistingFilesAndSymlinks(t *testing.T) {
+	for _, symlink := range []bool{false, true} {
+		sentinel := filepath.Join(t.TempDir(), "existing")
+		if err := os.WriteFile(sentinel, []byte("unchanged"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		path := sentinel
+		if symlink {
+			path = filepath.Join(t.TempDir(), "evidence")
+			if err := os.Symlink(sentinel, path); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writePrivateFile(path, []byte("replacement")); err == nil {
+			t.Fatal("existing evidence path overwritten")
+		}
+		data, err := os.ReadFile(sentinel)
+		if err != nil || string(data) != "unchanged" {
+			t.Fatalf("existing file modified: %s %v", data, err)
+		}
 	}
 }

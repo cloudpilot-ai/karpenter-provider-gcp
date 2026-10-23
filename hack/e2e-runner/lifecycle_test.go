@@ -18,8 +18,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,9 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -179,7 +175,7 @@ func TestDrainRejectsUnknownResourcesBeforeMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := withOwnedLease(context.Background(), client, "ci", true, func(ctx context.Context, o *leaseOwner) error {
-		return drainOwned(ctx, o, target)
+		return cleanLocalEnvironment(ctx, o, target, fixtureCheckout(t), nil)
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown nodeclaims.karpenter.sh") {
 		t.Fatalf("%v", err)
@@ -200,24 +196,24 @@ func TestPreparedLifecycleTargetMismatchCannotMutate(t *testing.T) {
 	dir := t.TempDir()
 	writeTool(t, dir, "kubectl", "#!/bin/sh\n[ \"$*\" = 'config current-context' ] || exit 97\necho wrong-cluster\n")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	b, s, image := preparedFixture(t)
-	input := preparedExecution{Bundle: b, Source: s, Image: image, Workers: 20, OutputDir: filepath.Join(t.TempDir(), "result")}
+	input, image := preparedFixture(t)
+	input.OutputDir = filepath.Join(t.TempDir(), "result")
 	err := runPreparedLifecycle(context.Background(), &memoryLeaseClient{}, "ci", lifecycleTarget{Project: "project", Location: "us-central1", Cluster: "cluster", Repository: strings.SplitN(image, "@", 2)[0]}, input)
 	if err == nil || !strings.Contains(err.Error(), "kubeconfig context mismatch") {
 		t.Fatalf("wrong target not checked: %v", err)
 	}
-	data, readErr := os.ReadFile(filepath.Join(input.OutputDir, "outcome.json"))
-	if readErr != nil || !strings.Contains(string(data), `"infrastructure": "failed"`) {
+	data, readErr := os.ReadFile(filepath.Join(input.OutputDir, "runtime.json"))
+	if readErr != nil || !strings.Contains(string(data), `"test_exit":null`) {
 		t.Fatalf("missing failed lifecycle: %s %v", data, readErr)
 	}
 }
 
 func lifecycleFixture(t *testing.T) (lifecycleTarget, preparedExecution, *memoryLeaseClient, string) {
 	t.Helper()
-	b, s, image := preparedFixture(t)
+	input, image := preparedFixture(t)
 	target := lifecycleTarget{Project: "fixture-pass", Region: "us-central1", Location: "us-central1", Prefix: "test", Cluster: "test-cluster", Repository: "us-central1-docker.pkg.dev/fixture-pass/test-images/karpenter", ControllerSA: "controller@fixture-pass.iam.gserviceaccount.com", NodeSA: "nodes@fixture-pass.iam.gserviceaccount.com", Pods: "pods", SmallPods: "small", LargePods: "large", TagKey: "test-tag"}
 	image = target.Repository + "@" + strings.SplitN(image, "@", 2)[1]
-	fakeController(t, image, strings.SplitN(image, "@", 2)[1], s.HeadSHA)
+	fakeController(t, image, strings.SplitN(image, "@", 2)[1], input.SourceSHA)
 	dir := t.TempDir()
 	header := fmt.Sprintf("#!/bin/sh\nset -eu\nf=%q\nprintf '%%s\\n' \"$*\" >> \"$f/operations\"\n", dir)
 	for name, data := range map[string]string{
@@ -232,6 +228,7 @@ func lifecycleFixture(t *testing.T) (lifecycleTarget, preparedExecution, *memory
 		}
 	}
 	writeTool(t, dir, "kubectl", header+`
+CONTROLLER_FIXTURE=`+os.Getenv("CONTROLLER_FIXTURE")+`
 case "$*" in
  "config current-context") echo gke_fixture-pass_us-central1_test-cluster ;;
  "config view --minify -o json") echo '{"clusters":[{"cluster":{"server":"https://127.0.0.1"}}]}' ;;
@@ -263,9 +260,9 @@ esac
 `)
 	writeTool(t, dir, "docker-credential-gcloud", "#!/bin/sh\nexit 97\n")
 	writeTool(t, dir, "crane", header+`
+[ "${GITHUB_TOKEN:-}" = '' ] || exit 99
 case "$1" in
- push) [ -f "$2/index.json" ]; [ -d "$2/blobs/sha256" ];[ "$3" = '`+target.Repository+`:e2e-`+s.HeadSHA+`-9' ] ;;
- digest) cat "$f/digest" ;;
+ push) [ -f "$2" ]; [ "$3" = '`+target.Repository+`:e2e-`+input.SourceSHA+`' ]; [ "$4" = --image-refs ]; printf '%s@%s\n' '`+target.Repository+`' "$(cat "$f/digest")" > "$5" ;;
  *) exit 97 ;;
 esac
 `)
@@ -283,7 +280,9 @@ if [ -f "$f/callback" ];then curl -fsS "$(cat "$f/callback")" >/dev/null;fi
 `)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	client := &memoryLeaseClient{lease: &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: leaseName, ResourceVersion: "1"}}}
-	return target, preparedExecution{Bundle: b, Source: s, Image: image, Workers: 20, OutputDir: filepath.Join(t.TempDir(), "results")}, client, dir
+	input.OutputDir = filepath.Join(t.TempDir(), "results")
+	setLifecycleTargetEnv(t, target)
+	return target, input, client, dir
 }
 
 func TestPreparedLifecycleUsesPreparedImageChartsAndNativeTests(t *testing.T) {
@@ -291,8 +290,8 @@ func TestPreparedLifecycleUsesPreparedImageChartsAndNativeTests(t *testing.T) {
 	if err := runPreparedLifecycle(context.Background(), client, "ci", target, input); err != nil {
 		t.Fatal(err)
 	}
-	outcome := readLifecycleOutcome(t, input.OutputDir)
-	if outcome.Overall() != statePassed || outcome.Counts.Executed != 1 || outcome.Cleanup != statePassed {
+	outcome := readRuntimeVerdict(t, input.OutputDir)
+	if outcome.TestExit == nil || *outcome.TestExit != 0 || !outcome.CleanupOK {
 		t.Fatalf("%+v", outcome)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "namespace")); err != nil {
@@ -303,7 +302,7 @@ func TestPreparedLifecycleUsesPreparedImageChartsAndNativeTests(t *testing.T) {
 		t.Fatal(err)
 	}
 	operations := string(data)
-	for _, arg := range []string{"push ", "karpenter-crd " + filepath.Join(input.Bundle.Root, "karpenter-crd.tgz"), "karpenter " + filepath.Join(input.Bundle.Root, "karpenter.tgz"), "rollout status"} {
+	for _, arg := range []string{"push ", "karpenter-crd " + input.CRDChart, "karpenter " + input.ControllerChart, "rollout status"} {
 		if !strings.Contains(operations, arg) {
 			t.Fatalf("missing %q in %s", arg, operations)
 		}
@@ -315,13 +314,17 @@ func TestPreparedLifecycleUsesPreparedImageChartsAndNativeTests(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func readLifecycleOutcome(t *testing.T, dir string) runOutcome {
+func readRuntimeVerdict(t *testing.T, dir string) runtimeVerdict {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(dir, "outcome.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "runtime.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var outcome runOutcome
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil || len(fields) != 3 {
+		t.Fatalf("not the three-field runtime contract: %s %v", data, err)
+	}
+	var outcome runtimeVerdict
 	if err := json.Unmarshal(data, &outcome); err != nil {
 		t.Fatal(err)
 	}
@@ -334,8 +337,8 @@ func TestPreparedLifecycleIncompleteCleanupPreservesTestOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := runPreparedLifecycle(context.Background(), client, "ci", target, input)
-	outcome := readLifecycleOutcome(t, input.OutputDir)
-	if err == nil || outcome.Tests != statePassed || outcome.Cleanup != stateIncomplete || outcome.Overall() == statePassed {
+	outcome := readRuntimeVerdict(t, input.OutputDir)
+	if err == nil || outcome.TestExit == nil || *outcome.TestExit != 0 || outcome.CleanupOK {
 		t.Fatalf("%+v: %v", outcome, err)
 	}
 }
@@ -360,8 +363,8 @@ func TestPreparedLifecycleCancellationCleansWithSeparateOwnership(t *testing.T) 
 	default:
 		t.Fatal("prepared native test did not run")
 	}
-	outcome := readLifecycleOutcome(t, input.OutputDir)
-	if err == nil || outcome.Tests != stateCancelled || outcome.Cleanup != statePassed {
+	outcome := readRuntimeVerdict(t, input.OutputDir)
+	if err == nil || outcome.TestExit == nil || *outcome.TestExit == 0 || !outcome.CleanupOK {
 		t.Fatalf("%+v: %v", outcome, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "namespace")); err != nil {
@@ -386,20 +389,6 @@ func TestPreparedLifecycleRefusesUnlabeledNamespace(t *testing.T) {
 		if strings.Contains(string(operations), mutation) {
 			t.Fatalf("mutated unknown namespace: %s", operations)
 		}
-	}
-}
-
-func TestPreparedLifecycleDigestMismatchStopsBeforeDeploy(t *testing.T) {
-	target, input, client, dir := lifecycleFixture(t)
-	if err := os.WriteFile(filepath.Join(dir, "digest"), []byte("sha256:"+strings.Repeat("0", 64)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := runPreparedLifecycle(context.Background(), client, "ci", target, input); err == nil {
-		t.Fatal("wrong remote digest accepted")
-	}
-	operations, _ := os.ReadFile(filepath.Join(dir, "operations"))
-	if strings.Contains(string(operations), "upgrade --install") {
-		t.Fatal("deployed wrong remote digest")
 	}
 }
 
@@ -432,8 +421,8 @@ func TestPreparedLifecycleHeartbeatLossTerminatesTestsWithoutCleanup(t *testing.
 			default:
 				t.Fatal("native tests not executed")
 			}
-			outcome := readLifecycleOutcome(t, input.OutputDir)
-			if err == nil || !strings.Contains(err.Error(), "maintenance-required") || outcome.Tests != stateCancelled || outcome.Cleanup != stateIncomplete {
+			outcome := readRuntimeVerdict(t, input.OutputDir)
+			if err == nil || !strings.Contains(err.Error(), "maintenance-required") || outcome.TestExit == nil || *outcome.TestExit == 0 || outcome.CleanupOK {
 				t.Fatalf("%+v: %v", outcome, err)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "namespace")); err != nil {
@@ -497,7 +486,7 @@ func TestOwnedCloudDeletionMustCompleteWithinCleanupBound(t *testing.T) {
 	err := withOwnedLease(context.Background(), client, "ci", true, func(ctx context.Context, o *leaseOwner) error {
 		cleanup, stop := o.cleanupContext(time.Second)
 		defer stop()
-		return drainOwned(cleanup, o, target)
+		return cleanLocalEnvironment(cleanup, o, target, fixtureCheckout(t), nil)
 	})
 	if err == nil || !strings.Contains(err.Error(), "maintenance-required") {
 		t.Fatalf("cloud deletion unconfirmed: %v", err)
@@ -678,148 +667,14 @@ func TestExplicitLocalReleaseDeployRetainsPublishedChartMode(t *testing.T) {
 	}
 }
 
-func TestInstalledCranePushesValidatedOCILayout(t *testing.T) {
-	if _, err := exec.LookPath("crane"); err != nil {
-		t.Skip("crane not installed; workflow must supply trusted uploader")
-	}
-	bundle, source, _ := preparedFixture(t)
-	helperDir := t.TempDir()
-	helperMarker := filepath.Join(helperDir, "helper-called")
-	writeTool(t, helperDir, "docker-credential-gcloud", fmt.Sprintf("#!/bin/sh\n[ \"${GITHUB_TOKEN:-}\" = '' ] || exit 99\n[ \"$1\" = get ] || exit 98\ncat >/dev/null\necho called >> %q\necho '{\"Username\":\"fixture\",\"Secret\":\"not-a-real-token\"}'\n", helperMarker))
-	t.Setenv("PATH", helperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("GITHUB_TOKEN", "must-not-enter-credential-helper")
-	var mu sync.Mutex
-	blobs := map[string][]byte{}
-	uploads := map[string][]byte{}
-	manifests := map[string][]byte{}
-	uploadID := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
-		user, pass, ok := r.BasicAuth()
-		if !ok || user != "fixture" || pass != "not-a-real-token" {
-			w.Header().Set("WWW-Authenticate", `Basic realm="fixture"`)
-			w.WriteHeader(401)
-			return
-		}
-		p := r.URL.Path
-		switch {
-		case p == "/v2/":
-			w.WriteHeader(200)
-		case strings.Contains(p, "/blobs/uploads/"):
-			uploadID++
-			upload := fmt.Sprintf("/v2/controller/blobs/uploads/%d", uploadID)
-			switch r.Method {
-			case http.MethodPost:
-				uploads[upload] = nil
-				w.Header().Set("Location", upload)
-				w.WriteHeader(202)
-			case http.MethodPatch:
-				data, _ := io.ReadAll(r.Body)
-				uploads[p] = append(uploads[p], data...)
-				w.Header().Set("Location", p)
-				w.WriteHeader(202)
-			case http.MethodPut:
-				data, _ := io.ReadAll(r.Body)
-				complete := append(uploads[p], data...)
-				h := sha256.Sum256(complete)
-				digest := "sha256:" + hex.EncodeToString(h[:])
-				if digest != r.URL.Query().Get("digest") {
-					t.Error("uploaded blob does not match digest")
-					w.WriteHeader(400)
-					return
-				}
-				blobs[digest] = complete
-				w.WriteHeader(201)
-			default:
-				w.WriteHeader(404)
-			}
-		case strings.Contains(p, "/blobs/"):
-			digest := p[strings.LastIndex(p, "/")+1:]
-			data, ok := blobs[digest]
-			if !ok {
-				w.WriteHeader(404)
-				return
-			}
-			w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-			if r.Method != http.MethodHead {
-				_, _ = w.Write(data)
-			}
-		case strings.Contains(p, "/manifests/"):
-			ref := p[strings.LastIndex(p, "/")+1:]
-			if r.Method == http.MethodPut {
-				data, _ := io.ReadAll(r.Body)
-				var manifest struct {
-					Config struct{ Digest string }
-					Layers []struct{ Digest string }
-				}
-				if err := json.Unmarshal(data, &manifest); err != nil {
-					t.Error(err)
-					w.WriteHeader(400)
-					return
-				}
-				for _, digest := range append([]string{manifest.Config.Digest}, func() []string {
-					var result []string
-					for _, layer := range manifest.Layers {
-						result = append(result, layer.Digest)
-					}
-					return result
-				}()...) {
-					if _, ok := blobs[digest]; !ok {
-						t.Errorf("manifest references missing blob %s", digest)
-						w.WriteHeader(400)
-						return
-					}
-				}
-				manifests[ref] = data
-				h := sha256.Sum256(data)
-				manifests["sha256:"+hex.EncodeToString(h[:])] = data
-				w.WriteHeader(201)
-				return
-			}
-			data, ok := manifests[ref]
-			if !ok {
-				w.WriteHeader(404)
-				return
-			}
-			h := sha256.Sum256(data)
-			w.Header().Set("Docker-Content-Digest", "sha256:"+hex.EncodeToString(h[:]))
-			w.Header().Set("Content-Type", "application/vnd.oci.image.manifest.v1+json")
-			w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-			if r.Method != http.MethodHead {
-				_, _ = w.Write(data)
-			}
-		default:
-			t.Errorf("unexpected registry route %s %s", r.Method, p)
-			w.WriteHeader(404)
-		}
-	}))
-	defer server.Close()
-	// Isolated empty registry config: never inspect or use personal Docker auth.
-	t.Setenv("DOCKER_CONFIG", t.TempDir())
-	target := lifecycleTarget{Repository: strings.TrimPrefix(server.URL, "http://") + "/controller"}
-	err := withOwnedLease(context.Background(), &memoryLeaseClient{}, "ci", false, func(ctx context.Context, o *leaseOwner) error {
-		image, err := pushPreparedController(ctx, o, target, bundle, source)
-		if err == nil && !strings.HasPrefix(image, target.Repository+"@sha256:") {
-			t.Errorf("%q", image)
-		}
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(helperMarker); err != nil {
-		t.Fatal("registry did not use refreshable gcloud credential helper")
-	}
-}
-
 func TestDrainRejectsUnattributedVMWithoutKarpenterName(t *testing.T) {
 	target, _, client, dir := lifecycleFixture(t)
 	if err := os.WriteFile(filepath.Join(dir, "instances.json"), []byte(`[{"name":"unattributed-legacy","id":"1","labels":{"goog-k8s-cluster-name":"test-cluster"}}]`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	err := withOwnedLease(context.Background(), client, "ci", true, func(ctx context.Context, o *leaseOwner) error { return drainOwned(ctx, o, target) })
+	err := withOwnedLease(context.Background(), client, "ci", true, func(ctx context.Context, o *leaseOwner) error {
+		return cleanLocalEnvironment(ctx, o, target, fixtureCheckout(t), nil)
+	})
 	if err == nil || !strings.Contains(err.Error(), "maintenance-required") {
 		t.Fatalf("unknown VM silently excluded: %v", err)
 	}
@@ -846,12 +701,12 @@ func TestPreparedLifecycleRejectsCredentialsInsideResults(t *testing.T) {
 	}
 }
 
-func TestLeaseReleaseFailureCannotLeaveSuccessfulOutcome(t *testing.T) {
+func TestLeaseReleaseFailureFailsJobDespitePassingTestsAndCleanup(t *testing.T) {
 	target, input, client, _ := lifecycleFixture(t)
 	boundary := &releaseFailureBoundary{memoryLeaseClient: client}
 	err := runPreparedLifecycle(context.Background(), boundary, "ci", target, input)
-	outcome := readLifecycleOutcome(t, input.OutputDir)
-	if err == nil || !errors.Is(err, errLeaseUncertain) || outcome.Tests != statePassed || outcome.Cleanup != stateIncomplete || outcome.Overall() == statePassed {
+	outcome := readRuntimeVerdict(t, input.OutputDir)
+	if err == nil || !errors.Is(err, errLeaseUncertain) || outcome.TestExit == nil || *outcome.TestExit != 0 || !outcome.CleanupOK {
 		t.Fatalf("%+v: %v", outcome, err)
 	}
 }
@@ -959,23 +814,6 @@ func TestMissingRuntimeBootstrapStopsBeforeRegistryPush(t *testing.T) {
 	}
 }
 
-func TestMaintenanceBlockIsDurableAndCannotRenderSuccess(t *testing.T) {
-	target, input, client, _ := lifecycleFixture(t)
-	client.lease.Annotations = map[string]string{maintenanceKey: "incomplete-drain"}
-	if err := runPreparedLifecycle(context.Background(), client, "ci", target, input); err == nil {
-		t.Fatal("blocked target accepted")
-	}
-	outcome := readLifecycleOutcome(t, input.OutputDir)
-	if !outcome.MaintenanceRequired {
-		t.Fatal("maintenance requirement not durable")
-	}
-	outcome.Infrastructure, outcome.Tests, outcome.Reports, outcome.Cleanup = statePassed, statePassed, statePassed, statePassed
-	outcome.Counts = specCounts{Executed: 1, Passed: 1}
-	if outcome.Overall() == statePassed {
-		t.Fatal("maintenance-required outcome called passing")
-	}
-}
-
 func TestTargetPreflightRejectsWrongEndpointAndFeatureRanges(t *testing.T) {
 	for _, mode := range []string{"endpoint", "range-membership", "range-semantics", "tag-value"} {
 		t.Run(mode, func(t *testing.T) {
@@ -1034,7 +872,7 @@ func TestCloudDeletionRejectsSameNameWithReplacementID(t *testing.T) {
 	err = withOwnedLease(context.Background(), client, "ci", true, func(ctx context.Context, o *leaseOwner) error {
 		cleanup, stop := o.cleanupContext(3 * time.Second)
 		defer stop()
-		return drainOwned(cleanup, o, target)
+		return cleanLocalEnvironment(cleanup, o, target, fixtureCheckout(t), nil)
 	})
 	if err == nil || !strings.Contains(err.Error(), "identity replaced") {
 		t.Fatalf("%v", err)

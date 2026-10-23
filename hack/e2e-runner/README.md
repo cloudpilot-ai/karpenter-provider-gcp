@@ -6,94 +6,100 @@ The default CLI remains the local, Lease-protected, test-only runner:
 go run ./hack/e2e-runner --selection standard --report .pi/results.md
 ```
 
-`--preset` remains an alias; feature-directory selections and extra Ginkgo arguments remain supported. `standard` excludes GPU and extended local SSD; `all` includes both. Empty selections fail. With `--report`, the runner retains native JSON and JUnit in a fresh, private `<report-path>-native-*` directory beside the Markdown report. These files and controller logs are **private evidence**, not safe public artifacts.
+`--preset` remains an alias; feature-directory selections and extra Ginkgo arguments remain supported. `standard` excludes GPU and extended local SSD; `all` includes both. Empty selections fail. With `--report`, native JSON/JUnit remain in a fresh adjacent private directory. The local Markdown formatter bounds and escapes text, but neither reports nor controller logs are public-safe.
 
-## Trusted prepared lifecycle
+## Manual PR workflow
 
-Opt-in CI entry point (build the coordinator from trusted upstream workflow source):
+[`.github/workflows/e2e.yaml`](../../.github/workflows/e2e.yaml) is the sole CI entry point: trusted gate → pending frozen-SHA check → credential-free build → runtime → independent reporter. It is **disabled by default**. Configure identity, target variables, environment restrictions and bootstrap only after the [separate activation gates](../../deploy/terraform-e2e/README.md#opt-in-manual-ci-identity-not-activated). There is no ChatOps trigger.
+
+An upstream write/maintain/admin actor dispatches on upstream `main` with a positive upstream PR number and one separately enabled preset. Fork heads are allowed. The gate captures the full head SHA once; build fetches that upstream PR ref and rejects movement/deletion. Later pushes never retarget runtime or checks. Reruns are rejected: use a **new dispatch**. `standard` excludes GPU and extended local SSD; `gpu` selects GPU; `full` is local `all`, including both. All use **20 global workers**, without automatic downgrade or quota waves. Local fixtures do not validate capacity or authorize any preset.
+
+### Five raw build artifacts
+
+The isolated build worker has no OIDC, cloud credentials, environment secrets or GitHub writes. Trusted fixed ko/Helm/Go commands compile the frozen PR without running PR scripts or Makefiles. It prepares exactly `controller-image.tar`, `controller-chart.tgz`, `crd-chart.tgz`, `e2e.test` and matching `ginkgo`. Pinned **upload-artifact v7** uploads each file separately with `archive: false`, its basename as artifact name and **one-day retention**, capturing exact IDs/digests. No custom bundle, manifest or receipt is used.
+
+Before WIF, trusted Octokit checks five distinct positive IDs, exact names, same-run/repository provenance, matching nonempty server digests and bounded sizes. Pinned **download-artifact v8** downloads each exact ID into its own fresh directory with `skip-decompress: true` and `digest-mismatch: error`. A second gate requires all five regular nonsymlink files, exact sizes and no unexpected paths: the Action alone can warn on partially missing requested IDs. Standard `crane validate --tarball`, Helm and Go build metadata checks also run before WIF. After authentication the fixed trusted shell uses `crane push` on that ko tarball; Helm parses the packaged charts. There is no custom archive parser or original-ZIP downloader.
+
+SHA/digest/provenance checks establish alignment and transfer integrity, **not honest PR code**. This is privileged authorized controller/chart/test execution in a dedicated project, not sandbox isolation. Audit transitive controller/node/workload authority before activation; never expose unrelated secrets. Runtime has no GitHub writes; reporter has no cloud/OIDC credentials and executes no PR binaries. Trusted Actions are SHA-pinned; refresh beyond initial OIDC and impersonated-token expiry still needs live proof for gcloud, crane's credential helper, GKE client-go and Go ADC.
+
+### Public evidence and recovery
+
+The small trusted standard-library projector, [`.github/scripts/e2e/project.py`](../../.github/scripts/e2e/project.py), bounds private native Ginkgo JSON and the three-field runtime verdict, comparing the independent expected SHA/preset. It retains numeric counts/timing, known feature labels, enum states and generated safe spec IDs only. Arbitrary names, paths, failures, output and image identifiers are stripped. Public JUnit is generated from that same safe data, not a second hostile document. This is sanitization, not protection against malicious authorized code or deliberate covert leakage.
+
+Only **sanitized native-format JSON/JUnit**, plus a small `summary.json`, are uploaded for **30 days**. Summary is a single raw-file artifact; `sanitized-native-reports` uses the standard Action archive for the two sanitized reports. Raw reports/logs and credentials remain private on ephemeral workers; public log evidence is marked unavailable. Never upload whole result/workspace trees, credentials, kubeconfig, environment dumps or Terraform state/inputs. Rich lifecycle/resource/log reporting is deferred, not replaced with a new reporting framework.
+
+The reporter verifies/downloads the exact raw summary ID/digest and validates its bounded fields. Missing/corrupt/zero-test evidence, build/runtime/cleanup/projection/upload/download failure and cancellation cannot pass. It combines independent job outcomes with evidence, finalizes its own frozen-SHA check independently of comment errors, then updates only a matching bot-owned PR/preset comment. Publication is serialized per PR/preset with newer-run protection; moved-head comments are suppressed. There is no public export/render CLI or delivery-artifact protocol.
+
+Cancellation may prevent projection/reporter jobs from starting; publication concurrency is not FIFO and pending jobs can be cancelled. Checks can remain incomplete. Confirm workers stopped and inspect cleanup/maintenance state before separately authorized reconciliation of only that invocation/SHA as non-success. Missing evidence or a newer comment never implies pass. Recover the target safely, then dispatch anew, never rerun an old authorization. The Lease/maintenance rules below apply equally to local and CI mutators; Terraform state locking is not runtime exclusion.
+
+Activation still requires cloud-free **fork-head check publication and exact raw-file Action handoff** proof, positive upstream-main/negative wrong-ref/workflow/event/fork WIF exchanges, long-duration credential refresh, and each preset's capacity/cleanup/cancellation/contention proof. Candidate rehearsal and post-merge upstream proof require separate approval. Offline checks do not establish any of these live properties.
+
+## Trusted prepared command
+
+Build the coordinator from the trusted workflow checkout. Run from that checkout:
 
 ```sh
-/trusted/tools/e2e-runner prepared --source /trusted/gate.json \
-  --receipt /trusted/receipt.json --download /private/original-artifact.zip \
+e2e-runner prepared --source-sha <full-sha> --selection standard \
+  --controller-archive /private/artifacts/controller-image.tar \
+  --controller-chart /private/artifacts/controller-chart.tgz \
+  --crd-chart /private/artifacts/crd-chart.tgz \
+  --test-binary /private/artifacts/e2e.test \
+  --ginkgo-binary /private/artifacts/ginkgo \
   --results-dir /private/new-results --lock-id upstream-run-123
 ```
 
-Integration **must** verify the original ZIP before WIF and recheck authorization with the trusted gate. This command verifies the same download again after authentication; it does not authorize a dispatch or replace that pre-auth gate. No prepared controller/chart/test compilation or PR shell script runs here. Runtime requires trusted `kubectl`, `gcloud`, `helm`, `crane`, and `docker-credential-gcloud` on PATH. Credentials/kubeconfig/config directories belong outside bundle/results roots. Registry upload uses a temporary private Docker config with the gcloud credential helper, never an access-token environment variable or the operator's Docker config. Real refresh across credential expiration remains a live activation gate.
+All nine flags are required. Selection is `standard`, `gpu`, or `full` (local `all`). Workers are fixed at **20**, with fail-on-empty. The workflow owns authorization/rechecks, five raw-file provenance/digest/completeness checks and standard-tool format/build metadata validation **before cloud authentication**. The runner does not parse image/chart archives, authorize GitHub dispatches, compile PR code or execute PR deployment scripts.
 
-All CI target values are explicit; no CI defaults/target flags:
+All target variables are explicit, without CI derivation:
 
 - `E2E_PROJECT_ID`, `E2E_LOCATION`, `E2E_REGION`, `E2E_PREFIX`, `E2E_CLUSTER_NAME`.
 - `E2E_IMAGE_REPOSITORY` (regional Artifact Registry image path in that project).
 - `E2E_CONTROLLER_SERVICE_ACCOUNT`, `E2E_NODE_SERVICE_ACCOUNT` (same project).
 - `E2E_PODS_RANGE_NAME`, `E2E_SMALL_PODS_RANGE_NAME`, `E2E_LARGE_PODS_RANGE_NAME`.
-- `E2E_RESOURCE_MANAGER_TAG_KEY`: **short_name**, not `tagKeys/id`; tests construct `project/short_name` and expect the existing `e2e` tag value.
+- `E2E_RESOURCE_MANAGER_TAG_KEY`: short name, not `tagKeys/id`; the existing `e2e` value is required.
 
-The coordinator checks the kubeconfig context **and actual GKE endpoint/identity**, existing controller namespace/priority class/Lease, reviewed owned test namespace and its exact runtime RoleBinding, actual primary/additional subnet range membership and small/large CIDR capacity semantics, and existing tag key/value. It never repairs bootstrap or creates ranges. Namespace/deployment overrides are forbidden in CI. Test environment target values are explicitly projected from this frozen configuration, not ambient test overrides.
+`validate-target` checks this configuration without cloud calls and remains available before authentication. Runtime preflight checks kubeconfig context and actual GKE endpoint/identity, controller namespace/priority class, reviewed test namespace/RoleBinding, subnet range attachment/capacity and tag configuration. Controller namespace/deployment overrides are forbidden. Missing bootstrap is never repaired.
 
-One `karpenter-e2e-tests` Lease covers old-controller drain, prepared OCI push and remote digest confirmation, both packaged Helm installs, rollout/digest/full-SHA verification, matching native Ginkgo execution with exactly **20** workers, bounded diagnostics, cleanup and persistence. The existing test namespace must have `karpenter-e2e/owned=true` and a UID. Its `e2e-runtime-test-workloads` RoleBinding must reference the same-named ClusterRole and only the dedicated `${prefix}-ci-sa@${project}.iam.gserviceaccount.com` User. Missing/mismatched/terminating bootstrap fails before image push. Namespace and binding survive every drain; the coordinator never creates, adopts, relabels or deletes them. Current suite initialization GETs an existing namespace; only local NotFound may create one. CI deliberately lacks Namespace create/delete permissions.
+One canonical `karpenter-system/karpenter-e2e-tests` Lease covers capture, original sourceable Bash cleanup, disappearance proof, fixed `.github/scripts/e2e/runtime.sh deploy`, controller verification, native tests, diagnostics and post-cleanup/proof. Only that trusted shell owns crane push and prepared Helm deployment. It receives explicit target environment, uses an ephemeral refreshable gcloud registry helper and records one digest-pinned reference in `controller-image.txt`. The runner requires the expected repository/digest, desired deployment image, every ready replica's running digest and full embedded source SHA before tests.
 
-Cleanup accepts only labeled Karpenter resources and label-owned Deployment roots in the preserved namespace. ReplicaSets/Pods require matching immutable UID controller-owner references back to those roots; unproven workloads fail before any deletion. Deployment deletion is label/name-filtered, foreground and bounded; final inventory must contain no workloads. Existing suite helpers can create **unlabeled Deployments**: their normal cleanup remains responsible; leftovers require maintenance, never inferred ownership from namespace/name/selector. The bootstrap namespace UID is verified unchanged. Before deleting, it correlates VMs to owned NodePools/NodeClasses/NodeClaim `gce://project/zone/name` provider IDs, cluster/location labels, immutable Compute IDs/selfLinks and attached disk identities. Only actual GKE node-pool MIG metadata proves bootstrap VM/disk exclusion. Unknown project VMs/disks or legacy/unlabeled resources fail closed. Kubernetes finalizers/old controller delete cloud resources; the coordinator never strips finalizers or directly deletes cloud objects. It verifies captured full VM/disk identities disappear, rejects replacement IDs, and fails on incomplete drain. Diagnostics are bounded private `controller.log`; no raw logs/results are public-safe.
+Artifact directories, new private results and credential/kubeconfig/gcloud configuration paths must not overlap (including symlink aliases). Temporary registry credentials cannot be placed inside artifacts/results. Subprocess environment is allowlisted, not inherited GitHub tokens or compiler configuration. This executes authorized privileged PR tests, **not a sandbox**; do not expose unrelated secrets.
 
-Test cancellation stops native process groups but keeps a separate heartbeat alive through at most ten minutes of cleanup. Lost/stolen/expired Lease or any ownership/renewal uncertainty cancels all mutating child contexts immediately when detected; only read-only diagnostics/local evidence writes remain allowed. There is no host-death cleanup guarantee. Local cleanup cancellation terminates the shell process group without retrying cleanup and marks maintenance only while ownership remains confirmed. Terminating a CLI does not cancel cloud operations already accepted by the server.
+## Ownership, cleanup and maintenance
 
-## Local shared-target commands and maintenance
+Cleanup accepts only label-owned Karpenter resources and Deployment roots. ReplicaSets/Pods require immutable UID controller-owner references to those roots. Namespace ownership/UID and the exact dedicated runtime RoleBinding must already exist; they survive cleanup. Current suites can create unlabeled Deployments: leftovers require maintenance, never name/namespace-based adoption.
 
-`make e2e-deploy` / `hack/e2e-deploy.sh` and `make e2e-clean-env` / `hack/e2e-clean-env.sh` route through this same coordinator/Lease. `E2E_LOCK_ID` is forwarded by `make e2e-tests`; deploy/cleanup accept `--lock-id` when invoked directly. Explicit local deploy keeps local ko build with `e2e-SHA` tags and published `RELEASE_VERSION` modes. The original Bash scripts define sourceable cleanup/deploy phases; sourcing is inert, and only their standalone entry points acquire the Lease through Go. Under that single Lease, Go captures shared read-only ownership/cloud inventory, invokes Bash cleanup, proves captured VMs/disks and resources disappeared, then invokes Bash deployment. Bash owns all local deletion/build/push/Helm mutations; prepared CI retains its strict Go lifecycle and never enters those phases. There is no nested cleanup lock. All commands use the canonical `karpenter-system/karpenter-e2e-tests` Lease; local controller namespace overrides never select a separate lock. Local-only target derivation preserves the prefix default and derives a missing region from the required regional/zonal location. The unchanged Make deploy recipe still defaults `E2E_REGION` to `us-central1`, so other-region deploys must set it explicitly; Make cleanup does not forward it. Prepared CI requires explicit region and all other target configuration. Deploy/clean require existing controller namespace/Lease. CI additionally requires the reviewed owned test namespace/RoleBinding bootstrap; explicit local cleanup on default-off manual targets permits an absent test namespace and does not require a CI identity/binding. Any existing namespace must still prove ownership and is preserved. Normal coordinator commands never create or repair them. See `deploy/terraform-e2e/ci-bootstrap-rbac.yaml` for the separately reviewed manual example. The default runner is still test-only and does **not** deploy. Standalone `make e2e-test` bypasses the Lease and is **unsupported on the shared CI target**.
+Read-only inventory correlates VMs with owned NodePools/NodeClasses/NodeClaim provider IDs, target cluster/location labels, immutable Compute IDs/selfLinks and attached disks. Only actual GKE node-pool MIG metadata excludes bootstrap VMs/disks. Unknown VMs/disks/resources block mutation. The original Bash cleanup deletes owned Kubernetes roots; finalizers/the old controller delete cloud resources. No finalizer stripping or direct cloud deletion is used. Captured VMs/disks must disappear; replacement IDs, remaining/new resources or changed bootstrap identity fail closed before deployment.
 
-All acquisitions reject abandoned nonempty expired Leases and `karpenter.k8s.gcp/maintenance-required`. Incomplete/unknown cleanup sets the sticky marker to bounded enum `incomplete-drain` through owner-token/resourceVersion CAS, then releases the holder without clearing the marker. Uncertain ownership never writes a marker or releases the Lease. Private outcomes record `maintenance_required`; cleanup/lease-release failures never overwrite primary test results or become success.
+Cancellation kills subprocess groups while an independent Lease heartbeat permits at most ten minutes of post-cleanup. Lost/stolen/expired or uncertain ownership cancels mutating contexts; only bounded read-only diagnostics and local evidence writes remain allowed. Incomplete/unknown cleanup marks `karpenter.k8s.gcp/maintenance-required=incomplete-drain` only under confirmed ownership. Release never clears that marker. Every acquisition rejects maintenance markers and abandoned nonempty expired holders.
 
-Only an explicit owner-approved maintenance exclusion may clear an abandoned holder/marker: disable CI administratively, stop all workers and local commands, verify processes/controllers/resources are stopped or safely drained, and investigate cloud identities before altering the Lease. During API outages ownership/cleanup cannot be proven: keep CI disabled and workers stopped; do not force-delete the Lease or use unlocked scripts. Normal CLI paths never clear markers. Terraform state locking is unrelated to this runtime exclusion. Each preset still needs separate live enable/validation.
+Only an owner-approved maintenance exclusion may clear an abandoned holder/marker: disable CI, stop workers/local commands and investigate/drain cloud resources first. API outages are not permission to force-delete Leases or run unlocked scripts. Host death has no cleanup guarantee; terminating processes cannot cancel cloud operations already accepted by the server. Presets and credential-refresh behavior still require separately authorized live activation proof.
 
-## Prepared test execution seam
+## Private evidence
 
-`executePrepared(ctx, preparedExecution)` is an internal, **lock-held test executor**, not a complete CI entry point. It does not acquire/release the Lease, deploy, clean resources, authenticate, repair infrastructure or publish reports. The lifecycle coordinator must:
+The runner writes `runtime.json` once finally, with exactly:
 
-1. Build itself and this renderer separately from the trusted workflow SHA, never from PR artifacts. Keep trusted gate/receipt metadata separate from the PR bundle.
-2. Use `e2eci.VerifyDownload` on the original artifact ZIP before cloud authentication, and recheck authorization and target configuration.
-3. Acquire the shared Lease before any push/deploy/cleanup; deploy the validated bundle with trusted tooling under that same ownership.
-4. Pass the validated `Bundle`, independent `Frozen`, trusted image repository plus the bundle's exact OCI image digest, explicit `Workers: 20`, and a **nonexistent** output directory under a private parent outside credentials and bundle roots.
-5. Retain ownership through diagnostics, cleanup and final result persistence. On ownership loss, cancel the execution context (terminates the child process group), stop mutation, and record maintenance-required evidence. This executor does not provide ownership-aware cleanup.
-
-The executor rechecks all five bundle-file hashes and the OCI source/digest; checks rollout, desired image, every ready replica's running image digest and full embedded controller SHA; then runs the prepared matching Ginkgo CLI on the native `.test` binary. No runtime git identity, compilation, arbitrary Ginkgo argument overrides or artifact-selected worker count is used. CI presets reuse local selection: `standard`, `gpu`, and `full` → `all` (including GPU and extended SSD). All presets still need separate administrative activation/live validation.
-
-The subprocess environment is allowlisted for target configuration, kubeconfig, refreshable ADC/gcloud configuration, and existing optional suite flags. It does not inherit the GitHub token. This is privileged execution of authorized PR code, **not a sandbox**; files readable by that code must not contain unrelated secrets.
-
-## Private outcome schema and durable evidence
-
-`outcome.go:runOutcome` defines schema 1. `outcome.json` records the frozen source/invocation, requested/resolved selection, workers, timestamps, image/controller identity, counts, and independent `infrastructure`, `tests`, `reports`, `cleanup`, `diagnostics`, `artifact`, `publication` states. States are `not-run`, `running`, `passed`, `failed`, `cancelled`, `incomplete`, `unavailable`. There are no raw error strings in this schema.
-
-`Overall()` requires successful infrastructure, nonzero tests, valid native reports, finished timestamps and successful cleanup with no maintenance requirement. Delivery failures remain separate from test outcomes. The lifecycle owner must update cleanup/diagnostics states and call `persistOutcome` then `renderPreparedReport` before release; delivery owners record upload/publication independently. A crash can leave `running` with no finish timestamp; that is incomplete, never success. Failure to create/write the evidence directory is returned as an error; persistence is not guaranteed after host death or disk failure.
-
-Each prepared run retains:
-
-- `results.json` and `junit.xml`: native, private Ginkgo evidence; neither is deleted.
-- `suite.log`: private stdout/stderr, bounded to 32 MiB; overflow fails execution.
-- `outcome.json`: atomic, private structured lifecycle evidence.
-- `report.md`: atomic output from the existing trusted formatter, including incomplete/failure outcomes.
-
-Readers reject missing/corrupt/linked/oversized reports, trailing XML, zero executed specs, and inconsistent JSON/JUnit counts/states. Each native report is limited to 16 MiB, JSON to 64 suites/20,000 spec entries; JUnit to 20,000 cases. These are reader/export bounds, not filesystem isolation against malicious PR code.
-
-## Offline trusted rendering
-
-Build **from the independent trusted checkout**, not the PR build worker:
-
-```sh
-go build -o /trusted/tools/e2e-runner ./hack/e2e-runner
-/trusted/tools/e2e-runner render --source /trusted/gate.json --results-dir /private/results
+```json
+{"source_sha":"<full-sha>","test_exit":0,"cleanup_ok":true}
 ```
 
-Rendering uses no git, kubectl, Go compilation, cloud API or PR executable/template. Gate attribution must exactly match the bounded strict outcome schema; successful outcomes also require consistent native JSON/JUnit and successful native suites. Invalid evidence removes any stale/PR-supplied `report.md` and fails closed. Explicit failed/incomplete outcomes can render without nonexistent native results.
+`test_exit` is null when tests did not start, otherwise 0..255 (signal termination is nonzero). `cleanup_ok` requires confirmed post-cleanup/proof. Cleanup, persistence and Lease-release errors also fail the command independently of passing test data. A missing verdict after a crash cannot pass reporting.
 
-The **same** `report.go`/`report.gotmpl` formatter serves local and offline paths. Text is control/bidi-stripped, punctuation entity-escaped and truncated to 128 visible characters; summaries show at most 32 feature rows and 64 spec rows, with omission notices. Output is capped at 60,000 bytes; overflow returns an error rather than a publishable partial report. Excluded/unexecuted features are not called passing.
+Other private files are native `results.json`/`junit.xml`, `suite.log` (32 MiB cap), `controller.log` (bounded diagnostics) and `controller-image.txt`. Native JSON is the authoritative test evidence; missing/corrupt/symlink/oversized JSON, zero executed tests, failed suites and incomplete spec states cannot pass. The JSON reader bounds input to 16 MiB, 20,000 spec entries and 64 suites. Private JUnit is still generated by Ginkgo but is not parsed or cross-compared; public JUnit is generated from the same sanitized JSON projection. Workflow projection has its own tighter public bounds and emits sanitized native-format evidence; raw logs/reports stay private. There is no runner export/render CLI or lifecycle-state schema. The pre-existing local Markdown renderer remains available through `--report`.
 
-Escaping is not secret redaction. Neither native reports, logs, private outcome metadata nor rendered spec names are automatically public-upload safe. The separate reporter/export step must schema-allowlist and sanitize its public artifacts before upload; it must not execute PR templates or trust a preexisting Markdown file. Safe artifact export and GitHub publication remain separate integration responsibilities.
+## Local shared-target commands
+
+`hack/e2e-deploy.sh` and `hack/e2e-clean-env.sh` retain their sourceable Bash phases and standalone canonical-Lease coordination. Local deployment retains ko `e2e-SHA` tags and published `RELEASE_VERSION` modes, without nested locks. Local-only target derivation retains the prefix default and derives a missing region from location. Non-US local deploys must set region explicitly because the unchanged Make recipe defaults it. Local cleanup permits an absent test namespace without CI-only identity bootstrap, but any existing namespace must prove ownership and is preserved. The default runner does not deploy. Standalone `make e2e-test` bypasses locking and is unsupported on the shared CI target.
 
 ## Offline regression checks
 
-The unchanged upstream Makefile does **not** include the offline pipeline/security tests in `make ci` or `make presubmit`. Run them explicitly from the repository root:
+The unchanged Makefile does not wire these runner/security fixtures into presubmit. Run explicitly from repository root:
 
 ```sh
-go test -race ./hack/e2e-ci/... ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
+node --test .github/scripts/e2e/*_test.cjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts/e2e -p '*_test.py'
+go test -race ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
+go vet ./hack/e2e-runner
+deadcode -filter='github.com/cloudpilot-ai/karpenter-provider-gcp/hack/e2e-runner' ./hack/e2e-runner
 ```
 
-These use local process/API fixtures, not a live cloud target. Live cleanup, IAM and credential refresh remain separate activation gates.
+Fixtures use real precompiled Ginkgo/native reports, original trusted Bash phases and local process/API boundaries, never a live cloud target.

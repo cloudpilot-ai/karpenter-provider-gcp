@@ -50,9 +50,7 @@ type suiteResult struct {
 
 type reportMetadata struct {
 	Commit, ControllerCommit, Duration string
-	ControllerDigest                   string
 	LogsUnavailable                    bool
-	Outcome                            *runOutcome
 }
 
 var resourceLine = regexp.MustCompile(`\[resources\] karpenter controller: requests cpu=(\d+)m memory=([^;]+); (?:latest cpu=\d+m memory=[^;]+; peak cpu=(\d+)m memory=([^;]+); samples=\d+|no usage samples available)`)
@@ -96,7 +94,7 @@ func controllerResources(reports []types.Report) string {
 }
 
 func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) error {
-	if len(reports) == 0 && metadata.Outcome == nil {
+	if len(reports) == 0 {
 		return fmt.Errorf("Ginkgo produced no suite results")
 	}
 	var suites []suiteResult
@@ -203,13 +201,11 @@ func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) 
 		Suites           []suiteResult
 		Commit           string
 		ControllerCommit string
-		ControllerDigest string
 		Duration         string
 		Resources        string
 		LogsUnavailable  bool
-		Outcome          *runOutcome
 		Omitted          int
-	}{suites, metadata.Commit, metadata.ControllerCommit, metadata.ControllerDigest, metadata.Duration, controllerResources(reports), metadata.LogsUnavailable, metadata.Outcome, omitted})
+	}{suites, metadata.Commit, metadata.ControllerCommit, metadata.Duration, controllerResources(reports), metadata.LogsUnavailable, omitted})
 }
 
 func writeReport(jsonPath, path string, metadata reportMetadata) error {
@@ -225,43 +221,6 @@ func writeReport(jsonPath, path string, metadata reportMetadata) error {
 		return err
 	}
 	return os.WriteFile(path, output.Bytes(), 0644)
-}
-
-// renderPreparedReport reuses the sole trusted formatter; native evidence stays
-// private. Callers must not upload its inputs or treat rendered spec text as secret-free.
-func renderPreparedReport(dir string, outcome runOutcome) error {
-	var reports []types.Report
-	if outcome.Reports == statePassed {
-		var counts specCounts
-		var err error
-		reports, counts, err = readNativeReports(dir)
-		if err != nil {
-			return err
-		}
-		if outcome.Tests == statePassed {
-			for _, report := range reports {
-				if !report.SuiteSucceeded {
-					return fmt.Errorf("passed outcome contradicts native suite failure")
-				}
-			}
-		}
-		if counts != outcome.Counts {
-			return fmt.Errorf("native counts differ from outcome")
-		}
-	}
-	duration := "unavailable"
-	if !outcome.Finished.IsZero() {
-		duration = outcome.Finished.Sub(outcome.Started).Round(time.Second).String()
-	}
-	digest := ""
-	if preparedImagePattern.MatchString(outcome.Image) {
-		digest = strings.SplitN(outcome.Image, "@", 2)[1]
-	}
-	var output bytes.Buffer
-	if err := renderReport(&output, reports, reportMetadata{Commit: outcome.Source.HeadSHA, ControllerCommit: outcome.ControllerCommit, ControllerDigest: digest, Duration: duration, LogsUnavailable: outcome.Diagnostics != statePassed, Outcome: &outcome}); err != nil {
-		return err
-	}
-	return atomicWrite(filepath.Join(dir, "report.md"), output.Bytes())
 }
 
 // publicText emits only text/entities, never PR HTML or Markdown. Controls and

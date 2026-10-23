@@ -134,6 +134,23 @@ Outputs for reviewed configuration (never dump state/private inputs into Actions
 - `ci_oidc_audience`: pass explicitly as the auth action's `audience`, not its default. Only this exact `https://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/github` audience is accepted.
 - `ci_environment_variables`: fixed `E2E_*` target values consumed by the trusted coordinator, including explicit `E2E_PODS_RANGE_NAME`, `E2E_SMALL_PODS_RANGE_NAME`, `E2E_LARGE_PODS_RANGE_NAME` and `E2E_RESOURCE_MANAGER_TAG_KEY`. It is configuration, not an enable flag. `additional_pod_ranges` exports the existing complete map; `resource_manager_tag_key` exports `id`, `name` and `short_name`. Tests require the **short name**, not `tagKeys/<id>`, and construct `project/short_name` themselves.
 
+### GitHub operator configuration (separately approved)
+
+Repository variables are administrative settings, not dispatch inputs:
+
+| Variable                      | Value                                                                                     |
+|-------------------------------|-------------------------------------------------------------------------------------------|
+| `E2E_CI_ENABLED`              | Literal `true` only after activation approval; unset/false disables.                      |
+| `E2E_ENABLED_PRESETS`         | Comma-separated validated subset of `standard,gpu,full`; empty disables all.              |
+| `E2E_TARGET_CONFIG`           | JSON object from `ci_environment_variables`, exactly its twelve explicit `E2E_*` entries. |
+| `E2E_WIF_PROVIDER`            | `ci_workload_identity_provider` output.                                                   |
+| `E2E_WIF_AUDIENCE`            | `ci_oidc_audience` output (explicit HTTPS audience).                                      |
+| `E2E_RUNTIME_SERVICE_ACCOUNT` | `ci_runtime_service_account` output.                                                      |
+
+Never copy private inputs/state into GitHub. Configure environment **`e2e-runtime`** for upstream `main` only, with no required reviewers or unrelated secrets; authorized dispatch is the run/cost approval. Missing environment restrictions block activation. The gate freezes source and target configuration; pre-authentication recheck rejects changed configuration, disabled presets or revoked actor permission. Disable CI to reject queued runs; stop active workers separately. A variable edit does not cancel active execution.
+
+See [manual workflow and public evidence](../../hack/e2e-runner/README.md#manual-pr-workflow) for dispatch, artifact handling and cancellation recovery. Terraform creates neither these settings nor Kubernetes bootstrap, and defaults remain off.
+
 ### Exact upstream trust
 
 Issuer is `https://token.actions.githubusercontent.com`. The provider requires every conjunct in `ci-oidc-condition.cel`:
@@ -165,7 +182,7 @@ Only `google.subject` and these attributes are mapped. The runtime account grant
 | Prepared OCI upload/digest reads through crane + gcloud credential helper                                 | `roles/artifactregistry.writer` on only the Terraform image repository                                                     |
 | Tests `Images.List` in `gke-node-images` and `ubuntu-os-gke-cloud`                                        | Existing Google-managed public image-project access for authenticated principals, **not** the target project's custom role |
 
-The cloud calls above are in `hack/e2e-runner/{target,drain,lifecycle}.go` and `test/pkg/environment/{environment,helpers,podrange,resourcemanagertags}.go`. GPU and extended SSD tests assert through Kubernetes/these same read clients; they do not require additional direct runtime cloud mutation permissions. Image listing in public projects must be proven operationally; if denied, stop for review, not project-wide image/admin grants. Terraform provisioning needs its own administrative identity (including project-number discovery), never this runtime identity.
+The cloud calls above are in `hack/e2e-runner/{target,drain,prepared}.go` and `test/pkg/environment/{environment,helpers,podrange,resourcemanagertags}.go`. GPU and extended SSD tests assert through Kubernetes/these same read clients; they do not require additional direct runtime cloud mutation permissions. Image listing in public projects must be proven operationally; if denied, stop for review, not project-wide image/admin grants. Terraform provisioning needs its own administrative identity (including project-number discovery), never this runtime identity.
 
 There is no direct runtime SA `actAs`, token-creator, IAM administration, custom-role administration, backend/state or maintenance grant. Controller node-SA `actAs` stays scoped to the existing dedicated node account; controller tag use stays on the fixture key. Do not duplicate controller permissions in this role to make tests pass.
 
@@ -222,5 +239,7 @@ All test runs specify `command = plan` with a mocked Google provider, not live p
 Offline pipeline/security regressions are not wired into the unchanged upstream `make ci`/presubmit. From the repository root, run them explicitly:
 
 ```sh
-go test -race ./hack/e2e-ci/... ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
+node --test .github/scripts/e2e/*_test.cjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts/e2e -p '*_test.py'
+go test -race ./hack/e2e-runner ./deploy/terraform-e2e ./test/pkg/environment -count=1 -timeout=300s
 ```

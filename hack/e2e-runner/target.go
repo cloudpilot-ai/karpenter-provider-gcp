@@ -24,6 +24,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 type lifecycleTarget struct {
@@ -218,4 +220,8 @@ func (t *lifecycleTarget) preflight(ctx context.Context, prepared bool) error {
 		}
 	}
 	return fmt.Errorf("required e2e tag value unavailable")
+}
+
+func newValidateTargetCommand() *cobra.Command {
+	return &cobra.Command{Use: "validate-target", Short: "Cloud-free fixed prepared target validation", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error { _, err := loadLifecycleTarget(true); return err }}
 }

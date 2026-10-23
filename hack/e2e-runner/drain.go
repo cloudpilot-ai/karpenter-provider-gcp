@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -189,42 +187,6 @@ func inspectDrain(ctx context.Context, t lifecycleTarget) (d drainInventory, err
 		return d, fmt.Errorf("maintenance-required: attached disk identity unavailable")
 	}
 	return d, nil
-}
-
-func mutation(ctx context.Context, o *leaseOwner, name string, args ...string) error {
-	if err := o.confirm(ctx); err != nil {
-		return err
-	}
-	cmd := exec.CommandContext(ctx, name, args...)
-	// Bounded private tool output; never print potentially credential-bearing errors.
-	cmd.Stdout = &limitedWriter{Writer: io.Discard, Remaining: 2 << 20}
-	cmd.Stderr = &limitedWriter{Writer: io.Discard, Remaining: 2 << 20}
-	return runIsolated(cmd)
-}
-
-func drainOwned(ctx context.Context, o *leaseOwner, t lifecycleTarget) error {
-	d, err := inspectDrain(ctx, t)
-	if err != nil {
-		return err
-	}
-	// Preserve the bootstrap namespace/RBAC; only delete proven-owned workload
-	// roots. Foreground GC drains their UID-correlated ReplicaSets and Pods.
-	for _, deployment := range d.workloads["deployments.apps"] {
-		if err := mutation(ctx, o, "kubectl", "-n", testNamespace, "delete", "deployments.apps", "--field-selector=metadata.name="+deployment.Metadata.Name, "--selector="+ownerLabel+"=true", "--cascade=foreground", "--ignore-not-found", "--wait=true", "--timeout=5m"); err != nil {
-			return fmt.Errorf("maintenance-required: incomplete workload drain: %w", err)
-		}
-	}
-	// The old controller remains running until all finalizers and cloud resources
-	// have drained. Never remove finalizers or call cloud deletion APIs here.
-	for _, r := range drainResources {
-		if len(d.resources[r]) == 0 {
-			continue
-		}
-		if err := mutation(ctx, o, "kubectl", "delete", r, "--selector="+ownerLabel+"=true", "--ignore-not-found", "--wait=true", "--timeout=5m"); err != nil {
-			return fmt.Errorf("maintenance-required: incomplete CR drain: %w", err)
-		}
-	}
-	return verifyDrained(ctx, o, t, d)
 }
 
 // Read-only completion proof shared by prepared CI and the local Bash cleanup.

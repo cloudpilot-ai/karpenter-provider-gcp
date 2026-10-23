@@ -18,22 +18,28 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	e2eci "github.com/cloudpilot-ai/karpenter-provider-gcp/hack/e2e-ci"
+	"github.com/spf13/cobra"
 )
 
 const preparedWorkers = 20
+
+type preparedExecution struct {
+	SourceSHA, Selection                                                   string
+	ControllerArchive, ControllerChart, CRDChart, TestBinary, GinkgoBinary string
+	OutputDir                                                              string
+}
 
 func preparedSelection(preset string) (filter, resolved string, err error) {
 	switch preset {
@@ -48,77 +54,76 @@ func preparedSelection(preset string) (filter, resolved string, err error) {
 	return filter, resolved, err
 }
 
-// preparedExecution is a lock-held test-only seam, not a CI lifecycle. Its caller
-// must VerifyDownload before auth, recheck authorization/target, acquire the Lease,
-// deploy the prepared charts/image, and retain ownership through final persistence.
-// Bundle and Source must arrive independently; no trusted tools come from Bundle.
-type preparedExecution struct {
-	Bundle        *e2eci.Bundle
-	Source        e2eci.Frozen
-	Image         string
-	Workers       int
-	OutputDir     string
-	Environment   []string
-	outputCreated bool
+func newPreparedCommand() *cobra.Command {
+	var input preparedExecution
+	var id string
+	cmd := &cobra.Command{Use: "prepared", Short: "Run prepared artifacts under the canonical target Lease", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		target, err := loadLifecycleTarget(true)
+		if err != nil {
+			return err
+		}
+		ns, dep := controllerTarget()
+		if ns != "karpenter-system" || dep != "karpenter" {
+			return fmt.Errorf("prepared controller target override forbidden")
+		}
+		holder, err := resolveLockID(id)
+		if err != nil {
+			return err
+		}
+		client, err := newLeaseClient()
+		if err != nil {
+			return err
+		}
+		return runPreparedLifecycle(cmd.Context(), client, holder, target, input)
+	}}
+	for _, flag := range []struct {
+		name  string
+		value *string
+	}{
+		{"source-sha", &input.SourceSHA}, {"selection", &input.Selection},
+		{"controller-archive", &input.ControllerArchive}, {"controller-chart", &input.ControllerChart}, {"crd-chart", &input.CRDChart},
+		{"test-binary", &input.TestBinary}, {"ginkgo-binary", &input.GinkgoBinary}, {"results-dir", &input.OutputDir}, {"lock-id", &id},
+	} {
+		cmd.Flags().StringVar(flag.value, flag.name, "", flag.name)
+		_ = cmd.MarkFlagRequired(flag.name)
+	}
+	return cmd
 }
 
-func validatePreparedExecution(input preparedExecution) error {
-	if err := input.Source.Validate(); err != nil {
+func validatePreparedExecution(input *preparedExecution) error {
+	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(input.SourceSHA) {
+		return fmt.Errorf("invalid source SHA")
+	}
+	if _, _, err := preparedSelection(input.Selection); err != nil {
 		return err
 	}
-	if input.Workers != preparedWorkers {
-		return fmt.Errorf("prepared workers must equal %d", preparedWorkers)
-	}
-	b := input.Bundle
-	if b == nil || b.Manifest.Source != input.Source || b.Manifest.Schema != 1 || b.Manifest.Platform != "linux/amd64" || b.Manifest.Outcome != "success" {
-		return fmt.Errorf("prepared bundle does not match frozen source")
-	}
-	allowed := map[string]bool{e2eci.ControllerArchive: true, e2eci.ControllerChart: true, e2eci.CRDChart: true, e2eci.TestBinary: true, e2eci.GinkgoBinary: true}
-	if len(b.Manifest.Files) != len(allowed) {
-		return fmt.Errorf("incomplete prepared manifest")
-	}
-	for _, expected := range b.Manifest.Files {
-		if !allowed[expected.Name] {
-			return fmt.Errorf("unexpected or duplicate prepared file")
+	for _, path := range []*string{&input.ControllerArchive, &input.ControllerChart, &input.CRDChart, &input.TestBinary, &input.GinkgoBinary, &input.OutputDir} {
+		if *path == "" {
+			return fmt.Errorf("missing prepared path")
 		}
-		delete(allowed, expected.Name)
-		path := filepath.Join(b.Root, expected.Name)
+		absolute, err := filepath.Abs(*path)
+		if err != nil {
+			return err
+		}
+		*path = absolute
+	}
+	for _, path := range []string{input.ControllerArchive, input.ControllerChart, input.CRDChart, input.TestBinary, input.GinkgoBinary} {
 		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() || info.Size() != expected.Size || info.Size() <= 0 || info.Size() > e2eci.MaxFileBytes {
-			return fmt.Errorf("prepared file changed")
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		h := sha256.New()
-		n, readErr := io.Copy(h, io.LimitReader(f, e2eci.MaxFileBytes+1))
-		err = errors.Join(readErr, f.Close())
-		if err != nil {
-			return err
-		}
-		if n != expected.Size || hex.EncodeToString(h.Sum(nil)) != expected.SHA256 {
-			return fmt.Errorf("prepared file digest changed")
+		if !info.Mode().IsRegular() || info.Size() <= 0 {
+			return fmt.Errorf("invalid prepared file")
 		}
 	}
-	layout, digest, err := b.ExtractControllerLayout("")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(layout)
-	if !strings.HasSuffix(input.Image, "@"+digest) {
-		return fmt.Errorf("requested controller digest differs from bundle")
-	}
-	return nil
+	return isolatedRuntimePaths(*input)
 }
 
+// Only tool/credential environment and explicitly validated target inputs cross
+// the runtime boundary; no ambient GitHub tokens or compiler configuration.
 func preparedEnvironment() []string {
 	var env []string
-	// No ambient GitHub token, compiler configuration or PR-defined subprocess env.
-	for _, key := range []string{"PATH", "HOME", "TMPDIR", "KUBECONFIG", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "CLOUDSDK_CONFIG", "USE_GKE_GCLOUD_AUTH_PLUGIN", "PROJECT_ID", "CLUSTER_NAME", "CLUSTER_LOCATION", "PODS_RANGE_NAME", "SMALL_PODS_RANGE_NAME", "LARGE_PODS_RANGE_NAME", "RESOURCE_MANAGER_TAG_KEY", "E2E_Z3_TESTS", "E2E_Z4D_TESTS", "E2E_CONFIDENTIAL_TYPES"} {
+	for _, key := range strings.Fields("PATH HOME TMPDIR KUBECONFIG GOOGLE_APPLICATION_CREDENTIALS CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE CLOUDSDK_CONFIG USE_GKE_GCLOUD_AUTH_PLUGIN PROJECT_ID CLUSTER_NAME CLUSTER_LOCATION PODS_RANGE_NAME SMALL_PODS_RANGE_NAME LARGE_PODS_RANGE_NAME RESOURCE_MANAGER_TAG_KEY E2E_Z3_TESTS E2E_Z4D_TESTS E2E_CONFIDENTIAL_TYPES") {
 		if value, ok := os.LookupEnv(key); ok {
 			env = append(env, key+"="+value)
 		}
@@ -126,115 +131,246 @@ func preparedEnvironment() []string {
 	return env
 }
 
-func executePrepared(ctx context.Context, input preparedExecution) (outcome runOutcome, retErr error) {
-	_, resolved, selectionErr := preparedSelection(input.Source.Dispatch.Preset)
-	outcome = runOutcome{Schema: 1, Source: input.Source, Requested: input.Source.Dispatch.Preset, Resolved: resolved, Workers: input.Workers, Started: time.Now().UTC(), Image: input.Image,
-		Infrastructure: stateNotRun, Tests: stateNotRun, Reports: stateNotRun, Cleanup: stateNotRun, Diagnostics: stateNotRun, Artifact: stateNotRun, Publication: stateNotRun}
-	// A fresh private directory prevents stale native results from passing a run.
-	if err := prepareOutputDirectory(input); err != nil {
-		return outcome, err
-	}
-	output, err := filepath.Abs(input.OutputDir)
-	if err != nil {
-		return outcome, err
-	}
-	defer func() {
-		outcome.Finished = time.Now().UTC()
-		retErr = errors.Join(retErr, persistOutcome(output, outcome))
-		// Even missing/corrupt native reports have a truthful rendered lifecycle.
-		retErr = errors.Join(retErr, renderPreparedReport(output, outcome))
-	}()
-	if err := persistOutcome(output, outcome); err != nil {
-		return outcome, err
-	}
-	if selectionErr != nil {
-		outcome.Infrastructure = stateFailed
-		return outcome, selectionErr
-	}
-	if err := ctx.Err(); err != nil {
-		outcome.Tests = stateCancelled
-		return outcome, err
-	}
-	if err := validatePreparedExecution(input); err != nil {
-		outcome.Infrastructure = stateFailed
-		return outcome, err
-	}
-	if err := verifyPreparedController(ctx, input.Image, input.Source.HeadSHA); err != nil {
-		outcome.Infrastructure = stateFailed
-		if ctx.Err() != nil {
-			outcome.Infrastructure = stateCancelled
+func (t lifecycleTarget) runtimeEnvironment() []string {
+	return append(t.testEnvironment(),
+		"E2E_PROJECT_ID="+t.Project, "E2E_LOCATION="+t.Location, "E2E_REGION="+t.Region, "E2E_PREFIX="+t.Prefix,
+		"E2E_CLUSTER_NAME="+t.Cluster, "E2E_IMAGE_REPOSITORY="+t.Repository, "E2E_CONTROLLER_SERVICE_ACCOUNT="+t.ControllerSA,
+		"E2E_NODE_SERVICE_ACCOUNT="+t.NodeSA, "E2E_PODS_RANGE_NAME="+t.Pods, "E2E_SMALL_PODS_RANGE_NAME="+t.SmallPods,
+		"E2E_LARGE_PODS_RANGE_NAME="+t.LargePods, "E2E_RESOURCE_MANAGER_TAG_KEY="+t.TagKey)
+}
+
+func (t lifecycleTarget) testEnvironment() []string {
+	values := map[string]string{"PROJECT_ID": t.Project, "CLUSTER_LOCATION": t.Location, "CLUSTER_NAME": t.Cluster, "PODS_RANGE_NAME": t.Pods, "SMALL_PODS_RANGE_NAME": t.SmallPods, "LARGE_PODS_RANGE_NAME": t.LargePods, "RESOURCE_MANAGER_TAG_KEY": t.TagKey}
+	var env []string
+	for _, item := range preparedEnvironment() {
+		key, _, _ := strings.Cut(item, "=")
+		if _, replace := values[key]; !replace {
+			env = append(env, item)
 		}
-		return outcome, err
 	}
-	outcome.Infrastructure = statePassed
-	outcome.ControllerCommit = input.Source.HeadSHA
-	outcome.Tests = stateRunning
-	if err := persistOutcome(output, outcome); err != nil {
-		return outcome, err
+	for key, value := range values {
+		env = append(env, key+"="+value)
 	}
-	log, err := os.OpenFile(filepath.Join(output, "suite.log"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	return env
+}
+
+func runPreparedLifecycle(ctx context.Context, client leaseClient, id string, target lifecycleTarget, input preparedExecution) (retErr error) {
+	if err := validatePreparedExecution(&input); err != nil {
+		return err
+	}
+	if err := os.Mkdir(input.OutputDir, 0700); err != nil {
+		return err
+	}
+	// One final neutral verdict, including acquisition/cleanup failures. Job exit
+	// independently fences release errors, even after passing tests and cleanup.
+	verdict := struct {
+		SourceSHA string `json:"source_sha"`
+		TestExit  *int   `json:"test_exit"`
+		CleanupOK bool   `json:"cleanup_ok"`
+	}{SourceSHA: input.SourceSHA}
+	defer func() {
+		data, err := json.Marshal(verdict)
+		if err == nil {
+			err = writePrivateFile(filepath.Join(input.OutputDir, "runtime.json"), append(data, '\n'))
+		}
+		retErr = errors.Join(retErr, err)
+	}()
+	root, err := boundedCommandOutput(ctx, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
-		return outcome, err
+		return err
 	}
-	filter, _, _ := preparedSelection(input.Source.Dispatch.Preset)
-	args := []string{"--procs=" + strconv.Itoa(input.Workers), "--fail-on-empty", "--output-dir=" + output, "--json-report=results.json", "--junit-report=junit.xml"}
+	checkout := strings.TrimSpace(string(root))
+	check, stop := context.WithTimeout(ctx, 2*time.Minute)
+	err = target.preflight(check, true)
+	stop()
+	if err != nil {
+		return err
+	}
+	return withOwnedLease(ctx, client, id, true, func(run context.Context, owner *leaseOwner) (result error) {
+		mayCleanup := false
+		defer func() {
+			diag, cancel := context.WithTimeout(context.Background(), time.Minute)
+			logs, logErr := boundedCommandOutput(diag, "kubectl", "-n", "karpenter-system", "logs", "deployment/karpenter", "--all-pods=true", "--all-containers=true", "--timestamps=true", "--tail=1000", "--limit-bytes=1048576")
+			cancel()
+			if logErr == nil {
+				result = errors.Join(result, writePrivateFile(filepath.Join(input.OutputDir, "controller.log"), logs))
+			}
+			if mayCleanup {
+				cleanup, stop := owner.cleanupContext(10 * time.Minute)
+				cleanErr := cleanLocalEnvironment(cleanup, owner, target, checkout, target.runtimeEnvironment())
+				stop()
+				verdict.CleanupOK = cleanErr == nil
+				result = errors.Join(result, cleanErr)
+			}
+			if !verdict.CleanupOK {
+				mark, stop := owner.cleanupContext(10 * time.Second)
+				result = errors.Join(result, owner.requireMaintenance(mark))
+				stop()
+			}
+			if cause := context.Cause(owner.ctx); cause != nil {
+				verdict.CleanupOK = false
+				result = errors.Join(result, cause)
+			}
+		}()
+		cleanup, stop := context.WithTimeout(run, 10*time.Minute)
+		err := cleanLocalEnvironment(cleanup, owner, target, checkout, target.runtimeEnvironment())
+		stop()
+		if err != nil {
+			return err
+		}
+		mayCleanup = true
+		if err := owner.confirm(run); err != nil {
+			return err
+		}
+		deploy := exec.CommandContext(run, "bash", filepath.Join(checkout, ".github/scripts/e2e/runtime.sh"), "deploy", input.ControllerArchive, input.ControllerChart, input.CRDChart, input.SourceSHA, input.OutputDir)
+		deploy.Dir, deploy.Env = checkout, target.runtimeEnvironment()
+		sink := &limitedWriter{Writer: io.Discard, Remaining: 2 << 20}
+		deploy.Stdout, deploy.Stderr = sink, sink
+		if err := runIsolated(deploy); err != nil {
+			return fmt.Errorf("prepared deployment: %w", err)
+		}
+		data, err := readBoundedRegular(filepath.Join(input.OutputDir, "controller-image.txt"), 4096)
+		if err != nil {
+			return err
+		}
+		image := strings.TrimSuffix(string(data), "\n")
+		if !preparedImagePattern.MatchString(image) || !strings.HasPrefix(image, target.Repository+"@sha256:") {
+			return fmt.Errorf("prepared image differs from target repository/digest")
+		}
+		if err := verifyPreparedController(run, image, input.SourceSHA); err != nil {
+			return err
+		}
+		if err := verifyTestBootstrap(run, target); err != nil {
+			return err
+		}
+		if err := owner.confirm(run); err != nil {
+			return err
+		}
+		verdict.TestExit, err = executePrepared(run, input, target.testEnvironment())
+		return err
+	})
+}
+
+func executePrepared(ctx context.Context, input preparedExecution, environment []string) (*int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	log, err := os.OpenFile(filepath.Join(input.OutputDir, "suite.log"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return nil, err
+	}
+	filter, _, err := preparedSelection(input.Selection)
+	if err != nil {
+		return nil, errors.Join(err, log.Close())
+	}
+	args := []string{"--procs=" + strconv.Itoa(preparedWorkers), "--fail-on-empty", "--output-dir=" + input.OutputDir, "--json-report=results.json", "--junit-report=junit.xml"}
 	if filter != "" {
 		args = append(args, "--label-filter="+filter)
 	}
-	binary, err := filepath.Abs(filepath.Join(input.Bundle.Root, e2eci.TestBinary))
-	if err != nil {
-		log.Close()
-		return outcome, err
-	}
-	args = append(args, binary)
-	cli, err := filepath.Abs(filepath.Join(input.Bundle.Root, e2eci.GinkgoBinary))
-	if err != nil {
-		log.Close()
-		return outcome, err
-	}
-	command := exec.CommandContext(ctx, cli, args...)
-	command.Env = input.Environment
-	if command.Env == nil {
-		command.Env = preparedEnvironment()
-	}
-	command.Dir = output
-	// os/exec serializes writes when stdout and stderr share the same writer.
+	args = append(args, input.TestBinary)
+	command := exec.CommandContext(ctx, input.GinkgoBinary, args...)
+	command.Dir, command.Env = input.OutputDir, environment
 	sink := &limitedWriter{Writer: log, Remaining: 32 << 20}
 	command.Stdout, command.Stderr = sink, sink
-	runErr := errors.Join(runIsolated(command), log.Close())
-	reports, counts, reportErr := readNativeReports(output)
-	outcome.Counts = counts
-	outcome.Reports = statePassed
-	if reportErr != nil {
-		outcome.Reports = stateFailed
-	}
-	outcome.Tests = statePassed
-	switch {
-	case ctx.Err() != nil:
-		outcome.Tests = stateCancelled
-	case runErr != nil:
-		outcome.Tests = stateFailed
-	case reportErr != nil:
-		outcome.Tests = stateIncomplete
-	default:
-		for _, report := range reports {
-			if !report.SuiteSucceeded {
-				outcome.Tests = stateFailed
-			}
+	runErr := runIsolated(command)
+	var exit *int
+	if command.ProcessState != nil {
+		code := command.ProcessState.ExitCode()
+		if code < 0 {
+			code = 1
 		}
-		if counts.Failed > 0 {
-			outcome.Tests = stateFailed
+		exit = &code
+	}
+	runErr = errors.Join(runErr, log.Close())
+	reports, counts, reportErr := readJSONReports(filepath.Join(input.OutputDir, "results.json"))
+	for _, report := range reports {
+		if !report.SuiteSucceeded {
+			reportErr = errors.Join(reportErr, fmt.Errorf("native suite failed"))
 		}
 	}
-	if outcome.Tests != statePassed && runErr == nil {
-		runErr = fmt.Errorf("prepared tests %s", outcome.Tests)
+	if counts.Failed > 0 {
+		reportErr = errors.Join(reportErr, fmt.Errorf("native specs failed"))
 	}
-	return outcome, errors.Join(runErr, reportErr)
+	return exit, errors.Join(runErr, reportErr, ctx.Err())
 }
 
-func prepareOutputDirectory(input preparedExecution) error {
-	if input.outputCreated {
-		return nil
+func isolatedRuntimePaths(input preparedExecution) error {
+	output, err := canonicalLocation(input.OutputDir)
+	if err != nil {
+		return err
 	}
-	return os.Mkdir(input.OutputDir, 0700)
+	roots := []string{output}
+	for _, path := range []string{input.ControllerArchive, input.ControllerChart, input.CRDChart, input.TestBinary, input.GinkgoBinary} {
+		root, err := canonicalLocation(filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		if pathsOverlap(root, output) {
+			return fmt.Errorf("artifact/results roots overlap")
+		}
+		roots = append(roots, root)
+	}
+	for _, key := range []string{"GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "GOOGLE_GHA_CREDS_PATH", "KUBECONFIG", "CLOUDSDK_CONFIG", "TMPDIR"} {
+		value := os.Getenv(key)
+		if value == "" {
+			continue
+		}
+		paths := []string{value}
+		if key == "KUBECONFIG" {
+			paths = filepath.SplitList(value)
+		}
+		for _, path := range paths {
+			cleanPath, err := canonicalLocation(path)
+			if err != nil {
+				return err
+			}
+			for _, root := range roots {
+				relative, err := filepath.Rel(root, cleanPath)
+				if err != nil {
+					return err
+				}
+				inside := relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+				if inside || key != "TMPDIR" && pathsOverlap(cleanPath, root) {
+					return fmt.Errorf("runtime credential/config path overlaps artifact/results root")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func canonicalLocation(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	var suffix []string
+	for {
+		resolved, err := filepath.EvalSymlinks(absolute)
+		if err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(absolute)
+		if parent == absolute {
+			return "", err
+		}
+		suffix = append(suffix, filepath.Base(absolute))
+		absolute = parent
+	}
+}
+
+func pathsOverlap(a, b string) bool {
+	for _, pair := range [][2]string{{a, b}, {b, a}} {
+		relative, err := filepath.Rel(pair[0], pair[1])
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
