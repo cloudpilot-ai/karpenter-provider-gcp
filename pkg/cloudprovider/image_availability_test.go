@@ -25,6 +25,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
@@ -32,8 +33,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	karpv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
@@ -92,15 +99,14 @@ func imagesReadyNodeClass(images ...v1alpha1.Image) *v1alpha1.GCENodeClass {
 	return nodeClass
 }
 
-// TestGetInstanceTypesRequiresUsableImages protects scheduler eligibility: only instance types that
-// at least one resolved image can back are offered, and nothing is offered before images are ready.
+// Image availability gates new capacity, not running-node catalog membership or offering identity.
 func TestGetInstanceTypesRequiresUsableImages(t *testing.T) {
 	t.Parallel()
 
 	catalog := []*karpcloudprovider.InstanceType{
-		imageAwareInstanceType("n2-standard-4", "amd64", ""),
-		imageAwareInstanceType("t2a-standard-4", "arm64", ""),
-		imageAwareInstanceType("g2-standard-4", "amd64", "1"),
+		launchableInstanceType("n2-standard-4", "amd64", ""),
+		launchableInstanceType("t2a-standard-4", "arm64", ""),
+		launchableInstanceType("g2-standard-4", "amd64", "1"),
 	}
 	pool := &karpv1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "pool"}, Spec: karpv1.NodePoolSpec{Template: karpv1.NodeClaimTemplate{Spec: karpv1.NodeClaimTemplateSpec{
 		NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"},
@@ -114,7 +120,13 @@ func TestGetInstanceTypesRequiresUsableImages(t *testing.T) {
 		provider := New(reproClient{nodeClass: nodeClass, nodePool: pool}, reproEvents{}, reproTypes{variants: catalog}, nil, nil)
 		got, err := provider.GetInstanceTypes(karpopts.ToContext(context.Background(), &karpopts.Options{}), pool)
 		require.NoError(t, err)
-		return lo.Map(got, func(it *karpcloudprovider.InstanceType, _ int) string { return it.Name })
+		require.Len(t, got, len(catalog), "running types must remain visible to core drift checks")
+		for idx, it := range got {
+			require.True(t, it.Offerings.HasCompatible(catalog[idx].Offerings[0].Requirements),
+				"core drift checks require offering identity even when capacity is unavailable")
+		}
+		available := lo.Filter(got, func(it *karpcloudprovider.InstanceType, _ int) bool { return len(it.Offerings.Available()) > 0 })
+		return lo.Map(available, func(it *karpcloudprovider.InstanceType, _ int) string { return it.Name })
 	}
 
 	for _, tc := range []struct {
@@ -133,7 +145,7 @@ func TestGetInstanceTypesRequiresUsableImages(t *testing.T) {
 			want:      []string{"n2-standard-4", "t2a-standard-4", "g2-standard-4"},
 		},
 		{
-			name: "images that are not ready expose no candidates",
+			name: "images that are not ready expose no available offerings",
 			nodeClass: func() *v1alpha1.GCENodeClass {
 				nodeClass := imagesReadyNodeClass(amd64Image)
 				nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageUnavailable", "publication in progress")
@@ -142,12 +154,12 @@ func TestGetInstanceTypesRequiresUsableImages(t *testing.T) {
 			want: []string{},
 		},
 		{
-			name:      "unknown image readiness exposes no candidates",
+			name:      "unknown image readiness exposes no available offerings",
 			nodeClass: &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}, Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{amd64Image}}},
 			want:      []string{},
 		},
 		{
-			name:      "ready without images exposes no candidates",
+			name:      "ready without images exposes no available offerings",
 			nodeClass: imagesReadyNodeClass(),
 			want:      []string{},
 		},
@@ -157,7 +169,11 @@ func TestGetInstanceTypesRequiresUsableImages(t *testing.T) {
 			require.Equal(t, tc.want, names(tc.nodeClass))
 		})
 	}
-	require.Len(t, catalog, 3, "the cached catalog must not be mutated")
+	t.Cleanup(func() {
+		for _, it := range catalog {
+			require.Len(t, it.Offerings.Available(), 1, "the shared catalog must not be mutated")
+		}
+	})
 }
 
 func TestGetInstanceTypesKeepsLocalSSDSchedulingFilter(t *testing.T) {
@@ -179,6 +195,79 @@ func TestGetInstanceTypesKeepsLocalSSDSchedulingFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, "0", got[0].Requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Any())
+}
+
+type adoptOnlyInstanceProvider struct {
+	instance.Provider
+	vm *instance.Instance
+}
+
+func (p adoptOnlyInstanceProvider) Adopt(context.Context, *karpv1.NodeClaim) (*instance.Instance, error) {
+	return p.vm, nil
+}
+
+type overlayClient struct {
+	reproClient
+	overlay *karpv1alpha1.NodeOverlay
+}
+
+func (c overlayClient) List(_ context.Context, list client.ObjectList, _ ...client.ListOption) error {
+	switch list := list.(type) {
+	case *karpv1.NodePoolList:
+		list.Items = []karpv1.NodePool{*c.nodePool.DeepCopy()}
+	case *karpv1alpha1.NodeOverlayList:
+		list.Items = []karpv1alpha1.NodeOverlay{*c.overlay.DeepCopy()}
+	}
+	return nil
+}
+
+type overlayStatusWriter struct{ client.SubResourceWriter }
+
+func (overlayStatusWriter) Patch(context.Context, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
+	return nil
+}
+
+func (overlayClient) Status() client.SubResourceWriter { return overlayStatusWriter{} }
+
+func TestAdoptionWithUnreadyImagesPreservesNodeOverlay(t *testing.T) {
+	t.Parallel()
+	for _, readiness := range []string{"false", "unknown"} {
+		t.Run(readiness, func(t *testing.T) {
+			t.Parallel()
+			class := imagesReadyNodeClass()
+			if readiness == "false" {
+				class.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageLookupFailed", "lookup failed")
+			} else {
+				class.StatusConditions().SetUnknown(v1alpha1.ConditionTypeImagesReady)
+			}
+			pool := &karpv1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "pool"}, Spec: karpv1.NodePoolSpec{Template: karpv1.NodeClaimTemplate{Spec: karpv1.NodeClaimTemplateSpec{
+				NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"},
+			}}}}
+			overlay := &karpv1alpha1.NodeOverlay{ObjectMeta: metav1.ObjectMeta{Name: "hugepages"}, Spec: karpv1alpha1.NodeOverlaySpec{
+				Capacity: corev1.ResourceList{corev1.ResourceName("hugepages-2Mi"): resource.MustParse("1Gi")},
+			}}
+			overlay.StatusConditions().SetTrue(karpv1alpha1.ConditionTypeValidationSucceeded)
+			kubeClient := overlayClient{reproClient: reproClient{nodeClass: class, nodePool: pool}, overlay: overlay}
+			store := nodeoverlay.NewInstanceTypeStore()
+			it := launchableInstanceType("t2a-standard-2", "arm64", "")
+			it.Offerings[0].Available = false
+			provider := New(kubeClient, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{it}}, adoptOnlyInstanceProvider{vm: &instance.Instance{
+				Name: "karpenter-claim", Type: it.Name, ProjectID: "test", Location: "us-central1-a",
+			}}, store)
+			ctx := karpopts.ToContext(context.Background(), &karpopts.Options{FeatureGates: karpopts.FeatureGates{NodeOverlay: true}})
+			ctx = gcpoptions.ToContext(ctx, &gcpoptions.Options{VMMemoryOverheadPercent: 0.07})
+			clk := clock.RealClock{}
+			controller := nodeoverlay.NewController(clk, kubeClient, provider, store, state.NewCluster(clk, kubeClient, provider))
+			_, err := controller.Reconcile(ctx, reconcile.Request{})
+			require.NoError(t, err)
+			got, err := provider.Create(ctx, &karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "claim", Labels: map[string]string{karpv1.NodePoolLabelKey: pool.Name}}, Spec: karpv1.NodeClaimSpec{
+				NodeClassRef: pool.Spec.Template.Spec.NodeClassRef,
+			}})
+			require.NoError(t, err)
+			require.Equal(t, resource.MustParse("1Gi"), got.Status.Capacity["hugepages-2Mi"])
+			require.Equal(t, resource.MustParse("1Gi"), got.Status.Allocatable["hugepages-2Mi"])
+		})
+	}
 }
 
 // TestCreateWithPartialImages protects the adoption boundary: launch candidates are filtered by the
@@ -209,7 +298,7 @@ func TestCreateWithPartialImages(t *testing.T) {
 		err        error
 		insertions int
 	}
-	run := func(t *testing.T, existingVM bool) outcome {
+	run := func(t *testing.T, existingVM, lookupFails bool, class *v1alpha1.GCENodeClass) outcome {
 		t.Helper()
 		result := outcome{}
 		var mu sync.Mutex
@@ -217,6 +306,10 @@ func TestCreateWithPartialImages(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case r.URL.Path == "/projects/test/aggregated/instances":
+				if lookupFails {
+					http.Error(w, "lookup forbidden", http.StatusForbidden)
+					return
+				}
 				items := map[string]compute.InstancesScopedList{}
 				if existingVM {
 					items["zones/us-central1-a"] = compute.InstancesScopedList{Instances: []*compute.Instance{{
@@ -225,6 +318,7 @@ func TestCreateWithPartialImages(t *testing.T) {
 						MachineType:       "zones/us-central1-a/machineTypes/t2a-standard-2",
 						CreationTimestamp: "2025-04-01T00:00:00Z",
 						Status:            "RUNNING",
+						Scheduling:        &compute.Scheduling{ProvisioningModel: "SPOT"},
 					}}}
 				}
 				_ = json.NewEncoder(w).Encode(&compute.InstanceAggregatedList{Items: items})
@@ -241,10 +335,15 @@ func TestCreateWithPartialImages(t *testing.T) {
 		service, err := compute.NewService(context.Background(), googleoption.WithEndpoint(srv.URL+"/"), googleoption.WithoutAuthentication())
 		require.NoError(t, err)
 
+		// A previous VM remains adoptable even when its offering cannot launch now.
+		catalog := []*karpcloudprovider.InstanceType{amd64Type.DeepCopy(), arm64Type.DeepCopy()}
+		if !class.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady) {
+			catalog[1].Offerings[0].Available = false
+		}
 		unavailable := unavailableofferings.NewUnavailableOfferings()
 		instanceProvider := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", service,
-			reproGKE{}, nil, reproTypes{variants: []*karpcloudprovider.InstanceType{amd64Type, arm64Type}}, reproTemplate{}, reproVersion{}, unavailable)
-		provider := New(reproClient{nodeClass: nodeClass}, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{amd64Type, arm64Type}}, instanceProvider, nil)
+			reproGKE{}, nil, reproTypes{variants: catalog}, reproTemplate{}, reproVersion{}, unavailable)
+		provider := New(reproClient{nodeClass: class}, reproEvents{}, reproTypes{variants: catalog}, instanceProvider, nil)
 
 		ctx := karpopts.ToContext(context.Background(), &karpopts.Options{})
 		ctx = gcpoptions.ToContext(ctx, &gcpoptions.Options{VMMemoryOverheadPercent: 0.07})
@@ -256,7 +355,7 @@ func TestCreateWithPartialImages(t *testing.T) {
 
 	t.Run("adopts the earlier arm64 VM before image filtering", func(t *testing.T) {
 		t.Parallel()
-		got := run(t, true)
+		got := run(t, true, false, nodeClass)
 		require.NoError(t, got.err)
 		require.Equal(t, "gce://test/us-central1-a/karpenter-claim", got.nodeClaim.Status.ProviderID)
 		require.Zero(t, got.insertions)
@@ -264,11 +363,53 @@ func TestCreateWithPartialImages(t *testing.T) {
 
 	t.Run("rejects a new arm64 launch with no compatible image", func(t *testing.T) {
 		t.Parallel()
-		got := run(t, false)
+		got := run(t, false, false, nodeClass)
 		require.Nil(t, got.nodeClaim)
 		require.ErrorContains(t, got.err, "no instance type is compatible with any image")
 		require.True(t, karpcloudprovider.IsInsufficientCapacityError(got.err),
 			"core must recognize an image-selection failure as capacity, not as a NodeClass configuration error: %v", got.err)
 		require.Zero(t, got.insertions, "no VM work may happen without a boot image")
 	})
+
+	t.Run("unrelated readiness rejection remains blocked", func(t *testing.T) {
+		t.Parallel()
+		class := nodeClass.DeepCopy()
+		class.StatusConditions().SetFalse(status.ConditionReady, "OtherFailure", "not ready")
+		got := run(t, true, false, class)
+		require.Nil(t, got.nodeClaim)
+		require.True(t, karpcloudprovider.IsNodeClassNotReadyError(got.err))
+		require.Zero(t, got.insertions)
+	})
+
+	for _, readiness := range []string{"false", "unknown"} {
+		t.Run(readiness+" image readiness", func(t *testing.T) {
+			t.Parallel()
+			class := nodeClass.DeepCopy()
+			if readiness == "false" {
+				class.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageLookupFailed", "lookup failed")
+			} else {
+				class.StatusConditions().SetUnknown(v1alpha1.ConditionTypeImagesReady)
+			}
+			adopted := run(t, true, false, class)
+			require.NoError(t, adopted.err)
+			require.Equal(t, "gce://test/us-central1-a/karpenter-claim", adopted.nodeClaim.Status.ProviderID)
+			require.Equal(t, karpv1.CapacityTypeSpot, adopted.nodeClaim.Labels[karpv1.CapacityTypeLabelKey], "adoption uses the VM's actual capacity type")
+			require.Zero(t, adopted.insertions)
+
+			absent := run(t, false, false, class)
+			require.Nil(t, absent.nodeClaim)
+			require.Error(t, absent.err)
+			if readiness == "false" {
+				require.True(t, karpcloudprovider.IsNodeClassNotReadyError(absent.err))
+			} else {
+				require.ErrorContains(t, absent.err, "Ready=Unknown")
+			}
+			require.Zero(t, absent.insertions)
+
+			failedLookup := run(t, false, true, class)
+			require.Nil(t, failedLookup.nodeClaim)
+			require.ErrorContains(t, failedLookup.err, "adopting instance")
+			require.Zero(t, failedLookup.insertions)
+		})
+	}
 }
