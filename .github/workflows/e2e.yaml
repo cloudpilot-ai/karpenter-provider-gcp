@@ -1,72 +1,393 @@
-name: On-demand E2E
+name: Manual PR E2E
 
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Upstream PR number (frozen head; no reruns)
+        required: true
+        type: string
+      preset:
+        description: Separately enabled cost/selection
+        required: true
+        type: choice
+        options: [standard, gpu, full]
+        default: standard
 
-permissions:
-  issues: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   gate:
-    name: Comment gate
-    if: github.event.issue.pull_request && (github.event.comment.body == '/e2e' || startsWith(github.event.comment.body, '/e2e '))
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
-      accepted: ${{ steps.command.outputs.continue }}
-      sha: ${{ steps.command.outputs.sha }}
+      source: ${{ steps.capture.outputs.source }}
+      config: ${{ steps.capture.outputs.config }}
+      sha: ${{ steps.capture.outputs.sha }}
+      pr: ${{ steps.capture.outputs.pr }}
+      preset: ${{ steps.capture.outputs.preset }}
+      target: ${{ steps.capture.outputs.target }}
     steps:
-      - name: Parse /e2e command
-        id: command
-        uses: github/command@3442f3fa1efe01bdb024b157083c337902d17372 # v2.0.0
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
         with:
-          command: /e2e
-          allowed_contexts: pull_request
-          permissions: write,maintain,admin
-          allow_forks: true
-          allow_drafts: true
-          skip_ci: true
-          skip_reviews: true
-          skip_completing: true
-
-  e2e:
-    name: E2E run
-    needs: gate
-    if: needs.gate.outputs.accepted == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    concurrency:
-      group: e2e-${{ github.repository }}
-      cancel-in-progress: false
-    outputs:
-      preset: ${{ steps.run.outputs.preset }}
-    steps:
-      - name: E2E run
-        id: run
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Authorize numeric upstream/actor/run and freeze source/config
+        id: capture
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR_NUMBER: ${{ inputs.pr }}
+          PRESET: ${{ inputs.preset }}
+          E2E_CI_ENABLED: ${{ vars.E2E_CI_ENABLED }}
+          E2E_ENABLED_PRESETS: ${{ vars.E2E_ENABLED_PRESETS }}
+          E2E_TARGET_CONFIG: ${{ vars.E2E_TARGET_CONFIG }}
+          E2E_WIF_PROVIDER: ${{ vars.E2E_WIF_PROVIDER }}
+          E2E_WIF_AUDIENCE: ${{ vars.E2E_WIF_AUDIENCE }}
+          E2E_RUNTIME_SERVICE_ACCOUNT: ${{ vars.E2E_RUNTIME_SERVICE_ACCOUNT }}
+        with:
+          script: |
+            try {
+              await require('./trusted/.github/scripts/e2e/gate.cjs').run({github, core}, 'capture');
+            } catch { core.setFailed('Trusted E2E capture failed; no authorization/evidence assumed'); }
+
+  pending:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: write
+    outputs:
+      check: ${{ steps.pending.outputs.check }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - id: pending
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          SOURCE: ${{ needs.gate.outputs.source }}
+        with:
+          script: |
+            try {
+              await require('./trusted/.github/scripts/e2e/report.cjs').run({github, core}, 'pending');
+            } catch { core.setFailed('Trusted E2E pending failed; no authorization/evidence assumed'); }
+
+  build:
+    name: Credential-free preparation
+    needs: [gate, pending]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      image_id: ${{ steps.image.outputs.artifact-id }}
+      image_digest: ${{ steps.image.outputs.artifact-digest }}
+      chart_id: ${{ steps.chart.outputs.artifact-id }}
+      chart_digest: ${{ steps.chart.outputs.artifact-digest }}
+      crd_id: ${{ steps.crd.outputs.artifact-id }}
+      crd_digest: ${{ steps.crd.outputs.artifact-digest }}
+      suite_id: ${{ steps.suite.outputs.artifact-id }}
+      suite_digest: ${{ steps.suite.outputs.artifact-digest }}
+      ginkgo_id: ${{ steps.ginkgo.outputs.artifact-id }}
+      ginkgo_digest: ${{ steps.ginkgo.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
+        with:
+          go-version-file: trusted/go.mod
+          cache: false
+      - uses: Azure/setup-helm@5dad9f39cb30e36bd9f8a5c7259a51353cc89871
+        with:
+          version: v3.19.0
+      - name: Build repo-pinned trusted ko before PR data
+        working-directory: trusted/hack/tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/trusted-bin"
+          go build -o "$RUNNER_TEMP/trusted-bin/ko" github.com/google/ko
+          echo "$RUNNER_TEMP/trusted-bin" >> "$GITHUB_PATH"
+      - name: Fixed ko/Helm/Go commands only; no PR scripts
+        env:
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+          PR_NUMBER: ${{ needs.gate.outputs.pr }}
+        run: bash trusted/.github/scripts/e2e/build.sh > "$RUNNER_TEMP/private-build.log" 2>&1
+      - id: image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: ${{ runner.temp }}/build-files/controller-image.tar
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - id: chart
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: ${{ runner.temp }}/build-files/controller-chart.tgz
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - id: crd
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: ${{ runner.temp }}/build-files/crd-chart.tgz
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - id: suite
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: ${{ runner.temp }}/build-files/e2e.test
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - id: ginkgo
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: ${{ runner.temp }}/build-files/ginkgo
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+  runtime:
+    needs: [gate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    environment: e2e-runtime
+    concurrency:
+      group: ${{ needs.gate.outputs.target }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      SOURCE: ${{ needs.gate.outputs.source }}
+      CONFIG: ${{ needs.gate.outputs.config }}
+      SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+      PRESET: ${{ needs.gate.outputs.preset }}
+    outputs:
+      summary_id: ${{ steps.summary.outputs.artifact-id }}
+      summary_digest: ${{ steps.summary.outputs.artifact-digest }}
+      summary_upload: ${{ steps.summary.outcome }}
+      native_upload: ${{ steps.native.outcome }}
+      project: ${{ steps.project.outcome }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
+        with:
+          go-version-file: trusted/go.mod
+          cache: false
+      - uses: Azure/setup-helm@5dad9f39cb30e36bd9f8a5c7259a51353cc89871
+        with:
+          version: v3.19.0
+      - name: Build only trusted runner and repo-pinned crane before PR data
+        working-directory: trusted
+        run: |
+          mkdir -p "$RUNNER_TEMP/trusted-bin" "$RUNNER_TEMP/e2e-auth"
+          chmod 700 "$RUNNER_TEMP/e2e-auth"
+          go build -o "$RUNNER_TEMP/trusted-bin/e2e-runner" ./hack/e2e-runner
+          (cd hack/tools && go build -o "$RUNNER_TEMP/trusted-bin/crane" github.com/google/go-containerregistry/cmd/crane)
+          echo "$RUNNER_TEMP/trusted-bin" >> "$GITHUB_PATH"
+      - name: Pre-auth recheck and complete five-ID metadata proof
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          E2E_CI_ENABLED: ${{ vars.E2E_CI_ENABLED }}
+          E2E_ENABLED_PRESETS: ${{ vars.E2E_ENABLED_PRESETS }}
+          E2E_TARGET_CONFIG: ${{ vars.E2E_TARGET_CONFIG }}
+          E2E_WIF_PROVIDER: ${{ vars.E2E_WIF_PROVIDER }}
+          E2E_WIF_AUDIENCE: ${{ vars.E2E_WIF_AUDIENCE }}
+          E2E_RUNTIME_SERVICE_ACCOUNT: ${{ vars.E2E_RUNTIME_SERVICE_ACCOUNT }}
+          ARTIFACT_IDS: ${{ format('["{0}","{1}","{2}","{3}","{4}"]', needs.build.outputs.image_id, needs.build.outputs.chart_id, needs.build.outputs.crd_id, needs.build.outputs.suite_id, needs.build.outputs.ginkgo_id) }}
+          ARTIFACT_DIGESTS: ${{ format('["{0}","{1}","{2}","{3}","{4}"]', needs.build.outputs.image_digest, needs.build.outputs.chart_digest, needs.build.outputs.crd_digest, needs.build.outputs.suite_digest, needs.build.outputs.ginkgo_digest) }}
+        with:
+          script: |
+            try {
+              await require('./trusted/.github/scripts/e2e/gate.cjs').run({github, core}, 'recheck');
+            } catch { core.setFailed('Trusted E2E recheck failed; no authorization/evidence assumed'); }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.image_id }}
+          path: ${{ runner.temp }}/prepared/controller-image.tar
+          skip-decompress: true
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.chart_id }}
+          path: ${{ runner.temp }}/prepared/controller-chart.tgz
+          skip-decompress: true
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.crd_id }}
+          path: ${{ runner.temp }}/prepared/crd-chart.tgz
+          skip-decompress: true
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.suite_id }}
+          path: ${{ runner.temp }}/prepared/e2e.test
+          skip-decompress: true
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.ginkgo_id }}
+          path: ${{ runner.temp }}/prepared/ginkgo
+          skip-decompress: true
+          digest-mismatch: error
+      - name: Exact paths, complete regular files and exact raw sizes
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            try {
+              await require('./trusted/.github/scripts/e2e/gate.cjs').run({github, core}, 'files');
+            } catch { core.setFailed('Trusted E2E files failed; no authorization/evidence assumed'); }
+      - name: Standard crane/Helm/build-info and explicit target validation
+        id: verify
+        run: bash trusted/.github/scripts/e2e/preauth.sh > "$RUNNER_TEMP/private-preauth.log" 2>&1
+      - name: Refreshable dedicated runtime WIF
+        id: auth
+        uses: google-github-actions/auth@12060449e87204eca501a11f2f7f1483024afff0
+        with:
+          workload_identity_provider: ${{ fromJSON(needs.gate.outputs.config).provider }}
+          audience: ${{ fromJSON(needs.gate.outputs.config).audience }}
+          service_account: ${{ fromJSON(needs.gate.outputs.config).service_account }}
+          project_id: ${{ fromJSON(needs.gate.outputs.config).target.E2E_PROJECT_ID }}
+          create_credentials_file: true
+          export_environment_variables: false
+      - name: Isolate credentials, refreshable gcloud and kubeconfig outside artifacts
+        env:
+          AUTH_FILE: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           set -euo pipefail
-          preset="${COMMENT_BODY#/e2e}"
-          preset="${preset#${preset%%[![:space:]]*}}"
-          if [[ -z "${preset}" ]]; then
-            preset="standard"
-          fi
-          echo "preset=${preset}" >> "${GITHUB_OUTPUT}"
-
-          echo "e2e run is not implemented"
-          echo "preset: ${preset}"
-          echo "commit: ${{ needs.gate.outputs.sha }}"
-
-      - name: Update sticky comment
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+          jq -e '.type == "external_account" and (.credential_source.url | startswith("https://")) and (.credential_source.headers.Authorization | startswith("Bearer ")) and (.credential_source | has("file") | not)' "$AUTH_FILE" > /dev/null
+          mv "$AUTH_FILE" "$RUNNER_TEMP/e2e-auth/external-account.json"
+          chmod 600 "$RUNNER_TEMP/e2e-auth/external-account.json"
+          {
+            printf 'GOOGLE_APPLICATION_CREDENTIALS=%s/e2e-auth/external-account.json\n' "$RUNNER_TEMP"
+            printf 'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=%s/e2e-auth/external-account.json\n' "$RUNNER_TEMP"
+            printf 'CLOUDSDK_CONFIG=%s/e2e-auth/gcloud\n' "$RUNNER_TEMP"
+            printf 'KUBECONFIG=%s/e2e-auth/kubeconfig\n' "$RUNNER_TEMP"
+            printf 'USE_GKE_GCLOUD_AUTH_PLUGIN=True\n'
+          } >> "$GITHUB_ENV"
+      - uses: google-github-actions/setup-gcloud@01af06c41d9aa0790d6fdc8f0b982b768ca4d102
         with:
-          number: ${{ github.event.issue.number }}
-          header: e2e-placeholder
-          message: |
-            e2e run is not implemented.
+          version: '>= 416.0.0'
+          install_components: gke-gcloud-auth-plugin
+      - name: Activate refreshable credentials and explicit cluster context
+        run: |
+          set -euo pipefail
+          gcloud auth login --cred-file="$GOOGLE_APPLICATION_CREDENTIALS" --quiet > "$RUNNER_TEMP/e2e-auth/login.log" 2>&1
+          gcloud container clusters get-credentials "$E2E_CLUSTER_NAME" --project "$E2E_PROJECT_ID" --location "$E2E_LOCATION" > "$RUNNER_TEMP/e2e-auth/get-credentials.log" 2>&1
+      - name: Neutral prepared lifecycle under one Lease (20 workers)
+        id: execute
+        working-directory: trusted
+        run: |
+          e2e-runner prepared --source-sha "$SOURCE_SHA" --selection "$PRESET" \
+            --controller-archive "$RUNNER_TEMP/prepared/controller-image.tar/controller-image.tar" \
+            --controller-chart "$RUNNER_TEMP/prepared/controller-chart.tgz/controller-chart.tgz" \
+            --crd-chart "$RUNNER_TEMP/prepared/crd-chart.tgz/crd-chart.tgz" \
+            --test-binary "$RUNNER_TEMP/prepared/e2e.test/e2e.test" \
+            --ginkgo-binary "$RUNNER_TEMP/prepared/ginkgo/ginkgo" \
+            --results-dir "$RUNNER_TEMP/private-results" --lock-id "github-$GITHUB_RUN_ID-1" \
+            > "$RUNNER_TEMP/private-runtime.log" 2>&1
+      - name: Strip native text before any public evidence upload
+        id: project
+        if: always() && steps.verify.outcome == 'success'
+        run: |
+          python3 trusted/.github/scripts/e2e/project.py --private "$RUNNER_TEMP/private-results" \
+            --public "$RUNNER_TEMP/public-results" --source-sha "$SOURCE_SHA" --preset "$PRESET"
+      - id: summary
+        if: always() && steps.project.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: ${{ runner.temp }}/public-results/summary.json
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+      - id: native
+        if: always() && steps.project.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sanitized-native-reports
+          path: |
+            ${{ runner.temp }}/public-results/results.json
+            ${{ runner.temp }}/public-results/junit.xml
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove runtime credentials; raw logs never uploaded
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/e2e-auth"
 
-            Preset: `${{ steps.run.outputs.preset }}`
-            Commit: `${{ needs.gate.outputs.sha }}`
+  reporter:
+    needs: [gate, pending, build, runtime]
+    if: always() && needs.gate.result == 'success' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: e2e-publication-${{ needs.gate.outputs.pr }}-${{ needs.gate.outputs.preset }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: write
+    env:
+      SOURCE: ${{ needs.gate.outputs.source }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Confirm exact raw summary provenance/digest/size
+        id: metadata
+        if: always() && needs.runtime.outputs.summary_id != ''
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          SUMMARY_ID: ${{ needs.runtime.outputs.summary_id }}
+          SUMMARY_DIGEST: ${{ needs.runtime.outputs.summary_digest }}
+        with:
+          script: |
+            try {
+              await require('./trusted/.github/scripts/e2e/gate.cjs').run({github, core}, 'summary');
+            } catch { core.setFailed('Trusted E2E summary failed; no authorization/evidence assumed'); }
+      - name: Download only exact raw summary ID
+        id: download
+        if: always() && steps.metadata.outcome == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.runtime.outputs.summary_id }}
+          path: ${{ runner.temp }}/report/summary.json
+          skip-decompress: true
+          digest-mismatch: error
+      - name: Finalize own check independently, then ordered bot-only PR/preset comment
+        if: always()
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          CHECK_ID: ${{ needs.pending.outputs.check }}
+          BUILD_STATUS: ${{ needs.build.result }}
+          RUNTIME_STATUS: ${{ needs.runtime.result }}
+          PROJECT_STATUS: ${{ needs.runtime.outputs.project }}
+          SUMMARY_UPLOAD_STATUS: ${{ needs.runtime.outputs.summary_upload }}
+          NATIVE_UPLOAD_STATUS: ${{ needs.runtime.outputs.native_upload }}
+          DOWNLOAD_STATUS: ${{ steps.download.outcome }}
+        with:
+          script: |
+            try {
+              await require('./trusted/.github/scripts/e2e/report.cjs').run({github, core}, 'publish');
+            } catch { core.setFailed('Trusted E2E publish failed; no authorization/evidence assumed'); }

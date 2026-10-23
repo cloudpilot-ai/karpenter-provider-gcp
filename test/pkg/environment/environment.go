@@ -178,17 +178,26 @@ func NewEnvironment() *Environment {
 	}
 
 	env.waitForControllerReady()
-	env.ensureTestNamespace()
+	Expect(env.ensureTestNamespace()).To(Succeed(), "ensuring test namespace %s", TestNamespace)
 	env.startControllerResourceSampler()
 	return env
 }
 
-func (e *Environment) ensureTestNamespace() {
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: TestNamespace}}
-	_, err := e.KubeClient.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		Expect(err).NotTo(HaveOccurred(), "creating test namespace %s", TestNamespace)
+func (e *Environment) ensureTestNamespace() error {
+	ctx := context.Background()
+	if _, err := e.KubeClient.CoreV1().Namespaces().Get(ctx, TestNamespace, metav1.GetOptions{}); err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return err
 	}
+	// Local environments retain creation on NotFound. CI requires reviewed
+	// bootstrap before tests and deliberately has no Namespace create permission.
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: TestNamespace, Labels: map[string]string{"karpenter-e2e/owned": "true"}}}
+	_, err := e.KubeClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		return nil
+	}
+	return err
 }
 
 // Must be called after successfully creating a NodePool so that Cleanup deletes it.

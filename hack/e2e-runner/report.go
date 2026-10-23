@@ -19,7 +19,6 @@ package main
 import (
 	"bytes"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -30,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/onsi/ginkgo/v2/types"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -177,28 +177,41 @@ func renderReport(w io.Writer, reports []types.Report, metadata reportMetadata) 
 		}
 	}
 	sort.Slice(suites, func(i, j int) bool { return suites[i].Name < suites[j].Name })
-	tmpl, err := template.New("report").Parse(reportTemplate)
+	omitted, remaining := 0, 64
+	for i := range suites {
+		if suites[i].Passed == 0 && suites[i].Failed == 0 {
+			suites[i].Result = "⏭ not executed"
+		}
+		keep := min(len(suites[i].Specs), remaining)
+		if i >= 32 {
+			keep = 0
+		}
+		omitted += len(suites[i].Specs) - keep
+		suites[i].Specs = suites[i].Specs[:keep]
+		remaining -= keep
+	}
+	if len(suites) > 32 {
+		suites = suites[:32]
+	}
+	tmpl, err := template.New("report").Funcs(template.FuncMap{"public": publicText}).Parse(reportTemplate)
 	if err != nil {
 		return err
 	}
-	return tmpl.Execute(w, struct {
+	return tmpl.Execute(&limitedWriter{Writer: w, Remaining: 60000}, struct {
 		Suites           []suiteResult
 		Commit           string
 		ControllerCommit string
 		Duration         string
 		Resources        string
 		LogsUnavailable  bool
-	}{suites, metadata.Commit, metadata.ControllerCommit, metadata.Duration, controllerResources(reports), metadata.LogsUnavailable})
+		Omitted          int
+	}{suites, metadata.Commit, metadata.ControllerCommit, metadata.Duration, controllerResources(reports), metadata.LogsUnavailable, omitted})
 }
 
 func writeReport(jsonPath, path string, metadata reportMetadata) error {
-	data, err := os.ReadFile(jsonPath)
+	reports, _, err := readJSONReports(jsonPath)
 	if err != nil {
 		return fmt.Errorf("reading Ginkgo JSON report: %w", err)
-	}
-	var reports []types.Report
-	if err := json.Unmarshal(data, &reports); err != nil {
-		return fmt.Errorf("decoding Ginkgo JSON report: %w", err)
 	}
 	var output bytes.Buffer
 	if err := renderReport(&output, reports, metadata); err != nil {
@@ -208,4 +221,32 @@ func writeReport(jsonPath, path string, metadata reportMetadata) error {
 		return err
 	}
 	return os.WriteFile(path, output.Bytes(), 0644)
+}
+
+// publicText emits only text/entities, never PR HTML or Markdown. Controls and
+// bidi formatting are discarded; truncation is explicit and output is bounded.
+func publicText(value string) template.HTML {
+	var out strings.Builder
+	count := 0
+	for _, r := range value {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			if unicode.IsSpace(r) && count < 128 {
+				count++
+				out.WriteByte(' ')
+			}
+			continue
+		}
+		if count >= 128 {
+			out.WriteString("… [truncated]")
+			break
+		}
+		count++
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ':
+			out.WriteRune(r)
+		default:
+			fmt.Fprintf(&out, "&#%d;", r)
+		}
+	}
+	return template.HTML(out.String()) // All punctuation is numeric-entity encoded above.
 }
