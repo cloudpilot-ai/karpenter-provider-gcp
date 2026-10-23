@@ -19,11 +19,14 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 )
 
 const (
@@ -52,7 +55,39 @@ func (c *CloudProvider) isImageDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v
 		}
 	}
 
+	// A partial image set must not drift nodes without a compatible replacement.
+	if !nodeClass.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady) {
+		return ""
+	}
+	if _, ok := imagefamily.FindImage(nodeClass.Status.Images, imageReplacementRequirements(nodeClaim)); !ok {
+		return ""
+	}
 	return ImageDrift
+}
+
+// Actual labels take precedence over broad spec requirements. A known architecture with no
+// GPU-count label identifies a CPU node, even if the spec also permits GPU shapes.
+func imageReplacementRequirements(nodeClaim *karpv1.NodeClaim) scheduling.Requirements {
+	specRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	requirements := scheduling.NewRequirements()
+	if value, ok := nodeClaim.Labels[corev1.LabelArchStable]; ok {
+		requirements.Add(scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, value))
+	} else if requirement, ok := specRequirements[corev1.LabelArchStable]; ok {
+		requirements.Add(requirement)
+	}
+	gpuCount, hasGPUCountLabel := nodeClaim.Labels[v1alpha1.LabelInstanceGPUCount]
+	_, hasArchLabel := nodeClaim.Labels[corev1.LabelArchStable]
+	switch {
+	case hasGPUCountLabel:
+		requirements.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpIn, gpuCount))
+	case hasArchLabel:
+		requirements.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist))
+	default:
+		if requirement, ok := specRequirements[v1alpha1.LabelInstanceGPUCount]; ok {
+			requirements.Add(requirement)
+		}
+	}
+	return requirements
 }
 
 func (c *CloudProvider) areStaticFieldsDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) cloudprovider.DriftReason {

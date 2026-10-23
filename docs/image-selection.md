@@ -27,7 +27,7 @@ Each term in `imageSelectorTerms` must use exactly one of three selection modes:
 | Version pin       | `family` + `version` | Fixed image. Nodes never drift from image changes.                                              |
 | Raw image ID      | `id`                 | Explicit GCE image URL. Nodes never drift from image changes.                                   |
 
-Karpenter only uses GCE images whose status is `READY`, so a newly published image can't start a node replacement before GCP finishes publishing it. `version: latest` selects the newest `READY` image and skips images that are still `PENDING`. For channel, version pin, and raw image ID terms, Karpenter waits until the matching image is `READY`. Until then, it keeps the images already recorded in the GCENodeClass status and retries resolution. Depending on the term, the `ImagesReady` condition reports `ImageResolutionFailed`, or the controller logs an `image <name> is not ready (status: PENDING)` error.
+Images must be `READY` before use. Family discovery excludes `DEPRECATED`, `OBSOLETE`, and `DELETED` images; raw `id` selectors check status but not deprecation.
 
 ### Channel reference (live)
 
@@ -52,6 +52,8 @@ Available channels:
 | `cluster`  | Follows whatever channel the cluster is enrolled in |
 
 Use `channel: cluster` as the default for most deployments. It automatically tracks the cluster's enrolled channel without hardcoding a specific one.
+
+Channel resolution never substitutes another GKE build. If the promoted build has no usable amd64 base image yet, resolution retries with `ImagesReady=False` / `ImageUnavailable`.
 
 Channel selection is only supported for Container-Optimized OS. Ubuntu images do not have per-channel differentiation in GKE.
 
@@ -88,6 +90,16 @@ imageSelectorTerms:
   - id: projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre
 ```
 
+## Container-Optimized OS variants
+
+Karpenter supports independently published amd64 CPU (`-c-pre`), arm64 CPU (`-cos-arm64-...-c-pre`), and amd64 NVIDIA (`-c-nvda`) images. Specialized builds such as kmod, gVisor, `-test`, and cgroup v1 are excluded.
+
+With `version: latest` (including the legacy alias), Karpenter selects the newest existing, `READY`, non-deprecated image **per variant** for the cluster's Kubernetes patch version. Unusable newer candidates are skipped until an eligible image is found; there is no one-build fallback limit or last-known-good history. If the cluster version cannot be read, discovery uses the existing broader COS scope. Channels and milestone pins keep their exact target, omitting unavailable siblings rather than substituting another build or version.
+
+`ImagesReady=True` can therefore contain a partial set. Only instance types backed by a resolved image offer new scheduling or launch capacity; unsupported requests wait or fail with an image-related capacity error, without poisoning the zonal capacity cache. Unsupported types and their offering requirements remain visible to running-node drift checks, with their scheduling offerings marked unavailable. Existing VMs remain adoptable on retries, even while image readiness is false or unknown; an unready class still cannot launch a new VM. Image drift waits for a compatible replacement; see [Drift and disruption](#drift-and-disruption).
+
+Successful results are cached for five minutes, so newly published variants and deleted/deprecated images are noticed on refresh, not instantly. Failures and empty results are not cached. While `ImagesReady` is not `True`, retained image status cannot authorize new launches. See [image readiness troubleshooting](troubleshooting.md#gcenodeclass-not-becoming-ready) for conditions, status clearing and retry intervals.
+
 ## OS families
 
 | Family                 | OS                     | Notes                            |
@@ -98,13 +110,13 @@ imageSelectorTerms:
 
 The bare `Ubuntu` family name is not supported. Use `Ubuntu2404` or `Ubuntu2204` explicitly.
 
-> **Note:** Ubuntu images are resolved per architecture, independently, from the `ubuntu-os-gke-cloud` catalog for the cluster's Kubernetes minor version. Only standard date builds are selected — `vYYYYMMDD`, optionally with a trailing letter (for example, `v20260416a` may be resolved by `version: latest`). Specialized GKE variant builds are excluded from selection, such as `-tpu`, `-cgroupsv1`, or `-linux64k`. If an architecture (for example, arm64) has no usable image for the cluster's Kubernetes minor version, resolution fails, and the GCENodeClass's `ImagesReady` condition reports `ImageResolutionFailed`. Use [Finding Available Versions](image-management.md#finding-available-versions) to confirm a date is published for both amd64 and arm64 before pinning, regardless of the NodePool's own architecture. amd64 and arm64 builds for a given date are published independently, so a `version: vYYYYMMDD` pin available for one architecture may not exist for the other. Pinning a date present for only one of the two architectures fails the same way, rather than silently synthesizing a nonexistent image.
+> **Ubuntu:** Both architectures must resolve from `ubuntu-os-gke-cloud` for the cluster's Kubernetes minor version. Only clean `vYYYYMMDD` builds (plus lettered re-spins for `latest`) are selected, excluding specialized builds such as `-tpu`, `-cgroupsv1`, and `-linux64k`. A missing or `PENDING` catalog architecture yields `ImageResolutionFailed`; a selected image becoming non-READY on final lookup yields `ImageUnavailable`. Final-lookup 404s are omitted. Before pinning a date, [confirm it exists for both architectures](image-management.md#finding-available-versions).
 
 ## Version formats
 
 | Family                 | `version: latest`                           | Version pin format            | Example             |
 |------------------------|---------------------------------------------|-------------------------------|---------------------|
-| `ContainerOptimizedOS` | Newest COS for cluster's K8s version        | `milestone.build.build.build` | `125.19216.104.126` |
+| `ContainerOptimizedOS` | Newest usable COS image per variant         | `milestone.build.build.build` | `125.19216.104.126` |
 | `Ubuntu2404`           | Newest Ubuntu 24.04 for cluster's K8s minor | `vYYYYMMDD`                   | `v20260416`         |
 | `Ubuntu2204`           | Newest Ubuntu 22.04 for cluster's K8s minor | `vYYYYMMDD`                   | `v20231201`         |
 
@@ -152,6 +164,8 @@ spec:
 ## Drift and disruption
 
 When using `channel:` terms, nodes are marked as drifted when GKE promotes a new build for the channel. Karpenter replaces drifted nodes according to your NodePool's disruption budgets.
+
+Image drift requires ready resolution and a replacement compatible with the node's actual architecture/GPU variant. An amd64 update alone does not drift arm64 or GPU nodes. This guard does not suppress configuration drift.
 
 To control replacement timing, configure `spec.disruption` on your NodePool:
 

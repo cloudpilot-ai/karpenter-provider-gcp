@@ -25,6 +25,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 func TestSelectImage_Ubuntu_SkipsPending(t *testing.T) {
@@ -174,6 +176,44 @@ func TestResolveImages_Ubuntu_PinnedVersion_PendingArm64(t *testing.T) {
 	p := &Ubuntu{computeService: buildComputeService(t, srv), release: "2404"}
 	_, err := p.ResolveImages(context.Background(), "v20260416")
 	require.Error(t, err)
+	// Ubuntu discovery only admits READY images, so a catalog-PENDING sibling leaves the required
+	// arm64 architecture unresolved: that is a configuration-shaped resolution failure, unlike a
+	// listed READY image that turns out to be PENDING on lookup (TestAliasTerm_UbuntuUnreadySiblingStillFailsResolution).
+	require.True(t, IsImageResolutionError(err), "expected an imageResolutionError, got %v", err)
+	require.False(t, IsImageUnavailableError(err))
+}
+
+// Ubuntu completeness is unchanged by the COS partial-set policy: an arm64 image that stops
+// being READY after it was listed must fail resolution, not publish an amd64-only set.
+func TestAliasTerm_UbuntuUnreadySiblingStillFailsResolution(t *testing.T) {
+	const (
+		amd64 = "ubuntu-gke-2404-1-35-amd64-v20260416"
+		arm64 = "ubuntu-gke-2404-1-35-arm64-v20260416"
+	)
+	catalog := &imageCatalog{
+		pages: [][]*compute.Image{{
+			{Name: amd64, Status: "READY"},
+			{Name: arm64, Status: "READY"},
+		}},
+		lookup: func(name string) (*compute.Image, int) {
+			if name == arm64 {
+				return &compute.Image{Name: arm64, Status: "PENDING"}, 0
+			}
+			return nil, 0
+		},
+	}
+	srv := imageCatalogServer(t, catalog)
+	defer srv.Close()
+
+	p := NewDefaultProvider(buildComputeService(t, srv), &fakeVersionProvider{version: "v1.35.1"}, &stubGKEProvider{})
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{{Alias: "Ubuntu2404@latest"}},
+	}}
+
+	_, err := p.List(context.Background(), nc)
+	require.ErrorContains(t, err, "PENDING")
+	require.False(t, IsImageResolutionError(err))
+	require.True(t, IsImageUnavailableError(err), "a pending Ubuntu sibling is a publication lag, not a configuration or API failure: %v", err)
 }
 
 func TestResolveImages_Ubuntu_PinnedVersion_InvalidFormat(t *testing.T) {

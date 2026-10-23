@@ -35,6 +35,28 @@ import (
 // cosImageProject is the GCP project that owns all Container-Optimized OS GKE images.
 const cosImageProject = "gke-node-images"
 
+// Drop only the patch scope when the cluster version is unavailable.
+const broadCOSImageFilter = `name=gke-*`
+
+// GKE publishes COS variants independently.
+type cosVariant int
+
+const (
+	cosVariantAMD64CPU cosVariant = iota
+	cosVariantARM64CPU
+	cosVariantAMD64NVIDIA
+)
+
+// cosVariantOrder is the stable order of published Images.
+var cosVariantOrder = []cosVariant{cosVariantAMD64CPU, cosVariantARM64CPU, cosVariantAMD64NVIDIA}
+
+// Anchored names exclude specialized builds, including cgroup-v1 images incompatible with GKE 1.29+.
+var (
+	cosAMD64CPUNameRe    = regexp.MustCompile(`^gke-\d+-gke\d+-cos-\d+-\d+-\d+-\d+-c-pre$`)
+	cosARM64CPUNameRe    = regexp.MustCompile(`^gke-\d+-gke\d+-cos-arm64-\d+-\d+-\d+-\d+-c-pre$`)
+	cosAMD64NVIDIANameRe = regexp.MustCompile(`^gke-\d+-gke\d+-cos-\d+-\d+-\d+-\d+-c-nvda$`)
+)
+
 var cosVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
 
 type ContainerOptimizedOS struct {
@@ -44,12 +66,12 @@ type ContainerOptimizedOS struct {
 
 func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
 	if version == "latest" {
-		sourceImage, err := c.resolveLatestCOSImage(ctx)
+		images, err := c.resolveLatestCOSImages(ctx)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to resolve COS GKE image from image project")
+			log.FromContext(ctx).Error(err, "failed to resolve COS GKE images from image project")
 			return nil, err
 		}
-		return c.resolveImages(sourceImage), nil
+		return images, nil
 	}
 
 	if k8sKey, build, ok := ParseGKEVersion(version); ok {
@@ -66,7 +88,7 @@ func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string
 		return nil, &imageResolutionError{msg: fmt.Sprintf(
 			"invalid ContainerOptimizedOS version %q: must be 'latest', a GKE version (e.g. '1.34.6-gke.1068000'), or 'milestone.build.build.build' (e.g. '125.19216.104.126')", version)}
 	}
-	sourceImage, err := c.resolveLatestCOSImage(ctx)
+	sourceImage, err := c.resolveMilestoneBaseCOSImage(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to resolve COS GKE image from image project")
 		return nil, err
@@ -89,13 +111,13 @@ func ParseGKEVersion(v string) (k8sKey, build string, ok bool) {
 	return strings.ReplaceAll(base, ".", ""), parts[1], true
 }
 
-// resolveExactBuildCOSImage selects the COS image for one GKE build without
-// filtering on the server. A miss must not fall back to a different build.
+// Exact builds never fall back to another build when publication is incomplete.
 func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8sKey, build string) (string, error) {
 	prefix := fmt.Sprintf("gke-%s-gke%s-", k8sKey, build)
 	var best *compute.Image
 	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
-		if strings.HasPrefix(img.Name, prefix) && isUsableCOSImage(img) {
+		variant, ok := usableCOSVariant(img, prefix)
+		if ok && variant == cosVariantAMD64CPU {
 			best = img
 			return true
 		}
@@ -105,20 +127,103 @@ func (c *ContainerOptimizedOS) resolveExactBuildCOSImage(ctx context.Context, k8
 		return "", fmt.Errorf("listing COS images for GKE build gke%s: %w", build, err)
 	}
 	if best == nil {
-		return "", &imageResolutionError{msg: fmt.Sprintf(
-			"no COS image found for GKE build gke%s (k8s %s) in %s — "+
-				"the channel version may not yet have a published COS image", build, k8sKey, cosImageProject)}
+		return "", &imageUnavailableError{msg: fmt.Sprintf(
+			"no usable COS image is published for GKE build gke%s (k8s %s) in %s yet — "+
+				"the channel version may not have a published COS image", build, k8sKey, cosImageProject)}
 	}
 	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, best.Name), nil
 }
 
-// resolveLatestCOSImage selects the newest ordinary COS image for the cluster patch.
-// The arm64 and GPU variants are derived from it by resolveImages.
-func (c *ContainerOptimizedOS) resolveLatestCOSImage(ctx context.Context) (string, error) {
+// Select the newest validated image per variant, continuing to older candidates during publication.
+func (c *ContainerOptimizedOS) resolveLatestCOSImages(ctx context.Context) (Images, error) {
 	filter := c.buildImageFilter(ctx)
+	scope := cosImageNameScope(filter)
+	selected := make(map[cosVariant]*compute.Image, len(cosVariantOrder))
+	var lookupErr error
+	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
+		variant, ok := usableCOSVariant(img, scope)
+		if !ok || selected[variant] != nil {
+			return false
+		}
+		candidate, err := lookupImage(ctx, c.computeService, cosImageProject, img.Name)
+		if err != nil {
+			lookupErr = fmt.Errorf("validating COS image %s: %w", img.Name, err)
+			return true
+		}
+		// The listing may be stale; do not let a vanished or unusable candidate displace an older one.
+		if candidate != nil && imageUsable(candidate) {
+			selected[variant] = candidate
+		}
+		return len(selected) == len(cosVariantOrder)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing COS GKE images in %s: %w", cosImageProject, err)
+	}
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if len(selected) == 0 {
+		return nil, &imageUnavailableError{msg: fmt.Sprintf(
+			"no usable ContainerOptimizedOS image is published in %s for filter %s: "+
+				"no READY, non-deprecated COS image matches the selected build yet", cosImageProject, filter)}
+	}
+	images := make(Images, 0, len(selected))
+	for _, variant := range cosVariantOrder {
+		if img := selected[variant]; img != nil {
+			images = append(images, Image{
+				SourceImage:  fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, img.Name),
+				Requirements: cosVariantRequirements(variant),
+			})
+		}
+	}
+	return images, nil
+}
+
+func usableCOSVariant(img *compute.Image, scope string) (cosVariant, bool) {
+	variant, ok := classifyCOSImage(img.Name)
+	return variant, ok && strings.HasPrefix(img.Name, scope) && imageUsable(img)
+}
+
+// classifyCOSImage maps a COS image name to its supported publication variant.
+func classifyCOSImage(name string) (cosVariant, bool) {
+	switch {
+	case cosAMD64CPUNameRe.MatchString(name):
+		return cosVariantAMD64CPU, true
+	case cosARM64CPUNameRe.MatchString(name):
+		return cosVariantARM64CPU, true
+	case cosAMD64NVIDIANameRe.MatchString(name):
+		return cosVariantAMD64NVIDIA, true
+	default:
+		return 0, false
+	}
+}
+
+// cosVariantRequirements returns the scheduling requirements of one COS variant.
+func cosVariantRequirements(variant cosVariant) scheduling.Requirements {
+	switch variant {
+	case cosVariantARM64CPU:
+		return scheduling.NewRequirements(
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchARM64Requirement),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpDoesNotExist))
+	case cosVariantAMD64NVIDIA:
+		return scheduling.NewRequirements(
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpExists))
+	default:
+		return scheduling.NewRequirements(
+			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpDoesNotExist))
+	}
+}
+
+// Milestone pins retain the existing name-template construction from an amd64 CPU base.
+func (c *ContainerOptimizedOS) resolveMilestoneBaseCOSImage(ctx context.Context) (string, error) {
+	filter := c.buildImageFilter(ctx)
+	scope := cosImageNameScope(filter)
 	var best *compute.Image
 	err := scanImages(ctx, c.computeService, cosImageProject, func(img *compute.Image) bool {
-		if matchesCOSNameFilter(img.Name, filter) && isUsableCOSImage(img) {
+		variant, ok := usableCOSVariant(img, scope)
+		if ok && variant == cosVariantAMD64CPU {
 			best = img
 			return true
 		}
@@ -128,56 +233,32 @@ func (c *ContainerOptimizedOS) resolveLatestCOSImage(ctx context.Context) (strin
 		return "", fmt.Errorf("listing COS GKE images in %s: %w", cosImageProject, err)
 	}
 	if best == nil {
-		return "", fmt.Errorf("no non-deprecated COS amd64 image found in %s (filter: %s)", cosImageProject, filter)
+		return "", &imageUnavailableError{msg: fmt.Sprintf("no usable COS amd64 image is published in %s for filter %s yet, so a milestone pin cannot be resolved", cosImageProject, filter)}
 	}
 	return fmt.Sprintf("projects/%s/global/images/%s", cosImageProject, best.Name), nil
 }
 
-func matchesCOSNameFilter(name, filter string) bool {
-	if filter == `name=gke-*-cos-*-c-pre` {
-		return strings.HasPrefix(name, "gke-") && strings.Contains(name, "-cos-") && strings.HasSuffix(name, "-c-pre")
-	}
-	return strings.HasPrefix(name, strings.TrimSuffix(strings.TrimPrefix(filter, "name="), "*"))
-}
-
-// isUsableCOSImage reports whether img is a non-deprecated general-purpose amd64 COS image
-// suitable for use as a GKE node image.
-func isUsableCOSImage(img *compute.Image) bool {
-	if img.Status != "READY" {
-		return false
-	}
-	if img.Deprecated != nil {
-		switch img.Deprecated.State {
-		case "DEPRECATED", "OBSOLETE", "DELETED":
-			return false
-		}
-	}
-	// Exclude arm64 and specialised variants. Exclude cgpv1 (cgroup v1) images:
-	// GKE 1.29+ clusters run cgroup v2 by default and the GKE 1.29+ kubelet
-	// sets --fail-cgroupv1=true, so cgpv1 images cause an immediate kubelet crash.
-	for _, skip := range []string{"arm64", "kmod", "nvda", "gvisor", "-test", "cgpv1"} {
-		if strings.Contains(img.Name, skip) {
-			return false
-		}
-	}
-	return true
+// cosImageNameScope returns the image-name prefix bounded by buildImageFilter. The scope only
+// limits the GKE build; variant classification is applied separately.
+func cosImageNameScope(filter string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(filter, "name="), "*")
 }
 
 // buildImageFilter describes the name scope to apply locally for the cluster's
 // K8s patch version. It falls back to the broad GKE COS scope when unavailable.
 func (c *ContainerOptimizedOS) buildImageFilter(ctx context.Context) string {
 	if c.versionProvider == nil {
-		return `name=gke-*-cos-*-c-pre`
+		return broadCOSImageFilter
 	}
 	k8sVer, err := c.versionProvider.Get(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to get K8s version for COS image filter, using broad filter")
-		return `name=gke-*-cos-*-c-pre`
+		return broadCOSImageFilter
 	}
 	parsed, err := k8sversion.ParseGeneric(k8sVer)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to parse K8s version for COS image filter, using broad filter", "version", k8sVer)
-		return `name=gke-*-cos-*-c-pre`
+		return broadCOSImageFilter
 	}
 	return fmt.Sprintf(`name=gke-%d%d%d-*`, parsed.Major(), parsed.Minor(), parsed.Patch())
 }
@@ -197,33 +278,14 @@ var (
 )
 
 func (c *ContainerOptimizedOS) resolveImages(sourceImage string) Images {
-	ret := Images{}
-
-	// x86
-	ret = append(ret, Image{
-		SourceImage: sourceImage,
-		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
-			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpDoesNotExist)),
-	})
-
 	// arm64
 	arm64Image := arm64Re.ReplaceAllString(sourceImage, arm64Replacement)
-	ret = append(ret, Image{
-		SourceImage: arm64Image,
-		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchARM64Requirement),
-			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpDoesNotExist)),
-	})
-
 	// gpu
-	gpuImages := strings.ReplaceAll(sourceImage, "-pre", "-nvda")
-	ret = append(ret, Image{
-		SourceImage: gpuImages,
-		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
-			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, v1.NodeSelectorOpExists)),
-	})
+	nvidiaImage := strings.ReplaceAll(sourceImage, "-pre", "-nvda")
 
-	return ret
+	return Images{
+		{SourceImage: sourceImage, Requirements: cosVariantRequirements(cosVariantAMD64CPU)},
+		{SourceImage: arm64Image, Requirements: cosVariantRequirements(cosVariantARM64CPU)},
+		{SourceImage: nvidiaImage, Requirements: cosVariantRequirements(cosVariantAMD64NVIDIA)},
+	}
 }

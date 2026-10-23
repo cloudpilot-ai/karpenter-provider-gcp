@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Container-Optimized OS images are ranked per variant
+
+COS `latest` now selects the newest usable image independently for amd64 CPU, arm64 CPU, and NVIDIA, falling back to older compatible catalog entries during publication. `ImagesReady=True` can contain a partial set: only supported instance types launch, and image drift waits for a compatible replacement. Channel and version pins remain exact; Ubuntu selection is unchanged.
+
+No API changes or migration action required. See [COS image selection](docs/image-selection.md#container-optimized-os-variants) and [readiness conditions](docs/troubleshooting.md#gcenodeclass-not-becoming-ready), including the new `ImageUnavailable` and `ImageLookupFailed` reasons.
+
 ### Default node service account lookup failures now stop startup
 
 When `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` is unset, the controller now exits if the Compute Engine project lookup fails, rather than continuing with an unresolved default service account. Pod restarts retry the lookup. This also applies when every `GCENodeClass` sets `spec.serviceAccount`.

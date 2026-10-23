@@ -88,13 +88,16 @@ kubectl describe gcenodeclass <name>
 
 Check `status.conditions`. The `ImagesReady` condition shows whether Karpenter can resolve the configured image.
 
-**Common causes:**
+Use the condition message and [available-image commands](image-management.md#finding-available-versions) to distinguish configuration errors from publication delays:
 
-- **Invalid version format** — Pinned versions must match the family's format: `milestone.build.build.build` for ContainerOptimizedOS (e.g. `125.19216.104.126`), `vYYYYMMDD` for Ubuntu (e.g. `v20260416`). Invalid formats are rejected at admission.
+| Reason                  | Meaning                                                                                  | Action / retry                                                                                                         |
+|-------------------------|------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `ImageResolutionFailed` | Invalid selector, or no usable catalog image for a required Ubuntu architecture.         | Check the selector and published versions. Retries every minute; Ubuntu publication can recover without a spec change. |
+| `ImageUnavailable`      | No usable COS candidate or a selected image is not `READY`; previous images are cleared. | Wait for publication; retries every minute.                                                                            |
+| `ImageLookupFailed`     | API lookup failed; previous images remain diagnostic only.                               | Check permissions/API availability; retries with controller error backoff.                                             |
+| `ImagesNotFound`        | No images matched, for example a missing raw ID; previous images are cleared.            | Verify the image ID; retries every minute.                                                                             |
 
-- **Version not found** — If `ImagesReady` shows `ImageResolutionFailed`, the pinned version does not exist in GCP or its image is not `READY` yet. Verify availability using the `gcloud compute images list` commands in [Image management](image-management.md#finding-available-versions).
-
-- **Unsupported family** — Only `ContainerOptimizedOS` and `Ubuntu` are supported.
+While `ImagesReady` is not `True`, no new nodes can use retained status. For COS, `True` may represent a partial set; see [missing arm64/GPU variants](#arm64-or-gpu-nodes-not-launching-with-containeroptimizedos).
 
 Example using the recommended structured fields:
 
@@ -204,6 +207,16 @@ The default `ContainerOptimizedOS` and `Ubuntu` images work for CPU Confidential
 
 ---
 
+## arm64 or GPU nodes not launching with ContainerOptimizedOS
+
+A ready COS NodeClass can lack an arm64 or NVIDIA variant. Inspect its resolved images:
+
+```sh
+kubectl get gcenodeclass <name> -o jsonpath='{range .status.images[*]}{.sourceImage}{"\n"}{end}'
+```
+
+If `-cos-arm64-` or `-c-nvda` is absent, matching instance types are not launchable yet. Check [available images](image-management.md#finding-available-versions); successful resolution refreshes every five minutes. See [COS variant selection](image-selection.md#container-optimized-os-variants) for fallback and drift behavior.
+
 ## arm64 provisioning not available
 
 arm64 node provisioning may be unavailable if the cluster's region does not support arm64 machine types. Check Karpenter startup logs for related messages.
@@ -212,7 +225,7 @@ Karpenter detects arm64 architecture directly from the GCP Compute API. All arm6
 
 Image resolution queries GCP image catalogs directly and does not depend on the bootstrap pool. Bootstrap pool discovery and kube-env patching allow a single source pool (of any architecture) to bootstrap nodes of any OS and architecture combination. See [Bootstrap pool selection](bootstrap-pool.md) for details.
 
-For the `Ubuntu` families, each architecture is resolved independently from the image catalog: Karpenter selects the newest clean `amd64` image and the newest clean `arm64` image separately, and excludes specialized variant builds (e.g. `-tpu`, `-cgroupsv1`, `-linux64k`, `-test`). If no usable `arm64` image exists for the cluster's Kubernetes minor version, the `GCENodeClass` reports `ImagesReady=False` with reason `ImageResolutionFailed` rather than resolving an `amd64`-only image set — so an arm64 pool never appears ready while it cannot actually provision. If you see this, confirm an `arm64` image is published for your Kubernetes version:
+For the `Ubuntu` families, each architecture is resolved independently from the image catalog: Karpenter selects the newest clean `amd64` image and the newest clean `arm64` image separately, and excludes specialized variant builds (e.g. `-tpu`, `-cgroupsv1`, `-linux64k`, `-test`). If no `arm64` image exists for the cluster's Kubernetes minor version, the `GCENodeClass` reports `ImagesReady=False` with reason `ImageResolutionFailed` rather than resolving an `amd64`-only image set — so an arm64 pool never appears ready while it cannot actually provision. If you see this, confirm an `arm64` image is published for your Kubernetes version:
 
 ```sh
 gcloud compute images list --project=ubuntu-os-gke-cloud \
