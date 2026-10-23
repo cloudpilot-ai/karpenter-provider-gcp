@@ -18,7 +18,9 @@ package interruption
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,9 +40,11 @@ import (
 // fakeKubeClient embeds client.Client and overrides only the methods used by the controller.
 type fakeKubeClient struct {
 	client.Client
-	nodes      []corev1.Node
-	nodeClaims []karpv1.NodeClaim
-	deleted    []client.Object
+	nodes            []corev1.Node
+	nodeClaims       []karpv1.NodeClaim
+	deleted          []client.Object
+	nodeClaimListErr error
+	deleteErr        error
 }
 
 func (f *fakeKubeClient) List(_ context.Context, list client.ObjectList, _ ...client.ListOption) error {
@@ -48,12 +52,18 @@ func (f *fakeKubeClient) List(_ context.Context, list client.ObjectList, _ ...cl
 	case *corev1.NodeList:
 		v.Items = f.nodes
 	case *karpv1.NodeClaimList:
+		if f.nodeClaimListErr != nil {
+			return f.nodeClaimListErr
+		}
 		v.Items = f.nodeClaims
 	}
 	return nil
 }
 
 func (f *fakeKubeClient) Delete(_ context.Context, obj client.Object, _ ...client.DeleteOption) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	f.deleted = append(f.deleted, obj)
 	return nil
 }
@@ -273,6 +283,79 @@ func TestHandleStoppingSpotInstances_DeletesPreemptingNode(t *testing.T) {
 	require.Len(t, recorder.events, 2)
 	require.Equal(t, "PreemptionNoticeReceived", recorder.events[0].Reason)
 	require.Equal(t, "TerminatingOnInterruption", recorder.events[1].Reason)
+}
+
+func TestReconcile_ContinuesAfterOrphanedNode(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		condition corev1.NodeCondition
+	}{
+		{
+			name: "shutting-down",
+			condition: corev1.NodeCondition{
+				Type:    corev1.NodeReady,
+				Status:  corev1.ConditionFalse,
+				Reason:  NodeConditionReasonKubeletNotReady,
+				Message: NodeConditionMessageShuttingDown,
+			},
+		},
+		{
+			name: "preempting",
+			condition: corev1.NodeCondition{
+				Type:   NodeConditionTypeGCESpotPreempting,
+				Status: corev1.ConditionTrue,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			kubeClient := preemptingNodeAndClaim(corev1.ConditionTrue)
+			kubeClient.nodes[0].Status.Conditions = []corev1.NodeCondition{tc.condition}
+			orphan := kubeClient.nodes[0].DeepCopy()
+			orphan.Name = "orphaned-node"
+			kubeClient.nodes = append([]corev1.Node{*orphan}, kubeClient.nodes...)
+			kubeClient.nodeClaims[0].Labels[karpv1.NodePoolLabelKey] = t.Name()
+			c := NewController(kubeClient, &fakeRecorder{}, unavailableofferings.NewUnavailableOfferings())
+
+			result, err := c.Reconcile(context.Background())
+
+			require.NoError(t, err)
+			require.Equal(t, time.Second, result.RequeueAfter)
+			require.Len(t, kubeClient.deleted, 1)
+			require.Equal(t, "spot-claim", kubeClient.deleted[0].GetName())
+		})
+	}
+}
+
+func TestReconcile_PropagatesNodeClaimAPIErrors(t *testing.T) {
+	t.Parallel()
+
+	apiErr := errors.New("kubernetes API unavailable")
+	for _, tc := range []struct {
+		name    string
+		listErr error
+		delErr  error
+	}{
+		{name: "list", listErr: apiErr},
+		{name: "delete", delErr: apiErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			kubeClient := preemptingNodeAndClaim(corev1.ConditionTrue)
+			kubeClient.nodeClaimListErr = tc.listErr
+			kubeClient.deleteErr = tc.delErr
+			c := NewController(kubeClient, &fakeRecorder{}, unavailableofferings.NewUnavailableOfferings())
+
+			_, err := c.Reconcile(context.Background())
+
+			require.ErrorIs(t, err, apiErr)
+			require.Empty(t, kubeClient.deleted)
+		})
+	}
 }
 
 func TestHandleStoppingSpotInstances_IgnoresPreemptingConditionFalse(t *testing.T) {

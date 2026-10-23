@@ -119,7 +119,7 @@ func (c *Controller) cleanNodeClaimByInstanceName(ctx context.Context, instanceN
 	if err != nil {
 		return fmt.Errorf("getting node claim by node name: %w", err)
 	}
-	if !nodeClaim.DeletionTimestamp.IsZero() {
+	if nodeClaim == nil || !nodeClaim.DeletionTimestamp.IsZero() {
 		return nil
 	}
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
@@ -174,5 +174,5 @@ func (c *Controller) getNodeClaimByNodeName(ctx context.Context, nodeName string
 		}
 	}
 
-	return nil, fmt.Errorf("no nodeclaim found for node %s", nodeName)
+	return nil, nil
 }
