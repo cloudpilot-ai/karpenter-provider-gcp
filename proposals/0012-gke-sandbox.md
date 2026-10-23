@@ -1,88 +1,78 @@
 # Proposal: GKE Sandbox (gVisor)
 
-- **Status**: Accepted; implemented, live acceptance pending
+- **Status**: Provisional
 - **Authors**: CloudPilot AI contributors
 - **Created**: 2026-10-22
 - **Related Issues**: [#504](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/504)
 
 ## Summary
 
-Add optional `GCENodeClass.spec.sandboxConfig.type: GVISOR`, matching GKE's sandbox configuration. Omission continues to mean ordinary capacity. Sandboxing uses public GKE COS images, immutable public installer artifacts, and an explicitly maintained bootstrap compatibility policy. It does not require a native sandbox pool.
-
-The implementation includes API/admission, image/artifact resolution, runtime metadata, hardware compatibility, NodePool reconciliation, scheduling/launch guards and durable lifecycle identity/drift. Operator guidance is in [Sandbox nodes](../docs/sandbox-nodes.md), with a [complete minimal example](../docs/examples/sandbox.md). Offline regression and zero-node native-template evidence do not prove reconstructed-node boot, isolation or CUDA execution; live acceptance remains separate.
+Add optional `GCENodeClass.spec.sandboxConfig.type: GVISOR` for native GKE Sandbox scheduling and reconstructed-node bootstrap. Omission preserves ordinary capacity. This record captures the design tradeoffs, not maintainer acceptance or a claim of live validation. Configuration and troubleshooting belong in [Sandbox nodes](../docs/sandbox-nodes.md) and the [minimal example](../docs/examples/sandbox.md).
 
 ## Motivation
 
-Ordinary COS bootstrap does not enable gVisor. A sandbox workload must not receive ordinary capacity, and ordinary workloads without the appropriate toleration must not trigger sandbox capacity. Copying runtime settings from a source pool also leaks its hardware policy and mutable installer selection into new nodes.
+Ordinary COS bootstrap does not enable gVisor. Runtime selection, scheduling and historical VM identity must agree: a sandbox workload must not receive ordinary capacity, while ordinary workloads without the sandbox toleration must not trigger sandbox provisioning. Copying a source pool's settings would also copy hardware-specific policy and mutable runtime artifacts.
 
-Goals are native scheduling semantics, fail-closed bootstrap compatibility, immutable runtime identity, and support for the provider's compatible CPU and built-in GPU catalog. MicroVM support is explicitly excluded and tracked by [#707](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/707).
+MicroVM support, RuntimeClass administration and general workload security certification are non-goals. MicroVM support is tracked separately in [#707](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/707).
 
 ## Proposal
 
-### API and images
+### Terraform-shaped opt-in API
 
-```yaml
-spec:
-  sandboxConfig:
-    type: GVISOR
-  imageSelectorTerms:
-    - family: ContainerOptimizedOS
-      channel: cluster
-```
+**Decision:** use the GKE/Terraform-shaped `sandboxConfig: {type: GVISOR}` object, with omission meaning ordinary capacity. Restrict sandboxing to supported public GKE COS images and compatible whole-GPU configurations.
 
-The singleton object requires `type`, whose only accepted value is `GVISOR`. There is no enable boolean, installer-version input, or sandboxType alias. Admission examines every selector, rejecting Ubuntu aliases/families, mixed terms, contradictory `imageFamily`, and GPU time-sharing. Explicit image IDs must resolve to actual READY, non-deprecated, supported public GKE COS images in `gke-node-images`; an override or custom/copied image is not provenance.
+**Why / alternatives:** a boolean would lose the runtime type; aliases or a separate installer-version field would introduce competing configuration identities. Unsupported runtime values are rejected rather than treated as ordinary capacity.
 
-CPU sandbox nodes use ordinary COS for amd64 or Arm64. GPU nodes use real public exact-GKE-build `-gv-nvda` or older `-gvisor-nvda` catalog variants, including Arm64 where published. CPU and GPU COS builds can differ. Discovery must honor explicit IDs, channel builds and explicit COS pins, never fabricate GPU names, change a pinned build, or fall back to ordinary GPU images. Missing compatible GPU variants mean no GPU candidates, not permission to use CPU images.
+**Consequences:** controller and CRDs must be upgraded together before opt-in. Runtime artifact selection follows the selected image, not a user-selected installer that might be incompatible. This is an optional feature, not a breaking migration for non-users.
 
-### Public immutable installer
+### Public artifacts, not a native sandbox pool prerequisite
 
-Strictly recognize the selected image's `gvisor-version` label, for example `20260323-0_rc03` becomes `20260323.0_RC03`. Fetch the public OCI manifest/index from `https://gke.gcr.io/v2/gke-gvisor-installer/manifests/<tag>`. Validate content SHA256 against the registry digest header, schema/media types and Linux platform descriptors (or a single manifest's digest-verified config). Resolve to `gke.gcr.io/gke-gvisor-installer@sha256:...`. Each resolved image carries its own installer version and digest in status; the status reconciler must copy this identity rather than resolving one artifact for the whole NodeClass.
+**Decision:** resolve actual public COS images and each image's immutable public gVisor installer digest, retaining existing ordinary bootstrap-pool discovery for cluster-specific material. Discover published sandbox GPU image variants rather than synthesizing names.
 
-Use bounded time/body sizes, same-origin redirects, a fixed public origin and bounded positive caches with five-minute refresh. Missing labels, unknown formats, unavailable artifacts and unsupported platforms fail explicitly. There is no `latest`, guessed fallback version, or release-note scraping. Ordinary and sandbox image cache identities are separate.
+**Why / alternatives:** requiring a native sandbox source pool adds infrastructure and leaks source hardware policy. Guessing installer versions, using mutable `latest`, or falling back to ordinary GPU images cannot preserve exact image/build pins or runtime identity.
 
-### Bootstrap consumer compatibility
+**Consequences:** no native sandbox pool is required, but artifact availability, provenance, architecture and outbound network access become explicit sandbox prerequisites. Missing compatible artifacts fail closed. The controller maintains hardware/security policy separately from artifact discovery.
 
-The effective source `KUBE_MANIFESTS_TAR_URL` and `SERVER_BINARY_TAR_URL` must name the same versioned GKE release under `https://storage.googleapis.com/gke-release/kubernetes/release/` or the accepted `gke-release-asia`/`gke-release-eu` bucket mirrors. Every entry in a native mirror list is validated. The master version is not a substitute for this effective kubelet/bootstrap version.
+### Strict full-consumer fingerprints over upgrade availability
 
-Download manifests only from this validated public path; do not execute scripts or extract to disk. Bound compressed data to 2 MiB, total decompression to 16 MiB, and each member to 2 MiB. Compare complete SHA256 fingerprints at these exact archive paths, rejecting missing, duplicate, non-regular or changed consumers:
+**Decision:** require the effective bootstrap/kubelet release's complete consumer hashes to match a reviewed profile, together with explicit hardware-policy identity. The initial reviewed fixture is GKE `1.35.6-gke.1250001`.
 
-- `kubernetes/gci-trusty/gci-configure-helper.sh`
-- `kubernetes/gci-trusty/gke-internal-configure-helper.sh`
-- `kubernetes/gci-trusty/installable.py`
+**Why / alternatives:** master-version checks, semver floors and text markers cannot detect changed bootstrap consumer semantics. Copying settings from a native template does not establish their safety on different hardware. Matching consumers is not discovery of GKE's complete native hardware/security policy.
 
-The initial accepted profile comes from public GKE `v1.35.6-gke.1250001`. A reduced public-consumer fixture, the complete original public archive and a provenance/fingerprint record accompany the resolver. Other releases are acceptable only when all consumers match a reviewed profile, or after reviewing new consumers/native policy and regression/live evidence. `SandboxBootstrapUnsupported` blocks launch for unknown schemas; it is not an insufficient-capacity signal. Positive cache identity includes release, schema and policy revision, and refreshes within five minutes.
+**Consequences:** unknown consumers block new sandbox provisioning, including after a GKE upgrade, until reviewed compatibility evidence permits a controller update. There is no bypass switch. This prioritizes fail-closed behavior over provisioning availability and creates an ongoing compatibility-maintenance obligation; image pins do not remove it.
 
-A match proves consumer compatibility, **not discovery of complete GKE control-plane hardware/security policy**. The durable VM profile identity must combine accepted schema, policy revision and validated hardware-policy variant. Do not infer historical identity from today's NodeClass. Unknown consumers may block new sandbox provisioning after an ordinary GKE upgrade until a controller update; this strict maintenance/upgrade tradeoff is explicitly accepted.
+### GKE / administrator RuntimeClass ownership
 
-### Runtime and lifecycle implementation
+**Decision:** leave RuntimeClasses to GKE or administrators and accept any class name targeting handler `gvisor` with safe scheduling. Rely on admission for Pod selector, tolerations and overhead, and on core Karpenter for overhead accounting.
 
-The instance provider retains existing cluster-specific bootstrap handling; sandbox discovery/compatibility does not reconstruct, log or separately persist source credentials. Apply a focused typed overlay, merge only `gvisor.gvisor` in `RENDERED_INSTALLABLES`, preserve unrelated installables and reject malformed JSON. Both enable and disable remove inherited sandbox-enabling settings before applying desired state. Synchronize sandbox labels/taints in all native metadata representations.
+**Why / alternatives:** controller-owned RuntimeClasses or literal-name assumptions would conflict with cluster policy and custom names. Duplicating overhead or Pod mutation would duplicate Kubernetes responsibilities.
 
-The reviewed native policy is `xemu`, SMT enabled and nftables reproduction. Core tags are enabled for Intel/mixed-vendor amd64 families, omitted for AMD-only families and Arm. Classify documented machine families (including custom machines), not just architecture or source-pool hardware. Keep full vCPU capacity consistent with SMT. Independently validate GPU model, selected image release, effective bootstrap release and default/latest driver mode: H100/A100/L4/T4 patch floors, later H200/B200/GB200/RTX PRO 6000 floors, and no V100/P100, unsupported fractional models or time-sharing. Do not filter historical instances out of discovery.
+**Consequences:** no new RuntimeClass RBAC or automatic repair. Operators must provide safe scheduling settings. Tolerating the sandbox taint allows ordinary Pods onto sandbox nodes but does not itself select gVisor.
 
-The `nodepool.sandbox` reconciler adds only the template label `sandbox.gke.io/runtime=gvisor`, its permanent `NoSchedule` taint and the top-level `karpenter.k8s.gcp/sandbox-ownership` annotation, with independent label/taint ownership and optimistic patches. Preexisting identical user fields, conflicts and unrelated fields are preserved. Disable/reference changes remove only still-owned canonical values. Gate scheduling on persisted consistent fields and guard stale NodeClaims in Create. Advertise runtime `In: gvisor` for sandbox and `DoesNotExist` for ordinary capacity. Separate affected static-instance-type caches as well as image caches. Configuration/artifact failures must not poison capacity caches.
+### Persisted NodePool field ownership, not scheduler mutation
 
-RuntimeClasses remain GKE/administrator-owned, including custom names targeting handler `gvisor`. No RuntimeClass RBAC or controller mutation is added. Admission supplies selectors/tolerations/overhead; core Karpenter already accounts for that overhead. Explicitly tolerated ordinary Pods may use sandbox capacity.
+**Decision:** reconcile the native runtime label and permanent taint onto NodePool templates, recording independent ownership of controller-added fields. Gate scheduling and launch on persisted consistency; remove only still-owned canonical fields on disable/reference changes.
 
-VMs are stamped with runtime, immutable installer and complete bootstrap schema/policy/hardware identity using reserved provider keys, bound to the launch NodeClass UID/hash and genuine NodePool owner UID when available. List/Get/adoption and NodeClaim conversion use VM facts, including actual boot-disk source images, rather than today's NodeClass/cache or mutable claim image. Ordinary/stale-runtime adoption is rejected. NodeClass/image drift and installer/profile drift preserve historical VM discovery/GC even when no longer launchable. Unknown actual image/profile facts produce comparison errors rather than invented drift.
+**Why / alternatives:** scheduler-only mutation hides the effective contract from users and other controllers. Overwriting conflicts or removing all runtime fields on disable would destroy user/GitOps ownership.
 
-## Migration
+**Consequences:** preexisting identical user values and unrelated fields survive; conflicts require operator correction. GitOps users can declare both canonical fields before reconciliation. Existing VMs are not converted in place; disruption controls govern replacement.
 
-Omitted sandbox configuration preserves ordinary behavior. Upgrade controller/CRDs together before opting in. Existing minimal controller custom roles need the declarative `compute.disks.get` permission in `deploy/iam/karpenter-controller-role.yaml` for factual adoption/drift; `deploy/terraform/` reads this role file. No RuntimeClass ownership/RBAC is added. Enabling requires safe GKE/admin-owned RuntimeClass scheduling, compatible public COS artifacts and outbound access to `gke.gcr.io` and public GKE artifact mirrors at `storage.googleapis.com`. Keep the ordinary system pool; no native sandbox pool is required.
+### VM-factual historical identity, not mutable caches
 
-New GitOps pools can explicitly declare both canonical runtime fields before reconciliation; these remain user-owned and must both be removed when disabling or changing to an ordinary class. Do not forge ownership records or ignore all labels/taints. Existing controller-added fields retain their recorded ownership. Scheduling gates on persisted fields instead of mutating its input. See [GitOps ownership](../docs/sandbox-nodes.md#gitops-ownership).
+**Decision:** persist runtime, immutable installer, bootstrap schema/policy/hardware and launch-owner identity on VMs. Get/List/adoption/drift use VM facts, including the actual boot-disk source image, rather than today's NodeClass or instance-type cache.
 
-GKE upgrades with changed consumers can block new sandbox provisioning until a reviewed controller compatibility update; there is no opt-out or semver-only bypass. Image pins do not bypass profile/artifact compatibility. Disable changes desired identity and cleans inherited enabling settings on new ordinary nodes, not running VMs; migrate workloads and plan disruption-controlled replacement before disabling/downgrading. See [Migration guidance](../MIGRATION.md#opt-in-gke-sandbox-and-boot-disk-read-permission).
+**Why / alternatives:** reconstructing identity from current desired state can misidentify ordinary or stale VMs as sandbox capacity. Filtering no-longer-launchable instances out of discovery would break lifecycle and garbage collection.
+
+**Consequences:** historical instances remain discoverable, malformed identity fails closed, and unknown comparison facts produce errors rather than invented drift. Sandbox adoption/drift requires `compute.disks.get`. Configuration/image/installer/profile changes can cause drift without converting the running node.
 
 ## Alternatives Considered
 
-- Copy a native sandbox pool: introduces a product prerequisite, source hardware leakage and credential-handling risk.
-- Synthesize GPU names or guess installer versions: violates public artifact identity and cannot honor exact build/COS pins.
-- Semver/marker-only compatibility: fails to detect changed consumer schemas.
-- Own RuntimeClasses or add scheduler special cases: duplicates admission/core responsibilities and breaks custom class names.
+The rejected alternatives and their tradeoffs are recorded alongside each decision above. None requires a new general-purpose deployment runner or automatic native-pool creation.
 
-## Test Plan and Acceptance Criteria
+## Opt-in setup and lifecycle
 
-Offline tests cover admission/hash behavior, strict public image selection and pinning, both architectures/roles, immutable OCI identities, bounded HTTP and archive handling, cache separation/refresh, fixture-backed compatibility, metadata preservation/cleanup, hardware/version matrices, NodePool ownership/gates, stale-claim/adoption/drift and ordinary regressions. The reviewed public bootstrap fixture is GKE `1.35.6-gke.1250001`; matching consumers on another release is compatibility evidence, not all-release native policy or runtime proof.
+See [prerequisites](../docs/sandbox-nodes.md#prerequisites-and-support-boundary), [GitOps ownership](../docs/sandbox-nodes.md#gitops-ownership) and [disabling](../docs/sandbox-nodes.md#identity-drift-and-disabling) for IAM/CRD updates, compatibility, network access and workload migration before disable/downgrade. Ordinary installations have no sandbox opt-in action.
 
-Before feature acceptance, separately authorized reconstructed CPU amd64/Arm64 and supported-GPU live tests must prove boot, runtime handling/isolation, networking/storage/system DaemonSets, CUDA and disable/drift behavior. Zero-node native comparisons prove template/artifact parity only, not runtime execution. Live acceptance/deployment requires separate environment-specific authorization; implementation and generation do not authorize cloud/Kubernetes/IAM writes.
+## Acceptance Criteria
+
+Offline regression tests and zero-node native-template comparisons establish API, artifact, bootstrap-policy, scheduling ownership and lifecycle contracts, not reconstructed-node boot, runtime isolation or CUDA execution. The three [sandbox E2E specs](../docs/sandbox-nodes.md#e2e-acceptance-specs) cover amd64/Arm64 runtime smoke checks, amd64 disable/drift and one L4 CUDA workload; they still require separately authorized live execution. Broader GPU, storage and system-workload compatibility remains a live acceptance responsibility. Writing or compiling these tests does not authorize cloud, Kubernetes or IAM mutations.

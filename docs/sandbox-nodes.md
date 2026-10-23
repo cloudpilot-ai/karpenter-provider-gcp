@@ -70,7 +70,7 @@ scheduling:
 
 This is a settings excerpt, not an instruction to overwrite the GKE-managed object. Administrators may own custom RuntimeClass names using handler `gvisor` and the same selector/toleration; use that name in the Pod. Karpenter has no dependency on the literal class name. Kubernetes admission supplies scheduling fields and any configured Pod overhead; upstream Karpenter already accounts for that overhead. Do not add a second sandbox overhead reservation.
 
-For each NodePool referencing a sandbox NodeClass, the `nodepool.sandbox` controller adds only:
+Native GKE itself adds the matching `sandbox.gke.io/runtime=gvisor` label and `sandbox.gke.io/runtime=gvisor:NoSchedule` taint to sandbox nodes by default. See [Run a regular Pod along with sandboxed Pods](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/sandbox-pods#run_a_regular_pod_along_with_sandboxed_pods). To reproduce that native scheduling contract, for each NodePool referencing a sandbox NodeClass the `nodepool.sandbox` controller adds only:
 
 - `spec.template.metadata.labels["sandbox.gke.io/runtime"]: gvisor`
 - The **permanent** `spec.template.spec.taints` entry `sandbox.gke.io/runtime=gvisor:NoSchedule` (not a startup taint).
@@ -78,7 +78,7 @@ For each NodePool referencing a sandbox NodeClass, the `nodepool.sandbox` contro
 
 It preserves preexisting identical user fields, conflicting values and unrelated labels/taints. Missing or conflicting **persisted** fields, runtime startup taints and contradictory requirements gate scheduling; scheduling does not repair its input NodePool in memory. Resolve conflicts in the manifest instead of expecting them to be overwritten.
 
-Ordinary capacity advertises absence of the runtime label; sandbox capacity advertises `gvisor`. An ordinary Pod without the toleration cannot trigger sandbox provisioning. A safely configured gVisor RuntimeClass Pod cannot receive ordinary capacity. Regular Pods that explicitly tolerate the sandbox taint may use sandbox nodes, matching native GKE behavior. A RuntimeClass with only a handler, but no runtime selector, is unsafe: it can allow ordinary placement and later fail at runtime. `SandboxReady` does not validate cluster-wide RuntimeClass policy.
+Ordinary capacity advertises absence of the runtime label; sandbox capacity advertises `gvisor`. An ordinary Pod without the toleration cannot trigger sandbox provisioning. A safely configured gVisor RuntimeClass Pod cannot receive ordinary capacity. Regular Pods that explicitly tolerate the sandbox taint may use sandbox nodes, matching native GKE behavior, but toleration alone does not select the gVisor runtime; that requires a RuntimeClass targeting handler `gvisor`. A RuntimeClass with only a handler, but no runtime selector, is unsafe: it can allow ordinary placement and later fail at runtime. `SandboxReady` does not validate cluster-wide RuntimeClass policy.
 
 See the [complete minimal example](examples/sandbox.md); it deliberately omits the auto-managed NodePool fields.
 
@@ -146,3 +146,25 @@ kubectl describe pod sandbox-example
 - **Adoption/drift comparison errors:** check controller `compute.disks.get` permission and actual boot-image/identity availability. Do not relabel an ordinary VM as sandboxed or patch identity to bypass guards.
 
 `SandboxReady=True` reports bootstrap capability only, not workload policy, node boot success, runtime isolation or CUDA acceptance. Conditions are periodically refreshed and launch rechecks prerequisites. Never dump or attach raw `kube-env`, source templates, instance metadata, certificates, tokens or ADC settings to diagnostics; use sanitized condition/error text and public artifact identities.
+
+## E2E acceptance specs
+
+`test/suites/sandbox` contains exactly three on-demand provisioning specs: amd64 `n2-standard-2` (60 GiB boot disk), Arm64 `t2a-standard-2` (60 GiB), and `g2-standard-4` with one whole L4 and the default driver (100 GiB). Each uses one uniquely owned pool/class and one runtime workload Pod. The amd64 spec also creates an ordinary negative-control Pod on the same pool, removes both demand Pods, then verifies disable/drift on the original claim without replacement. Cleanup deletes only the spec's Pods before its pool/class, retaining normal finalizers.
+
+All three carry `suite:sandbox`; only the CUDA spec also carries `suite:gpu`. Consequently, the existing **`standard` preset now includes both CPU sandbox cases**, the **`gpu` preset includes the sandbox CUDA case**, and **`--selection sandbox` selects all three**. Preset concurrency is unchanged. To select just these specs through the existing runner, after separate target-environment authorization:
+
+```bash
+go run ./hack/e2e-runner --selection sandbox
+```
+
+This is a live command, not an offline discovery command. The runner acquires a Kubernetes Lease **even when Ginkgo's `--dry-run` is passed after `--`**; do not use the runner for offline discovery. Writing, compiling or discovering tests is not permission to deploy or execute them.
+
+Before executing any preset that includes sandbox specs:
+
+- Install matching controller/CRDs and the reviewed IAM permissions, and satisfy the artifact/network and strict bootstrap-profile prerequisites above. The known reviewed source profile is `1.35.6-gke.1250001`; unknown consumers fail closed, without a bypass or silent skip.
+- Provide a GKE/admin-owned RuntimeClass with handler `gvisor`, a selector containing only `sandbox.gke.io/runtime: gvisor`, and one key-scoped `NoSchedule` toleration for that runtime (Equal `gvisor` or Exists). Its name is discovered read-only; the tests do not create/modify RuntimeClasses or native pools. Missing/unsafe prerequisites fail actionably rather than skipping.
+- Supply quota and zonal capacity for the pinned types. For CUDA, install the existing [GPU device plugin/driver prerequisites](gpu-nodes.md); required system DaemonSets must tolerate the sandbox and test-pool taints. The CUDA container requests/limits one GPU, preserves the pinned image's `/cuda-samples/sample` entrypoint, and must terminate successfully with `Test PASSED` in bounded logs.
+
+The pinned multiarch Python probe runs unprivileged without a service-account token. It compares its kernel release with the node's host kernel, checks Service DNS and verified TLS to the Kubernetes API using the public namespace CA, and exercises `emptyDir` I/O. These are runtime/isolation smoke checks, not a security audit or CSI acceptance. The GPU Pod includes that long-running probe, so tests inspect each container instead of waiting for whole-Pod Ready after CUDA exits.
+
+Pool CPU limits are 2/2/4 respectively, with `consolidateAfter: Never`, `expireAfter: Never` and an all-reason zero disruption budget set before demand. The specs assert one original claim. These are bounded operational guards, **not hard cloud allocation or billing guarantees**. Offline compile/label checks do not prove boot, isolation, networking or CUDA success; no live execution is claimed here.
