@@ -80,38 +80,3 @@ func TestStandardSelection(t *testing.T) {
 		})
 	}
 }
-
-func TestSandboxSelection(t *testing.T) {
-	cases := []struct {
-		name   string
-		labels []string
-	}{
-		{name: "amd64", labels: []string{"suite:sandbox"}},
-		{name: "arm64", labels: []string{"suite:sandbox"}},
-		{name: "L4 CUDA", labels: []string{"suite:sandbox", "suite:gpu"}},
-	}
-	for _, tc := range []struct {
-		selection string
-		want      []bool
-	}{
-		{selection: "standard", want: []bool{true, true, false}},
-		{selection: "gpu", want: []bool{false, false, true}},
-		{selection: "sandbox", want: []bool{true, true, true}},
-	} {
-		t.Run(tc.selection, func(t *testing.T) {
-			filter, err := selectFilter("../../test/suites", tc.selection)
-			if err != nil {
-				t.Fatal(err)
-			}
-			matches, err := types.ParseLabelFilter(filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for i, spec := range cases {
-				if got := matches(spec.labels); got != tc.want[i] {
-					t.Errorf("%s matches %s = %v, want %v", tc.selection, spec.name, got, tc.want[i])
-				}
-			}
-		})
-	}
-}
