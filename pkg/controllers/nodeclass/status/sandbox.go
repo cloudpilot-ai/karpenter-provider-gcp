@@ -23,7 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/sandbox"
 )
@@ -63,18 +62,6 @@ func (s *Sandbox) validate(ctx context.Context, nodeClass *v1alpha1.GCENodeClass
 	if err != nil {
 		return &sandbox.ConfigurationError{Reason: "bootstrap source template is unavailable"}
 	}
-	target, err := metadata.FromSourceTemplate(source)
-	if err != nil {
-		return &sandbox.ConfigurationError{Reason: "bootstrap source metadata has an invalid typed configuration"}
-	}
-	if err := metadata.ValidateSourceKubeEnv(target); err != nil {
-		return &sandbox.ConfigurationError{Reason: err.Error()}
-	}
-	if err := target.ApplySandbox(nil); err != nil {
-		return &sandbox.ConfigurationError{Reason: err.Error()}
-	}
-	manifests, _ := target.GetKubeEnvEntry("KUBE_MANIFESTS_TAR_URL")
-	server, _ := target.GetKubeEnvEntry("SERVER_BINARY_TAR_URL")
-	_, err = s.resolver.ResolveBootstrap(ctx, manifests, server)
+	_, err = sandbox.ResolveBootstrapSource(ctx, source, s.resolver)
 	return err
 }

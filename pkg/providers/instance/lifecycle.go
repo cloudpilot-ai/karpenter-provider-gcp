@@ -214,23 +214,11 @@ func bindSandboxPool(target *metadata.InstanceMetadata, class *v1alpha1.GCENodeC
 }
 
 func (p *DefaultProvider) adoptionBootstrapProfile(ctx context.Context, source *compute.Metadata) (sandbox.BootstrapProfile, error) {
-	target, err := metadata.FromSourceTemplate(source)
-	if err != nil {
-		return sandbox.BootstrapProfile{}, &sandbox.ConfigurationError{Reason: "bootstrap source has an invalid typed configuration"}
-	}
-	if err := metadata.ValidateSourceKubeEnv(target); err != nil {
-		return sandbox.BootstrapProfile{}, &sandbox.ConfigurationError{Reason: err.Error()}
-	}
-	if err := target.ApplySandbox(nil); err != nil {
-		return sandbox.BootstrapProfile{}, &sandbox.ConfigurationError{Reason: err.Error()}
-	}
-	manifests, _ := target.GetKubeEnvEntry("KUBE_MANIFESTS_TAR_URL")
-	server, _ := target.GetKubeEnvEntry("SERVER_BINARY_TAR_URL")
 	resolver := p.bootstrapResolver
 	if resolver == nil {
 		resolver = sandbox.SharedResolver()
 	}
-	return resolver.ResolveBootstrap(ctx, manifests, server)
+	return sandbox.ResolveBootstrapSource(ctx, source, resolver)
 }
 
 func renderLaunchMetadata(target *metadata.InstanceMetadata, class *v1alpha1.GCENodeClass, claim *karpv1.NodeClaim) (*compute.Metadata, error) {

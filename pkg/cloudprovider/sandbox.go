@@ -30,7 +30,6 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/sandbox"
 	sandboxcontract "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/sandbox"
@@ -148,20 +147,7 @@ func (c *CloudProvider) sandboxBootstrapProfile(ctx context.Context, class *v1al
 	if err != nil {
 		return sandbox.BootstrapProfile{}, &sandbox.ConfigurationError{Reason: "bootstrap source template is unavailable"}
 	}
-	target, err := metadata.FromSourceTemplate(source)
-	if err != nil {
-		return sandbox.BootstrapProfile{}, &sandbox.ConfigurationError{Reason: "bootstrap source metadata has an invalid typed configuration"}
-	}
-	if err := metadata.ValidateSourceKubeEnv(target); err != nil {
-		return sandbox.BootstrapProfile{}, &sandbox.ConfigurationError{Reason: err.Error()}
-	}
-	if err := target.ApplySandbox(nil); err != nil {
-		return sandbox.BootstrapProfile{}, &sandbox.ConfigurationError{Reason: err.Error()}
-	}
-	manifests, _ := target.GetKubeEnvEntry("KUBE_MANIFESTS_TAR_URL")
-	server, _ := target.GetKubeEnvEntry("SERVER_BINARY_TAR_URL")
-	profile, err := c.bootstrapResolver.ResolveBootstrap(ctx, manifests, server)
-	return profile, err
+	return sandbox.ResolveBootstrapSource(ctx, source, c.bootstrapResolver)
 }
 
 func validateClaimPoolIdentity(claim *karpv1.NodeClaim, pool *karpv1.NodePool) error {
