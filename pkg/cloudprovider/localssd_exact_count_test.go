@@ -269,7 +269,7 @@ func TestResolveInstanceTypeFromInstanceUsesFullCatalogForKeylessPool(t *testing
 		{Name: "n2d-standard-4", Requirements: scheduling.NewRequirements(scheduling.NewRequirement(v1alpha1.LabelInstanceLocalSsdCount, corev1.NodeSelectorOpIn, "4"))},
 	}
 	kc := reproClient{nodeClass: nodeClass, nodePool: nodePool}
-	provider := New(kc, reproEvents{}, reproTypes{variants: variants}, nil, nil)
+	provider := New(kc, reproEvents{}, reproTypes{variants: variants}, nil, nil, nil)
 	instance := &instance.Instance{Type: "n2d-standard-4", Labels: map[string]string{
 		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey):              "pool",
 		utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount): "4",
@@ -308,7 +308,7 @@ func TestResolveInstanceTypeFromInstanceIgnoresMissingOwners(t *testing.T) {
 				nodeClass: nodeClass, nodePool: nodePool,
 				nodePoolNotFound: tc.nodePoolNotFound, nodeClassNotFound: tc.nodeClassNotFound,
 			}
-			provider := New(kc, reproEvents{}, reproTypes{}, nil, nil)
+			provider := New(kc, reproEvents{}, reproTypes{}, nil, nil, nil)
 			resolved, err := provider.resolveInstanceTypeFromInstance(context.Background(), instance)
 			require.NoError(t, err)
 			require.Nil(t, resolved)
@@ -393,11 +393,11 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	}}
 	poolReq = append(poolReq, config.poolReq...)
 	pool := &karpv1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "pool", UID: types.UID("pool")}, Spec: karpv1.NodePoolSpec{Template: karpv1.NodeClaimTemplate{Spec: karpv1.NodeClaimTemplateSpec{Requirements: poolReq, NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"}}}}}
-	kc := reproClient{nodeClass: nclass}
+	kc := reproClient{nodeClass: nclass, nodePool: pool}
 	typeProvider := reproTypes{variants: variants, machine: mt}
 	menu := variants
 	if config.useProviderMenu {
-		menuProvider := New(kc, reproEvents{}, typeProvider, nil, nil)
+		menuProvider := New(kc, reproEvents{}, typeProvider, nil, nil, nil)
 		var err error
 		menu, err = menuProvider.GetInstanceTypes(ctx, pool)
 		require.NoError(t, err)
@@ -482,7 +482,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	svc, err := compute.NewService(ctx, googleoption.WithEndpoint(srv.URL+"/"), googleoption.WithoutAuthentication())
 	require.NoError(t, err)
 	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", svc, reproGKE{}, nil, typeProvider, reproTemplate{}, reproVersion{}, unavailableofferings.NewUnavailableOfferings())
-	cp := New(kc, reproEvents{}, typeProvider, ip, nil)
+	cp := New(kc, reproEvents{}, typeProvider, ip, nil, nil)
 	if len(results.NewNodeClaims) > 0 {
 		generated := results.NewNodeClaims[0].ToNodeClaim()
 		generated.Name = "claim"

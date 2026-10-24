@@ -654,6 +654,18 @@ spec:
                 - message: invalid resourceManagerTags key
                   rule: self.all(k, k.matches('^tagKeys/[0-9]+$') || (!k.startsWith('tagKeys/')
                     && k.matches('^[^/]+/[^/]+$')))
+              sandboxConfig:
+                description: SandboxConfig enables GKE Sandbox. Omission provisions
+                  ordinary nodes.
+                properties:
+                  type:
+                    description: Type is the sandbox runtime. Only GVISOR is supported.
+                    enum:
+                    - GVISOR
+                    type: string
+                required:
+                - type
+                type: object
               serviceAccount:
                 description: ServiceAccount is the GCP IAM service account email to
                   assign to the instance
@@ -714,6 +726,12 @@ spec:
             x-kubernetes-validations:
             - message: subnetRangeName and subnetRangeNames are mutually exclusive
               rule: '!(has(self.subnetRangeName) && has(self.subnetRangeNames))'
+            - message: GVISOR requires only ContainerOptimizedOS selectors and imageFamily
+              rule: '!has(self.sandboxConfig) || ((!has(self.imageFamily) || self.imageFamily
+                == ''ContainerOptimizedOS'') && self.imageSelectorTerms.all(t, (!has(t.family)
+                || t.family == ''ContainerOptimizedOS'') && (!has(t.alias) || t.alias.startsWith(''ContainerOptimizedOS@''))))'
+            - message: GVISOR does not support GPU time-sharing
+              rule: '!has(self.sandboxConfig) || !has(self.gpuSharingConfig)'
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass
             properties:
@@ -817,6 +835,23 @@ spec:
                         - operator
                         type: object
                       type: array
+                    sandboxInstaller:
+                      description: SandboxInstaller binds the immutable runtime artifact
+                        to this image.
+                      properties:
+                        digest:
+                          description: Digest is the sha256 digest of the validated
+                            OCI manifest or index.
+                          pattern: ^sha256:[a-f0-9]{64}$
+                          type: string
+                        version:
+                          description: Version is the dated installer tag derived
+                            from the image label.
+                          type: string
+                      required:
+                      - digest
+                      - version
+                      type: object
                     sourceImage:
                       description: SourceImage represents the source image, format
                         like projects/gke-node-images/global/images/gke-1309-gke1046000-cos-113-18244-291-9-c-pre

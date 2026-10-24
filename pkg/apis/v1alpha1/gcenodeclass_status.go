@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	ConditionTypeImagesReady = "ImagesReady"
+	ConditionTypeImagesReady  = "ImagesReady"
+	ConditionTypeSandboxReady = "SandboxReady"
 )
 
 // GCENodeClassStatus contains the resolved state of the GCENodeClass
@@ -57,6 +58,9 @@ type SubnetRangeStatus struct {
 
 // Image contains resolved image selector values utilized for node launch
 type Image struct {
+	// SandboxInstaller binds the immutable runtime artifact to this image.
+	// +optional
+	SandboxInstaller *SandboxInstaller `json:"sandboxInstaller,omitempty"`
 	// SourceImage represents the source image, format like projects/gke-node-images/global/images/gke-1309-gke1046000-cos-113-18244-291-9-c-pre
 	// +required
 	SourceImage string `json:"sourceImage"`
@@ -66,9 +70,11 @@ type Image struct {
 }
 
 func (in *GCENodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
-	return status.NewReadyConditions(
-		ConditionTypeImagesReady,
-	).For(in, opts...)
+	conditions := []string{ConditionTypeImagesReady}
+	if in.SandboxEnabled() {
+		conditions = append(conditions, ConditionTypeSandboxReady)
+	}
+	return status.NewReadyConditions(conditions...).For(in, opts...)
 }
 
 func (in *GCENodeClass) GetConditions() []status.Condition {
@@ -77,4 +83,15 @@ func (in *GCENodeClass) GetConditions() []status.Condition {
 
 func (in *GCENodeClass) SetConditions(conditions []status.Condition) {
 	in.Status.Conditions = conditions
+}
+
+// SandboxInstaller is a public, content-verified gVisor installer identity.
+type SandboxInstaller struct {
+	// Version is the dated installer tag derived from the image label.
+	// +required
+	Version string `json:"version"`
+	// Digest is the sha256 digest of the validated OCI manifest or index.
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +required
+	Digest string `json:"digest"`
 }

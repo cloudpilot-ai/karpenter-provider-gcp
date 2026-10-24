@@ -20,11 +20,14 @@ import (
 	"context"
 
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 type Image struct {
-	SourceImage  string
-	Requirements scheduling.Requirements
+	SandboxInstaller *v1alpha1.SandboxInstaller
+	SourceImage      string
+	Requirements     scheduling.Requirements
 }
 
 type Images []Image

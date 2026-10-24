@@ -239,7 +239,7 @@ func TestCreateMatchesAdoptedCountOutsideFilteredCandidates(t *testing.T) {
 
 	nodeClass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
-	claim := &karpv1.NodeClaim{Spec: karpv1.NodeClaimSpec{
+	claim := &karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{karpv1.NodePoolLabelKey: "pool"}}, Spec: karpv1.NodeClaimSpec{
 		NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"},
 		Resources:    karpv1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("80Gi")}},
 	}}
@@ -255,7 +255,7 @@ func TestCreateMatchesAdoptedCountOutsideFilteredCandidates(t *testing.T) {
 			t.Parallel()
 			inst := instanceWithSSDLabel("n2d-standard-8", tc.count)
 			inst.Name = "karpenter-claim"
-			provider := New(reproClient{nodeClass: nodeClass}, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{zero, two}}, existingInstanceProvider{inst: inst}, nil)
+			provider := New(reproClient{nodeClass: nodeClass, nodePool: &karpv1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "pool"}, Spec: karpv1.NodePoolSpec{Template: karpv1.NodeClaimTemplate{Spec: karpv1.NodeClaimTemplateSpec{NodeClassRef: claim.Spec.NodeClassRef}}}}}, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{zero, two}}, existingInstanceProvider{inst: inst}, nil, nil)
 			got, err := provider.Create(karpopts.ToContext(context.Background(), &karpopts.Options{}), claim)
 			if tc.wantError {
 				require.ErrorContains(t, err, "local SSD count")

@@ -13,6 +13,7 @@ includedPermissions:
   - compute.instances.setServiceAccount
   - compute.instances.setTags
   # Compute Engine — infrastructure discovery
+  - compute.disks.get  # sandbox boot-image identity lookup
   - compute.disks.create  # implicit: required by Instances.Insert (boot disk)
   - compute.disks.setLabels  # required by Instances.Insert when initializing labeled disks
   - compute.images.get

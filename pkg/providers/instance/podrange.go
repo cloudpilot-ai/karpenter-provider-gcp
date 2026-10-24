@@ -97,6 +97,17 @@ func rejectedPodRangeMessage(message, rangeName string) bool {
 		(strings.Contains(lower, "not found") || strings.Contains(lower, "not valid") || strings.Contains(lower, "does not exist"))
 }
 
+func (p *DefaultProvider) setupLaunchNetwork(ctx context.Context, cluster *containerv1.Cluster, nodeClass *v1alpha1.GCENodeClass, target *metadata.InstanceMetadata, podRange string) ([]*compute.NetworkInterface, error) {
+	interfaces, err := p.setupPodNetwork(cluster, nodeClass, target, podRange)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.configureDualStackNetwork(ctx, cluster, interfaces); err != nil {
+		return nil, fmt.Errorf("configuring dual-stack networking: %w", err)
+	}
+	return interfaces, nil
+}
+
 func (p *DefaultProvider) setupPodNetwork(cluster *containerv1.Cluster, nodeClass *v1alpha1.GCENodeClass, target *metadata.InstanceMetadata, podRange string) ([]*compute.NetworkInterface, error) {
 	interfaces := p.setupNetworkInterfaces(cluster, nodeClass)
 	if cluster.NetworkConfig == nil {

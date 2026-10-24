@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +55,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/sandbox"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
@@ -97,6 +99,7 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	bootstrapResolver        sandbox.BootstrapResolver
 	gkeProvider              gke.Provider
 	subnetProvider           subnet.Provider
 	instanceTypeProvider     instancetype.Provider
@@ -126,6 +129,7 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 	unavailableOfferings *unavailableofferings.UnavailableOfferings,
 ) Provider {
 	return &DefaultProvider{
+		bootstrapResolver:        sandbox.SharedResolver(),
 		gkeProvider:              gkeProvider,
 		subnetProvider:           subnetProvider,
 		instanceTypeProvider:     instanceTypeProvider,
@@ -394,12 +398,13 @@ func lastPathSegment(value string) string {
 	return value
 }
 
-func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance, capacityType string) *Instance {
+func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance) *Instance {
 	zone := lastPathSegment(existingInstance.Zone)
 	machineType := lastPathSegment(existingInstance.MachineType)
 
 	log.FromContext(ctx).Info("Found existing instance for NodeClaim", "instance", existingInstance.Name, "zone", zone)
 	return &Instance{
+		Sandbox:      sandboxIdentityFromVM(existingInstance),
 		InstanceID:   existingInstance.Name,
 		Name:         existingInstance.Name,
 		Type:         machineType,
@@ -407,7 +412,7 @@ func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingIns
 		ProjectID:    p.projectID,
 		ImageID:      resolveInstanceImage(existingInstance),
 		CreationTime: parseCreationTime(existingInstance.CreationTimestamp),
-		CapacityType: capacityType,
+		CapacityType: resolveCapacityType(existingInstance.Scheduling),
 		Labels:       existingInstance.Labels,
 		Tags:         existingInstance.Labels,
 		Status:       existingInstance.Status,
@@ -427,7 +432,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	if existingInstance, err := p.findInstanceByNodeClaim(ctx, nodeClaim); err != nil {
 		log.FromContext(ctx).Error(err, "failed to check if instance exists in region", "nodeClaim", nodeClaim.Name)
 	} else if existingInstance != nil {
-		return p.adoptExistingInstance(ctx, existingInstance, p.getCapacityType(nodeClaim, instanceTypes)), nil
+		return p.adoptForClaim(ctx, existingInstance, nodeClass, nodeClaim, instanceTypes)
 	}
 
 	launchInstanceTypes, err := validateLaunchInstanceTypes(launchInstanceTypes, rejectedConfigurable)
@@ -461,6 +466,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
 
 		return &Instance{
+			Sandbox:    sandboxIdentityFromVM(instance),
 			InstanceID: instance.Name,
 			Name:       instance.Name,
 			// Refer to https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/45#discussion_r2115586327
@@ -470,11 +476,11 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			Location:     zone,
 			ProjectID:    p.projectID,
 			ImageID:      resolveInstanceImage(instance),
-			CreationTime: time.Now(),
-			CapacityType: capacityType,
+			CreationTime: parseCreationTime(instance.CreationTimestamp),
+			CapacityType: resolveCapacityType(instance.Scheduling),
 			Tags:         instance.Labels,
 			Labels:       instance.Labels,
-			Status:       InstanceStatusProvisioning,
+			Status:       lo.Ternary(instance.Status == "", InstanceStatusProvisioning, instance.Status),
 		}, nil
 	}
 
@@ -540,6 +546,9 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 			return nil, "", false, fmt.Errorf("failed to check if instance exists: %w", err)
 		}
 		if exists {
+			if err := p.validateAdoption(ctx, existing, nodeClass, nodeClaim, []*cloudprovider.InstanceType{instanceType}, sourceMetadata); err != nil {
+				return nil, "", false, adoptionError(err)
+			}
 			if candidate != zone {
 				log.FromContext(ctx).Info("adopting instance from an earlier attempt instead of creating a duplicate in another zone",
 					"instanceName", instanceName, "existingZone", candidate, "selectedZone", zone)
@@ -817,9 +826,9 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int,
+	nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int, selectedImage *v1alpha1.Image,
 ) ([]*compute.AttachedDisk, error) {
-	disks := nodeClass.Spec.Disks
+	disks := slices.Clone(nodeClass.Spec.Disks)
 	sort.Slice(disks, func(i, j int) bool {
 		return disks[i].Boot
 	})
@@ -860,14 +869,11 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 		}
 
 		if disk.Boot {
-			targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
-				reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
-				return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
-			})
-			if !found {
-				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
+			sourceImage, err := bootImageSource(nodeClass, instanceType, selectedImage)
+			if err != nil {
+				return nil, err
 			}
-			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+			attachedDisk.InitializeParams.SourceImage = sourceImage
 		} else {
 			attachedDisk.DeviceName = secondaryBootDiskImageDeviceName(disk.SecondaryBootImage)
 			attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
@@ -912,26 +918,20 @@ func (p *DefaultProvider) scratchDisk(zone string) *compute.AttachedDisk {
 }
 
 func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, podRange string) (*compute.Instance, error) {
-	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClaim, nodeClass, zone, ssdCount)
-	if err != nil {
-		return nil, fmt.Errorf("rendering disk properties: %w", err)
-	}
-
 	isGPUInstance := instanceTypeHasGPU(instanceType)
-
-	// Setup metadata
-	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount)
+	instanceMetadata, selectedImage, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount)
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
-	interfaces, err := p.setupPodNetwork(clusterConfig, nodeClass, instanceMetadata, podRange)
+	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClaim, nodeClass, zone, ssdCount, selectedImage)
+	if err != nil {
+		return nil, fmt.Errorf("rendering disk properties: %w", err)
+	}
+	interfaces, err := p.setupLaunchNetwork(ctx, clusterConfig, nodeClass, instanceMetadata, podRange)
 	if err != nil {
 		return nil, err
 	}
-	if err := p.configureDualStackNetwork(ctx, clusterConfig, interfaces); err != nil {
-		return nil, fmt.Errorf("configuring dual-stack networking: %w", err)
-	}
-	computeMetadata, err := instanceMetadata.ToComputeMetadata()
+	computeMetadata, err := renderLaunchMetadata(instanceMetadata, nodeClass, nodeClaim)
 	if err != nil {
 		return nil, fmt.Errorf("rendering instance metadata: %w", err)
 	}
@@ -1086,13 +1086,22 @@ func podCIDRRange(maxPods int32) int32 {
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance.
-func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool, ssdCount int) (*metadata.InstanceMetadata, error) {
+func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool, ssdCount int) (*metadata.InstanceMetadata, *v1alpha1.Image, error) {
+	if err := sandbox.ValidateConfiguration(nodeClass); err != nil {
+		return nil, nil, err
+	}
 	target, err := metadata.FromSourceTemplate(sourceMetadata)
 	if err != nil {
-		return nil, err
+		if nodeClass.SandboxEnabled() {
+			return nil, nil, &sandbox.ConfigurationError{Reason: "bootstrap source metadata has an invalid typed configuration"}
+		}
+		return nil, nil, err
 	}
-	if err := validateSourceKubeEnv(target); err != nil {
-		return nil, err
+	if err := metadata.ValidateSourceKubeEnv(target); err != nil {
+		if nodeClass.SandboxEnabled() {
+			return nil, nil, &sandbox.ConfigurationError{Reason: err.Error()}
+		}
+		return nil, nil, err
 	}
 	target.SetCustomMetadata(metadata.CustomMetadata(nodeClass.Spec.Metadata))
 	provisioningModel := "standard"
@@ -1109,13 +1118,24 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 		applyNodeClassKubeletConfig(config, nodeClass.Spec.KubeletConfiguration)
 		applySpotShutdownKubeletConfig(config, provisioningModel)
 	})
+	if nodeClass.SandboxEnabled() {
+		manifests, _ := target.GetKubeEnvEntry("KUBE_MANIFESTS_TAR_URL")
+		server, _ := target.GetKubeEnvEntry("SERVER_BINARY_TAR_URL")
+		if _, _, err := sandbox.ValidateBootstrapURLs(manifests, server); err != nil {
+			return nil, nil, err
+		}
+	}
 	if err := p.patchKubeEnvServerBinaryForArch(ctx, target, instanceType); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p.buildTargetMetadata(ctx, target, sourceMetadata, nodeClass, instanceType, nodeClaim, provisioningModel, isGPUInstance)
+	selectedImage, err := p.prepareSandbox(ctx, target, nodeClass, instanceType)
+	if err != nil {
+		return nil, nil, err
+	}
 	patchLocalSSDMetadata(target, nodeClass, ssdCount)
 
-	return target, nil
+	return target, selectedImage, nil
 }
 
 func (p *DefaultProvider) buildTargetMetadata(ctx context.Context, target *metadata.InstanceMetadata, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, provisioningModel string, isGPUInstance bool) {
@@ -1656,6 +1676,9 @@ func (p *DefaultProvider) Delete(ctx context.Context, providerID string) error {
 }
 
 func (p *DefaultProvider) CreateTags(ctx context.Context, providerID string, tags map[string]string) error {
+	if _, ok := tags[metadata.SandboxRuntimeInstanceLabel]; ok {
+		return &sandbox.ConfigurationError{Reason: "sandbox runtime instance label is provider-owned"}
+	}
 	projectID, zone, instanceName, err := parseGCEProviderID(providerID)
 	if err != nil {
 		return fmt.Errorf("failed to parse provider ID: %w", err)
@@ -1743,13 +1766,21 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 			}
 
 			for _, inst := range page.Items {
+				imageID := getBootImageID(inst)
+				if sandboxIdentityFromVM(inst) != nil {
+					imageID = ""
+					if image, err := p.sandboxBootImage(ctx, inst, zone); err == nil {
+						imageID = image
+					}
+				}
 				instance := &Instance{
+					Sandbox:      sandboxIdentityFromVM(inst),
 					InstanceID:   inst.Name,
 					Name:         inst.Name,
 					Type:         inst.MachineType[strings.LastIndex(inst.MachineType, "/")+1:], // just for matching "e2-standard-2"
 					Location:     zone,
 					ProjectID:    p.projectID,
-					ImageID:      getBootImageID(inst),
+					ImageID:      imageID,
 					CreationTime: parseCreationTime(inst.CreationTimestamp),
 					CapacityType: resolveCapacityType(inst.Scheduling),
 					Labels:       inst.Labels,

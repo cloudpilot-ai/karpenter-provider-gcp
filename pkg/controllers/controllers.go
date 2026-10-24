@@ -35,6 +35,7 @@ import (
 	nodeclasshash "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/hash"
 	nodeclassstatus "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/status"
 	nodeclasstermination "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclass/termination"
+	nodepoolsandbox "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepool/sandbox"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/instancetype"
 	controllerspricing "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/providers/pricing"
@@ -66,8 +67,9 @@ func NewController(
 	subnetProvider subnet.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
-		nodeclassstatus.NewController(kubeClient, imageProvider, gkeProvider, subnetProvider),
+		nodeclassstatus.NewController(kubeClient, imageProvider, gkeProvider, subnetProvider, nodePoolTemplateProvider),
 		nodepooltemplate.NewController(nodePoolTemplateProvider),
+		nodepoolsandbox.NewController(kubeClient),
 		nodeclasstermination.NewController(kubeClient),
 		nodeclasshash.NewController(kubeClient),
 		instancetype.NewController(instanceTypeProvider),

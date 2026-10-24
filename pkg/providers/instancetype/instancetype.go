@@ -176,7 +176,7 @@ func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass 
 	kcHash, _ := hashstructure.Hash(nodeClass.Spec.KubeletConfiguration, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	disksHash, _ := hashstructure.Hash(nodeClass.Spec.Disks, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	gpuSharingHash, _ := hashstructure.Hash(nodeClass.Spec.GPUSharingConfig, hashstructure.FormatV2, nil)
-	key := fmt.Sprintf("%d-%d-%d-%s-%d", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode, gpuSharingHash)
+	key := fmt.Sprintf("%d-%d-%d-%s-%d-%t", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode, gpuSharingHash, nodeClass.SandboxEnabled())
 
 	if item, ok := p.staticInstanceTypesCache.Get(key); ok {
 		return item.([]staticInstanceType), nil
@@ -220,7 +220,9 @@ func (p *DefaultProvider) injectOfferings(ctx context.Context, staticInstanceTyp
 
 		it := cached.instanceType.DeepCopy()
 		it.Offerings = offerings
+		runtimeRequirement := it.Requirements.Get(v1alpha1.LabelSandboxRuntime)
 		it.Requirements = computeRequirements(cached.machineType, offerings, p.authOptions.Region, cached.ssdCount, cached.gpuSharing)
+		it.Requirements.Add(runtimeRequirement)
 		instanceTypes = append(instanceTypes, it)
 	}
 	return instanceTypes

@@ -71,7 +71,7 @@ func TestValidateSourceKubeEnv(t *testing.T) {
 			target, err := metadata.FromSourceTemplate(source)
 			require.NoError(t, err)
 
-			err = validateSourceKubeEnv(target)
+			err = metadata.ValidateSourceKubeEnv(target)
 			if tt.want == "" {
 				require.NoError(t, err)
 				return

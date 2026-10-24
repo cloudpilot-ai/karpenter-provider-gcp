@@ -39,6 +39,7 @@ func main() {
 		op.InstanceTypeProvider,
 		op.InstanceProvider,
 		op.InstanceTypeStore,
+		op.NodePoolTemplateProvider,
 	)
 
 	lo.Must0(op.AddHealthzCheck("cloud-provider", gcpCloudProvider.LivenessProbe))

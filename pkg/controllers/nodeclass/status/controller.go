@@ -35,6 +35,8 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/sandbox"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
@@ -45,13 +47,15 @@ type nodeClassStatusReconciler interface {
 type Controller struct {
 	kubeClient client.Client
 
+	sandbox     *Sandbox
 	image       *Image
 	subnetRange *SubnetRange
 }
 
-func NewController(kubeClient client.Client, imageProvider imagefamily.Provider, gkeProvider gke.Provider, subnetProvider subnet.Provider) *Controller {
+func NewController(kubeClient client.Client, imageProvider imagefamily.Provider, gkeProvider gke.Provider, subnetProvider subnet.Provider, sourceProvider nodepooltemplate.Provider) *Controller {
 	return &Controller{
 		kubeClient:  kubeClient,
+		sandbox:     &Sandbox{sourceProvider: sourceProvider, resolver: sandbox.SharedResolver()},
 		image:       &Image{imageProvider: imageProvider},
 		subnetRange: &SubnetRange{gkeProvider: gkeProvider, subnetProvider: subnetProvider},
 	}
@@ -78,6 +82,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	for _, reconciler := range []nodeClassStatusReconciler{
 		c.image,
 		c.subnetRange,
+		c.sandbox,
 	} {
 		res, err := reconciler.Reconcile(ctx, nodeClass)
 		errs = multierr.Append(errs, err)

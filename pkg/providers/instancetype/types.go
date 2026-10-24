@@ -35,6 +35,7 @@ import (
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
+	sandboxcontract "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/sandbox"
 )
 
 // staticKubeProxyCPUMilliCore matches the CPU request on GKE's node-owned
@@ -53,6 +54,7 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 		return nil
 	}
 	it.Requirements = computeRequirements(mt, offerings, region, ssdCount, nodeClass.Spec.GPUSharingConfig)
+	it.Requirements.Add(sandboxcontract.RuntimeRequirement(nodeClass.SandboxEnabled()))
 	it.Offerings = offerings
 	return it
 }
@@ -124,7 +126,7 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 
 	it := &cloudprovider.InstanceType{
 		Name:         lo.FromPtr(mt.Name),
-		Requirements: scheduling.NewRequirements(),
+		Requirements: scheduling.NewRequirements(sandboxcontract.RuntimeRequirement(nodeClass.SandboxEnabled())),
 		Capacity:     computeCapacity(ctx, mt, nodeClass, totalStorageBytes),
 		Overhead:     &overhead,
 	}

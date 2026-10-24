@@ -30,7 +30,7 @@ func scanImages(ctx context.Context, service *compute.Service, project string, v
 	for {
 		call := service.Images.List(project).
 			OrderBy("creationTimestamp desc").
-			Fields(googleapi.Field("nextPageToken,items(name,creationTimestamp,status,deprecated/state)"))
+			Fields(googleapi.Field("nextPageToken,items(name,creationTimestamp,status,deprecated/state,architecture,labels)"))
 		if pageToken != "" {
 			call.PageToken(pageToken)
 		}

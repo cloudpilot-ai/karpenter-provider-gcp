@@ -40,6 +40,7 @@ import (
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/networking"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/provisioning"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/repair"
+	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/sandbox"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/storage"
 )
 

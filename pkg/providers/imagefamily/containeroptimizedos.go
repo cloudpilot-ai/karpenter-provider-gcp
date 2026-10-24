@@ -43,38 +43,48 @@ type ContainerOptimizedOS struct {
 }
 
 func (c *ContainerOptimizedOS) ResolveImages(ctx context.Context, version string) (Images, error) {
+	sourceImage, err := c.resolveSourceImage(ctx, version)
+	if err != nil {
+		return nil, err
+	}
+	return c.resolveImages(sourceImage), nil
+}
+
+// resolveSourceImage selects the ordinary CPU anchor without constructing role
+// variants. Sandbox resolution discovers GPU and Arm images from the catalog.
+func (c *ContainerOptimizedOS) resolveSourceImage(ctx context.Context, version string) (string, error) {
 	if version == "latest" {
 		sourceImage, err := c.resolveLatestCOSImage(ctx)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve COS GKE image from image project")
-			return nil, err
+			return "", err
 		}
-		return c.resolveImages(sourceImage), nil
+		return sourceImage, nil
 	}
 
 	if k8sKey, build, ok := ParseGKEVersion(version); ok {
 		// Channel-based resolution: use exact-build filter; no fallback on miss.
 		sourceImage, err := c.resolveExactBuildCOSImage(ctx, k8sKey, build)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
-		return c.resolveImages(sourceImage), nil
+		return sourceImage, nil
 	}
 
 	// Explicit milestone version pin via alias (e.g. "125.19216.104.126").
 	if !cosVersionRe.MatchString(version) {
-		return nil, &imageResolutionError{msg: fmt.Sprintf(
+		return "", &imageResolutionError{msg: fmt.Sprintf(
 			"invalid ContainerOptimizedOS version %q: must be 'latest', a GKE version (e.g. '1.34.6-gke.1068000'), or 'milestone.build.build.build' (e.g. '125.19216.104.126')", version)}
 	}
 	sourceImage, err := c.resolveLatestCOSImage(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to resolve COS GKE image from image project")
-		return nil, err
+		return "", err
 	}
 	versionRe := regexp.MustCompile(`cos-\d+-([\d-]+)-c-pre`)
 	targetVersion := renderVersion(version)
 	modifiedImage := versionRe.ReplaceAllString(sourceImage, "cos-"+targetVersion+"-c-pre")
-	return c.resolveImages(modifiedImage), nil
+	return modifiedImage, nil
 }
 
 // ParseGKEVersion parses a GKE version string (e.g. "1.34.6-gke.1068000") into
