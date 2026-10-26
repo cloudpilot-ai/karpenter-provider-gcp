@@ -100,6 +100,14 @@ The bare `Ubuntu` family name is not supported. Use `Ubuntu2404` or `Ubuntu2204`
 
 > **Note:** Ubuntu images are resolved per architecture, independently, from the `ubuntu-os-gke-cloud` catalog for the cluster's Kubernetes minor version. Only standard date builds are selected — `vYYYYMMDD`, optionally with a trailing letter (for example, `v20260416a` may be resolved by `version: latest`). Specialized GKE variant builds are excluded from selection, such as `-tpu`, `-cgroupsv1`, or `-linux64k`. If an architecture (for example, arm64) has no usable image for the cluster's Kubernetes minor version, resolution fails, and the GCENodeClass's `ImagesReady` condition reports `ImageResolutionFailed`. Use [Finding Available Versions](image-management.md#finding-available-versions) to confirm a date is published for both amd64 and arm64 before pinning, regardless of the NodePool's own architecture. amd64 and arm64 builds for a given date are published independently, so a `version: vYYYYMMDD` pin available for one architecture may not exist for the other. Pinning a date present for only one of the two architectures fails the same way, rather than silently synthesizing a nonexistent image.
 
+## Sandbox image selection
+
+With `spec.sandboxConfig.type: GVISOR`, **every** selector must be compatible with Container-Optimized OS. Ubuntu aliases/families, mixed terms and contradictory `imageFamily` overrides are rejected. Explicit IDs require actual READY, non-deprecated public GKE COS provenance in `gke-node-images`, plus the correct architecture and image role; setting a COS override does not make copied/custom images supported.
+
+CPU nodes use ordinary COS images. GPU nodes require discovered exact-GKE-build sandbox variants (`-gv-nvda` or older `-gvisor-nvda`), including Arm64 where published, rather than ordinary GPU images or synthesized names. Explicit IDs, channels and COS pins remain authoritative: a CPU ID does not imply a GPU variant, and a COS pin must also match the GPU variant's COS build. Without a COS pin, the specialized GPU COS build can differ from the CPU build within the selected GKE release.
+
+Each image's `gvisor-version` resolves to its own immutable public installer digest in `status.images[].sandboxInstaller`. Image pins do not bypass artifact availability, effective-bootstrap compatibility or installer/profile drift. See [Sandbox nodes](sandbox-nodes.md) for the strict complete-consumer compatibility gate, upgrade implications and current validation boundary.
+
 ## Version formats
 
 | Family                 | `version: latest`                           | Version pin format            | Example             |

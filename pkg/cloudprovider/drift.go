@@ -37,9 +37,13 @@ func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv
 		return drifted
 	}
 
-	if drifted := c.isImageDrifted(nodeClaim, nodeClass); drifted != "" {
-		log.FromContext(ctx).Info("image drifted", "drifted", drifted)
-		return drifted
+	// Sandbox image comparisons require actual VM boot-disk facts. A stale or
+	// empty NodeClaim ImageID must not preempt that lifecycle comparison.
+	if !requiresSandboxDrift(nodeClaim, nodeClass) {
+		if drifted := c.isImageDrifted(nodeClaim, nodeClass); drifted != "" {
+			log.FromContext(ctx).Info("image drifted", "drifted", drifted)
+			return drifted
+		}
 	}
 
 	return ""

@@ -44,6 +44,8 @@ import (
 	gcperrors "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/errors"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/sandbox"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
 )
@@ -64,6 +66,8 @@ type CloudProvider struct {
 	instanceTypeProvider instancetype.Provider
 	instanceProvider     instance.Provider
 	instanceTypeStore    *nodeoverlay.InstanceTypeStore
+	sourceProvider       nodepooltemplate.Provider
+	bootstrapResolver    sandbox.BootstrapResolver
 }
 
 func New(kubeClient client.Client,
@@ -71,6 +75,7 @@ func New(kubeClient client.Client,
 	instanceTypeProvider instancetype.Provider,
 	instanceProvider instance.Provider,
 	store *nodeoverlay.InstanceTypeStore,
+	sourceProvider nodepooltemplate.Provider,
 ) *CloudProvider {
 	return &CloudProvider{
 		kubeClient:           kubeClient,
@@ -78,17 +83,26 @@ func New(kubeClient client.Client,
 		instanceTypeProvider: instanceTypeProvider,
 		instanceProvider:     instanceProvider,
 		instanceTypeStore:    store,
+		sourceProvider:       sourceProvider,
+		bootstrapResolver:    sandbox.SharedResolver(),
 	}
 }
 
 // Create a NodeClaim given the constraints.
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*karpv1.NodeClaim, error) {
+	if !managedNodeClassRef(nodeClaim.Spec.NodeClassRef) {
+		return nil, cloudprovider.NewNodeClassNotReadyError(&sandbox.ConfigurationError{Reason: "NodeClaim has no managed GCENodeClass reference"})
+	}
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			c.recorder.Publish(cloudproviderevents.NodeClaimFailedToResolveNodeClass(nodeClaim))
 		}
-		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
+		return nil, runtimeCreateError(fmt.Errorf("resolving node class, %w", err))
+	}
+
+	if err := c.validateRuntimeCreate(ctx, nodeClaim, nodeClass); err != nil {
+		return nil, runtimeCreateError(err)
 	}
 
 	nodeClassReady := nodeClass.StatusConditions().Get(status.ConditionReady)
@@ -99,17 +113,14 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving NodeClass readiness, NodeClass is in Ready=Unknown, %s", nodeClassReady.Message), "NodeClassReadinessUnknown", "NodeClass is in Ready=Unknown")
 	}
 
-	instanceTypes, err := c.resolveInstanceTypes(ctx, nodeClaim, nodeClass)
+	instanceTypes, err := c.resolveLaunchInstanceTypes(ctx, nodeClaim, nodeClass)
 	if err != nil {
-		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving instance types, %w", err), "InstanceTypeResolutionFailed", "Error resolving instance types")
-	}
-	if len(instanceTypes) == 0 {
-		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all requested instance types were unavailable during launch"))
+		return nil, err
 	}
 
-	instance, err := c.instanceProvider.Create(ctx, nodeClass, nodeClaim, instanceTypes)
+	instance, err := c.createRuntimeInstance(ctx, nodeClass, nodeClaim, instanceTypes)
 	if err != nil {
-		return nil, fmt.Errorf("creating instance, %w", err)
+		return nil, err
 	}
 
 	instanceType, err := c.resolveCreatedInstanceType(ctx, nodeClass, instanceTypes, instance)
@@ -117,12 +128,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, err
 	}
 
-	nc := c.instanceToNodeClaim(instance, instanceType)
-	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-		v1alpha1.AnnotationGCENodeClassHash:        nodeClass.Hash(),
-		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
-	})
-	return nc, nil
+	return c.createdNodeClaim(instance, instanceType, nodeClass), nil
 }
 
 func (c *CloudProvider) resolveCreatedInstanceType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType, inst *instance.Instance) (*cloudprovider.InstanceType, error) {
@@ -256,6 +262,14 @@ func (c *CloudProvider) LivenessProbe(req *http.Request) error {
 // Non-zero configurable SSD counts require the count label on the NodePool;
 // existing instances are reconciled against the unfiltered catalog.
 func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	persisted := &karpv1.NodePool{}
+	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodePool.Name}, persisted); err != nil {
+		return nil, err
+	}
+	if !sameSchedulingPool(nodePool, persisted) {
+		return nil, &sandbox.ConfigurationError{Reason: "NodePool scheduling snapshot is stale"}
+	}
+	nodePool = persisted
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
 	if err != nil {
 		if stderrors.Is(err, errNodeClassTerminating) {
@@ -268,8 +282,15 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 		log.FromContext(ctx).Error(gcperrors.ErrResolveNodeClass, "nodePool", nodePool)
 		return nil, fmt.Errorf("resolving node class, %w", err)
 	}
+	if err := validateRuntimePool(nodePool, nodeClass); err != nil {
+		return nil, err
+	}
 	// TODO, break this coupling
 	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	if err != nil {
+		return nil, err
+	}
+	instanceTypes, err = c.sandboxCandidates(ctx, nodeClass, instanceTypes)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +298,15 @@ func (c *CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.N
 }
 
 func (c *CloudProvider) getAllInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	// A changed/deleting reference can remove optional catalog enrichment, never
+	// historical VM discovery. Genuine API/catalog errors still propagate.
+	if !managedNodeClassRef(nodePool.Spec.Template.Spec.NodeClassRef) {
+		return nil, nil
+	}
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
+	if stderrors.Is(err, errNodeClassTerminating) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +329,9 @@ func instanceTypesForScheduling(nodePool *karpv1.NodePool, instanceTypes []*clou
 }
 
 func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *karpv1.NodePool) (*v1alpha1.GCENodeClass, error) {
+	if !managedNodeClassRef(nodePool.Spec.Template.Spec.NodeClassRef) {
+		return nil, fmt.Errorf("NodePool has no managed GCENodeClass reference")
+	}
 	nodeClass := &v1alpha1.GCENodeClass{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
 		return nil, err
@@ -347,7 +379,10 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 		}
 		return "", client.IgnoreNotFound(fmt.Errorf("resolving node class, %w", err))
 	}
-	return c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass), nil
+	if drift := c.isNodeClassDrifted(ctx, nodeClaim, nodePool, nodeClass); drift != "" {
+		return drift, nil
+	}
+	return c.isSandboxDrifted(ctx, nodeClaim, nodeClass)
 }
 
 // RepairPolicies preserves forceful replacement for supported unhealthy conditions.
@@ -440,6 +475,12 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 		nodeClaim.Status.Allocatable = lo.PickBy(instanceType.Allocatable(), resourceFilter)
 	}
 
+	// Runtime requirements describe new capacity, never historical VM facts.
+	delete(labels, v1alpha1.LabelSandboxRuntime)
+	if i.Sandbox != nil && i.Sandbox.Runtime != "" {
+		labels[v1alpha1.LabelSandboxRuntime] = i.Sandbox.Runtime
+	}
+	mapSandboxIdentity(annotations, i.Sandbox)
 	// Identity comes from the VM even when its type is no longer in the catalog.
 	labels[corev1.LabelInstanceTypeStable] = i.Type
 	labels[corev1.LabelTopologyZone] = i.Location
@@ -507,4 +548,25 @@ func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *kar
 			len(i.Offerings.Compatible(reqs).Available()) > 0 &&
 			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
 	}), nil
+}
+
+func (c *CloudProvider) resolveLaunchInstanceTypes(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass) ([]*cloudprovider.InstanceType, error) {
+	instanceTypes, err := c.resolveInstanceTypes(ctx, nodeClaim, nodeClass)
+	if err != nil {
+		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving instance types, %w", err), "InstanceTypeResolutionFailed", "Error resolving instance types")
+	}
+	if len(instanceTypes) == 0 {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all requested instance types were unavailable during launch"))
+	}
+
+	instanceTypes, err = c.sandboxCandidates(ctx, nodeClass, instanceTypes)
+	if err != nil {
+		return nil, runtimeCreateError(err)
+	}
+	// Re-read after candidate/source resolution; immutable claims cannot be repaired
+	// when the pool or class changed during scheduling/launch preparation.
+	if err := c.validateRuntimeCreate(ctx, nodeClaim, nodeClass); err != nil {
+		return nil, runtimeCreateError(err)
+	}
+	return instanceTypes, nil
 }

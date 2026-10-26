@@ -473,7 +473,7 @@ func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	patched, err := p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false, 0)
+	patched, _, err := p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false, 0)
 	require.NoError(t, err)
 
 	computeMetadata, err := patched.ToComputeMetadata()
@@ -707,7 +707,7 @@ func TestAdoptExistingInstance_PopulatesFieldsFromGCEInstance(t *testing.T) {
 		},
 	}
 
-	result := p.adoptExistingInstance(ctx, gceInstance, karpv1.CapacityTypeSpot)
+	result := p.adoptExistingInstance(ctx, gceInstance)
 
 	require.Equal(t, "karpenter-test-node", result.InstanceID)
 	require.Equal(t, "karpenter-test-node", result.Name)
@@ -743,7 +743,7 @@ func TestAdoptExistingInstance_UsesActualStatusNotProvisioning(t *testing.T) {
 				Status:            status,
 				CreationTimestamp: "2025-10-31T11:09:17Z",
 			}
-			result := p.adoptExistingInstance(ctx, gceInstance, karpv1.CapacityTypeOnDemand)
+			result := p.adoptExistingInstance(ctx, gceInstance)
 			require.Equal(t, status, result.Status)
 		})
 	}
@@ -941,13 +941,42 @@ func bootDiskNodeClass(category v1alpha1.DiskCategory, iops, throughput *int64) 
 	}
 }
 
+func TestRenderDiskPropertiesPreservesNodeClassDiskOrder(t *testing.T) {
+	for _, mode := range []string{"ordinary", "sandbox"} {
+		t.Run(mode, func(t *testing.T) {
+			p := &DefaultProvider{projectID: "my-project"}
+			nodeClass := bootDiskNodeClass("pd-balanced", nil, nil)
+			nodeClass.Spec.Disks = []v1alpha1.Disk{
+				{SizeGiB: 20, Category: "pd-ssd"},
+				nodeClass.Spec.Disks[0],
+			}
+			var selected *v1alpha1.Image
+			if mode == "sandbox" {
+				nodeClass.Spec.SandboxConfig = &v1alpha1.SandboxConfig{Type: v1alpha1.SandboxTypeGVISOR}
+				selected = &nodeClass.Status.Images[0]
+			}
+			before := nodeClass.DeepCopy()
+
+			disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, selected)
+			require.NoError(t, err)
+			require.Len(t, disks, 2)
+			require.True(t, disks[0].Boot)
+			require.Equal(t, int64(100), disks[0].InitializeParams.DiskSizeGb)
+			require.Equal(t, before.Status.Images[0].SourceImage, disks[0].InitializeParams.SourceImage)
+			require.False(t, disks[1].Boot)
+			require.Equal(t, int64(20), disks[1].InitializeParams.DiskSizeGb)
+			require.Equal(t, before, nodeClass, "rendering must preserve the launch resource snapshot")
+		})
+	}
+}
+
 func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	t.Parallel()
 
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-ssd", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -970,7 +999,7 @@ func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
 	nodeClaim := spotOrOnDemandNodeClaim()
 	nodeClaim.Labels = map[string]string{karpv1.NodePoolLabelKey: "test-pool"}
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 	require.Len(t, disks, 2)
 	wantLabels := map[string]string{
@@ -998,7 +1027,7 @@ func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
 	require.Equal(t, "dev", disks[1].InitializeParams.Labels["env"])
 
 	nodeClass.Spec.Labels = nil
-	disks, err = p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0)
+	disks, err = p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{
 		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey):     "test-pool",
@@ -1016,7 +1045,7 @@ func TestRenderDiskProperties_OmitsEmptyDiskCategory(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1029,7 +1058,7 @@ func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-extreme", ptr.To(int64(5000)), nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1043,7 +1072,7 @@ func TestRenderDiskProperties_SetsProvisionedThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-throughput", nil, ptr.To(int64(500)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1057,7 +1086,7 @@ func TestRenderDiskProperties_SetsBothIOPSAndThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-balanced", ptr.To(int64(10000)), ptr.To(int64(400)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1120,7 +1149,7 @@ func TestRenderDiskProperties_SsdCountEmitsScratchDisks(t *testing.T) {
 			it := amd64InstanceType()
 			it.Name = tc.instanceTypeName
 			p := &DefaultProvider{projectID: "my-project"}
-			disks, err := p.renderDiskProperties(it, spotOrOnDemandNodeClaim(), nc, "us-central1-a", tc.ssdCount)
+			disks, err := p.renderDiskProperties(it, spotOrOnDemandNodeClaim(), nc, "us-central1-a", tc.ssdCount, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantScratchCount, countScratch(disks),
 				"expected %d SCRATCH local-SSD disks", tc.wantScratchCount)
@@ -1164,7 +1193,7 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 		},
 	}
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 2)
@@ -1805,7 +1834,7 @@ func makeGPUIT() *cloudprovider.InstanceType {
 	}
 }
 
-// requiredSourceKubeEnv holds the kube-env entries that validateSourceKubeEnv
+// requiredSourceKubeEnv holds the kube-env entries that metadata.ValidateSourceKubeEnv
 // requires in every source template.
 const requiredSourceKubeEnv = "CA_CERT: test-ca\n" +
 	"KUBE_MANIFESTS_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-manifests.tar.gz\n" +

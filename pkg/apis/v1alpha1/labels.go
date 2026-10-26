@@ -32,6 +32,7 @@ import (
 func init() {
 	karpv1.RestrictedLabelDomains = karpv1.RestrictedLabelDomains.Insert(RestrictedLabelDomains...)
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(
+		LabelSandboxRuntime,
 		LabelInstanceFamily,
 		LabelInstanceShape,
 		LabelInstanceGeneration,
@@ -58,6 +59,11 @@ func init() {
 	)
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(disktype.AllLabels()...)
 }
+
+const (
+	LabelSandboxRuntime  = "sandbox.gke.io/runtime"
+	SandboxRuntimeGVISOR = "gvisor"
+)
 
 var (
 	TerminationFinalizer   = apis.Group + "/termination"

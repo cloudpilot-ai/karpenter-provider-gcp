@@ -16,6 +16,8 @@ package instance
 
 import (
 	"time"
+
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 )
 
 const (
@@ -35,17 +37,19 @@ const (
 
 // Instance is an internal data structure for GCE instances
 type Instance struct {
-	CapacityReservationID string            `json:"capacityReservationId"`
-	CapacityType          string            `json:"capacityType"`
-	CreationTime          time.Time         `json:"creationTime"`
-	ImageID               string            `json:"imageId"`
-	InstanceID            string            `json:"instanceId"`
-	InstanceTemplate      string            `json:"instanceTemplate"`
-	Labels                map[string]string `json:"labels"`
-	Location              string            `json:"location"`
-	Name                  string            `json:"name"`
-	ProjectID             string            `json:"projectId"`
-	Status                string            `json:"status"`
-	Tags                  map[string]string `json:"tags"`
-	Type                  string            `json:"type"`
+	// Sandbox is read from actual VM metadata, never today's NodeClass.
+	Sandbox               *metadata.SandboxIdentity `json:"sandbox,omitempty"`
+	CapacityReservationID string                    `json:"capacityReservationId"`
+	CapacityType          string                    `json:"capacityType"`
+	CreationTime          time.Time                 `json:"creationTime"`
+	ImageID               string                    `json:"imageId"`
+	InstanceID            string                    `json:"instanceId"`
+	InstanceTemplate      string                    `json:"instanceTemplate"`
+	Labels                map[string]string         `json:"labels"`
+	Location              string                    `json:"location"`
+	Name                  string                    `json:"name"`
+	ProjectID             string                    `json:"projectId"`
+	Status                string                    `json:"status"`
+	Tags                  map[string]string         `json:"tags"`
+	Type                  string                    `json:"type"`
 }

@@ -62,6 +62,8 @@ const (
 // TestCase describes a provisioning scenario: capacity type, architecture,
 // and the set of GCP instance families and types the test is allowed to use.
 type TestCase struct {
+	// CPULimit bounds total pool CPU when set; eventual consistency still permits overshoot.
+	CPULimit      string
 	CapacityType  string
 	Arch          string
 	Families      []string
@@ -653,6 +655,9 @@ func (e *Environment) createNodePool(ctx context.Context, name, nodeClassName st
 			"metadata": map[string]any{"labels": map[string]any{e2eOwnerLabel: "true"}},
 			"spec":     templateSpec,
 		},
+	}
+	if tc.CPULimit != "" {
+		spec["limits"] = map[string]any{"cpu": tc.CPULimit}
 	}
 	if tc.StaticReplicas == nil {
 		spec["weight"] = int64(DefaultNodePoolWeight)

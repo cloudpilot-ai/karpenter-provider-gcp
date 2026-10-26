@@ -42,6 +42,7 @@ Key capabilities:
 ## Features
 
 - [GPU nodes](gpu-nodes.md) — GPU instance types, driver version control, and device plugin scheduling
+- [Sandbox nodes](sandbox-nodes.md) — opt-in gVisor runtime, strict bootstrap compatibility and native RuntimeClass scheduling
 - [Image selection](image-selection.md) — select node images by GKE release channel, version pin, or raw image ID
 - [Node repair](node-repair.md) — automatic replacement of nodes that fail GKE health conditions
 - [Spot preemption notice](spot-preemption.md) — get up to two minutes' warning before GCE reclaims a Spot VM
@@ -60,6 +61,7 @@ Key capabilities:
 - [arm64](examples/arm64.md) — Google Axion and Ampere Altra nodes
 - [Ubuntu](examples/ubuntu.md) — Ubuntu image family
 - [GPU](examples/gpu.md) — GPU workloads
+- [Sandbox](examples/sandbox.md) — COS sandbox NodeClass, NodePool and native gVisor RuntimeClass Pod
 - [Networking](examples/networking.md) — private nodes, custom subnetwork, pod IP range, resource manager tags
 - [Static capacity](examples/static-capacity.md) — fixed node count with `spec.replicas`
 - [Advanced](examples/advanced.md) — kubelet config, static hugepages, Shielded VM, Confidential VM, nested virtualization, local SSDs, metadata, secondary disk, multiple pools

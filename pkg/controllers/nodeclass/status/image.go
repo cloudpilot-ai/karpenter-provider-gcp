@@ -39,7 +39,7 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 	images, err := i.imageProvider.List(ctx, nodeClass)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "listing images")
-		if imagefamily.IsImageResolutionError(err) {
+		if nodeClass.SandboxEnabled() || imagefamily.IsImageResolutionError(err) {
 			msg := err.Error()
 			if len([]rune(msg)) > 256 {
 				msg = string([]rune(msg)[:256])
@@ -68,8 +68,9 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 			return reqs[i].Key < reqs[j].Key
 		})
 		return v1alpha1.Image{
-			SourceImage:  image.SourceImage,
-			Requirements: reqs,
+			SourceImage:      image.SourceImage,
+			SandboxInstaller: image.SandboxInstaller.DeepCopy(),
+			Requirements:     reqs,
 		}
 	})
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
