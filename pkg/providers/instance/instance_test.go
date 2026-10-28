@@ -1666,7 +1666,7 @@ func useFakeCreateDependencies(p *DefaultProvider, zones ...string) *cache.Cache
 	return c
 }
 
-func spotAndOnDemandIT(name string, spotPrice float64) *cloudprovider.InstanceType {
+func spotAndOnDemandIT(name string, spotPrice, onDemandPrice float64) *cloudprovider.InstanceType {
 	offering := func(capacityType string, price float64) *cloudprovider.Offering {
 		return &cloudprovider.Offering{
 			Available: true,
@@ -1679,7 +1679,7 @@ func spotAndOnDemandIT(name string, spotPrice float64) *cloudprovider.InstanceTy
 	}
 	it := makeNonGPUIT()
 	it.Name = name
-	it.Offerings = cloudprovider.Offerings{offering(karpv1.CapacityTypeSpot, spotPrice), offering(karpv1.CapacityTypeOnDemand, 4*spotPrice)}
+	it.Offerings = cloudprovider.Offerings{offering(karpv1.CapacityTypeSpot, spotPrice), offering(karpv1.CapacityTypeOnDemand, onDemandPrice)}
 	it.Requirements.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceLocalSsdCount, corev1.NodeSelectorOpIn, "0"))
 	return it
 }
@@ -1710,12 +1710,28 @@ func TestCreate_FallsBackToOnDemandAfterSpotStockout(t *testing.T) {
 	nodeClaim := spotOrOnDemandNodeClaim()
 	nodeClaim.Name = "fallback"
 
-	instance, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05)})
+	instance, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05, 0.2)})
 
 	require.NoError(t, err)
 	require.Equal(t, karpv1.CapacityTypeOnDemand, instance.CapacityType)
 	require.Equal(t, []string{"n2-standard-4/spot", "n2-standard-4/on-demand"}, inserts())
 	requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot, stockoutTTL)
+}
+
+func TestCreate_FallbackOrdersInstanceTypesByOnDemandPrice(t *testing.T) {
+	t.Parallel()
+
+	p, _, inserts := newFakeCreateProvider(t, spotStockout(""))
+	nodeClaim := spotOrOnDemandNodeClaim()
+	nodeClaim.Name = "reorder"
+
+	instance, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{
+		spotAndOnDemandIT("n2-standard-4", 0.05, 0.5), spotAndOnDemandIT("n2-standard-8", 0.06, 0.3),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "n2-standard-8", instance.Type)
+	require.Equal(t, []string{"n2-standard-4/spot", "n2-standard-8/spot", "n2-standard-8/on-demand"}, inserts())
 }
 
 func TestCreate_SpotOnlyNodeClaimDoesNotFallBackToOnDemand(t *testing.T) {
@@ -1726,7 +1742,7 @@ func TestCreate_SpotOnlyNodeClaimDoesNotFallBackToOnDemand(t *testing.T) {
 	nodeClaim.Name = "spot-only"
 	nodeClaim.Spec.Requirements[0].Values = []string{karpv1.CapacityTypeSpot}
 
-	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05)})
+	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05, 0.2)})
 
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.Equal(t, []string{"n2-standard-4/spot"}, inserts())
@@ -1748,7 +1764,7 @@ func TestCreate_DoesNotFallBackWhenASpotFailureIsNotCapacity(t *testing.T) {
 	nodeClaim.Name = "mixed"
 
 	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{
-		spotAndOnDemandIT("n2-standard-4", 0.05), spotAndOnDemandIT("n2-standard-8", 0.1),
+		spotAndOnDemandIT("n2-standard-4", 0.05, 0.2), spotAndOnDemandIT("n2-standard-8", 0.1, 0.4),
 	})
 
 	require.Error(t, err)
@@ -1762,7 +1778,7 @@ func TestCreate_OnDemandFallbackFailureIsNotReportedAsSpotCapacity(t *testing.T)
 	nodeClaim := spotOrOnDemandNodeClaim()
 	nodeClaim.Name = "fallback-fails"
 
-	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05)})
+	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05, 0.2)})
 
 	require.Error(t, err)
 	require.False(t, cloudprovider.IsInsufficientCapacityError(err), "core must retry the NodeClaim, not delete it for spot capacity")
@@ -1801,7 +1817,7 @@ func TestCreate_FallbackAdoptsSpotInstanceLeftByStockedOutInsert(t *testing.T) {
 	}))
 	useFakeCreateDependencies(p, "us-central1-a", "us-central1-b")
 	p.unavailableOfferings.MarkUnavailable(context.Background(), "test", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeOnDemand)
-	it := spotAndOnDemandIT("n2-standard-4", 0.05)
+	it := spotAndOnDemandIT("n2-standard-4", 0.05, 0.2)
 	it.Offerings = append(it.Offerings, &cloudprovider.Offering{
 		Available: true,
 		Price:     0.2,
