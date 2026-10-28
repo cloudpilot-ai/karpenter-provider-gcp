@@ -17,9 +17,11 @@ limitations under the License.
 package cloudprovider
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -127,63 +129,183 @@ func TestAreStaticFieldsDrifted(t *testing.T) {
 	}
 }
 
+func imageWithRequirements(source string, requirements ...corev1.NodeSelectorRequirement) v1alpha1.Image {
+	return v1alpha1.Image{SourceImage: source, Requirements: requirements}
+}
+
+func cpuImageRequirements(arch string) []corev1.NodeSelectorRequirement {
+	return []corev1.NodeSelectorRequirement{
+		{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{arch}},
+		{Key: v1alpha1.LabelInstanceGPUCount, Operator: corev1.NodeSelectorOpDoesNotExist},
+	}
+}
+
+func gpuImageRequirements() []corev1.NodeSelectorRequirement {
+	return []corev1.NodeSelectorRequirement{
+		{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+		{Key: v1alpha1.LabelInstanceGPUCount, Operator: corev1.NodeSelectorOpExists},
+	}
+}
+
+// TestIsImageDrifted protects image-only drift: a retained node only drifts when the published
+// images contain a usable replacement for the variant it actually runs.
 func TestIsImageDrifted(t *testing.T) {
 	t.Parallel()
 	cp := &CloudProvider{}
 
-	nodeClaimWithImage := func(imageID string) *karpv1.NodeClaim {
-		nc := &karpv1.NodeClaim{}
+	const (
+		amd64Image    = "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre"
+		newAMD64Image = "projects/gke-node-images/global/images/gke-1351-gke1396005-cos-125-19216-105-127-c-pre"
+		arm64Image    = "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-arm64-125-19216-104-126-c-pre"
+		newARM64Image = "projects/gke-node-images/global/images/gke-1351-gke1396005-cos-arm64-125-19216-105-127-c-pre"
+		nvidiaImage   = "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-nvda"
+	)
+
+	amd64CPUImage := imageWithRequirements(amd64Image, cpuImageRequirements("amd64")...)
+	newAMD64CPUImage := imageWithRequirements(newAMD64Image, cpuImageRequirements("amd64")...)
+	arm64CPUImage := imageWithRequirements(arm64Image, cpuImageRequirements("arm64")...)
+	newARM64CPUImage := imageWithRequirements(newARM64Image, cpuImageRequirements("arm64")...)
+	nvidiaGPUImage := imageWithRequirements(nvidiaImage, gpuImageRequirements()...)
+
+	claim := func(imageID string, labels map[string]string, specRequirements ...karpv1.NodeSelectorRequirementWithMinValues) *karpv1.NodeClaim {
+		nc := &karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels}}
 		nc.Status.ImageID = imageID
+		nc.Spec.Requirements = specRequirements
 		return nc
 	}
-
-	nodeClassWithImages := func(sources ...string) *v1alpha1.GCENodeClass {
-		nc := &v1alpha1.GCENodeClass{}
-		for _, s := range sources {
-			nc.Status.Images = append(nc.Status.Images, v1alpha1.Image{SourceImage: s})
-		}
+	archRequirement := func(arches ...string) karpv1.NodeSelectorRequirementWithMinValues {
+		return karpv1.NodeSelectorRequirementWithMinValues{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: arches}
+	}
+	class := func(images ...v1alpha1.Image) *v1alpha1.GCENodeClass {
+		nc := &v1alpha1.GCENodeClass{Status: v1alpha1.GCENodeClassStatus{Images: images}}
+		nc.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
 		return nc
 	}
 
 	tests := []struct {
 		name      string
-		nodeClass *v1alpha1.GCENodeClass
 		nodeClaim *karpv1.NodeClaim
+		nodeClass *v1alpha1.GCENodeClass
 		want      karpcloudprovider.DriftReason
 	}{
 		{
-			name:      "no drift when ImageID suffix matches SourceImage",
-			nodeClaim: nodeClaimWithImage("projects/gke-node-images/global/images/cos-113-123"),
-			nodeClass: nodeClassWithImages("cos-113-123"),
+			name:      "no drift when the node still runs a published image",
+			nodeClaim: claim(amd64Image, map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: class(amd64CPUImage, arm64CPUImage),
 			want:      "",
 		},
 		{
-			name:      "no drift when one of multiple images matches",
-			nodeClaim: nodeClaimWithImage("projects/gke-node-images/global/images/cos-113-123"),
-			nodeClass: nodeClassWithImages("ubuntu-2004-456", "cos-113-123"),
+			name:      "drift when the amd64 image the node runs was replaced",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-pre", map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: class(newAMD64CPUImage),
+			want:      ImageDrift,
+		},
+		{
+			// Deeper insight: a newer amd64 build must not rotate every arm64 node.
+			name:      "no drift for a retained arm64 node when only amd64 advanced",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-arm64-125-19216-100-100-c-pre", map[string]string{corev1.LabelArchStable: "arm64"}),
+			nodeClass: class(newAMD64CPUImage),
 			want:      "",
 		},
 		{
-			name:      "ImageDrift when no image matches",
-			nodeClaim: nodeClaimWithImage("projects/gke-node-images/global/images/cos-113-999"),
-			nodeClass: nodeClassWithImages("cos-113-123"),
+			name:      "drift when a usable arm64 replacement is published",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-arm64-125-19216-100-100-c-pre", map[string]string{corev1.LabelArchStable: "arm64"}),
+			nodeClass: class(newAMD64CPUImage, newARM64CPUImage),
 			want:      ImageDrift,
 		},
 		{
-			name:      "ImageDrift when Status.Images is empty",
-			nodeClaim: nodeClaimWithImage("projects/gke-node-images/global/images/cos-113-123"),
-			nodeClass: &v1alpha1.GCENodeClass{},
+			name:      "no drift while images are not ready",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-pre", map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: func() *v1alpha1.GCENodeClass {
+				nc := class(newAMD64CPUImage)
+				nc.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageUnavailable", "publication in progress")
+				return nc
+			}(),
+			want: "",
+		},
+		{
+			name:      "no drift when image readiness is unknown",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-pre", map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: &v1alpha1.GCENodeClass{Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{newAMD64CPUImage}}},
+			want:      "",
+		},
+		{
+			name:      "no drift when no image is published",
+			nodeClaim: claim(amd64Image, map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: class(),
+			want:      "",
+		},
+		{
+			// Deeper insight: the arm64 and NVIDIA siblings are published independently, so a GPU
+			// node has no usable replacement while only CPU images exist.
+			name:      "no drift for a GPU node without a GPU image",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-nvda", map[string]string{corev1.LabelArchStable: "amd64", v1alpha1.LabelInstanceGPUCount: "1"}),
+			nodeClass: class(newAMD64CPUImage, newARM64CPUImage),
+			want:      "",
+		},
+		{
+			name:      "drift for a GPU node once its GPU image is replaced",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-nvda", map[string]string{corev1.LabelArchStable: "amd64", v1alpha1.LabelInstanceGPUCount: "1"}),
+			nodeClass: class(newAMD64CPUImage, nvidiaGPUImage),
 			want:      ImageDrift,
+		},
+		{
+			// Deeper insight: a CPU node's labels carry no GPU count, which must not be read as
+			// "any GPU shape" and drift the node onto a GPU-only image.
+			name:      "no drift for a CPU node toward a GPU-only image",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-pre", map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: class(nvidiaGPUImage),
+			want:      "",
+		},
+		{
+			// Deeper insight: a broad GPU spec requirement admits a GPU shape, but the labels still
+			// prove this is a CPU node, so the GPU-only image is not a replacement.
+			name: "broad GPU spec requirement cannot override the actual CPU node",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-pre",
+				map[string]string{corev1.LabelArchStable: "amd64"},
+				karpv1.NodeSelectorRequirementWithMinValues{Key: v1alpha1.LabelInstanceGPUCount, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"8"}}),
+			nodeClass: class(nvidiaGPUImage),
+			want:      "",
+		},
+		{
+			name:      "no drift when only the spec requirements name another architecture",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-arm64-125-19216-100-100-c-pre", nil, archRequirement("arm64")),
+			nodeClass: class(newAMD64CPUImage),
+			want:      "",
+		},
+		{
+			name:      "drift when the spec requirements are the only architecture source and match",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-arm64-125-19216-100-100-c-pre", nil, archRequirement("arm64")),
+			nodeClass: class(newARM64CPUImage),
+			want:      ImageDrift,
+		},
+		{
+			name:      "broad spec requirements cannot override the actual arm64 node",
+			nodeClaim: claim("projects/gke-node-images/global/images/gke-1351-gke1390000-cos-arm64-125-19216-100-100-c-pre", map[string]string{corev1.LabelArchStable: "arm64"}, archRequirement("amd64", "arm64")),
+			nodeClass: class(newAMD64CPUImage),
+			want:      "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := cp.isImageDrifted(tt.nodeClaim, tt.nodeClass)
-			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.want, cp.isImageDrifted(tt.nodeClaim, tt.nodeClass))
 		})
 	}
+}
+
+// TestStaticDriftIsReportedWhileImagesAreNotReady protects the boundary of the image-only guard.
+func TestStaticDriftIsReportedWhileImagesAreNotReady(t *testing.T) {
+	t.Parallel()
+	cp := &CloudProvider{}
+
+	nodeClass := nodeClass("newhash")
+	nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageUnavailable", "publication in progress")
+	claim := nodeClaim("oldhash")
+	claim.Status.ImageID = "projects/gke-node-images/global/images/gke-1351-gke1390000-cos-125-19216-100-100-c-pre"
+
+	require.Equal(t, NodeClassDrift, cp.isNodeClassDrifted(context.Background(), claim, nil, nodeClass))
 }
 
 // TestNodeClassDriftFieldCoverage verifies that each GCENodeClassSpec field either

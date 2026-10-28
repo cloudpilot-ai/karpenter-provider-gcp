@@ -89,6 +89,7 @@ type insufficientCapacityDetails struct {
 }
 
 type Provider interface {
+	Adopt(context.Context, *karpv1.NodeClaim) (*Instance, error)
 	Create(context.Context, *v1alpha1.GCENodeClass, *karpv1.NodeClaim, []*cloudprovider.InstanceType) (*Instance, error)
 	Get(context.Context, string) (*Instance, error)
 	List(context.Context) ([]*Instance, error)
@@ -414,6 +415,16 @@ func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingIns
 	}
 }
 
+// Adopt looks up a VM from an earlier attempt without launching or resolving images.
+// A missing VM returns (nil, nil).
+func (p *DefaultProvider) Adopt(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*Instance, error) {
+	existing, err := p.findInstanceByNodeClaim(ctx, nodeClaim)
+	if err != nil || existing == nil {
+		return nil, err
+	}
+	return p.adoptExistingInstance(ctx, existing, resolveCapacityType(existing.Scheduling)), nil
+}
+
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
 	if len(instanceTypes) == 0 {
 		return nil, fmt.Errorf("no instance types provided")
@@ -424,18 +435,24 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	launchInstanceTypes, rejectedConfigurable := instanceTypesForLaunch(nodeClaim, instanceTypes)
 
 	// Check for an instance in any zone before validating launch candidates so earlier attempts are adopted.
-	if existingInstance, err := p.findInstanceByNodeClaim(ctx, nodeClaim); err != nil {
+	if existingInstance, err := p.Adopt(ctx, nodeClaim); err != nil {
 		log.FromContext(ctx).Error(err, "failed to check if instance exists in region", "nodeClaim", nodeClaim.Name)
 	} else if existingInstance != nil {
-		return p.adoptExistingInstance(ctx, existingInstance, p.getCapacityType(nodeClaim, instanceTypes)), nil
+		return existingInstance, nil
 	}
 
 	launchInstanceTypes, err := validateLaunchInstanceTypes(launchInstanceTypes, rejectedConfigurable)
 	if err != nil {
 		return nil, err
 	}
+	// Earlier VMs must be adopted before current image availability can reject a new launch.
+	instanceTypes = imagefamily.FilterInstanceTypes(nodeClass, launchInstanceTypes)
+	if len(instanceTypes) == 0 {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf(
+			"no instance type is compatible with any image resolved for node class %s", nodeClass.Name))
+	}
 
-	instanceTypes = orderInstanceTypesByPrice(launchInstanceTypes, requirements)
+	instanceTypes = orderInstanceTypesByPrice(instanceTypes, requirements)
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
 	freeIPs := p.podRangeFreeIPs(ctx, nodeClass)
 	var errs []error
@@ -860,10 +877,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 		}
 
 		if disk.Boot {
-			targetImage, found := lo.Find(nodeClass.Status.Images, func(image v1alpha1.Image) bool {
-				reqs := scheduling.NewNodeSelectorRequirements(image.Requirements...)
-				return reqs.Compatible(instanceType.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
-			})
+			targetImage, found := imagefamily.FindImage(nodeClass.Status.Images, instanceType.Requirements)
 			if !found {
 				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
 			}

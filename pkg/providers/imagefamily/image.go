@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/googleapi"
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -37,18 +39,27 @@ import (
 	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
 )
 
-// imageResolutionError marks a non-transient failure caused by the NodeClass
-// configuration (invalid alias version, pinned version absent from GCP).
-// The reconciler surfaces these as a status condition instead of returning
-// them for controller-runtime exponential backoff.
+// imageResolutionError covers configuration failures and Ubuntu catalog misses.
+// Both are reported as conditions and retried rather than returned for backoff.
 type imageResolutionError struct{ msg string }
 
 func (e *imageResolutionError) Error() string { return e.msg }
 
-// IsImageResolutionError reports whether err originated from user-controlled
-// NodeClass configuration rather than a transient infrastructure failure.
+// IsImageResolutionError identifies configuration failures or Ubuntu catalog misses.
 func IsImageResolutionError(err error) bool {
 	var e *imageResolutionError
+	return errors.As(err, &e)
+}
+
+// imageUnavailableError marks a valid selector with no usable image published yet.
+type imageUnavailableError struct{ msg string }
+
+func (e *imageUnavailableError) Error() string { return e.msg }
+
+// IsImageUnavailableError reports whether err means no usable image is currently published for
+// an otherwise valid selector.
+func IsImageUnavailableError(err error) bool {
+	var e *imageUnavailableError
 	return errors.As(err, &e)
 }
 
@@ -91,6 +102,7 @@ func NewDefaultProvider(computeService *compute.Service, versionProvider version
 	}
 }
 
+// List caches non-empty successful resolutions per selector; failures and empty results retry.
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, error) {
 	p.Lock()
 	defer p.Unlock()
@@ -113,7 +125,9 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		result = append(result, imgs...)
 	}
 
-	p.cache.SetDefault(cacheKey, result)
+	if len(result) > 0 {
+		p.cache.SetDefault(cacheKey, result)
+	}
 	return result, nil
 }
 
@@ -146,7 +160,7 @@ func (p *DefaultProvider) resolveAliasTerm(ctx context.Context, term v1alpha1.Im
 	if err != nil {
 		return nil, err
 	}
-	return p.filterExistingImages(ctx, ims)
+	return p.ensureImagesAvailable(ctx, family, version, ims)
 }
 
 func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
@@ -190,7 +204,7 @@ func (p *DefaultProvider) resolveFamilyTerm(ctx context.Context, term v1alpha1.I
 	if err != nil {
 		return nil, err
 	}
-	return p.filterExistingImages(ctx, ims)
+	return p.ensureImagesAvailable(ctx, term.Family, version, ims)
 }
 
 // resolveVersion returns the version string to pass to the image family provider.
@@ -236,33 +250,70 @@ func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
 	return p.providers[family]
 }
 
-func (p *DefaultProvider) filterExistingImages(ctx context.Context, ims Images) (Images, error) {
+// COS latest is already validated; exact COS siblings may be unavailable independently.
+// Preserve Ubuntu's existing lookup policy: omit 404s, but fail on non-READY images.
+func (p *DefaultProvider) ensureImagesAvailable(ctx context.Context, family, version string, ims Images) (Images, error) {
+	cos := family == v1alpha1.ImageFamilyContainerOptimizedOS
+	if cos && version == "latest" {
+		return ims, nil
+	}
 	var result Images
 	for _, im := range ims {
-		gceim, err := p.resolveImage(ctx, im.SourceImage)
+		img, err := p.resolveImage(ctx, im.SourceImage)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to resolve image", "imageSource", im.SourceImage)
 			return nil, err
 		}
-		if gceim == nil {
-			continue
-		}
-		if err := imageReady(gceim); err != nil {
+		eligible, err := imageEligible(img, family)
+		if err != nil {
 			return nil, err
 		}
-		result = append(result, im)
+		if eligible {
+			result = append(result, im)
+		}
 	}
-	if len(ims) > 0 && len(result) == 0 {
-		return nil, &imageResolutionError{msg: fmt.Sprintf("%d candidate image(s) were resolved but none exist in GCP; verify the pinned version is available", len(ims))}
+	if len(result) == 0 {
+		if cos {
+			return nil, &imageUnavailableError{msg: fmt.Sprintf("%d derived COS image(s) were checked but none exist and are READY in GCP yet", len(ims))}
+		}
+		if len(ims) > 0 {
+			return nil, &imageResolutionError{msg: fmt.Sprintf("%d candidate image(s) were resolved but none exist in GCP; verify the pinned version is available", len(ims))}
+		}
 	}
 	return result, nil
 }
 
+func imageEligible(img *compute.Image, family string) (bool, error) {
+	if img == nil {
+		return false, nil
+	}
+	if family == v1alpha1.ImageFamilyContainerOptimizedOS {
+		return imageUsable(img), nil
+	}
+	return true, imageReady(img)
+}
+
+// Non-READY images are retried as publication failures, not infrastructure errors.
 func imageReady(img *compute.Image) error {
 	if img.Status != "READY" {
-		return fmt.Errorf("image %s is not ready (status: %s)", img.Name, img.Status)
+		return &imageUnavailableError{msg: fmt.Sprintf("image %s is not ready (status: %s)", img.Name, img.Status)}
 	}
 	return nil
+}
+
+// COS excludes deprecated images even though GCP permits using them.
+func imageUsable(img *compute.Image) bool {
+	if img.Status != "READY" {
+		return false
+	}
+	if img.Deprecated == nil {
+		return true
+	}
+	switch img.Deprecated.State {
+	case "DEPRECATED", "OBSOLETE", "DELETED":
+		return false
+	}
+	return true
 }
 
 func (p *DefaultProvider) resolveImage(ctx context.Context, sourceImage string) (*compute.Image, error) {
@@ -270,13 +321,25 @@ func (p *DefaultProvider) resolveImage(ctx context.Context, sourceImage string) 
 	if err != nil {
 		return nil, err
 	}
+	return lookupImage(ctx, p.computeService, projectID, imageName)
+}
 
-	image, err := p.computeService.Images.Get(projectID, imageName).Context(ctx).Do()
-	if err != nil && !strings.Contains(err.Error(), "404") {
+// lookupImage treats only a typed 404 as absence; other API failures must not trigger fallback.
+func lookupImage(ctx context.Context, service *compute.Service, projectID, imageName string) (*compute.Image, error) {
+	image, err := service.Images.Get(projectID, imageName).Context(ctx).Do()
+	if err != nil {
+		if isImageNotFound(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
-
 	return image, nil
+}
+
+// isImageNotFound reports whether err is the Compute API's typed 404 response.
+func isImageNotFound(err error) bool {
+	var apiErr *googleapi.Error
+	return errors.As(err, &apiErr) && apiErr.Code == http.StatusNotFound
 }
 
 // parseImageSource parses a GCP image source string
