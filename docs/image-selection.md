@@ -110,15 +110,15 @@ Successful results are cached for five minutes, so newly published variants and 
 
 The bare `Ubuntu` family name is not supported. Use `Ubuntu2404` or `Ubuntu2204` explicitly.
 
-> **Ubuntu:** Both architectures must resolve from `ubuntu-os-gke-cloud` for the cluster's Kubernetes minor version. Only clean `vYYYYMMDD` builds (plus lettered re-spins for `latest`) are selected, excluding specialized builds such as `-tpu`, `-cgroupsv1`, and `-linux64k`. A missing or `PENDING` catalog architecture yields `ImageResolutionFailed`; a selected image becoming non-READY on final lookup yields `ImageUnavailable`. Final-lookup 404s are omitted. Before pinning a date, [confirm it exists for both architectures](image-management.md#finding-available-versions).
+> **Ubuntu:** Both architectures must resolve from `ubuntu-os-gke-cloud` for the cluster's Kubernetes minor version. Only clean `vYYYYMMDD` builds, optionally with a trailing letter (for example, `v20260416a`), are selected, excluding specialized builds such as `-tpu`, `-cgroupsv1`, and `-linux64k`. A pin matches one build exactly, so pin a lettered build with its letter (`version: v20260416a`). A missing or `PENDING` catalog architecture yields `ImageResolutionFailed`; a selected image becoming non-READY on final lookup yields `ImageUnavailable`. Final-lookup 404s are omitted. Before pinning a date, [confirm it exists for both architectures](image-management.md#finding-available-versions).
 
 ## Version formats
 
-| Family                 | `version: latest`                           | Version pin format            | Example             |
-|------------------------|---------------------------------------------|-------------------------------|---------------------|
-| `ContainerOptimizedOS` | Newest usable COS image per variant         | `milestone.build.build.build` | `125.19216.104.126` |
-| `Ubuntu2404`           | Newest Ubuntu 24.04 for cluster's K8s minor | `vYYYYMMDD`                   | `v20260416`         |
-| `Ubuntu2204`           | Newest Ubuntu 22.04 for cluster's K8s minor | `vYYYYMMDD`                   | `v20231201`         |
+| Family                 | `version: latest`                           | Version pin format                    | Example                   |
+|------------------------|---------------------------------------------|---------------------------------------|---------------------------|
+| `ContainerOptimizedOS` | Newest usable COS image per variant         | `milestone.build.build.build`         | `125.19216.104.126`       |
+| `Ubuntu2404`           | Newest Ubuntu 24.04 for cluster's K8s minor | `vYYYYMMDD`, optional trailing letter | `v20260416`, `v20251218a` |
+| `Ubuntu2204`           | Newest Ubuntu 22.04 for cluster's K8s minor | `vYYYYMMDD`, optional trailing letter | `v20231201`, `v20251218a` |
 
 ## Examples
 

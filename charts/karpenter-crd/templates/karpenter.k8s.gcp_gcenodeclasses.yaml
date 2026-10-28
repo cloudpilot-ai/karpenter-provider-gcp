@@ -237,9 +237,9 @@ spec:
                       - message: ContainerOptimizedOS version must be 'latest' or
                           'milestone.build.build.build' (e.g. '125.19216.104.126')
                         rule: '!self.startsWith(''ContainerOptimizedOS@'') || self.matches(''^ContainerOptimizedOS@(latest|[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)$'')'
-                      - message: Ubuntu version must be 'latest' or 'vYYYYMMDD' (e.g.
-                          'v20260416')
-                        rule: '!self.startsWith(''Ubuntu@'') || self.matches(''^Ubuntu@(latest|v[0-9]{8})$'')'
+                      - message: Ubuntu version must be 'latest' or 'vYYYYMMDD' with
+                          an optional release letter (e.g. 'v20260416', 'v20251218a')
+                        rule: '!self.startsWith(''Ubuntu@'') || self.matches(''^Ubuntu@(latest|v[0-9]{8}[a-z]?)$'')'
                     channel:
                       description: |-
                         Channel specifies the GKE release channel to follow. Only valid when Family is ContainerOptimizedOS.
@@ -272,7 +272,7 @@ spec:
                       description: |-
                         Version pins the image to a specific version or "latest".
                         For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").
-                        For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" (e.g. "v20260416").
+                        For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" with an optional release letter (e.g. "v20260416", "v20251218a").
                       maxLength: 32
                       type: string
                   type: object
@@ -293,14 +293,14 @@ spec:
                     rule: '!has(self.version) || !has(self.family) || self.family
                       != ''ContainerOptimizedOS'' || self.version == ''latest'' ||
                       self.version.matches(''^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$'')'
-                  - message: Ubuntu2404 version must be 'latest' or 'vYYYYMMDD' (e.g.
-                      'v20260416')
+                  - message: Ubuntu2404 version must be 'latest' or 'vYYYYMMDD' with
+                      an optional release letter (e.g. 'v20260416', 'v20251218a')
                     rule: '!has(self.version) || !has(self.family) || self.family
-                      != ''Ubuntu2404'' || self.version == ''latest'' || self.version.matches(''^v[0-9]{8}$'')'
-                  - message: Ubuntu2204 version must be 'latest' or 'vYYYYMMDD' (e.g.
-                      'v20260416')
+                      != ''Ubuntu2404'' || self.version == ''latest'' || self.version.matches(''^v[0-9]{8}[a-z]?$'')'
+                  - message: Ubuntu2204 version must be 'latest' or 'vYYYYMMDD' with
+                      an optional release letter (e.g. 'v20260416', 'v20251218a')
                     rule: '!has(self.version) || !has(self.family) || self.family
-                      != ''Ubuntu2204'' || self.version == ''latest'' || self.version.matches(''^v[0-9]{8}$'')'
+                      != ''Ubuntu2204'' || self.version == ''latest'' || self.version.matches(''^v[0-9]{8}[a-z]?$'')'
                   - message: family 'Ubuntu' is not valid; use Ubuntu2404 for Ubuntu
                       24.04 or Ubuntu2204 for Ubuntu 22.04
                     rule: '!has(self.family) || self.family != ''Ubuntu'''
