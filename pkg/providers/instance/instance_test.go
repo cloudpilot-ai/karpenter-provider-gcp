@@ -23,9 +23,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,6 +50,8 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
 )
@@ -1587,6 +1591,234 @@ func TestGetCapacityType(t *testing.T) {
 			require.Equal(t, tt.want, p.getCapacityType(tt.nodeClaim, tt.instanceTypes))
 		})
 	}
+}
+
+type fakeInstanceTypeProvider struct {
+	instancetype.Provider
+}
+
+func (fakeInstanceTypeProvider) GetMachineType(string) *computepb.MachineType { return nil }
+
+type fakeNodePoolTemplateProvider struct {
+	nodepooltemplate.Provider
+}
+
+func (fakeNodePoolTemplateProvider) GetSourceTemplateMetadata(context.Context) (*compute.Metadata, error) {
+	return makeSourceMetadata("max-pods-per-node=110"), nil
+}
+
+type fakeClusterGKEProvider struct {
+	fakeGKEProvider
+}
+
+func (f *fakeClusterGKEProvider) GetClusterConfig(context.Context) (*containerv1.Cluster, error) {
+	return makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false), nil
+}
+
+// newFakeCreateProvider returns a provider whose fake GCE API rejects an insert with the
+// reason insertError returns for its instance type and capacity type, and accepts it when
+// the reason is empty. It records each insert as "<instance type>/<capacity type>".
+func newFakeCreateProvider(t *testing.T, insertError func(instanceType, capacityType string) string) (*DefaultProvider, *cache.Cache, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var inserts []string
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			var inst compute.Instance
+			if err := json.NewDecoder(r.Body).Decode(&inst); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			instanceType, capacityType := lastPathSegment(inst.MachineType), resolveCapacityType(inst.Scheduling)
+			mu.Lock()
+			inserts = append(inserts, instanceType+"/"+capacityType)
+			mu.Unlock()
+			if reason := insertError(instanceType, capacityType); reason != "" {
+				w.WriteHeader(http.StatusBadRequest)
+				writeJSON(w, map[string]any{"error": map[string]any{"errors": []map[string]string{{"reason": reason}}}})
+				return
+			}
+			writeJSON(w, map[string]any{"name": "op-1", "status": "DONE"})
+		case strings.Contains(r.URL.Path, "/operations/"):
+			writeJSON(w, map[string]any{"name": "op-1", "status": "DONE"})
+		case strings.HasSuffix(r.URL.Path, "/aggregated/instances"):
+			writeJSON(w, map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	c := useFakeCreateDependencies(p, "us-central1-a")
+	return p, c, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(inserts)
+	}
+}
+
+func useFakeCreateDependencies(p *DefaultProvider, zones ...string) *cache.Cache {
+	p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+	p.gkeProvider = &fakeClusterGKEProvider{fakeGKEProvider{zones: zones}}
+	p.instanceTypeProvider = fakeInstanceTypeProvider{}
+	p.nodePoolTemplateProvider = fakeNodePoolTemplateProvider{}
+	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
+	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
+	return c
+}
+
+func spotAndOnDemandIT(name string, spotPrice float64) *cloudprovider.InstanceType {
+	offering := func(capacityType string, price float64) *cloudprovider.Offering {
+		return &cloudprovider.Offering{
+			Available: true,
+			Price:     price,
+			Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"),
+			),
+		}
+	}
+	it := makeNonGPUIT()
+	it.Name = name
+	it.Offerings = cloudprovider.Offerings{offering(karpv1.CapacityTypeSpot, spotPrice), offering(karpv1.CapacityTypeOnDemand, 4*spotPrice)}
+	it.Requirements.Add(scheduling.NewRequirement(v1alpha1.LabelInstanceLocalSsdCount, corev1.NodeSelectorOpIn, "0"))
+	return it
+}
+
+func imagesReadyNodeClass() *v1alpha1.GCENodeClass {
+	nodeClass := &v1alpha1.GCENodeClass{}
+	nodeClass.Status.Images = []v1alpha1.Image{{
+		SourceImage:  "projects/gke-node-images/global/images/gke-cos",
+		Requirements: []corev1.NodeSelectorRequirement{{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}}},
+	}}
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+	return nodeClass
+}
+
+func spotStockout(onDemandError string) func(string, string) string {
+	return func(_, capacityType string) string {
+		if capacityType == karpv1.CapacityTypeSpot {
+			return "ZONE_RESOURCE_POOL_EXHAUSTED"
+		}
+		return onDemandError
+	}
+}
+
+func TestCreate_FallsBackToOnDemandAfterSpotStockout(t *testing.T) {
+	t.Parallel()
+
+	p, c, inserts := newFakeCreateProvider(t, spotStockout(""))
+	nodeClaim := spotOrOnDemandNodeClaim()
+	nodeClaim.Name = "fallback"
+
+	instance, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05)})
+
+	require.NoError(t, err)
+	require.Equal(t, karpv1.CapacityTypeOnDemand, instance.CapacityType)
+	require.Equal(t, []string{"n2-standard-4/spot", "n2-standard-4/on-demand"}, inserts())
+	requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot, stockoutTTL)
+}
+
+func TestCreate_SpotOnlyNodeClaimDoesNotFallBackToOnDemand(t *testing.T) {
+	t.Parallel()
+
+	p, _, inserts := newFakeCreateProvider(t, spotStockout(""))
+	nodeClaim := spotOrOnDemandNodeClaim()
+	nodeClaim.Name = "spot-only"
+	nodeClaim.Spec.Requirements[0].Values = []string{karpv1.CapacityTypeSpot}
+
+	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05)})
+
+	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
+	require.Equal(t, []string{"n2-standard-4/spot"}, inserts())
+}
+
+func TestCreate_DoesNotFallBackWhenASpotFailureIsNotCapacity(t *testing.T) {
+	t.Parallel()
+
+	p, _, inserts := newFakeCreateProvider(t, func(instanceType, capacityType string) string {
+		if capacityType != karpv1.CapacityTypeSpot {
+			return ""
+		}
+		if instanceType == "n2-standard-4" {
+			return "ZONE_RESOURCE_POOL_EXHAUSTED"
+		}
+		return "internalError"
+	})
+	nodeClaim := spotOrOnDemandNodeClaim()
+	nodeClaim.Name = "mixed"
+
+	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{
+		spotAndOnDemandIT("n2-standard-4", 0.05), spotAndOnDemandIT("n2-standard-8", 0.1),
+	})
+
+	require.Error(t, err)
+	require.Equal(t, []string{"n2-standard-4/spot", "n2-standard-8/spot"}, inserts())
+}
+
+func TestCreate_OnDemandFallbackFailureIsNotReportedAsSpotCapacity(t *testing.T) {
+	t.Parallel()
+
+	p, _, inserts := newFakeCreateProvider(t, spotStockout("internalError"))
+	nodeClaim := spotOrOnDemandNodeClaim()
+	nodeClaim.Name = "fallback-fails"
+
+	_, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{spotAndOnDemandIT("n2-standard-4", 0.05)})
+
+	require.Error(t, err)
+	require.False(t, cloudprovider.IsInsufficientCapacityError(err), "core must retry the NodeClaim, not delete it for spot capacity")
+	require.Equal(t, []string{"n2-standard-4/spot", "n2-standard-4/on-demand"}, inserts())
+}
+
+func TestCreate_FallbackAdoptsSpotInstanceLeftByStockedOutInsert(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var leftover *compute.Instance
+	inserts := 0
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodPost:
+			inserts++
+			leftover = &compute.Instance{}
+			if err := json.NewDecoder(r.Body).Decode(leftover); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]any{"name": "op-1", "status": "RUNNING"})
+		case strings.Contains(r.URL.Path, "/operations/"):
+			writeJSON(w, map[string]any{"name": "op-1", "status": "DONE", "error": map[string]any{
+				"errors": []map[string]string{{"code": "ZONE_RESOURCE_POOL_EXHAUSTED"}},
+			}})
+		case strings.HasSuffix(r.URL.Path, "/zones/us-central1-a/instances/karpenter-leftover") && leftover != nil:
+			writeJSON(w, leftover)
+		case strings.HasSuffix(r.URL.Path, "/aggregated/instances"):
+			writeJSON(w, map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	useFakeCreateDependencies(p, "us-central1-a", "us-central1-b")
+	p.unavailableOfferings.MarkUnavailable(context.Background(), "test", "n2-standard-4", "us-central1-a", karpv1.CapacityTypeOnDemand)
+	it := spotAndOnDemandIT("n2-standard-4", 0.05)
+	it.Offerings = append(it.Offerings, &cloudprovider.Offering{
+		Available: true,
+		Price:     0.2,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-b"),
+		),
+	})
+	nodeClaim := spotOrOnDemandNodeClaim()
+	nodeClaim.Name = "leftover"
+
+	instance, err := p.Create(context.Background(), imagesReadyNodeClass(), nodeClaim, []*cloudprovider.InstanceType{it})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, inserts, "the on-demand pass must adopt the leftover spot VM instead of inserting a second one")
+	require.Equal(t, "us-central1-a", instance.Location)
+	require.Equal(t, karpv1.CapacityTypeSpot, instance.CapacityType)
 }
 
 func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
