@@ -455,20 +455,56 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, requirements)
 	capacityType := p.getCapacityType(nodeClaim, instanceTypes)
 	freeIPs := p.podRangeFreeIPs(ctx, nodeClass)
-	var errs []error
 	var attemptedZones []string
+	instance, errs, err := p.createWithCapacityType(ctx, nodeClass, nodeClaim, instanceTypes, capacityType, &attemptedZones, freeIPs)
+	if err != nil || instance != nil {
+		return instance, err
+	}
+
+	if capacityType == karpv1.CapacityTypeSpot {
+		instance, errs, err = p.fallBackToOnDemand(ctx, nodeClass, nodeClaim, instanceTypes, requirements, errs, &attemptedZones, freeIPs)
+		if err != nil || instance != nil {
+			return instance, err
+		}
+	}
+
+	if len(errs) == 0 {
+		return nil, fmt.Errorf("failed to create instance after trying all instance types: unknown error")
+	}
+
+	joined := errors.Join(errs...)
+	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
+}
+
+// fallBackToOnDemand retries with on-demand when every spot attempt failed for lack of capacity and
+// the NodeClaim allows on-demand. Otherwise it returns spotErrs unchanged.
+func (p *DefaultProvider) fallBackToOnDemand(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, spotErrs []error, attemptedZones *[]string, freeIPs map[string]int64) (*Instance, []error, error) {
+	if len(spotErrs) == 0 || !lo.EveryBy(spotErrs, cloudprovider.IsInsufficientCapacityError) ||
+		!hasAvailableOffering(nodeClaim, instanceTypes, karpv1.CapacityTypeOnDemand) {
+		return nil, spotErrs, nil
+	}
+	log.FromContext(ctx).Info("spot capacity unavailable for all instance types, falling back to on-demand", "nodeClaim", nodeClaim.Name)
+	requirements[karpv1.CapacityTypeLabelKey] = scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand)
+	instanceTypes = orderInstanceTypesByPrice(instanceTypes, requirements)
+	return p.createWithCapacityType(ctx, nodeClass, nodeClaim, instanceTypes, karpv1.CapacityTypeOnDemand, attemptedZones, freeIPs)
+}
+
+// createWithCapacityType tries each instance type in order with the given capacity type. It returns
+// the retryable errors when no instance type could be launched.
+func (p *DefaultProvider) createWithCapacityType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType, capacityType string, attemptedZones *[]string, freeIPs map[string]int64) (*Instance, []error, error) {
+	var errs []error
 	// try all instance types, if one is available, use it
 	for _, instanceType := range instanceTypes {
-		instance, zone, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType, attemptedZones, freeIPs)
-		if zone != "" && !lo.Contains(attemptedZones, zone) {
-			attemptedZones = append(attemptedZones, zone)
+		instance, zone, err := p.tryCreateInstance(ctx, nodeClass, nodeClaim, instanceType, capacityType, *attemptedZones, freeIPs)
+		if zone != "" && !lo.Contains(*attemptedZones, zone) {
+			*attemptedZones = append(*attemptedZones, zone)
 		}
 		if err != nil {
 			if retryableErr, ok := errors.AsType[*retryableError](err); ok {
 				errs = append(errs, retryableErr.err)
 				continue
 			}
-			return nil, err
+			return nil, nil, err
 		}
 
 		// we could wait for the node to be present in kubernetes api via csr sign up
@@ -488,19 +524,13 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 			ProjectID:    p.projectID,
 			ImageID:      resolveInstanceImage(instance),
 			CreationTime: time.Now(),
-			CapacityType: capacityType,
+			CapacityType: resolveCapacityType(instance.Scheduling),
 			Tags:         instance.Labels,
 			Labels:       instance.Labels,
 			Status:       InstanceStatusProvisioning,
-		}, nil
+		}, nil, nil
 	}
-
-	if len(errs) == 0 {
-		return nil, fmt.Errorf("failed to create instance after trying all instance types: unknown error")
-	}
-
-	joined := errors.Join(errs...)
-	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
+	return nil, errs, nil
 }
 
 type retryableError struct {
@@ -642,18 +672,28 @@ func resolveInstanceImage(instance *compute.Instance) string {
 // getCapacityType selects spot if both constraints are flexible and there is an
 // available offering.
 func (p *DefaultProvider) getCapacityType(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) string {
+	if hasAvailableOffering(nodeClaim, instanceTypes, karpv1.CapacityTypeSpot) {
+		return karpv1.CapacityTypeSpot
+	}
+	return karpv1.CapacityTypeOnDemand
+}
+
+// hasAvailableOffering reports whether the NodeClaim allows capacityType and any
+// instance type has an available offering for it.
+func hasAvailableOffering(nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType, capacityType string) bool {
 	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-	if requirements.Get(karpv1.CapacityTypeLabelKey).Has(karpv1.CapacityTypeSpot) {
-		requirements[karpv1.CapacityTypeLabelKey] = scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeSpot)
-		for _, instanceType := range instanceTypes {
-			for _, offering := range instanceType.Offerings.Available() {
-				if requirements.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
-					return karpv1.CapacityTypeSpot
-				}
+	if !requirements.Get(karpv1.CapacityTypeLabelKey).Has(capacityType) {
+		return false
+	}
+	requirements[karpv1.CapacityTypeLabelKey] = scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType)
+	for _, instanceType := range instanceTypes {
+		for _, offering := range instanceType.Offerings.Available() {
+			if requirements.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+				return true
 			}
 		}
 	}
-	return karpv1.CapacityTypeOnDemand
+	return false
 }
 
 func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements) []*cloudprovider.InstanceType {
