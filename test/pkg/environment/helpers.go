@@ -1602,7 +1602,7 @@ func (e *Environment) ResolveCurrentUbuntuVersion(ctx context.Context) string {
 	Expect(listErr).NotTo(HaveOccurred(), "listing Ubuntu images in ubuntu-os-gke-cloud")
 	Expect(best).NotTo(BeNil(), "no Ubuntu image found for K8s version %s", serverVer.GitVersion)
 
-	versionRe := regexp.MustCompile(`-v(\d{8})`)
+	versionRe := regexp.MustCompile(`-v(\d{8}[a-z]?)`)
 	m := versionRe.FindStringSubmatch(best.Name)
 	Expect(m).To(HaveLen(2), "could not extract Ubuntu version from %q", best.Name)
 	version := "v" + m[1]

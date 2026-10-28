@@ -19,6 +19,8 @@ package v1alpha1
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -191,4 +193,43 @@ func TestGCENodeClassCRDGPUSharingConfig(t *testing.T) {
 	require.NotNil(t, clients.Maximum)
 	require.Equal(t, float64(2), *clients.Minimum)
 	require.Equal(t, float64(48), *clients.Maximum)
+}
+
+func TestGCENodeClassCRDUbuntuVersionPinFormat(t *testing.T) {
+	celPattern := regexp.MustCompile(`matches\('([^']+)'\)`)
+	term := specSchema(t).Properties["imageSelectorTerms"].Items.Schema
+
+	patterns := map[string]string{}
+	for _, v := range term.XValidations {
+		if strings.HasPrefix(v.Message, "Ubuntu2404 version") || strings.HasPrefix(v.Message, "Ubuntu2204 version") {
+			m := celPattern.FindStringSubmatch(v.Rule)
+			require.Len(t, m, 2, "rule %q", v.Rule)
+			patterns[v.Message[:len("Ubuntu2404")]] = m[1]
+		}
+	}
+	for _, v := range term.Properties["alias"].XValidations {
+		if strings.HasPrefix(v.Message, "Ubuntu version") {
+			m := celPattern.FindStringSubmatch(v.Rule)
+			require.Len(t, m, 2, "rule %q", v.Rule)
+			patterns["Ubuntu@"] = m[1]
+		}
+	}
+	require.Len(t, patterns, 3)
+
+	valid := []string{"v20260416", "v20251218a", "v20251218z"}
+	invalid := []string{"20260416", "v2026041", "v202604161", "v20251218ab", "v20251218A", "v20251218-a", "va20251218"}
+	for key, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		prefix := ""
+		if key == "Ubuntu@" {
+			prefix = key
+			require.True(t, re.MatchString(prefix+"latest"), "%s rejects latest", key)
+		}
+		for _, version := range valid {
+			require.True(t, re.MatchString(prefix+version), "%s rejects %q", key, version)
+		}
+		for _, version := range invalid {
+			require.False(t, re.MatchString(prefix+version), "%s accepts %q", key, version)
+		}
+	}
 }

@@ -34,8 +34,8 @@ import (
 
 const ubuntuGKEImageProject = "ubuntu-os-gke-cloud"
 
-// ubuntuPinnedVersionRe validates a pinned image version (vYYYYMMDD).
-var ubuntuPinnedVersionRe = regexp.MustCompile(`^v\d{8}$`)
+// ubuntuPinnedVersionRe validates a pinned image version (vYYYYMMDD, optionally with a release letter).
+var ubuntuPinnedVersionRe = regexp.MustCompile(`^v\d{8}[a-z]?$`)
 
 // Clean-name allowlists per release and architecture: anchoring on the version end rejects
 // variant builds (-tpu, -cgroupsv1, -linux64k, ...) while allowing a trailing date letter
@@ -65,7 +65,7 @@ var ubuntuArchitectures = []string{OSArchAMD64Requirement, OSArchARM64Requiremen
 func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, error) {
 	if version != "latest" && !ubuntuPinnedVersionRe.MatchString(version) {
 		return nil, &imageResolutionError{msg: fmt.Sprintf(
-			"invalid Ubuntu version %q: must be 'latest' or 'vYYYYMMDD' (e.g. 'v20260416')", version)}
+			"invalid Ubuntu version %q: must be 'latest' or 'vYYYYMMDD' with an optional release letter (e.g. 'v20260416', 'v20251218a')", version)}
 	}
 
 	images, err := u.listImages(ctx, version)
@@ -119,8 +119,8 @@ func (u *Ubuntu) listImages(ctx context.Context, version string) ([]*compute.Ima
 	return images, nil
 }
 
-// selectImage returns the newest usable image name for arch ("latest") or the exact-dated
-// usable image for a pinned vYYYYMMDD; ok=false if none matches, so a pinned date missing for
+// selectImage returns the newest usable image name for arch ("latest") or the exact-version
+// usable image for a pin; ok=false if none matches, so a pinned version missing for
 // one arch fails resolution rather than resolving a single-arch set.
 func (u *Ubuntu) selectImage(images []*compute.Image, arch, version string) (string, bool) {
 	var best *compute.Image

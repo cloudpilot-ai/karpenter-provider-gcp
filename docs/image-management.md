@@ -74,7 +74,7 @@ v20260420a
 
 For Ubuntu 22.04, the `ubuntu-gke-2204` amd64 image names do not carry an `-amd64-` token. Drop the arch token from the amd64 filter: use `^ubuntu-gke-2204-1-35-v[0-9]+[a-z]?$` for amd64 and `^ubuntu-gke-2204-1-35-arm64-v[0-9]+[a-z]?$` for arm64.
 
-> **Note:** A date shown with a trailing letter (for example, `v20260416a`) is a re-spin that `version: latest` can select, but it is not a valid `version:` pin — pins must be a bare `vYYYYMMDD`. Pin only dates that appear without a trailing letter.
+> **Note:** A date shown with a trailing letter (for example, `v20260416a`) is a separate build of that date. Pins match exactly: to pin it, include the letter (`version: "v20260416a"`). A pin without the letter (`v20260416`) does not resolve to `v20260416a`, and a letter pin does not resolve to the letterless build. Pin a token that appears in the output for both amd64 and arm64.
 
 > **Note:** Ubuntu pins require a usable catalog image for both architectures. See [Ubuntu selection behavior](image-selection.md#os-families) and [image readiness troubleshooting](troubleshooting.md#gcenodeclass-not-becoming-ready).
 

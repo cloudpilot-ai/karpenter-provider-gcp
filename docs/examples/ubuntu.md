@@ -22,7 +22,7 @@ imageSelectorTerms:
 
 ## Pinned version
 
-Pin to a specific Ubuntu build using the date format `vYYYYMMDD`:
+Pin to a specific Ubuntu build using the date format `vYYYYMMDD`. If the build has a trailing release letter, include it (for example, `v20251218a`); pins match exactly:
 
 ```yaml
 imageSelectorTerms:
