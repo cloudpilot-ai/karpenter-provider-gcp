@@ -52,6 +52,11 @@ func (in *AdvancedMachineFeatures) DeepCopyInto(out *AdvancedMachineFeatures) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.ThreadsPerCore != nil {
+		in, out := &in.ThreadsPerCore, &out.ThreadsPerCore
+		*out = new(int32)
+		**out = **in
+	}
 	return
 }
 

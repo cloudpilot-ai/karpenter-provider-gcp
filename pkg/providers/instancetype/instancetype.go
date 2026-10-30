@@ -176,7 +176,12 @@ func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass 
 	kcHash, _ := hashstructure.Hash(nodeClass.Spec.KubeletConfiguration, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	disksHash, _ := hashstructure.Hash(nodeClass.Spec.Disks, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	gpuSharingHash, _ := hashstructure.Hash(nodeClass.Spec.GPUSharingConfig, hashstructure.FormatV2, nil)
-	key := fmt.Sprintf("%d-%d-%d-%s-%d", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode, gpuSharingHash)
+	// ThreadsPerCore changes the vCPUs a node reports, so it changes cached capacity.
+	var threadsPerCore int32
+	if amf := nodeClass.Spec.AdvancedMachineFeatures; amf != nil && amf.ThreadsPerCore != nil {
+		threadsPerCore = *amf.ThreadsPerCore
+	}
+	key := fmt.Sprintf("%d-%d-%d-%s-%d-%d", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode, gpuSharingHash, threadsPerCore)
 
 	if item, ok := p.staticInstanceTypesCache.Get(key); ok {
 		return item.([]staticInstanceType), nil

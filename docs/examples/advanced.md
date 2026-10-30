@@ -257,6 +257,28 @@ requirements:
 
 To confirm nested virtualization is active on a node, check that the `vmx` CPU flag is present (`grep -c vmx /proc/cpuinfo`) or that `/dev/kvm` exists.
 
+## Threads per core
+
+Machine types run two threads per physical core (simultaneous multithreading, SMT). Set `threadsPerCore: 1` to disable SMT, for example for workloads that must not share a core between tenants or that are sensitive to noisy-neighbour effects on a sibling thread:
+
+```yaml
+advancedMachineFeatures:
+  threadsPerCore: 1
+```
+
+With SMT off the guest sees half the machine type's vCPUs: an `n2-standard-16` node reports 8 CPUs. GCE still bills the full 16. Karpenter accounts for this: the instance type's CPU capacity, and the kube-reserved CPU derived from it, use the vCPUs the node will report, so pods are packed against 8 and the NodePool's `limits.cpu` counts 8 for that node. The `karpenter.k8s.gcp/instance-cpu` label keeps the machine type's count (16), since that is the shape being bought. Requests that select a node by that label are unaffected, but a NodePool `limits.cpu` sized from vCPU billing is not: size it from the visible count.
+
+`threadsPerCore` accepts `1` or `2`. It is not supported on every family: GCE rejects C4A, H3, H4D, N4A, T2A, T2D, shared-core types and types with fewer than 2 vCPUs. See the [GCP documentation](https://cloud.google.com/compute/docs/instances/set-threads-per-core) for the current list. Restrict the NodePool to supported families so launches do not fail:
+
+```yaml
+requirements:
+  - key: karpenter.k8s.gcp/instance-family
+    operator: In
+    values: ["n2", "c3", "c4"]
+```
+
+Changing `threadsPerCore` on an existing GCENodeClass drifts its nodes, which are then replaced.
+
 ## Local SSDs
 
 [Local SSDs](https://cloud.google.com/compute/docs/disks/local-ssd) give nodes fast scratch storage. Their data is lost when the node stops, is preempted, or is deleted, so use them for caches and temporary data only.

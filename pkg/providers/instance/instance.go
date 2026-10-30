@@ -1509,17 +1509,22 @@ func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instan
 }
 
 // configureAdvancedMachineFeatures passes advanced machine features to the GCE
-// instance. Currently this only contains EnableNestedVirtualization which
-// allows access to KVM on certain GCE machine types
+// instance: EnableNestedVirtualization, which allows access to KVM on certain
+// GCE machine types, and ThreadsPerCore, which disables SMT when set to 1.
 func (p *DefaultProvider) configureAdvancedMachineFeatures(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass) {
 	amf := nodeClass.Spec.AdvancedMachineFeatures
-	if amf == nil || amf.EnableNestedVirtualization == nil {
+	if amf == nil || (amf.EnableNestedVirtualization == nil && amf.ThreadsPerCore == nil) {
 		return
 	}
-	instance.AdvancedMachineFeatures = &compute.AdvancedMachineFeatures{
-		EnableNestedVirtualization: *amf.EnableNestedVirtualization,
-		ForceSendFields:            []string{"EnableNestedVirtualization"},
+	features := &compute.AdvancedMachineFeatures{}
+	if amf.EnableNestedVirtualization != nil {
+		features.EnableNestedVirtualization = *amf.EnableNestedVirtualization
+		features.ForceSendFields = append(features.ForceSendFields, "EnableNestedVirtualization")
 	}
+	if amf.ThreadsPerCore != nil {
+		features.ThreadsPerCore = int64(*amf.ThreadsPerCore)
+	}
+	instance.AdvancedMachineFeatures = features
 }
 
 // setupInstanceLabels writes controller-owned GCE labels for a new instance.
