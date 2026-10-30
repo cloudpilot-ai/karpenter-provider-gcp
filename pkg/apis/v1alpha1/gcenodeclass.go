@@ -503,6 +503,14 @@ type AdvancedMachineFeatures struct {
 	// Confidential VM instances.
 	// +optional
 	EnableNestedVirtualization *bool `json:"enableNestedVirtualization,omitempty"`
+	// ThreadsPerCore is the number of threads per physical core. Machine types default to 2
+	// (simultaneous multithreading); set 1 to disable SMT. With 1 the guest sees half the
+	// machine type's vCPUs while GCE still bills the full count, so Karpenter sizes the node
+	// at half. Not supported on every family (for example C4A, H3, N4A, T2A, T2D and
+	// shared-core types); GCE rejects an unsupported machine type at create.
+	// +kubebuilder:validation:Enum=1;2
+	// +optional
+	ThreadsPerCore *int32 `json:"threadsPerCore,omitempty"`
 }
 
 // GCENodeClass is the Schema for the GCENodeClass API

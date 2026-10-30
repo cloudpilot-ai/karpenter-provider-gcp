@@ -3158,14 +3158,40 @@ func TestAdvancedMachineFeatures(t *testing.T) {
 	t.Parallel()
 
 	enabled, disabled := true, false
+	one, two := int32(1), int32(2)
 	cases := []struct {
 		name string
 		amf  *v1alpha1.AdvancedMachineFeatures
+		// want is nil when the instance must carry no AdvancedMachineFeatures.
+		want *compute.AdvancedMachineFeatures
 	}{
 		{name: "unset"},
 		{name: "empty", amf: &v1alpha1.AdvancedMachineFeatures{}},
-		{name: "nested virtualization enabled", amf: &v1alpha1.AdvancedMachineFeatures{EnableNestedVirtualization: &enabled}},
-		{name: "nested virtualization disabled", amf: &v1alpha1.AdvancedMachineFeatures{EnableNestedVirtualization: &disabled}},
+		{
+			name: "nested virtualization enabled",
+			amf:  &v1alpha1.AdvancedMachineFeatures{EnableNestedVirtualization: &enabled},
+			want: &compute.AdvancedMachineFeatures{EnableNestedVirtualization: true, ForceSendFields: []string{"EnableNestedVirtualization"}},
+		},
+		{
+			name: "nested virtualization disabled",
+			amf:  &v1alpha1.AdvancedMachineFeatures{EnableNestedVirtualization: &disabled},
+			want: &compute.AdvancedMachineFeatures{ForceSendFields: []string{"EnableNestedVirtualization"}},
+		},
+		{
+			name: "one thread per core",
+			amf:  &v1alpha1.AdvancedMachineFeatures{ThreadsPerCore: &one},
+			want: &compute.AdvancedMachineFeatures{ThreadsPerCore: 1},
+		},
+		{
+			name: "two threads per core",
+			amf:  &v1alpha1.AdvancedMachineFeatures{ThreadsPerCore: &two},
+			want: &compute.AdvancedMachineFeatures{ThreadsPerCore: 2},
+		},
+		{
+			name: "nested virtualization with one thread per core",
+			amf:  &v1alpha1.AdvancedMachineFeatures{EnableNestedVirtualization: &enabled, ThreadsPerCore: &one},
+			want: &compute.AdvancedMachineFeatures{EnableNestedVirtualization: true, ThreadsPerCore: 1, ForceSendFields: []string{"EnableNestedVirtualization"}},
+		},
 	}
 
 	for _, tc := range cases {
@@ -3177,14 +3203,11 @@ func TestAdvancedMachineFeatures(t *testing.T) {
 
 			instance := buildConfidentialInstance(t, nc)
 
-			if tc.amf == nil || tc.amf.EnableNestedVirtualization == nil {
+			if tc.want == nil {
 				require.Nil(t, instance.AdvancedMachineFeatures)
 				return
 			}
-
-			require.NotNil(t, instance.AdvancedMachineFeatures)
-			require.Equal(t, *tc.amf.EnableNestedVirtualization, instance.AdvancedMachineFeatures.EnableNestedVirtualization)
-			require.Contains(t, instance.AdvancedMachineFeatures.ForceSendFields, "EnableNestedVirtualization")
+			require.Equal(t, tc.want, instance.AdvancedMachineFeatures)
 		})
 	}
 }

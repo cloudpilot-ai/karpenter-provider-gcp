@@ -74,7 +74,7 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 
 	reservedCPU, reservedMemory, evictionMemory, ephemeralEviction, ephemeralSystem := utils.ResolveReservedResource(
 		lo.FromPtr(mt.Name),
-		int64(mt.GetGuestCpus()*1000),
+		visibleCPUs(mt, nodeClass)*1000,
 		int64(mt.GetMemoryMb()),
 		bootDiskGiB,
 		kubeletEphemeralSSDGiB,
@@ -262,9 +262,9 @@ func machineTypeArch(mt *computepb.MachineType) string {
 }
 
 func computeCapacity(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass, totalStorageBytes int64) corev1.ResourceList {
-	maxPods := kcMaxPods(nodeClass.GetMaxPods(), nodeClass.Spec.KubeletConfiguration, int64(mt.GetGuestCpus()))
+	maxPods := kcMaxPods(nodeClass.GetMaxPods(), nodeClass.Spec.KubeletConfiguration, visibleCPUs(mt, nodeClass))
 	resourceList := corev1.ResourceList{
-		corev1.ResourceCPU:              *cpu(mt),
+		corev1.ResourceCPU:              *resource.NewQuantity(visibleCPUs(mt, nodeClass), resource.DecimalSI),
 		corev1.ResourceMemory:           *memory(ctx, mt),
 		corev1.ResourcePods:             *resource.NewQuantity(maxPods, resource.DecimalSI),
 		corev1.ResourceEphemeralStorage: *resource.NewQuantity(totalStorageBytes, resource.BinarySI),
@@ -281,8 +281,20 @@ func gpuClientsPerGPU(nodeClass *v1alpha1.GCENodeClass) int64 {
 	return int64(nodeClass.Spec.GPUSharingConfig.MaxSharedClientsPerGPU)
 }
 
-func cpu(mt *computepb.MachineType) *resource.Quantity {
-	return resource.NewQuantity(int64(mt.GetGuestCpus()), resource.DecimalSI)
+// visibleCPUs is the number of vCPUs the guest OS sees, which is what the
+// kubelet reports as node capacity. Machine types run two threads per physical
+// core; with ThreadsPerCore set to 1 the guest sees half the machine type's
+// vCPUs (GCE still bills all of them). The instance-cpu label keeps the machine
+// type's count, since that is the shape being bought.
+func visibleCPUs(mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass) int64 {
+	cpus := int64(mt.GetGuestCpus())
+	if nodeClass == nil || nodeClass.Spec.AdvancedMachineFeatures == nil {
+		return cpus
+	}
+	if tpc := nodeClass.Spec.AdvancedMachineFeatures.ThreadsPerCore; tpc != nil && *tpc == 1 && cpus >= 2 {
+		return cpus / 2
+	}
+	return cpus
 }
 
 func memory(ctx context.Context, mt *computepb.MachineType) *resource.Quantity {

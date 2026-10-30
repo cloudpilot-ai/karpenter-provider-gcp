@@ -430,6 +430,13 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			want: NodeClassDrift,
 		},
 		{
+			name: "AdvancedMachineFeatures ThreadsPerCore",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.AdvancedMachineFeatures = &v1alpha1.AdvancedMachineFeatures{ThreadsPerCore: ptr(int32(1))}
+			},
+			want: NodeClassDrift,
+		},
+		{
 			name: "NetworkConfig",
 			mutate: func(nc *v1alpha1.GCENodeClass) {
 				nc.Spec.NetworkConfig = &v1alpha1.NetworkConfig{
