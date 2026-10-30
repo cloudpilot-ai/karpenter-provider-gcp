@@ -93,7 +93,7 @@ func resolveLockID(override string) (string, error) {
 	return fmt.Sprintf("%s@%s:pid-%d", current.Username, hostname, os.Getpid()), nil
 }
 
-func main() {
+func newRunnerCommand() *cobra.Command {
 	var selection, preset, reportPath, lockID, releaseVersion string
 	cmd := &cobra.Command{
 		Use:          "e2e-runner",
@@ -121,6 +121,7 @@ func main() {
 			}
 			return withLease(cmd.Context(), client, holder, func(runCtx context.Context) error {
 				args := append([]string{"run", "github.com/onsi/ginkgo/v2/ginkgo"}, ginkgoArgs...)
+				args = append(args, "--fail-on-empty")
 				if filter != "" {
 					args = append(args, "--label-filter="+filter)
 				}
@@ -134,13 +135,15 @@ func main() {
 					if err != nil {
 						return err
 					}
-					dir, err := os.MkdirTemp("", "e2e-report-")
+					if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+						return err
+					}
+					dir, err := os.MkdirTemp(filepath.Dir(reportPath), filepath.Base(reportPath)+"-native-")
 					if err != nil {
 						return err
 					}
-					defer os.RemoveAll(dir)
 					jsonPath = filepath.Join(dir, "results.json")
-					args = append(args, "--output-dir="+dir, "--json-report=results.json")
+					args = append(args, "--output-dir="+dir, "--json-report=results.json", "--junit-report=junit.xml")
 				}
 				args = append(args, "./test/suites/")
 				runner := exec.CommandContext(runCtx, "go", args...)
@@ -167,9 +170,15 @@ func main() {
 	}
 	cmd.Flags().StringVar(&selection, "selection", "standard", "Preset (standard, gpu, all, provisioning) or comma-separated feature directories")
 	cmd.Flags().StringVar(&preset, "preset", "", "Deprecated alias for --selection")
-	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report to this path")
+	cmd.Flags().StringVar(&reportPath, "report", "", "Write a Markdown test report here; retain native JSON/JUnit in an adjacent private directory")
 	cmd.Flags().StringVar(&releaseVersion, "release-version", "", "Validate the deployed release instead of matching the test commit (with --report)")
 	cmd.Flags().StringVar(&lockID, "lock-id", "", "Lease holder ID (default: username@hostname:pid-<runner PID>)")
+	cmd.AddCommand(newValidateTargetCommand(), newPreparedCommand(), newLocalLifecycleCommand(true), newLocalLifecycleCommand(false))
+	return cmd
+}
+
+func main() {
+	cmd := newRunnerCommand()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := cmd.ExecuteContext(ctx); err != nil {

@@ -1,0 +1,282 @@
+# REVIEWED EXAMPLE ONLY. Never applied by Terraform or normal CI.
+# Replace CI_RUNTIME_SERVICE_ACCOUNT_EMAIL with the dedicated Terraform output.
+# Existing namespace/Lease/PriorityClass ownership must be reviewed, not adopted.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: karpenter-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: karpenter-e2e-test
+  labels:
+    karpenter-e2e/owned: "true"
+---
+apiVersion: coordination.k8s.io/v1
+kind: Lease
+metadata:
+  name: karpenter-e2e-tests
+  namespace: karpenter-system
+spec: {}
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gmp-critical
+value: 1000000000
+globalDefault: false
+preemptionPolicy: Never
+description: Non-preempting e2e controller priority for targets without GMP.
+---
+# Current chart ClusterRoles plus test/coordinator cluster-scoped operations.
+# NO bind/escalate: Kubernetes must reject chart rules beyond this inventory.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: e2e-runtime-cluster
+rules:
+  - apiGroups: [""]
+    resources: [pods, nodes, persistentvolumes, persistentvolumeclaims, replicationcontrollers, namespaces, services]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses, csinodes, volumeattachments]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [daemonsets]
+    verbs: [list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets]
+    verbs: [get, list, watch]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch, create]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    resourceNames: [gcenodeclasses.karpenter.k8s.gcp, gcecustommachinetypes.karpenter.k8s.gcp, nodepools.karpenter.sh, nodeclaims.karpenter.sh, nodeoverlays.karpenter.sh]
+    verbs: [update, patch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [karpenter-leader-election]
+    verbs: [update, patch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [list, create, patch]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [delete, update, patch]
+  - apiGroups: [""]
+    resources: [nodes/status]
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [pods/eviction]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]
+  - apiGroups: [certificates.k8s.io]
+    resources: [certificatesigningrequests, certificatesigningrequests/status]
+    verbs: [create, update, patch, delete, get, list, watch]
+  - apiGroups: [certificates.k8s.io]
+    resources: [certificatesigningrequests/approval]
+    verbs: [update, patch]
+  - apiGroups: [certificates.k8s.io]
+    resources: [signers]
+    resourceNames: [kubernetes.io/kube-apiserver-client-kubelet, kubernetes.io/kubelet-serving]
+    verbs: [approve]
+  - apiGroups: [karpenter.k8s.gcp]
+    resources: [gcenodeclasses]
+    verbs: [get, list, watch, create, delete, update, patch]
+  - apiGroups: [karpenter.k8s.gcp]
+    resources: [gcecustommachinetypes]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [karpenter.k8s.gcp]
+    resources: [gcenodeclasses/status, gcecustommachinetypes/status]
+    verbs: [update, patch]
+  - apiGroups: [karpenter.sh]
+    resources: [nodepools, nodeclaims, nodeoverlays]
+    verbs: [get, list, watch, create, delete, update, patch]
+  - apiGroups: [karpenter.sh]
+    resources: [nodepools/status, nodeoverlays/status]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [karpenter.sh]
+    resources: [nodeclaims/status]
+    verbs: [get, list, watch, create, delete, update, patch]
+  - apiGroups: [autoscaling.x-k8s.io]
+    resources: [capacitybuffers]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling.x-k8s.io]
+    resources: [capacitybuffers/status]
+    verbs: [patch]
+  - apiGroups: [""]
+    resources: [podtemplates]
+    verbs: [get, list, watch]
+  - apiGroups: [scheduling.k8s.io]
+    resources: [priorityclasses]
+    resourceNames: [gmp-critical]
+    verbs: [get]
+  # Create cannot be name-constrained; built-in anti-escalation still applies.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles, clusterrolebindings]
+    verbs: [create]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles, clusterrolebindings]
+    resourceNames: [karpenter, karpenter-core]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: e2e-runtime-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: e2e-runtime-cluster
+subjects:
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: CI_RUNTIME_SERVICE_ACCOUNT_EMAIL
+---
+# Helm release Secrets and current chart Role. No other namespace's Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: e2e-runtime-controller
+  namespace: karpenter-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, watch, create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [karpenter-leader-election, karpenter-e2e-tests]
+    verbs: [update, patch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [serviceaccounts, services]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [serviceaccounts, services]
+    resourceNames: [karpenter]
+    verbs: [get, update, patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [karpenter]
+    verbs: [get, update, patch]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [create]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    resourceNames: [karpenter]
+    verbs: [get, update, patch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    verbs: [create]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    resourceNames: [karpenter]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: e2e-runtime-controller
+  namespace: karpenter-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: e2e-runtime-controller
+subjects:
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: CI_RUNTIME_SERVICE_ACCOUNT_EMAIL
+---
+# Current chart's kube-node-lease Role; only its role objects are updatable.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: e2e-runtime-nodeleases
+  namespace: kube-node-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    verbs: [create]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    resourceNames: [karpenter-lease]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: e2e-runtime-nodeleases
+  namespace: kube-node-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: e2e-runtime-nodeleases
+subjects:
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: CI_RUNTIME_SERVICE_ACCOUNT_EMAIL
+---
+# ClusterRole is bound ONLY in the preserved test namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: e2e-runtime-test-workloads
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, delete]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    resourceNames: [e2e-runtime-test-workloads]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: e2e-runtime-test-workloads
+  namespace: karpenter-e2e-test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: e2e-runtime-test-workloads
+subjects:
+  - kind: User
+    apiGroup: rbac.authorization.k8s.io
+    name: CI_RUNTIME_SERVICE_ACCOUNT_EMAIL
