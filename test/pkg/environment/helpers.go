@@ -375,10 +375,10 @@ func (e *Environment) CreateNodeClassWithNestedVirtualization(ctx context.Contex
 	e.trackNodeClass(name)
 }
 
-// CreateNodeClassWithGvnicAndMinCpuPlatform creates a GCENodeClass with
-// networkConfig.enableGvnic set to true and spec.minCpuPlatform set. Used by
-// instance-config e2e tests.
-func (e *Environment) CreateNodeClassWithGvnicAndMinCpuPlatform(ctx context.Context, name, minCpuPlatform string) {
+// CreateNodeClassWithNicTypeAndMinCpuPlatform creates a GCENodeClass with
+// networkConfig.nicType and spec.minCpuPlatform set. Used by instance-config
+// e2e tests.
+func (e *Environment) CreateNodeClassWithNicTypeAndMinCpuPlatform(ctx context.Context, name, nicType, minCpuPlatform string) {
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
@@ -387,7 +387,7 @@ func (e *Environment) CreateNodeClassWithGvnicAndMinCpuPlatform(ctx context.Cont
 		"spec": map[string]any{
 			"minCpuPlatform": minCpuPlatform,
 			"networkConfig": map[string]any{
-				"enableGvnic": true,
+				"nicType": nicType,
 			},
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},
