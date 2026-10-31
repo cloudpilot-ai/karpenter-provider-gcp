@@ -599,6 +599,15 @@ spec:
                       (no external IP). When unset, defaults to the cluster's EnablePrivateNodes setting.
                       Mirrors GKE node pool network_config.enable_private_nodes.
                     type: boolean
+                  nicType:
+                    description: |-
+                      NicType is the GCE network interface type for every interface on provisioned nodes,
+                      for example GVNIC or VIRTIO_NET. It is passed to GCE as the interface's nicType
+                      without validation, so any value GCE accepts works. When unset, GCE chooses, which is
+                      gVNIC on machine series that require it and VirtIO-Net otherwise. GCE rejects a type the
+                      machine series or node image does not support; Container-Optimized OS supports gVNIC.
+                      Mirrors the GCE API's NetworkInterface.nicType; GKE node pool gvnic.enabled selects GVNIC.
+                    type: string
                   subnetwork:
                     description: |-
                       Subnetwork is the subnetwork for the primary network interface.

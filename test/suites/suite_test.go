@@ -32,6 +32,7 @@ import (
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/gc"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/gpu"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/hugepages"
+	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/instance-config"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/interruption"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/kubelet_config"
 	_ "github.com/cloudpilot-ai/karpenter-provider-gcp/test/suites/local-ssd"
