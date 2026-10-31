@@ -1000,6 +1000,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
 		NetworkInterfaces: interfaces,
+		MinCpuPlatform:    nodeClass.Spec.MinCpuPlatform,
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          computeMetadata,
 		Labels:            instanceMetadata.ToComputeInstanceLabels(),
@@ -1071,9 +1072,15 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 		}
 	}
 
+	var nic string
+	if nodeClass.Spec.NetworkConfig != nil {
+		nic = nodeClass.Spec.NetworkConfig.NicType
+	}
+
 	primary := &compute.NetworkInterface{
 		Network:    network,
 		Subnetwork: subnetwork,
+		NicType:    nic,
 		AliasIpRanges: []*compute.AliasIpRange{{
 			IpCidrRange:         fmt.Sprintf("/%d", targetRange),
 			SubnetworkRangeName: rangeName,
@@ -1084,7 +1091,7 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 	ifaces := []*compute.NetworkInterface{primary}
 
 	if nodeClass.Spec.NetworkConfig != nil {
-		ifaces = append(ifaces, buildAdditionalInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.AdditionalNetworkInterfaces, disableExternal)...)
+		ifaces = append(ifaces, buildAdditionalInterfaces(cluster.NetworkConfig.Network, nodeClass.Spec.NetworkConfig.AdditionalNetworkInterfaces, disableExternal, nic)...)
 	}
 
 	return ifaces
@@ -1103,7 +1110,7 @@ func applyAccessConfig(iface *compute.NetworkInterface, disableExternal bool) {
 // buildAdditionalInterfaces builds secondary NetworkInterface objects from additionalNetworkInterfaces.
 // Subnetwork is required by the CRD schema on each entry. Network falls back to the cluster network
 // when not explicitly set, mirroring GKE's additional_node_network_configs behavior.
-func buildAdditionalInterfaces(clusterNetwork string, overrides []v1alpha1.AdditionalNetworkInterface, disableExternal bool) []*compute.NetworkInterface {
+func buildAdditionalInterfaces(clusterNetwork string, overrides []v1alpha1.AdditionalNetworkInterface, disableExternal bool, nic string) []*compute.NetworkInterface {
 	ifaces := make([]*compute.NetworkInterface, 0, len(overrides))
 	for _, override := range overrides {
 		network := clusterNetwork
@@ -1113,6 +1120,7 @@ func buildAdditionalInterfaces(clusterNetwork string, overrides []v1alpha1.Addit
 		iface := &compute.NetworkInterface{
 			Network:    network,
 			Subnetwork: override.Subnetwork,
+			NicType:    nic,
 		}
 		applyAccessConfig(iface, disableExternal)
 		ifaces = append(ifaces, iface)

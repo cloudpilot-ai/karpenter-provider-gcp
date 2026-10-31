@@ -375,6 +375,34 @@ func (e *Environment) CreateNodeClassWithNestedVirtualization(ctx context.Contex
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithNicTypeAndMinCpuPlatform creates a GCENodeClass with
+// networkConfig.nicType and spec.minCpuPlatform set. Used by instance-config
+// e2e tests.
+func (e *Environment) CreateNodeClassWithNicTypeAndMinCpuPlatform(ctx context.Context, name, nicType, minCpuPlatform string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"minCpuPlatform": minCpuPlatform,
+			"networkConfig": map[string]any{
+				"nicType": nicType,
+			},
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"disks": []any{
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
 // CreateNodeClass but with networkConfig.enablePrivateNodes set to true,
 // so Karpenter provisions nodes with no external (public) IP.

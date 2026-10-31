@@ -430,6 +430,20 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			want: NodeClassDrift,
 		},
 		{
+			name: "MinCpuPlatform",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.MinCpuPlatform = "Intel Ice Lake"
+			},
+			want: NodeClassDrift,
+		},
+		{
+			name: "NetworkConfig NicType",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.NetworkConfig = &v1alpha1.NetworkConfig{NicType: "GVNIC"}
+			},
+			want: NodeClassDrift,
+		},
+		{
 			name: "NetworkConfig",
 			mutate: func(nc *v1alpha1.GCENodeClass) {
 				nc.Spec.NetworkConfig = &v1alpha1.NetworkConfig{

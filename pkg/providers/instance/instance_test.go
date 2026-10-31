@@ -1369,6 +1369,39 @@ func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) 
 	require.Equal(t, "ONE_TO_ONE_NAT", result[1].AccessConfigs[0].Type)
 }
 
+func TestSetupNetworkInterfaces_NicType(t *testing.T) {
+	t.Parallel()
+
+	secondary := []v1alpha1.AdditionalNetworkInterface{{Subnetwork: "regions/us-central1/subnetworks/secondary"}}
+	cases := []struct {
+		name string
+		cfg  *v1alpha1.NetworkConfig
+		want string
+	}{
+		{name: "no networkConfig leaves the type to GCE"},
+		{name: "unset leaves the type to GCE", cfg: &v1alpha1.NetworkConfig{AdditionalNetworkInterfaces: secondary}},
+		{name: "GVNIC", cfg: &v1alpha1.NetworkConfig{NicType: "GVNIC", AdditionalNetworkInterfaces: secondary}, want: "GVNIC"},
+		{name: "VIRTIO_NET", cfg: &v1alpha1.NetworkConfig{NicType: "VIRTIO_NET", AdditionalNetworkInterfaces: secondary}, want: "VIRTIO_NET"},
+		// The value is not validated here: any type GCE accepts passes through, including ones added later.
+		{name: "other values pass through", cfg: &v1alpha1.NetworkConfig{NicType: "IDPF", AdditionalNetworkInterfaces: secondary}, want: "IDPF"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := &DefaultProvider{}
+			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{NetworkConfig: tc.cfg}}
+			result := p.setupNetworkInterfaces(makeCluster("net", "subnet", "pods", false), nodeClass)
+
+			require.NotEmpty(t, result)
+			for i, iface := range result {
+				require.Equal(t, tc.want, iface.NicType, "interface %d", i)
+			}
+		})
+	}
+}
+
 func TestSetupNetworkInterfaces_AdditionalInterfaceNetworkOverride(t *testing.T) {
 	t.Parallel()
 
@@ -3150,6 +3183,33 @@ func TestConfidentialInstanceType(t *testing.T) {
 			require.True(t, instance.ConfidentialInstanceConfig.EnableConfidentialCompute)
 			require.Equal(t, *tc.typ, instance.ConfidentialInstanceConfig.ConfidentialInstanceType)
 			require.Equal(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
+		})
+	}
+}
+
+func TestMinCpuPlatform(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		platform string
+		want     string
+	}{
+		{name: "unset leaves the platform to GCE"},
+		{name: "Ice Lake", platform: "Intel Ice Lake", want: "Intel Ice Lake"},
+		{name: "Granite Rapids", platform: "Intel Granite Rapids", want: "Intel Granite Rapids"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.MinCpuPlatform = tc.platform
+
+			instance := buildConfidentialInstance(t, nc)
+
+			require.Equal(t, tc.want, instance.MinCpuPlatform)
 		})
 	}
 }
