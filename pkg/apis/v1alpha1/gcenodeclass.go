@@ -122,6 +122,13 @@ type GCENodeClassSpec struct {
 	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
+	// MinCpuPlatform is the minimum CPU platform for provisioned nodes, for example
+	// "Intel Ice Lake" or "Intel Granite Rapids". GCE schedules the node on that platform or
+	// a newer one. Leave unset to let GCE choose. GCE rejects a platform the machine type does
+	// not offer, so restrict the NodePool to machine types that do.
+	// Mirrors GKE node pool min_cpu_platform.
+	// +optional
+	MinCpuPlatform string `json:"minCpuPlatform,omitempty"`
 	// AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes.
 	// +optional
 	AdvancedMachineFeatures *AdvancedMachineFeatures `json:"advancedMachineFeatures,omitempty"`
