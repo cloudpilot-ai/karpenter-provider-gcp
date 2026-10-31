@@ -35,9 +35,12 @@ var _ = Describe("Instance Config", Label("suite:instance-config"), func() {
 	// Cascade Lake is a floor that every N2 zone offers. GCE reports the platform
 	// that was requested, so this checks the field reached the instance, not which
 	// platform the scheduler picked.
-	const minCpuPlatform = "Intel Cascade Lake"
+	const (
+		nicType        = "GVNIC"
+		minCpuPlatform = "Intel Cascade Lake"
+	)
 
-	It("should apply enableGvnic and minCpuPlatform to the GCE instance", func(ctx SpecContext) {
+	It("should apply nicType and minCpuPlatform to the GCE instance", func(ctx SpecContext) {
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "inst-cfg")
 		name := prefix + "-" + environment.UniqueSuffix()
 
@@ -53,7 +56,7 @@ var _ = Describe("Instance Config", Label("suite:instance-config"), func() {
 			}
 		})
 
-		env.CreateNodeClassWithGvnicAndMinCpuPlatform(ctx, name, minCpuPlatform)
+		env.CreateNodeClassWithNicTypeAndMinCpuPlatform(ctx, name, nicType, minCpuPlatform)
 		env.CreateNodePool(ctx, name, name, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,
@@ -73,10 +76,10 @@ var _ = Describe("Instance Config", Label("suite:instance-config"), func() {
 		instance, err := env.GetGCEInstance(ctx, node.Spec.ProviderID)
 		Expect(err).NotTo(HaveOccurred(), "fetching GCE instance for node %s", provisionedNodeName)
 
-		By("every interface is gVNIC")
+		By("every interface has the requested type")
 		Expect(instance.NetworkInterfaces).NotTo(BeEmpty(), "node %s has no network interfaces", provisionedNodeName)
 		for i, iface := range instance.NetworkInterfaces {
-			Expect(iface.NicType).To(Equal("GVNIC"), "interface %d on node %s", i, provisionedNodeName)
+			Expect(iface.NicType).To(Equal(nicType), "interface %d on node %s", i, provisionedNodeName)
 		}
 
 		By("the requested minimum CPU platform is recorded")
