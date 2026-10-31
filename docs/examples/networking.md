@@ -48,6 +48,17 @@ The deprecated `subnetRangeName` and `subnetRangeNames` are mutually exclusive. 
 
 If neither field is set, Karpenter discovers the cluster's default pod range plus additional pod ranges on its primary subnetwork. Names from GKE's configured range list and utilization metadata are combined without duplicates. Ranges on separate additional subnetworks are not included. Selection uses descending `subnetworks.get` free-IP counts and IP-exhaustion fallback, not GKE's node-pool allocation algorithm. Counts are cached for one minute; unknown counts follow known counts, with candidate order breaking ties. If the capacity read fails, launch preserves candidate order without counts. Free IPs do not guarantee a contiguous pod CIDR block.
 
+## Network interface type
+
+`nicType` sets the GCE network interface type on every interface of the node. The usual reason is [gVNIC](https://cloud.google.com/compute/docs/networking/using-gvnic), Google's virtual network interface, which has higher bandwidth than VirtIO-Net:
+
+```yaml
+networkConfig:
+  nicType: GVNIC
+```
+
+The value is passed to GCE as the interface's `nicType` without validation, so any type GCE accepts works: `GVNIC`, `VIRTIO_NET`, and whatever GCE adds later. Leave it unset to let GCE choose, which is gVNIC on the machine series that require it (C3, C4, N4 and others) and VirtIO-Net on the rest. GCE rejects a type that the machine series or the node image does not support; Container-Optimized OS supports gVNIC. `GVNIC` is the equivalent of GKE node pool `gvnic.enabled`. Changing `nicType` on an existing GCENodeClass drifts its nodes, which are then replaced.
+
 ## Resource manager tags
 
 Bind [resource manager tags](https://cloud.google.com/resource-manager/docs/tags/tags-overview) (secure tags) to nodes at creation, the equivalent of GKE node pool `resource_manager_tags`. Unlike `networkTags`, attaching a tag requires IAM permission on the tag value, so tags can be used as targets in [network firewall policies](https://cloud.google.com/firewall/docs/tags-firewalls-overview), IAM conditions and organization policies.
