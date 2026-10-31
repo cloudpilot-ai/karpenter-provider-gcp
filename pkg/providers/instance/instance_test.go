@@ -3154,6 +3154,33 @@ func TestConfidentialInstanceType(t *testing.T) {
 	}
 }
 
+func TestMinCpuPlatform(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		platform string
+		want     string
+	}{
+		{name: "unset leaves the platform to GCE"},
+		{name: "Ice Lake", platform: "Intel Ice Lake", want: "Intel Ice Lake"},
+		{name: "Granite Rapids", platform: "Intel Granite Rapids", want: "Intel Granite Rapids"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.MinCpuPlatform = tc.platform
+
+			instance := buildConfidentialInstance(t, nc)
+
+			require.Equal(t, tc.want, instance.MinCpuPlatform)
+		})
+	}
+}
+
 func TestAdvancedMachineFeatures(t *testing.T) {
 	t.Parallel()
 

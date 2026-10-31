@@ -235,6 +235,25 @@ If the chosen machine type does not support the requested confidential type, GCE
 
 The default `ContainerOptimizedOS` and `Ubuntu` images boot as Confidential VMs on supported families without any image change. GPU Confidential VMs are an exception: an A3 instance with an attached H100 GPU using Intel TDX requires a TDX-specific image (for example `cos-tdx-*`), which is not available through the `family` image selectors. Pin such an image by its full resource URL with `imageSelectorTerms[].id`; see the [GCP supported configurations](https://cloud.google.com/confidential-computing/confidential-vm/docs/supported-configurations#supported-images-gpu).
 
+## Minimum CPU platform
+
+`minCpuPlatform` asks GCE to place the node on a given CPU platform or a newer one, for workloads that need an instruction-set level or a performance floor:
+
+```yaml
+minCpuPlatform: Intel Ice Lake
+```
+
+Leave it unset to let GCE choose. Values are GCE's names, for example `Intel Ice Lake`, `Intel Sapphire Rapids` or `AMD Milan`, and which ones a machine type offers differs by type and zone; see the [GCP CPU platform documentation](https://cloud.google.com/compute/docs/cpu-platforms) for the list. GCE rejects a platform the machine type does not offer, and Karpenter does not model platforms when choosing instance types, so restrict the NodePool to machine types that offer it:
+
+```yaml
+requirements:
+  - key: node.kubernetes.io/instance-type
+    operator: In
+    values: ["n2-standard-16"]
+```
+
+Changing `minCpuPlatform` on an existing GCENodeClass drifts its nodes, which are then replaced.
+
 ## Nested virtualization
 
 Nested virtualization lets pods on the node run their own virtual machines, for example with KVM-based sandboxes or emulators.

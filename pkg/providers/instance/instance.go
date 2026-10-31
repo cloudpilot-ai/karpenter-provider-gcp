@@ -1000,6 +1000,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		MachineType:       fmt.Sprintf("zones/%s/machineTypes/%s", zone, instanceType.Name),
 		Disks:             attachedDisks,
 		NetworkInterfaces: interfaces,
+		MinCpuPlatform:    nodeClass.Spec.MinCpuPlatform,
 		ServiceAccounts:   serviceAccounts,
 		Metadata:          computeMetadata,
 		Labels:            instanceMetadata.ToComputeInstanceLabels(),

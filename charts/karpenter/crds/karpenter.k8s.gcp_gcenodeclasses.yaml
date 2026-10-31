@@ -556,6 +556,14 @@ spec:
                     in self) && !(''windows-startup-script-ps1'' in self) && !(''common-psm1''
                     in self) && !(''kubeconfig'' in self) && !(''kubelet-config''
                     in self)'
+              minCpuPlatform:
+                description: |-
+                  MinCpuPlatform is the minimum CPU platform for provisioned nodes, for example
+                  "Intel Ice Lake" or "Intel Granite Rapids". GCE schedules the node on that platform or
+                  a newer one. Leave unset to let GCE choose. GCE rejects a platform the machine type does
+                  not offer, so restrict the NodePool to machine types that do.
+                  Mirrors GKE node pool min_cpu_platform.
+                type: string
               networkConfig:
                 description: NetworkConfig allows overriding per-interface network
                   settings for provisioned nodes.
