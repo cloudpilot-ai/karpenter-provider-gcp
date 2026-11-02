@@ -3154,6 +3154,36 @@ func TestConfidentialInstanceType(t *testing.T) {
 	}
 }
 
+func TestMinCPUPlatform(t *testing.T) {
+	t.Parallel()
+
+	iceLake := "Intel Ice Lake"
+	cases := []struct {
+		name     string
+		platform *string
+	}{
+		{name: "unset"},
+		{name: "set", platform: &iceLake},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.MinCPUPlatform = tc.platform
+
+			instance := buildConfidentialInstance(t, nc)
+
+			if tc.platform == nil {
+				require.Empty(t, instance.MinCpuPlatform)
+				return
+			}
+			require.Equal(t, *tc.platform, instance.MinCpuPlatform)
+		})
+	}
+}
+
 func TestAdvancedMachineFeatures(t *testing.T) {
 	t.Parallel()
 

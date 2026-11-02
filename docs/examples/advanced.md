@@ -235,6 +235,16 @@ If the chosen machine type does not support the requested confidential type, GCE
 
 The default `ContainerOptimizedOS` and `Ubuntu` images boot as Confidential VMs on supported families without any image change. GPU Confidential VMs are an exception: an A3 instance with an attached H100 GPU using Intel TDX requires a TDX-specific image (for example `cos-tdx-*`), which is not available through the `family` image selectors. Pin such an image by its full resource URL with `imageSelectorTerms[].id`; see the [GCP supported configurations](https://cloud.google.com/confidential-computing/confidential-vm/docs/supported-configurations#supported-images-gpu).
 
+## Minimum CPU platform
+
+Some machine families are offered on more than one CPU generation, for example N2 on Cascade Lake or Ice Lake, and E2 on whatever hardware is available. Workloads that depend on an exact CPU feature set, such as restoring VM snapshots taken on another node, need every node in the pool to land on the same platform.
+
+```yaml
+minCpuPlatform: "Intel Ice Lake"
+```
+
+GCE schedules the instance on the named platform or a newer one from the same vendor. The value is a GCE CPU platform name as listed in the [GCP CPU platforms documentation](https://cloud.google.com/compute/docs/instances/specify-min-cpu-platform). If the chosen machine type does not offer the platform, GCE rejects the instance creation and the error surfaces on the `NodeClaim` `Launched` condition. Leave the field unset to accept the family default.
+
 ## Nested virtualization
 
 Nested virtualization lets pods on the node run their own virtual machines, for example with KVM-based sandboxes or emulators.

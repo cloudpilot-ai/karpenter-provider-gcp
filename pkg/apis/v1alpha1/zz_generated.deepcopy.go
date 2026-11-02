@@ -371,6 +371,11 @@ func (in *GCENodeClassSpec) DeepCopyInto(out *GCENodeClassSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.MinCPUPlatform != nil {
+		in, out := &in.MinCPUPlatform, &out.MinCPUPlatform
+		*out = new(string)
+		**out = **in
+	}
 	if in.NetworkConfig != nil {
 		in, out := &in.NetworkConfig, &out.NetworkConfig
 		*out = new(NetworkConfig)

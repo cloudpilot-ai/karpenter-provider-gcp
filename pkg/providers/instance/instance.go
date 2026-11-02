@@ -1043,6 +1043,9 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	// Configure advanced machine features
 	p.configureAdvancedMachineFeatures(instance, nodeClass)
 
+	// Configure minimum CPU platform
+	p.configureMinCPUPlatform(instance, nodeClass)
+
 	// Setup karpenter built-in labels
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, clusterConfig.Id, ssdCount)
 
@@ -1506,6 +1509,14 @@ func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instan
 	}
 	// Confidential VMs cannot live-migrate; GCE rejects MIGRATE on create.
 	instance.Scheduling.OnHostMaintenance = "TERMINATE"
+}
+
+// configureMinCPUPlatform pins the GCE minimum CPU platform when the NodeClass
+// asks for one, so families offered on several CPU generations stay uniform.
+func (p *DefaultProvider) configureMinCPUPlatform(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass) {
+	if mcp := nodeClass.Spec.MinCPUPlatform; mcp != nil {
+		instance.MinCpuPlatform = *mcp
+	}
 }
 
 // configureAdvancedMachineFeatures passes advanced machine features to the GCE

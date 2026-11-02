@@ -131,6 +131,15 @@ type GCENodeClassSpec struct {
 	// +kubebuilder:validation:Enum=SEV;SEV_SNP;TDX
 	// +optional
 	ConfidentialInstanceType *string `json:"confidentialInstanceType,omitempty"`
+	// MinCPUPlatform sets the minimum CPU platform for provisioned nodes, for example
+	// "Intel Ice Lake" or "AMD Milan". GCE then schedules the instance on that platform
+	// or a newer one from the same vendor. Use it when a machine family is offered on more
+	// than one CPU generation and workloads depend on a specific CPU feature set, such as
+	// VM snapshot restore. Leave unset to accept the family default.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	// +optional
+	MinCPUPlatform *string `json:"minCpuPlatform,omitempty"`
 	// NetworkConfig allows overriding per-interface network settings for provisioned nodes.
 	// +optional
 	NetworkConfig *NetworkConfig `json:"networkConfig,omitempty"`
