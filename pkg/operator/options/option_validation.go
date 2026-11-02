@@ -23,7 +23,15 @@ import (
 func (o *Options) Validate() error {
 	return multierr.Combine(
 		o.validateRequiredFields(),
+		o.validateQuotaExceededTTL(),
 	)
+}
+
+func (o *Options) validateQuotaExceededTTL() error {
+	if o.QuotaExceededTTL < 0 {
+		return fmt.Errorf("%s must not be negative, got %s", quotaExceededTTLFlagName, o.QuotaExceededTTL)
+	}
+	return nil
 }
 
 func (o *Options) validateRequiredFields() error {

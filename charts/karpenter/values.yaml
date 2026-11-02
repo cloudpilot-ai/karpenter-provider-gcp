@@ -188,6 +188,10 @@ controller:
     # Recommended: set to a dedicated SA with roles/container.nodeServiceAccount.
     # Can be overridden per-NodeClass via GCENodeClass.spec.serviceAccount.
     defaultNodepoolServiceAccount: ""
+    # -- How long an instance type stays unavailable in the region after a launch fails with
+    # QUOTA_EXCEEDED (e.g. `1h`). Leave empty for the controller default of 30m; set to `0s`
+    # to disable quota backoff. Corresponds to the QUOTA_EXCEEDED_TTL env var.
+    quotaExceededTTL: ""
 
 # -- Optional node-problem-detector deployment that watches the GCE metadata server
 # for Spot preemption notices and sets the GCESpotPreempting node condition, which

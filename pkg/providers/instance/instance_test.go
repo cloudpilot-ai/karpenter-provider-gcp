@@ -50,6 +50,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
@@ -223,6 +224,7 @@ func TestInsufficientCapacityBackoffTTL(t *testing.T) {
 	const (
 		unavailable = "unavailable"
 		unsupported = "unsupported configuration"
+		quota       = "quota exceeded"
 	)
 	tests := []struct {
 		name       string
@@ -238,11 +240,12 @@ func TestInsufficientCapacityBackoffTTL(t *testing.T) {
 		{"ip space exhausted", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED"}, ipSpaceInsufficientCapacityTTL, unavailable},
 		{"ip space exhausted with details", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}, ipSpaceInsufficientCapacityTTL, unavailable},
 		{"ip space exhausted with configuration reason", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS", structuredReason: "configuration_availability"}, ipSpaceInsufficientCapacityTTL, unavailable},
+		{"quota exceeded", insufficientCapacityDetails{code: "QUOTA_EXCEEDED"}, options.DefaultQuotaExceededTTL, quota},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ttl := insufficientCapacityBackoffTTL(tt.details)
+			ttl := insufficientCapacityBackoffTTL(context.Background(), tt.details)
 			require.Equal(t, tt.wantTTL, ttl)
 			err := newInsufficientCapacityError("n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, ttl, tt.details)
 			require.ErrorContains(t, err, fmt.Sprintf("n2-standard-4 on-demand/us-east4-a %s %s ", tt.wantStatus, tt.wantTTL))
@@ -296,6 +299,7 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 		{"ZONE_RESOURCE_POOL_EXHAUSTED", stockoutTTL, true},
 		{"MACHINE_TYPE_UNSUPPORTED", unsupportedConfigurationTTL, true},
 		{"IP_SPACE_EXHAUSTED", ipSpaceInsufficientCapacityTTL, false},
+		{"quotaExceeded", options.DefaultQuotaExceededTTL, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
@@ -353,14 +357,115 @@ func TestHandleZoneOperationErrorForNonCapacityFailure(t *testing.T) {
 	t.Parallel()
 
 	op := &compute.Operation{Error: &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
-		Code:    "QUOTA_EXCEEDED",
-		Message: "quota exceeded",
+		Code:    "INVALID_FIELD_VALUE",
+		Message: "invalid field value",
 	}}}}
 
 	err := handleZoneOperationError(op)
 	require.Error(t, err)
 	_, ok := errors.AsType[*insufficientCapacityError](err)
 	require.False(t, ok)
+}
+
+func TestHandleZoneOperationErrorQuotaExceeded(t *testing.T) {
+	t.Parallel()
+
+	op := &compute.Operation{Error: &compute.OperationError{Errors: []*compute.OperationErrorErrors{{
+		Code:    "QUOTA_EXCEEDED",
+		Message: "Quota 'N2_CPUS' exceeded. Limit: 24.0 in region us-central1.",
+	}}}}
+
+	capacityErr, ok := errors.AsType[*insufficientCapacityError](handleZoneOperationError(op))
+	require.True(t, ok)
+	require.True(t, isQuotaExceeded(capacityErr.details))
+	require.Equal(t, "Quota 'N2_CPUS' exceeded. Limit: 24.0 in region us-central1.", capacityErr.details.message)
+}
+
+func TestExtractInsertInsufficientCapacityDetailsQuotaExceeded(t *testing.T) {
+	t.Parallel()
+
+	details, ok := extractInsertInsufficientCapacityDetails(&googleapi.Error{
+		Code:   http.StatusForbidden,
+		Errors: []googleapi.ErrorItem{{Reason: "quotaExceeded", Message: "Quota 'CPUS' exceeded. Limit: 8.0 in region us-central1."}},
+	})
+
+	require.True(t, ok)
+	require.True(t, isQuotaExceeded(details))
+	require.Equal(t, "quotaExceeded", details.structuredReason)
+}
+
+// API rate limits are reported as rateLimitExceeded and must not be treated as resource quota.
+func TestExtractInsertInsufficientCapacityDetailsIgnoresRateLimit(t *testing.T) {
+	t.Parallel()
+
+	_, ok := extractInsertInsufficientCapacityDetails(&googleapi.Error{
+		Code:   http.StatusForbidden,
+		Errors: []googleapi.ErrorItem{{Reason: "rateLimitExceeded"}},
+	})
+
+	require.False(t, ok)
+}
+
+func TestMarkQuotaExceededMarksAllZonesForCapacityType(t *testing.T) {
+	t.Parallel()
+
+	const ttl = 2 * time.Hour
+	ctx := options.ToContext(context.Background(), &options.Options{QuotaExceededTTL: ttl})
+	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
+	p := &DefaultProvider{unavailableOfferings: unavailableofferings.NewUnavailableOfferingsWithCache(c)}
+	offering := func(zone, capacityType string) *cloudprovider.Offering {
+		return &cloudprovider.Offering{Available: true, Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
+		)}
+	}
+	it := &cloudprovider.InstanceType{
+		Name: "n2-standard-4",
+		Offerings: cloudprovider.Offerings{
+			offering("us-central1-a", karpv1.CapacityTypeOnDemand),
+			offering("us-central1-b", karpv1.CapacityTypeOnDemand),
+			offering("us-central1-b", karpv1.CapacityTypeSpot),
+		},
+	}
+
+	err := p.markQuotaExceeded(ctx, it, "us-central1-a", karpv1.CapacityTypeOnDemand,
+		insufficientCapacityDetails{code: "QUOTA_EXCEEDED", message: "Quota 'N2_CPUS' exceeded."})
+
+	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
+	require.ErrorContains(t, err, "n2-standard-4 on-demand/us-central1-a quota exceeded 2h0m0s")
+	requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeOnDemand, ttl)
+	requireStoredTTL(t, c, "n2-standard-4", "us-central1-b", karpv1.CapacityTypeOnDemand, ttl)
+	_, found := c.Get(fmt.Sprintf("%s:%s:%s", karpv1.CapacityTypeSpot, "n2-standard-4", "us-central1-b"))
+	require.False(t, found, "spot quota is separate from on-demand quota")
+}
+
+// A zero TTL keeps the pre-quota behavior: the error is retryable within the
+// launch but no offering is marked unavailable.
+func TestGetOrCreateInstanceQuotaExceededDisabled(t *testing.T) {
+	t.Parallel()
+
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]any{"error": map[string]any{"errors": []map[string]string{{"reason": "quotaExceeded"}}}})
+	}))
+	p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
+	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
+	ctx := options.ToContext(context.Background(), &options.Options{QuotaExceededTTL: 0})
+
+	_, _, retryable, err := p.getOrCreateInstance(ctx, spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
+		makeSourceMetadata("max-pods-per-node=110"),
+		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+		"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
+
+	require.Error(t, err)
+	require.False(t, cloudprovider.IsInsufficientCapacityError(err))
+	require.True(t, retryable)
+	require.Empty(t, c.Items())
 }
 
 type emptySubnetProvider struct{}
