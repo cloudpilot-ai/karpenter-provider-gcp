@@ -284,7 +284,9 @@ GC only deletes instances that carry the Karpenter cluster tag and have no corre
 
 When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable. The duration depends on the error: 5 minutes for a stockout, 1 hour when GCE reports that the zone does not support the requested configuration (`configuration_availability` or `MACHINE_TYPE_UNSUPPORTED`), and 30 seconds for IP space exhaustion. Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones can recover and become available again.
 
-Karpenter can fall back from Spot to on-demand within a single launch. This happens when the NodeClaim allows both capacity types and every Spot attempt fails for lack of capacity. The on-demand retry starts from the lowest-priced on-demand instance type. If any Spot attempt fails for another reason, such as a GCE API error, Karpenter does not fall back and the launch fails.
+GCE enforces project quotas per region. When a launch fails with `QUOTA_EXCEEDED`, Karpenter marks the instance type unavailable for that capacity type in every zone of the region. The entry lasts for `QUOTA_EXCEEDED_TTL`, which defaults to 30 minutes. After you raise the quota in the Google Cloud console, wait for the TTL to expire or restart the controller to clear the entry. See [Quota exhaustion](settings.md#quota-exhaustion).
+
+Karpenter can fall back from Spot to on-demand within a single launch. This happens when the NodeClaim allows both capacity types and every Spot attempt fails for lack of capacity or quota. The on-demand retry starts from the lowest-priced on-demand instance type. If any Spot attempt fails for another reason, such as a GCE API error, Karpenter does not fall back and the launch fails.
 
 If a NodeClass has more than one candidate pod range, Karpenter tries the next range when one reports IP space exhaustion. It marks the offering unavailable only after every candidate range is exhausted.
 
