@@ -136,6 +136,10 @@ spec:
             - name: DEFAULT_NODEPOOL_SERVICE_ACCOUNT
               value: "{{ . }}"
             {{- end }}
+            {{- with .Values.controller.settings.quotaExceededTTL }}
+            - name: QUOTA_EXCEEDED_TTL
+              value: "{{ . }}"
+            {{- end }}
             - name: METRICS_PORT
               value: "{{ .Values.controller.metrics.port }}"
             - name: KARPENTER_SERVICE
