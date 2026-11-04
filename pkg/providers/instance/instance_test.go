@@ -1474,34 +1474,43 @@ func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) 
 	require.Equal(t, "ONE_TO_ONE_NAT", result[1].AccessConfigs[0].Type)
 }
 
-func TestSetupNetworkInterfaces_NicType(t *testing.T) {
+func TestSetupNetworkInterfaces_GVNIC(t *testing.T) {
 	t.Parallel()
 
-	secondary := []v1alpha1.AdditionalNetworkInterface{{Subnetwork: "regions/us-central1/subnetworks/secondary"}}
-	cases := []struct {
-		name string
-		cfg  *v1alpha1.NetworkConfig
-		want string
-	}{
-		{name: "no networkConfig leaves the type to GCE"},
-		{name: "unset leaves the type to GCE", cfg: &v1alpha1.NetworkConfig{AdditionalNetworkInterfaces: secondary}},
-		{name: "GVNIC", cfg: &v1alpha1.NetworkConfig{NicType: "GVNIC", AdditionalNetworkInterfaces: secondary}, want: "GVNIC"},
-		{name: "VIRTIO_NET", cfg: &v1alpha1.NetworkConfig{NicType: "VIRTIO_NET", AdditionalNetworkInterfaces: secondary}, want: "VIRTIO_NET"},
-		// The value is not validated here: any type GCE accepts passes through, including ones added later.
-		{name: "other values pass through", cfg: &v1alpha1.NetworkConfig{NicType: "IDPF", AdditionalNetworkInterfaces: secondary}, want: "IDPF"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, additional := range []bool{false, true} {
+		t.Run(fmt.Sprintf("additional interface %t", additional), func(t *testing.T) {
 			t.Parallel()
 
-			p := &DefaultProvider{}
-			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{NetworkConfig: tc.cfg}}
-			result := p.setupNetworkInterfaces(makeCluster("net", "subnet", "pods", false), nodeClass)
+			for _, tc := range []struct {
+				name  string
+				gvnic *v1alpha1.VirtualNIC
+				want  string
+			}{
+				{name: "absent leaves the type to GCE"},
+				{name: "enabled", gvnic: &v1alpha1.VirtualNIC{Enabled: true}, want: "GVNIC"},
+				{name: "disabled", gvnic: &v1alpha1.VirtualNIC{Enabled: false}, want: "VIRTIO_NET"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
 
-			require.NotEmpty(t, result)
-			for i, iface := range result {
-				require.Equal(t, tc.want, iface.NicType, "interface %d", i)
+					nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GVNIC: tc.gvnic}}
+					wantCount := 1
+					if additional {
+						nodeClass.Spec.NetworkConfig = &v1alpha1.NetworkConfig{
+							AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
+								{Subnetwork: "regions/us-central1/subnetworks/secondary"},
+							},
+						}
+						wantCount++
+					}
+					p := &DefaultProvider{}
+					result := p.setupNetworkInterfaces(makeCluster("net", "subnet", "pods", false), nodeClass)
+
+					require.Len(t, result, wantCount)
+					for i, iface := range result {
+						require.Equal(t, tc.want, iface.NicType, "interface %d", i)
+					}
+				})
 			}
 		})
 	}

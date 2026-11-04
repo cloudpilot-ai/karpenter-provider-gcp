@@ -48,16 +48,29 @@ The deprecated `subnetRangeName` and `subnetRangeNames` are mutually exclusive. 
 
 If neither field is set, Karpenter discovers the cluster's default pod range plus additional pod ranges on its primary subnetwork. Names from GKE's configured range list and utilization metadata are combined without duplicates. Ranges on separate additional subnetworks are not included. Selection uses descending `subnetworks.get` free-IP counts and IP-exhaustion fallback, not GKE's node-pool allocation algorithm. Counts are cached for one minute; unknown counts follow known counts, with candidate order breaking ties. If the capacity read fails, launch preserves candidate order without counts. Free IPs do not guarantee a contiguous pod CIDR block.
 
-## Network interface type
+## Google Virtual NIC (gVNIC)
 
-`nicType` sets the GCE network interface type on every interface of the node. The usual reason is [gVNIC](https://cloud.google.com/compute/docs/networking/using-gvnic), Google's virtual network interface, which has higher bandwidth than VirtIO-Net:
+`spec.gvnic.enabled` controls [gVNIC](https://cloud.google.com/kubernetes-engine/docs/how-to/using-gvnic) on every network interface of the node, including additional interfaces. It mirrors GKE `NodeConfig.gvnic.enabled` and Terraform node pool `node_config.gvnic.enabled`:
 
-```yaml
-networkConfig:
-  nicType: GVNIC
+```hcl
+node_config {
+  gvnic {
+    enabled = true
+  }
+}
 ```
 
-The value is passed to GCE as the interface's `nicType` without validation, so any type GCE accepts works: `GVNIC`, `VIRTIO_NET`, and whatever GCE adds later. Leave it unset to let GCE choose, which is gVNIC on the machine series that require it (C3, C4, N4 and others) and VirtIO-Net on the rest. GCE rejects a type that the machine series or the node image does not support; Container-Optimized OS supports gVNIC. `GVNIC` is the equivalent of GKE node pool `gvnic.enabled`. Changing `nicType` on an existing GCENodeClass drifts its nodes, which are then replaced.
+The equivalent GCENodeClass configuration is:
+
+```yaml
+spec:
+  gvnic:
+    enabled: true
+```
+
+GCENodeClass `spec` holds node configuration settings directly; there is no `nodeConfig` wrapper. With `enabled: true`, every interface requests `GVNIC`; with `enabled: false`, every interface requests `VIRTIO_NET`. Omit `gvnic` to preserve GCE's default interface selection. The `enabled` boolean is required when `gvnic` is present.
+
+GCE rejects a type unsupported by the machine series or node image. In particular, do not set `enabled: false` on a series that requires gVNIC. Container-Optimized OS supports gVNIC. Changing `gvnic` on an existing GCENodeClass drifts its nodes, which are then replaced.
 
 ## Resource manager tags
 

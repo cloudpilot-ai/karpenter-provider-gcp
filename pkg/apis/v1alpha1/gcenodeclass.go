@@ -126,9 +126,14 @@ type GCENodeClassSpec struct {
 	// "Intel Ice Lake" or "Intel Granite Rapids". GCE schedules the node on that platform or
 	// a newer one. Leave unset to let GCE choose. GCE rejects a platform the machine type does
 	// not offer, so restrict the NodePool to machine types that do.
-	// Mirrors GKE node pool min_cpu_platform.
+	// Mirrors GKE NodeConfig.minCpuPlatform (Terraform node_config.min_cpu_platform).
 	// +optional
 	MinCpuPlatform string `json:"minCpuPlatform,omitempty"`
+	// GVNIC configures Google Virtual NIC on every network interface of provisioned nodes.
+	// When unset, GCE chooses the interface type. Mirrors GKE NodeConfig.gvnic
+	// (Terraform node_config.gvnic).
+	// +optional
+	GVNIC *VirtualNIC `json:"gvnic,omitempty"`
 	// AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes.
 	// +optional
 	AdvancedMachineFeatures *AdvancedMachineFeatures `json:"advancedMachineFeatures,omitempty"`
@@ -212,6 +217,14 @@ type GPUSharingConfig struct {
 	MaxSharedClientsPerGPU int32 `json:"maxSharedClientsPerGPU"`
 }
 
+// VirtualNIC configures the Google Virtual NIC (gVNIC) feature, matching GKE VirtualNIC.
+type VirtualNIC struct {
+	// Enabled selects GVNIC when true and VIRTIO_NET when false on every interface.
+	// GCE rejects a type unsupported by the machine series or node image.
+	// +required
+	Enabled bool `json:"enabled"`
+}
+
 // NetworkConfig holds network settings for provisioned nodes.
 // The shape mirrors the Terraform google_container_node_pool network_config block
 // so that operators already familiar with GKE node pools can transfer that knowledge directly.
@@ -227,14 +240,6 @@ type NetworkConfig struct {
 	// Mirrors GKE node pool network_config.subnetwork.
 	// +optional
 	Subnetwork string `json:"subnetwork,omitempty"`
-	// NicType is the GCE network interface type for every interface on provisioned nodes,
-	// for example GVNIC or VIRTIO_NET. It is passed to GCE as the interface's nicType
-	// without validation, so any value GCE accepts works. When unset, GCE chooses, which is
-	// gVNIC on machine series that require it and VirtIO-Net otherwise. GCE rejects a type the
-	// machine series or node image does not support; Container-Optimized OS supports gVNIC.
-	// Mirrors the GCE API's NetworkInterface.nicType; GKE node pool gvnic.enabled selects GVNIC.
-	// +optional
-	NicType string `json:"nicType,omitempty"`
 	// AdditionalNetworkInterfaces adds secondary network interfaces to provisioned nodes.
 	// Each entry must specify a subnetwork.
 	// Mirrors GKE node pool network_config.additional_node_network_configs.

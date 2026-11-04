@@ -40,7 +40,7 @@ var _ = Describe("Instance Config", Label("suite:instance-config"), func() {
 		minCpuPlatform = "Intel Cascade Lake"
 	)
 
-	It("should apply nicType and minCpuPlatform to the GCE instance", func(ctx SpecContext) {
+	It("should apply gvnic and minCpuPlatform to the GCE instance", func(ctx SpecContext) {
 		prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "inst-cfg")
 		name := prefix + "-" + environment.UniqueSuffix()
 
@@ -56,7 +56,7 @@ var _ = Describe("Instance Config", Label("suite:instance-config"), func() {
 			}
 		})
 
-		env.CreateNodeClassWithNicTypeAndMinCpuPlatform(ctx, name, nicType, minCpuPlatform)
+		env.CreateNodeClassWithGvnicAndMinCpuPlatform(ctx, name, true, minCpuPlatform)
 		env.CreateNodePool(ctx, name, name, environment.TestCase{
 			CapacityType:  karpv1.CapacityTypeOnDemand,
 			Arch:          karpv1.ArchitectureAmd64,

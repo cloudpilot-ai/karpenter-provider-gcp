@@ -421,10 +421,9 @@ func (e *Environment) GetNodeClaimForNode(ctx context.Context, nodeName string) 
 	return nil, fmt.Errorf("no NodeClaim for node %s", nodeName)
 }
 
-// CreateNodeClassWithNicTypeAndMinCpuPlatform creates a GCENodeClass with
-// networkConfig.nicType and spec.minCpuPlatform set. Used by instance-config
-// e2e tests.
-func (e *Environment) CreateNodeClassWithNicTypeAndMinCpuPlatform(ctx context.Context, name, nicType, minCpuPlatform string) {
+// CreateNodeClassWithGvnicAndMinCpuPlatform creates a GCENodeClass with
+// spec.gvnic.enabled and spec.minCpuPlatform set for instance-config e2e tests.
+func (e *Environment) CreateNodeClassWithGvnicAndMinCpuPlatform(ctx context.Context, name string, enabled bool, minCpuPlatform string) {
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
@@ -432,8 +431,8 @@ func (e *Environment) CreateNodeClassWithNicTypeAndMinCpuPlatform(ctx context.Co
 		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
 		"spec": map[string]any{
 			"minCpuPlatform": minCpuPlatform,
-			"networkConfig": map[string]any{
-				"nicType": nicType,
+			"gvnic": map[string]any{
+				"enabled": enabled,
 			},
 			"imageSelectorTerms": []any{
 				map[string]any{"alias": "ContainerOptimizedOS@latest"},

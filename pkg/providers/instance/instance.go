@@ -1121,8 +1121,11 @@ func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nod
 	}
 
 	var nic string
-	if nodeClass.Spec.NetworkConfig != nil {
-		nic = nodeClass.Spec.NetworkConfig.NicType
+	if nodeClass.Spec.GVNIC != nil {
+		nic = "VIRTIO_NET"
+		if nodeClass.Spec.GVNIC.Enabled {
+			nic = "GVNIC"
+		}
 	}
 
 	primary := &compute.NetworkInterface{

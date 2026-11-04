@@ -239,8 +239,19 @@ The default `ContainerOptimizedOS` and `Ubuntu` images boot as Confidential VMs 
 
 `minCpuPlatform` asks GCE to place the node on a given CPU platform or a newer one, for workloads that need an instruction-set level or a performance floor:
 
+This mirrors GKE `NodeConfig.minCpuPlatform` and Terraform node pool `node_config.min_cpu_platform`:
+
+```hcl
+node_config {
+  min_cpu_platform = "Intel Ice Lake"
+}
+```
+
+The equivalent GCENodeClass configuration places the setting directly under `spec`, alongside other node configuration fields such as `gvnic`:
+
 ```yaml
-minCpuPlatform: Intel Ice Lake
+spec:
+  minCpuPlatform: Intel Ice Lake
 ```
 
 Leave it unset to let GCE choose. Values are GCE's names, for example `Intel Ice Lake`, `Intel Sapphire Rapids` or `AMD Milan`, and which ones a machine type offers differs by type and zone; see the [GCP CPU platform documentation](https://cloud.google.com/compute/docs/cpu-platforms) for the list. GCE rejects a platform the machine type does not offer, and Karpenter does not model platforms when choosing instance types, so restrict the NodePool to machine types that offer it:
