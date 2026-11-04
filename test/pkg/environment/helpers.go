@@ -375,6 +375,52 @@ func (e *Environment) CreateNodeClassWithNestedVirtualization(ctx context.Contex
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithThreadsPerCore creates a GCENodeClass with
+// advancedMachineFeatures.threadsPerCore and kubeletConfiguration.podsPerCore
+// set. podsPerCore makes the node's pod limit depend on the CPU count the
+// kubelet reports, so it checks that count end to end. Used by threads-per-core
+// e2e tests.
+func (e *Environment) CreateNodeClassWithThreadsPerCore(ctx context.Context, name string, threadsPerCore, podsPerCore int64) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"advancedMachineFeatures": map[string]any{
+				"threadsPerCore": threadsPerCore,
+			},
+			"kubeletConfiguration": map[string]any{
+				"podsPerCore": podsPerCore,
+			},
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"disks": []any{
+				map[string]any{"sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+			},
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
+// GetNodeClaimForNode returns the NodeClaim whose status.nodeName is nodeName.
+func (e *Environment) GetNodeClaimForNode(ctx context.Context, nodeName string) (*unstructured.Unstructured, error) {
+	claims, err := e.ListNodeClaims(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range claims {
+		if got, _, _ := unstructured.NestedString(claims[i].Object, "status", "nodeName"); got == nodeName {
+			return &claims[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no NodeClaim for node %s", nodeName)
+}
+
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
 // CreateNodeClass but with networkConfig.enablePrivateNodes set to true,
 // so Karpenter provisions nodes with no external (public) IP.
