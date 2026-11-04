@@ -108,7 +108,7 @@ kubeletConfiguration:
 ```
 
 - `maxPods` — absolute cap on pods per node
-- `podsPerCore` — caps pods at `podsPerCore × cpu_cores`; cannot exceed `maxPods`
+- `podsPerCore` — caps pods at `podsPerCore` × the vCPUs the node reports (half the machine type's count with [`threadsPerCore: 1`](#threads-per-core)); cannot exceed `maxPods`
 
 Both values are reflected in `node.status.capacity.pods` and used by the scheduler.
 
@@ -266,7 +266,7 @@ advancedMachineFeatures:
   threadsPerCore: 1
 ```
 
-With SMT off the guest sees half the machine type's vCPUs: an `n2-standard-16` node reports 8 CPUs. GCE still bills the full 16. Karpenter accounts for this: the instance type's CPU capacity, and the kube-reserved CPU derived from it, use the vCPUs the node will report, so pods are packed against 8 and the NodePool's `limits.cpu` counts 8 for that node. The `karpenter.k8s.gcp/instance-cpu` label keeps the machine type's count (16), since that is the shape being bought. Requests that select a node by that label are unaffected, but a NodePool `limits.cpu` sized from vCPU billing is not: size it from the visible count.
+With SMT off the guest sees half the machine type's vCPUs: an `n2-standard-16` node reports 8 CPUs. GCE still bills the full 16. Karpenter accounts for this. The instance type's CPU capacity, its kube-reserved CPU, and the [`podsPerCore`](#pod-density) pod cap all use the vCPUs the node reports. Pods are packed against 8, and the NodePool's `limits.cpu` counts 8 for that node. The `karpenter.k8s.gcp/instance-cpu` label keeps the machine type's count (16), since that is the shape being bought. Requests that select a node by that label are unaffected, but a NodePool `limits.cpu` sized from vCPU billing is not: size it from the visible count.
 
 `threadsPerCore` accepts `1` or `2`. It is not supported on every family: GCE rejects C4A, H3, H4D, N4A, T2A, T2D, shared-core types and types with fewer than 2 vCPUs. See the [GCP documentation](https://cloud.google.com/compute/docs/instances/set-threads-per-core) for the current list. Restrict the NodePool to supported families so launches do not fail:
 
