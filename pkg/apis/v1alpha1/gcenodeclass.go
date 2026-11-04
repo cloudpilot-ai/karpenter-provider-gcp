@@ -329,6 +329,7 @@ type KubeletQuantity string
 // https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration
 // https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
 // +kubebuilder:validation:XValidation:message="maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false",rule="!has(self.maxParallelImagePulls) || self.maxParallelImagePulls < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls == false)"
+// +kubebuilder:validation:XValidation:message="memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false",rule="!has(self.memorySwap) || !has(self.memorySwap.swapBehavior) || self.memorySwap.swapBehavior != 'LimitedSwap' || (has(self.failSwapOn) && self.failSwapOn == false)"
 type KubeletConfiguration struct {
 	// clusterDNS is a list of IP addresses for the cluster DNS server.
 	// Note that not all providers may use all addresses.
@@ -413,6 +414,27 @@ type KubeletConfiguration struct {
 	// +kubebuilder:validation:Minimum:=1
 	// +optional
 	MaxParallelImagePulls *int32 `json:"maxParallelImagePulls,omitempty"`
+	// FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.
+	// Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap.
+	// Default: true
+	// +optional
+	FailSwapOn *bool `json:"failSwapOn,omitempty"`
+	// MemorySwap configures swap memory available to container workloads. The
+	// kubelet only uses swap the node already has: provisioning a swap device or
+	// file is up to the node image or a DaemonSet.
+	// +optional
+	MemorySwap *MemorySwapConfiguration `json:"memorySwap,omitempty"`
+}
+
+// MemorySwapConfiguration configures swap memory available to container workloads.
+// https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#MemorySwapConfiguration
+type MemorySwapConfiguration struct {
+	// SwapBehavior is NoSwap (workloads cannot use swap, the kubelet default) or
+	// LimitedSwap (a container's swap limit is proportionate to its memory request,
+	// for Burstable pods only).
+	// +kubebuilder:validation:Enum:={NoSwap,LimitedSwap}
+	// +optional
+	SwapBehavior string `json:"swapBehavior,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:message="provisionedIOPS is only applicable for pd-extreme, hyperdisk-balanced, hyperdisk-balanced-high-availability, and hyperdisk-extreme",rule="!has(self.provisionedIOPS) || self.category in ['pd-extreme', 'hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-extreme']"

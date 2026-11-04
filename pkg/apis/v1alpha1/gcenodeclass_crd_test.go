@@ -233,3 +233,29 @@ func TestGCENodeClassCRDUbuntuVersionPinFormat(t *testing.T) {
 		}
 	}
 }
+
+func TestGCENodeClassCRDRestrictsLimitedSwapToFailSwapOnFalse(t *testing.T) {
+	const rule = `!has(self.memorySwap) || !has(self.memorySwap.swapBehavior) || ` +
+		`self.memorySwap.swapBehavior != 'LimitedSwap' || (has(self.failSwapOn) && self.failSwapOn == false)`
+
+	var found bool
+	for _, v := range kubeletConfigurationSchema(t).XValidations {
+		if v.Rule == rule {
+			found = true
+			require.Equal(t,
+				"memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false",
+				v.Message)
+		}
+	}
+	require.True(t, found, "LimitedSwap must require failSwapOn false: the kubelet refuses to start with swap active otherwise")
+}
+
+func TestGCENodeClassCRDSwapBehaviorEnum(t *testing.T) {
+	field := kubeletConfigurationSchema(t).Properties["memorySwap"].Properties["swapBehavior"]
+
+	var values []string
+	for _, v := range field.Enum {
+		values = append(values, strings.Trim(string(v.Raw), `"`))
+	}
+	require.ElementsMatch(t, []string{"NoSwap", "LimitedSwap"}, values)
+}
