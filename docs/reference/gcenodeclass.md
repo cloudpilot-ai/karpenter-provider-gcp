@@ -42,6 +42,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `enableNestedVirtualization` _boolean_ | EnableNestedVirtualization defines whether the instance can run nested virtual machines.<br />Only supported on Intel-based machine families; not supported on E2, AMD, Arm or<br />Confidential VM instances. |  | Optional: \{\} <br /> |
+| `threadsPerCore` _integer_ | ThreadsPerCore is the number of threads per physical core. Machine types default to 2<br />(simultaneous multithreading); set 1 to disable SMT. With 1 the guest sees half the<br />machine type's vCPUs while GCE still bills the full count, so Karpenter sizes the node<br />at half. Not supported on every family (for example C4A, H3, N4A, T2A, T2D and<br />shared-core types); GCE rejects an unsupported machine type at create. |  | Enum: [1 2] <br />Optional: \{\} <br /> |
 
 
 

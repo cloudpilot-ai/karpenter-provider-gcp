@@ -1328,3 +1328,67 @@ func TestNewInstanceTypeGPUTimeSharing(t *testing.T) {
 		assert.Error(t, it.Requirements.Compatible(sharedSelector))
 	})
 }
+
+func TestListCacheKeyCoversThreadsPerCore(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+
+	p := newTestProvider()
+	smtOn := &v1alpha1.GCENodeClass{}
+	smtOff := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		AdvancedMachineFeatures: &v1alpha1.AdvancedMachineFeatures{ThreadsPerCore: lo.ToPtr[int32](1)},
+	}}
+
+	_, err := p.List(ctx, smtOn)
+	assert.NoError(t, err)
+	_, err = p.List(ctx, smtOff)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 2, p.staticInstanceTypesCache.ItemCount(),
+		"different ThreadsPerCore must produce different static cache entries")
+}
+
+func TestNewStaticInstanceTypeThreadsPerCore(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	mt := &computepb.MachineType{Name: lo.ToPtr("n2-standard-16"), GuestCpus: lo.ToPtr[int32](16), MemoryMb: lo.ToPtr[int32](65536)}
+
+	class := func(tpc *int32) *v1alpha1.GCENodeClass {
+		nc := &v1alpha1.GCENodeClass{}
+		if tpc != nil {
+			nc.Spec.AdvancedMachineFeatures = &v1alpha1.AdvancedMachineFeatures{ThreadsPerCore: tpc}
+		}
+		return nc
+	}
+
+	cases := []struct {
+		name string
+		tpc  *int32
+		want int64
+	}{
+		{name: "unset keeps the machine type's vCPUs", want: 16},
+		{name: "two threads keeps the machine type's vCPUs", tpc: lo.ToPtr[int32](2), want: 16},
+		{name: "one thread halves the vCPUs the guest sees", tpc: lo.ToPtr[int32](1), want: 8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			it := NewStaticInstanceType(ctx, mt, class(tc.tpc), 0)
+			require.NotNil(t, it)
+			got := it.Capacity[corev1.ResourceCPU]
+			assert.Equal(t, tc.want, got.Value())
+		})
+	}
+
+	t.Run("kube-reserved CPU follows the visible vCPUs", func(t *testing.T) {
+		on := NewStaticInstanceType(ctx, mt, class(nil), 0)
+		off := NewStaticInstanceType(ctx, mt, class(lo.ToPtr[int32](1)), 0)
+		onReserved := on.Overhead.KubeReserved[corev1.ResourceCPU]
+		offReserved := off.Overhead.KubeReserved[corev1.ResourceCPU]
+		assert.Less(t, offReserved.MilliValue(), onReserved.MilliValue())
+	})
+
+	t.Run("a one vCPU type is not halved to zero", func(t *testing.T) {
+		tiny := &computepb.MachineType{Name: lo.ToPtr("e2-micro"), GuestCpus: lo.ToPtr[int32](1), MemoryMb: lo.ToPtr[int32](1024)}
+		it := NewStaticInstanceType(ctx, tiny, class(lo.ToPtr[int32](1)), 0)
+		got := it.Capacity[corev1.ResourceCPU]
+		assert.Equal(t, int64(1), got.Value())
+	})
+}

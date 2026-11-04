@@ -48,6 +48,7 @@ import (
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
@@ -71,6 +72,11 @@ const (
 	unsupportedConfigurationTTL    = 1 * time.Hour
 
 	instanceTerminationActionDelete = "DELETE"
+
+	// quotaExceededCode is the zone operation error code; Insert reports the same
+	// failure synchronously with quotaExceededReason.
+	quotaExceededCode   = "QUOTA_EXCEEDED"
+	quotaExceededReason = "quotaExceeded"
 )
 
 var InsufficientCapacityErrorCodes = sets.NewString(
@@ -232,7 +238,7 @@ func isInsufficientCapacityError(operationError *compute.OperationErrorErrors) b
 		return false
 	}
 
-	return InsufficientCapacityErrorCodes.Has(operationError.Code)
+	return InsufficientCapacityErrorCodes.Has(operationError.Code) || operationError.Code == quotaExceededCode
 }
 
 func extractOperationInsufficientCapacityDetails(op *compute.Operation) (insufficientCapacityDetails, bool) {
@@ -274,13 +280,17 @@ func extractInsertInsufficientCapacityDetails(err error) (insufficientCapacityDe
 	}
 
 	for _, detail := range apiError.Errors {
-		if InsufficientCapacityErrorCodes.Has(detail.Reason) {
+		code := detail.Reason
+		if code == quotaExceededReason {
+			code = quotaExceededCode
+		}
+		if InsufficientCapacityErrorCodes.Has(code) || code == quotaExceededCode {
 			message := detail.Message
 			if message == "" {
 				message = detail.Reason
 			}
 			return insufficientCapacityDetails{
-				code:             detail.Reason,
+				code:             code,
 				structuredReason: detail.Reason,
 				message:          message,
 			}, true
@@ -300,7 +310,10 @@ func newInsufficientCapacityError(instanceType, zone, capacityType string, ttl t
 	}
 	gceDetails = append(gceDetails, "code="+details.code)
 	status := "unavailable"
-	if isUnsupportedConfiguration(details) {
+	switch {
+	case isQuotaExceeded(details):
+		status = "quota exceeded"
+	case isUnsupportedConfiguration(details):
 		status = "unsupported configuration"
 	}
 	return cloudprovider.NewInsufficientCapacityError(fmt.Errorf(
@@ -330,8 +343,23 @@ func isUnsupportedConfiguration(details insufficientCapacityDetails) bool {
 		(details.code == "MACHINE_TYPE_UNSUPPORTED" || details.structuredReason == "configuration_availability")
 }
 
-func insufficientCapacityBackoffTTL(details insufficientCapacityDetails) time.Duration {
+func isQuotaExceeded(details insufficientCapacityDetails) bool {
+	return details.code == quotaExceededCode
+}
+
+// quotaExceededTTL returns the configured quota backoff. Zero means quota
+// failures are not treated as insufficient capacity.
+func quotaExceededTTL(ctx context.Context) time.Duration {
+	if opts := options.FromContext(ctx); opts != nil {
+		return opts.QuotaExceededTTL
+	}
+	return options.DefaultQuotaExceededTTL
+}
+
+func insufficientCapacityBackoffTTL(ctx context.Context, details insufficientCapacityDetails) time.Duration {
 	switch {
+	case isQuotaExceeded(details):
+		return quotaExceededTTL(ctx)
 	case isIPSpaceExhausted(details):
 		return ipSpaceInsufficientCapacityTTL
 	case isUnsupportedConfiguration(details):
@@ -348,9 +376,23 @@ func (p *DefaultProvider) markInsufficientCapacity(ctx context.Context, instance
 	if details.message == "" {
 		details.message = "insufficient capacity"
 	}
-	ttl := insufficientCapacityBackoffTTL(details)
+	ttl := insufficientCapacityBackoffTTL(ctx, details)
 	p.unavailableOfferings.MarkUnavailableWithTTL(ctx, details.message, instanceType, zone, capacityType, ttl)
 	return newInsufficientCapacityError(instanceType, zone, capacityType, ttl, details)
+}
+
+// markQuotaExceeded marks the instance type unavailable in every zone it is offered in,
+// because GCE enforces compute quotas per region rather than per zone.
+func (p *DefaultProvider) markQuotaExceeded(ctx context.Context, instanceType *cloudprovider.InstanceType, zone, capacityType string, details insufficientCapacityDetails) error {
+	err := p.markInsufficientCapacity(ctx, instanceType.Name, zone, capacityType, details)
+	ttl := quotaExceededTTL(ctx)
+	for _, offering := range instanceType.Offerings {
+		if offering.CapacityType() != capacityType || offering.Zone() == "" || offering.Zone() == zone {
+			continue
+		}
+		p.unavailableOfferings.MarkUnavailableWithTTL(ctx, details.message, instanceType.Name, offering.Zone(), capacityType, ttl)
+	}
+	return err
 }
 
 func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceName string) (*compute.Instance, bool, error) {
@@ -624,6 +666,9 @@ func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeC
 		if err == nil {
 			return instance, zone, false, nil
 		}
+		if insufficient && isQuotaExceeded(details) && quotaExceededTTL(ctx) == 0 {
+			insufficient = false
+		}
 
 		exhausted := isIPSpaceExhausted(details)
 		if exhausted || rejected {
@@ -636,7 +681,10 @@ func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeC
 		}
 
 		retryable := true
-		if insufficient {
+		switch {
+		case insufficient && isQuotaExceeded(details):
+			err = p.markQuotaExceeded(ctx, instanceType, zone, capacityType, details)
+		case insufficient:
 			err = p.markInsufficientCapacity(ctx, instanceType.Name, zone, capacityType, details)
 			// Other instance types share the subnet, so stop once all ranges are exhausted.
 			retryable = !exhausted
@@ -1509,17 +1557,22 @@ func (p *DefaultProvider) configureConfidentialInstance(instance *compute.Instan
 }
 
 // configureAdvancedMachineFeatures passes advanced machine features to the GCE
-// instance. Currently this only contains EnableNestedVirtualization which
-// allows access to KVM on certain GCE machine types
+// instance: EnableNestedVirtualization, which allows access to KVM on certain
+// GCE machine types, and ThreadsPerCore, which disables SMT when set to 1.
 func (p *DefaultProvider) configureAdvancedMachineFeatures(instance *compute.Instance, nodeClass *v1alpha1.GCENodeClass) {
 	amf := nodeClass.Spec.AdvancedMachineFeatures
-	if amf == nil || amf.EnableNestedVirtualization == nil {
+	if amf == nil || (amf.EnableNestedVirtualization == nil && amf.ThreadsPerCore == nil) {
 		return
 	}
-	instance.AdvancedMachineFeatures = &compute.AdvancedMachineFeatures{
-		EnableNestedVirtualization: *amf.EnableNestedVirtualization,
-		ForceSendFields:            []string{"EnableNestedVirtualization"},
+	features := &compute.AdvancedMachineFeatures{}
+	if amf.EnableNestedVirtualization != nil {
+		features.EnableNestedVirtualization = *amf.EnableNestedVirtualization
+		features.ForceSendFields = append(features.ForceSendFields, "EnableNestedVirtualization")
 	}
+	if amf.ThreadsPerCore != nil {
+		features.ThreadsPerCore = int64(*amf.ThreadsPerCore)
+	}
+	instance.AdvancedMachineFeatures = features
 }
 
 // setupInstanceLabels writes controller-owned GCE labels for a new instance.

@@ -129,6 +129,7 @@ serviceMonitor:
 | controller.settings.nodeLocation | string | `""` | The exact GCP cluster location for GKE API calls (e.g., us-central1-a for zonal, us-central1 for regional). If not set, defaults to 'clusterLocation' for backward compatibility. |
 | controller.settings.preferencePolicy | string | `"Respect"` | preferencePolicy controls how Karpenter handles soft scheduling preferences. `Respect` is the default; `Ignore` disregards preferred node/pod affinity and anti-affinity plus ScheduleAnyway topology spread constraints. |
 | controller.settings.projectID | string | `""` | The GCP project ID. |
+| controller.settings.quotaExceededTTL | string | `""` | How long an instance type stays unavailable in the region after a launch fails with QUOTA_EXCEEDED (e.g. `1h`). Leave empty for the controller default of 30m; set to `0s` to disable quota backoff. Corresponds to the QUOTA_EXCEEDED_TTL env var. |
 | controller.settings.schedulerConfig | object | `{}` | Optional kube-scheduler behavior to mirror during scheduling simulations. Supports podTopologySpread.defaultConstraints; leave empty unless matching a known cluster scheduler configuration. |
 | controller.settings.vmMemoryOverheadPercent | float | `0.065` | The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%. |
 | controller.strategy.rollingUpdate.maxUnavailable | int | `1` |  |

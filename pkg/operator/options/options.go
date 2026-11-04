@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	coreoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
@@ -44,6 +45,12 @@ const (
 	nodePoolServiceAccountFlagName        = "default-nodepool-service-account"
 	defaultNodePoolTemplateNameEnvVarName = "DEFAULT_NODEPOOL_TEMPLATE_NAME"
 	defaultNodePoolTemplateNameFlagName   = "default-nodepool-template-name"
+	quotaExceededTTLEnvVarName            = "QUOTA_EXCEEDED_TTL"
+	quotaExceededTTLFlagName              = "quota-exceeded-ttl"
+
+	// DefaultQuotaExceededTTL is how long an instance type stays unavailable in a
+	// region after GCE rejects it for exceeded quota.
+	DefaultQuotaExceededTTL = 30 * time.Minute
 )
 
 func init() {
@@ -64,6 +71,9 @@ type Options struct {
 	NodePoolServiceAccount      string
 	DefaultNodePoolTemplateName string
 	Interruption                bool
+	// QuotaExceededTTL is how long an instance type stays unavailable after a
+	// QUOTA_EXCEEDED launch failure. Zero disables quota backoff.
+	QuotaExceededTTL time.Duration
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -76,6 +86,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.NodePoolServiceAccount, nodePoolServiceAccountFlagName, env.WithDefaultString(nodePoolServiceAccountEnvVarName, ""), "Service account to use for default node pool templates. If not set, uses <project number>-compute@developer.gserviceaccount.com")
 	fs.StringVar(&o.DefaultNodePoolTemplateName, defaultNodePoolTemplateNameFlagName, env.WithDefaultString(defaultNodePoolTemplateNameEnvVarName, ""), "Pin the bootstrap source pool by name. If set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
+	fs.DurationVar(&o.QuotaExceededTTL, quotaExceededTTLFlagName, env.WithDefaultDuration(quotaExceededTTLEnvVarName, DefaultQuotaExceededTTL), "How long an instance type stays unavailable in the region after a launch fails with QUOTA_EXCEEDED. Set to 0 to disable quota backoff.")
 }
 
 func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
