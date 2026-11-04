@@ -216,6 +216,20 @@ spec:
                 - maxSharedClientsPerGPU
                 - strategy
                 type: object
+              gvnic:
+                description: |-
+                  GVNIC configures Google Virtual NIC on every network interface of provisioned nodes.
+                  When unset, GCE chooses the interface type. Mirrors GKE NodeConfig.gvnic
+                  (Terraform node_config.gvnic).
+                properties:
+                  enabled:
+                    description: |-
+                      Enabled selects GVNIC when true and VIRTIO_NET when false on every interface.
+                      GCE rejects a type unsupported by the machine series or node image.
+                    type: boolean
+                required:
+                - enabled
+                type: object
               imageFamily:
                 description: |-
                   ImageFamily dictates the instance template used when generating launch templates.
@@ -571,6 +585,14 @@ spec:
                     in self) && !(''windows-startup-script-ps1'' in self) && !(''common-psm1''
                     in self) && !(''kubeconfig'' in self) && !(''kubelet-config''
                     in self)'
+              minCpuPlatform:
+                description: |-
+                  MinCpuPlatform is the minimum CPU platform for provisioned nodes, for example
+                  "Intel Ice Lake" or "Intel Granite Rapids". GCE schedules the node on that platform or
+                  a newer one. Leave unset to let GCE choose. GCE rejects a platform the machine type does
+                  not offer, so restrict the NodePool to machine types that do.
+                  Mirrors GKE NodeConfig.minCpuPlatform (Terraform node_config.min_cpu_platform).
+                type: string
               networkConfig:
                 description: NetworkConfig allows overriding per-interface network
                   settings for provisioned nodes.

@@ -214,6 +214,8 @@ _Appears in:_
 | `networkTags` _[NetworkTag](#networktag) array_ | NetworkTags is a list of network tags to apply to the node. |  | MaxItems: 20 <br />MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z]([-a-z0-9]\{0,61\}[a-z0-9])?$` <br />Optional: \{\} <br /> |
 | `resourceManagerTags` _object (keys:string, values:[ResourceManagerTagValue](#resourcemanagertagvalue))_ | ResourceManagerTags are GCP resource manager (secure) tags bound to the instance<br />at creation. Unlike network tags, binding them is IAM-controlled, so they can be<br />used as targets in network firewall policies, IAM conditions and organization policies.<br />Keys are `tagKeys/\{tag_key_id\}` or `\{org_id\|project_id\}/\{tag_key_short_name\}`; values are<br />`tagValues/\{tag_value_id\}` or `\{tag_value_short_name\}`. Mirrors GKE node pool<br />resource_manager_tags. The Karpenter service account needs roles/resourcemanager.tagUser<br />on the tag values. |  | MaxProperties: 50 <br />Optional: \{\} <br /> |
 | `shieldedInstanceConfig` _[ShieldedInstanceConfig](#shieldedinstanceconfig)_ | ShieldedInstanceConfig enables Shielded VM for provisioned nodes: Secure Boot,<br />virtual TPM, and integrity monitoring. |  | Optional: \{\} <br /> |
+| `minCpuPlatform` _string_ | MinCpuPlatform is the minimum CPU platform for provisioned nodes, for example<br />"Intel Ice Lake" or "Intel Granite Rapids". GCE schedules the node on that platform or<br />a newer one. Leave unset to let GCE choose. GCE rejects a platform the machine type does<br />not offer, so restrict the NodePool to machine types that do.<br />Mirrors GKE NodeConfig.minCpuPlatform (Terraform node_config.min_cpu_platform). |  | Optional: \{\} <br /> |
+| `gvnic` _[VirtualNIC](#virtualnic)_ | GVNIC configures Google Virtual NIC on every network interface of provisioned nodes.<br />When unset, GCE chooses the interface type. Mirrors GKE NodeConfig.gvnic<br />(Terraform node_config.gvnic). |  | Optional: \{\} <br /> |
 | `advancedMachineFeatures` _[AdvancedMachineFeatures](#advancedmachinefeatures)_ | AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes. |  | Optional: \{\} <br /> |
 | `confidentialInstanceType` _string_ | ConfidentialInstanceType enables Confidential VM for provisioned nodes using the<br />named technology (AMD SEV / SEV-SNP or Intel TDX), providing in-use memory<br />encryption. Leave unset to disable. Only supported on specific machine families. |  | Enum: [SEV SEV_SNP TDX] <br />Optional: \{\} <br /> |
 | `networkConfig` _[NetworkConfig](#networkconfig)_ | NetworkConfig allows overriding per-interface network settings for provisioned nodes. |  | Optional: \{\} <br /> |
@@ -516,5 +518,21 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `name` _string_ | Name is the subnetwork secondary IPv4 range name. |  | Required: \{\} <br /> |
 | `totalFreeIP` _integer_ | TotalFreeIP is the Compute-reported number of free IPv4 addresses in this<br />secondary range. Omitted when unknown; zero means no free addresses were reported.<br />Counts are snapshots, not a guarantee of an allocatable contiguous pod CIDR block. |  | Minimum: 0 <br />Optional: \{\} <br /> |
+
+
+#### VirtualNIC
+
+
+
+VirtualNIC configures the Google Virtual NIC (gVNIC) feature, matching GKE VirtualNIC.
+
+
+
+_Appears in:_
+- [GCENodeClassSpec](#gcenodeclassspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled selects GVNIC when true and VIRTIO_NET when false on every interface.<br />GCE rejects a type unsupported by the machine series or node image. |  | Required: \{\} <br /> |
 
 

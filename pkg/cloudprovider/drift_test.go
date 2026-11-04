@@ -308,6 +308,23 @@ func TestStaticDriftIsReportedWhileImagesAreNotReady(t *testing.T) {
 	require.Equal(t, NodeClassDrift, cp.isNodeClassDrifted(context.Background(), claim, nil, nodeClass))
 }
 
+func TestGVNICDisabledDrift(t *testing.T) {
+	t.Parallel()
+
+	class := &v1alpha1.GCENodeClass{
+		Spec: v1alpha1.GCENodeClassSpec{GVNIC: &v1alpha1.VirtualNIC{Enabled: true}},
+	}
+	claim := nodeClaim(class.Hash())
+	class.Spec.GVNIC.Enabled = false
+	class.Annotations = map[string]string{
+		v1alpha1.AnnotationGCENodeClassHash:        class.Hash(),
+		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
+	}
+
+	cp := &CloudProvider{}
+	require.Equal(t, NodeClassDrift, cp.areStaticFieldsDrifted(claim, class))
+}
+
 // TestNodeClassDriftFieldCoverage verifies that each GCENodeClassSpec field either
 // triggers NodeClassDrift (hashed fields) or produces no drift (hash:"ignore" fields).
 // One row per field — when per-field drift reasons are added in the future (e.g.
@@ -433,6 +450,20 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			name: "AdvancedMachineFeatures ThreadsPerCore",
 			mutate: func(nc *v1alpha1.GCENodeClass) {
 				nc.Spec.AdvancedMachineFeatures = &v1alpha1.AdvancedMachineFeatures{ThreadsPerCore: ptr(int32(1))}
+			},
+			want: NodeClassDrift,
+		},
+		{
+			name: "MinCpuPlatform",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.MinCpuPlatform = "Intel Ice Lake"
+			},
+			want: NodeClassDrift,
+		},
+		{
+			name: "GVNIC enabled",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.GVNIC = &v1alpha1.VirtualNIC{Enabled: true}
 			},
 			want: NodeClassDrift,
 		},

@@ -1474,6 +1474,48 @@ func TestSetupNetworkInterfaces_AdditionalInterfaceWithSubnetwork(t *testing.T) 
 	require.Equal(t, "ONE_TO_ONE_NAT", result[1].AccessConfigs[0].Type)
 }
 
+func TestSetupNetworkInterfaces_GVNIC(t *testing.T) {
+	t.Parallel()
+
+	for _, additional := range []bool{false, true} {
+		t.Run(fmt.Sprintf("additional interface %t", additional), func(t *testing.T) {
+			t.Parallel()
+
+			for _, tc := range []struct {
+				name  string
+				gvnic *v1alpha1.VirtualNIC
+				want  string
+			}{
+				{name: "absent leaves the type to GCE"},
+				{name: "enabled", gvnic: &v1alpha1.VirtualNIC{Enabled: true}, want: "GVNIC"},
+				{name: "disabled", gvnic: &v1alpha1.VirtualNIC{Enabled: false}, want: "VIRTIO_NET"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GVNIC: tc.gvnic}}
+					wantCount := 1
+					if additional {
+						nodeClass.Spec.NetworkConfig = &v1alpha1.NetworkConfig{
+							AdditionalNetworkInterfaces: []v1alpha1.AdditionalNetworkInterface{
+								{Subnetwork: "regions/us-central1/subnetworks/secondary"},
+							},
+						}
+						wantCount++
+					}
+					p := &DefaultProvider{}
+					result := p.setupNetworkInterfaces(makeCluster("net", "subnet", "pods", false), nodeClass)
+
+					require.Len(t, result, wantCount)
+					for i, iface := range result {
+						require.Equal(t, tc.want, iface.NicType, "interface %d", i)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestSetupNetworkInterfaces_AdditionalInterfaceNetworkOverride(t *testing.T) {
 	t.Parallel()
 
@@ -3255,6 +3297,33 @@ func TestConfidentialInstanceType(t *testing.T) {
 			require.True(t, instance.ConfidentialInstanceConfig.EnableConfidentialCompute)
 			require.Equal(t, *tc.typ, instance.ConfidentialInstanceConfig.ConfidentialInstanceType)
 			require.Equal(t, "TERMINATE", instance.Scheduling.OnHostMaintenance)
+		})
+	}
+}
+
+func TestMinCpuPlatform(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		platform string
+		want     string
+	}{
+		{name: "unset leaves the platform to GCE"},
+		{name: "Ice Lake", platform: "Intel Ice Lake", want: "Intel Ice Lake"},
+		{name: "Granite Rapids", platform: "Intel Granite Rapids", want: "Intel Granite Rapids"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			nc := &v1alpha1.GCENodeClass{}
+			nc.Spec.MinCpuPlatform = tc.platform
+
+			instance := buildConfidentialInstance(t, nc)
+
+			require.Equal(t, tc.want, instance.MinCpuPlatform)
 		})
 	}
 }

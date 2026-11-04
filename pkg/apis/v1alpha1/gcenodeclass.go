@@ -122,6 +122,18 @@ type GCENodeClassSpec struct {
 	// virtual TPM, and integrity monitoring.
 	// +optional
 	ShieldedInstanceConfig *ShieldedInstanceConfig `json:"shieldedInstanceConfig,omitempty"`
+	// MinCpuPlatform is the minimum CPU platform for provisioned nodes, for example
+	// "Intel Ice Lake" or "Intel Granite Rapids". GCE schedules the node on that platform or
+	// a newer one. Leave unset to let GCE choose. GCE rejects a platform the machine type does
+	// not offer, so restrict the NodePool to machine types that do.
+	// Mirrors GKE NodeConfig.minCpuPlatform (Terraform node_config.min_cpu_platform).
+	// +optional
+	MinCpuPlatform string `json:"minCpuPlatform,omitempty"`
+	// GVNIC configures Google Virtual NIC on every network interface of provisioned nodes.
+	// When unset, GCE chooses the interface type. Mirrors GKE NodeConfig.gvnic
+	// (Terraform node_config.gvnic).
+	// +optional
+	GVNIC *VirtualNIC `json:"gvnic,omitempty"`
 	// AdvancedMachineFeatures configures advanced CPU and virtualisation options for provisioned nodes.
 	// +optional
 	AdvancedMachineFeatures *AdvancedMachineFeatures `json:"advancedMachineFeatures,omitempty"`
@@ -203,6 +215,14 @@ type GPUSharingConfig struct {
 	// +kubebuilder:validation:Maximum=48
 	// +required
 	MaxSharedClientsPerGPU int32 `json:"maxSharedClientsPerGPU"`
+}
+
+// VirtualNIC configures the Google Virtual NIC (gVNIC) feature, matching GKE VirtualNIC.
+type VirtualNIC struct {
+	// Enabled selects GVNIC when true and VIRTIO_NET when false on every interface.
+	// GCE rejects a type unsupported by the machine series or node image.
+	// +required
+	Enabled bool `json:"enabled"`
 }
 
 // NetworkConfig holds network settings for provisioned nodes.
