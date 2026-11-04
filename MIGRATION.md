@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### Instance types that hit GCE quota are skipped for 30 minutes
+
+A launch can fail because a GCE project quota, such as `N2_CPUS` or `NVIDIA_L4_GPUS`, is exhausted (`QUOTA_EXCEEDED`). Karpenter now marks that instance type unavailable for the same capacity type in every zone of the region for 30 minutes. New NodeClaims try other instance types instead of retrying the quota-blocked one. A Spot NodeClaim whose Spot attempts all fail for capacity or quota can fall back to on-demand. Previously, every new NodeClaim retried the same instance type.
+
+No action required. To change the backoff, set `QUOTA_EXCEEDED_TTL` (Helm: `controller.settings.quotaExceededTTL`), for example to `1h`. To keep the previous behavior, set it to `0s`. Negative values stop the controller at startup. After you raise a quota, the instance type stays unavailable until the TTL expires or the controller restarts. See [Quota exhaustion](docs/settings.md#quota-exhaustion).
+
 ### Container-Optimized OS images are ranked per variant
 
 COS `latest` now selects the newest usable image independently for amd64 CPU, arm64 CPU, and NVIDIA, falling back to older compatible catalog entries during publication. `ImagesReady=True` can contain a partial set: only supported instance types launch, and image drift waits for a compatible replacement. Channel and version pins remain exact; Ubuntu selection is unchanged.
