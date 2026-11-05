@@ -281,3 +281,17 @@ func TestGCENodeClassCRDDiskDeviceName(t *testing.T) {
 	require.True(t, dataOnly, "the provider sets the boot and secondary boot disks' device names itself")
 	require.True(t, unique, "GCE rejects an instance whose disks share a device name")
 }
+
+func TestGCENodeClassCRDBoundsShutdownGracePeriodCriticalPods(t *testing.T) {
+	const rule = `!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod) && ` +
+		`duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))`
+
+	var found bool
+	for _, v := range kubeletConfigurationSchema(t).XValidations {
+		if v.Rule == rule {
+			found = true
+			require.Equal(t, "shutdownGracePeriodCriticalPods requires shutdownGracePeriod and must not exceed it", v.Message)
+		}
+	}
+	require.True(t, found, "the kubelet does not start when shutdownGracePeriodCriticalPods exceeds shutdownGracePeriod")
+}

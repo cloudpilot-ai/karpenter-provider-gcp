@@ -331,6 +331,7 @@ type KubeletQuantity string
 // https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
 // +kubebuilder:validation:XValidation:message="maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false",rule="!has(self.maxParallelImagePulls) || self.maxParallelImagePulls < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls == false)"
 // +kubebuilder:validation:XValidation:message="memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false",rule="!has(self.memorySwap) || !has(self.memorySwap.swapBehavior) || self.memorySwap.swapBehavior != 'LimitedSwap' || (has(self.failSwapOn) && self.failSwapOn == false)"
+// +kubebuilder:validation:XValidation:message="shutdownGracePeriodCriticalPods requires shutdownGracePeriod and must not exceed it",rule="!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod) && duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))"
 type KubeletConfiguration struct {
 	// clusterDNS is a list of IP addresses for the cluster DNS server.
 	// Note that not all providers may use all addresses.
@@ -425,6 +426,16 @@ type KubeletConfiguration struct {
 	// file is up to the node image or a DaemonSet.
 	// +optional
 	MemorySwap *MemorySwapConfiguration `json:"memorySwap,omitempty"`
+	// ShutdownGracePeriod is how long the node delays its shutdown so that pods
+	// can terminate, for example when GCE stops or deletes the VM. It turns on
+	// graceful node shutdown. Spot nodes default to 30s.
+	// +optional
+	ShutdownGracePeriod *metav1.Duration `json:"shutdownGracePeriod,omitempty"`
+	// ShutdownGracePeriodCriticalPods is the part of shutdownGracePeriod
+	// reserved for critical pods, which terminate after all other pods.
+	// Spot nodes default to 15s.
+	// +optional
+	ShutdownGracePeriodCriticalPods *metav1.Duration `json:"shutdownGracePeriodCriticalPods,omitempty"`
 }
 
 // MemorySwapConfiguration configures swap memory available to container workloads.

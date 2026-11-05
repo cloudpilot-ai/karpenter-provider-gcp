@@ -180,6 +180,23 @@ These settings only let kubelet use swap the node already has. Provisioning the 
 
 > **Note:** `swapBehavior: LimitedSwap` requires `failSwapOn: false`; admission otherwise fails with `memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false`.
 
+### Graceful node shutdown
+
+Give pods time to terminate when GCE stops or deletes the VM:
+
+```yaml
+kubeletConfiguration:
+  shutdownGracePeriod: 30s
+  shutdownGracePeriodCriticalPods: 15s
+```
+
+- `shutdownGracePeriod` — how long the node delays its shutdown for pods to terminate; setting it turns on graceful node shutdown
+- `shutdownGracePeriodCriticalPods` — the part of `shutdownGracePeriod` reserved for critical pods, which terminate last
+
+Spot nodes default to `30s` and `15s`. Values in the GCENodeClass replace those defaults. On-demand nodes have no graceful shutdown unless the GCENodeClass sets it. GKE enables it on some machine types and not others, so check the kubelet configuration of the node pool you are replacing.
+
+> **Note:** `shutdownGracePeriodCriticalPods` requires `shutdownGracePeriod` and must not exceed it, because the kubelet does not start otherwise.
+
 ## Static hugepages
 
 Set `spec.linuxNodeConfig.hugepages` to pre-allocate hugepages on every node that the GCENodeClass provisions. The node allocates the pages at boot, before the kubelet starts, and reports them as `hugepages-2Mi` and `hugepages-1Gi` node capacity.

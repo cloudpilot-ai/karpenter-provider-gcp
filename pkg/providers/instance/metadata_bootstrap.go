@@ -256,6 +256,22 @@ func applyNodeClassRuntimeKubeletConfig(config *kubeletconfig.KubeletConfigurati
 	if overlay.MemorySwap != nil && overlay.MemorySwap.SwapBehavior != "" {
 		config.MemorySwap.SwapBehavior = overlay.MemorySwap.SwapBehavior
 	}
+	applyNodeClassShutdownKubeletConfig(config, overlay)
+}
+
+// applyNodeClassShutdownKubeletConfig runs after the Spot defaults, so a node
+// class value replaces them.
+func applyNodeClassShutdownKubeletConfig(config *kubeletconfig.KubeletConfiguration, overlay *v1alpha1.KubeletConfiguration) {
+	if overlay.ShutdownGracePeriod != nil {
+		if config.FeatureGates == nil {
+			config.FeatureGates = map[string]bool{}
+		}
+		config.FeatureGates["GracefulNodeShutdown"] = true
+		config.ShutdownGracePeriod = *overlay.ShutdownGracePeriod
+	}
+	if overlay.ShutdownGracePeriodCriticalPods != nil {
+		config.ShutdownGracePeriodCriticalPods = *overlay.ShutdownGracePeriodCriticalPods
+	}
 }
 
 func mergeKubeletQuantityMap(target *map[string]string, overlay map[string]v1alpha1.KubeletQuantity) {
