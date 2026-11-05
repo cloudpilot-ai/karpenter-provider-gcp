@@ -428,12 +428,19 @@ type KubeletConfiguration struct {
 	MemorySwap *MemorySwapConfiguration `json:"memorySwap,omitempty"`
 	// ShutdownGracePeriod is how long the node delays its shutdown so that pods
 	// can terminate, for example when GCE stops or deletes the VM. It turns on
-	// graceful node shutdown. Spot nodes default to 30s.
+	// graceful node shutdown. Spot nodes default to 30s; on-demand nodes keep
+	// the source node pool's value.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$`
 	// +optional
 	ShutdownGracePeriod *metav1.Duration `json:"shutdownGracePeriod,omitempty"`
 	// ShutdownGracePeriodCriticalPods is the part of shutdownGracePeriod
 	// reserved for critical pods, which terminate after all other pods.
-	// Spot nodes default to 15s.
+	// Spot nodes default to 15s; on-demand nodes keep the source node pool's
+	// value. When only shutdownGracePeriod is set, a default or source value
+	// larger than it is lowered to shutdownGracePeriod.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$`
 	// +optional
 	ShutdownGracePeriodCriticalPods *metav1.Duration `json:"shutdownGracePeriodCriticalPods,omitempty"`
 }

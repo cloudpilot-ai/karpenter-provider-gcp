@@ -272,6 +272,12 @@ func applyNodeClassShutdownKubeletConfig(config *kubeletconfig.KubeletConfigurat
 	if overlay.ShutdownGracePeriodCriticalPods != nil {
 		config.ShutdownGracePeriodCriticalPods = *overlay.ShutdownGracePeriodCriticalPods
 	}
+	// The kubelet does not start when the critical-pods period exceeds the
+	// total. The CRD keeps an explicit pair valid; a Spot default or source
+	// template value left in place by a shorter shutdownGracePeriod is lowered.
+	if config.ShutdownGracePeriodCriticalPods.Duration > config.ShutdownGracePeriod.Duration {
+		config.ShutdownGracePeriodCriticalPods = config.ShutdownGracePeriod
+	}
 }
 
 func mergeKubeletQuantityMap(target *map[string]string, overlay map[string]v1alpha1.KubeletQuantity) {
