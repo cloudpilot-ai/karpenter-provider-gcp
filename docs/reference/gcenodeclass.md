@@ -401,6 +401,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `hugepages` _[HugepagesConfig](#hugepagesconfig)_ | Hugepages configures the static hugepages that the node allocates at boot.<br />Mirrors GKE node pool linux_node_config.hugepages_config. |  | Optional: \{\} <br /> |
+| `swap` _[SwapConfig](#swapconfig)_ | Swap configures the swap file that the node creates at boot, before the<br />kubelet starts. Mirrors GKE node pool linux_node_config.swap_config.<br />Workloads use the swap only when kubeletConfiguration sets failSwapOn to<br />false and memorySwap.swapBehavior to LimitedSwap. |  | Optional: \{\} <br /> |
 
 
 #### LocalSSDMode
@@ -540,6 +541,58 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `name` _string_ | Name is the subnetwork secondary IPv4 range name. |  | Required: \{\} <br /> |
 | `totalFreeIP` _integer_ | TotalFreeIP is the Compute-reported number of free IPv4 addresses in this<br />secondary range. Omitted when unknown; zero means no free addresses were reported.<br />Counts are snapshots, not a guarantee of an allocatable contiguous pod CIDR block. |  | Minimum: 0 <br />Optional: \{\} <br /> |
+
+
+#### SwapBootDiskProfile
+
+
+
+SwapBootDiskProfile defines a swap file on the boot disk.
+
+
+
+_Appears in:_
+- [SwapConfig](#swapconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `swapSizeGib` _integer_ | SwapSizeGib is the size of the swap file in GiB. GKE limits it to half<br />of the boot disk. |  | Minimum: 1 <br />Required: \{\} <br /> |
+
+
+#### SwapConfig
+
+
+
+SwapConfig defines the swap file that a node creates at boot.
+The GKE node bootstrap creates the file before the kubelet starts, so the
+kubelet sizes LimitedSwap from it at its first start.
+
+
+
+_Appears in:_
+- [LinuxNodeConfig](#linuxnodeconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled creates the swap file on the node. |  | Required: \{\} <br /> |
+| `encryptionConfig` _[SwapEncryptionConfig](#swapencryptionconfig)_ | EncryptionConfig configures the encryption of the swap file. The swap<br />file is encrypted with a key that the node generates at boot, unless<br />encryptionConfig.disabled is true. |  | Optional: \{\} <br /> |
+| `bootDiskProfile` _[SwapBootDiskProfile](#swapbootdiskprofile)_ | BootDiskProfile creates the swap file on the boot disk. |  | Optional: \{\} <br /> |
+
+
+#### SwapEncryptionConfig
+
+
+
+SwapEncryptionConfig defines the encryption of the swap file.
+
+
+
+_Appears in:_
+- [SwapConfig](#swapconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `disabled` _boolean_ | Disabled turns off the encryption of the swap file. |  | Optional: \{\} <br /> |
 
 
 #### VirtualNIC

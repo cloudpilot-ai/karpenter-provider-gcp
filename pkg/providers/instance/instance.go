@@ -1232,6 +1232,7 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	patchKubeEnvOSDistribution(target, nodeClass)
 	patchSecondaryBootDisksKubeEnv(target, nodeClass)
 	patchHugepagesKubeEnv(target, nodeClass)
+	patchSwapKubeEnv(target, nodeClass)
 	patchGPUSharingKubeEnv(target, nodeClass, isGPUInstance)
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)

@@ -29,6 +29,8 @@ import (
 // GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
 // This will contain the configuration necessary to launch instances in GCP.
 // +kubebuilder:validation:XValidation:message="subnetRangeName and subnetRangeNames are mutually exclusive",rule="!(has(self.subnetRangeName) && has(self.subnetRangeNames))"
+// +kubebuilder:validation:XValidation:message="linuxNodeConfig.swap.enabled requires kubeletConfiguration.failSwapOn to be explicitly set to false",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !self.linuxNodeConfig.swap.enabled || (has(self.kubeletConfiguration) && has(self.kubeletConfiguration.failSwapOn) && self.kubeletConfiguration.failSwapOn == false)"
+// +kubebuilder:validation:XValidation:message="linuxNodeConfig.swap.bootDiskProfile.swapSizeGib must be at most half of the boot disk sizeGiB",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !has(self.linuxNodeConfig.swap.bootDiskProfile) || !has(self.disks) || self.disks.all(d, !d.boot || !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swap.bootDiskProfile.swapSizeGib <= d.sizeGiB)"
 type GCENodeClassSpec struct {
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
@@ -554,6 +556,12 @@ type LinuxNodeConfig struct {
 	// Mirrors GKE node pool linux_node_config.hugepages_config.
 	// +optional
 	Hugepages *HugepagesConfig `json:"hugepages,omitempty"`
+	// Swap configures the swap file that the node creates at boot, before the
+	// kubelet starts. Mirrors GKE node pool linux_node_config.swap_config.
+	// Workloads use the swap only when kubeletConfiguration sets failSwapOn to
+	// false and memorySwap.swapBehavior to LimitedSwap.
+	// +optional
+	Swap *SwapConfig `json:"swap,omitempty"`
 }
 
 // HugepagesConfig defines the static hugepages that a node allocates at boot.
@@ -568,6 +576,41 @@ type HugepagesConfig struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	HugepageSize1g *int32 `json:"hugepageSize1g,omitempty"`
+}
+
+// SwapConfig defines the swap file that a node creates at boot.
+// The GKE node bootstrap creates the file before the kubelet starts, so the
+// kubelet sizes LimitedSwap from it at its first start.
+// +kubebuilder:validation:XValidation:message="bootDiskProfile is required when swap is enabled",rule="!self.enabled || has(self.bootDiskProfile)"
+// +kubebuilder:validation:XValidation:message="bootDiskProfile and encryptionConfig must not be set when swap is disabled",rule="self.enabled || (!has(self.bootDiskProfile) && !has(self.encryptionConfig))"
+type SwapConfig struct {
+	// Enabled creates the swap file on the node.
+	// +required
+	Enabled bool `json:"enabled"`
+	// EncryptionConfig configures the encryption of the swap file. The swap
+	// file is encrypted with a key that the node generates at boot, unless
+	// encryptionConfig.disabled is true.
+	// +optional
+	EncryptionConfig *SwapEncryptionConfig `json:"encryptionConfig,omitempty"`
+	// BootDiskProfile creates the swap file on the boot disk.
+	// +optional
+	BootDiskProfile *SwapBootDiskProfile `json:"bootDiskProfile,omitempty"`
+}
+
+// SwapEncryptionConfig defines the encryption of the swap file.
+type SwapEncryptionConfig struct {
+	// Disabled turns off the encryption of the swap file.
+	// +optional
+	Disabled *bool `json:"disabled,omitempty"`
+}
+
+// SwapBootDiskProfile defines a swap file on the boot disk.
+type SwapBootDiskProfile struct {
+	// SwapSizeGib is the size of the swap file in GiB. GKE limits it to half
+	// of the boot disk.
+	// +kubebuilder:validation:Minimum=1
+	// +required
+	SwapSizeGib int64 `json:"swapSizeGib"`
 }
 
 // AdvancedMachineFeatures defines advanced CPU and virtualisation options for a GCE instance.
