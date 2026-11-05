@@ -30,7 +30,7 @@ import (
 // This will contain the configuration necessary to launch instances in GCP.
 // +kubebuilder:validation:XValidation:message="subnetRangeName and subnetRangeNames are mutually exclusive",rule="!(has(self.subnetRangeName) && has(self.subnetRangeNames))"
 // +kubebuilder:validation:XValidation:message="linuxNodeConfig.swap.enabled requires kubeletConfiguration.failSwapOn to be explicitly set to false",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !self.linuxNodeConfig.swap.enabled || (has(self.kubeletConfiguration) && has(self.kubeletConfiguration.failSwapOn) && self.kubeletConfiguration.failSwapOn == false)"
-// +kubebuilder:validation:XValidation:message="linuxNodeConfig.swap.bootDiskProfile.swapSizeGib must be at most half of the boot disk sizeGiB",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !has(self.linuxNodeConfig.swap.bootDiskProfile) || !has(self.disks) || self.disks.all(d, !d.boot || !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swap.bootDiskProfile.swapSizeGib <= d.sizeGiB)"
+// +kubebuilder:validation:XValidation:message="linuxNodeConfig.swap.bootDiskProfile.swapSizeGib must be at most half of the boot disk sizeGiB",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !has(self.linuxNodeConfig.swap.bootDiskProfile) || !has(self.disks) || self.disks.all(d, !has(d.boot) || !d.boot || !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swap.bootDiskProfile.swapSizeGib <= d.sizeGiB)"
 type GCENodeClassSpec struct {
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
@@ -741,6 +741,19 @@ func (in *GCENodeClass) GetMaxPods() int32 {
 		return *in.Spec.KubeletConfiguration.MaxPods
 	}
 	return KubeletMaxPods
+}
+
+// BootDiskSwapGiB returns the size of the swap file that nodes create on the
+// boot disk, or 0 when they create none.
+func (in *GCENodeClass) BootDiskSwapGiB() int64 {
+	if in.Spec.LinuxNodeConfig == nil || in.Spec.LinuxNodeConfig.Swap == nil {
+		return 0
+	}
+	swap := in.Spec.LinuxNodeConfig.Swap
+	if !swap.Enabled || swap.BootDiskProfile == nil {
+		return 0
+	}
+	return swap.BootDiskProfile.SwapSizeGib
 }
 
 // GKEValue returns the strategy as GKE spells it in node labels and kube-env.

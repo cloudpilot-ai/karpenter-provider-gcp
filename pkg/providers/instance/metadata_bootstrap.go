@@ -181,18 +181,16 @@ func patchSwapKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCE
 	for _, key := range swapKubeEnvEntries {
 		target.UnsetKubeEnvEntry(key)
 	}
-	if nodeClass.Spec.LinuxNodeConfig == nil {
+	swapGiB := nodeClass.BootDiskSwapGiB()
+	if swapGiB == 0 {
 		return
 	}
 	swap := nodeClass.Spec.LinuxNodeConfig.Swap
-	if swap == nil || !swap.Enabled || swap.BootDiskProfile == nil {
-		return
-	}
 	// The bootstrap passes NODE_SWAP_SIZE to fallocate -l and wraps the file
 	// in dm-crypt (/dev/mapper/encswap) when NODE_SWAP_ENCRYPTION is "true".
 	encrypted := swap.EncryptionConfig == nil || swap.EncryptionConfig.Disabled == nil || !*swap.EncryptionConfig.Disabled
 	target.SetKubeEnvEntry("NODE_SWAP_PROFILE", "BOOT_DISK")
-	target.SetKubeEnvEntry("NODE_SWAP_SIZE", fmt.Sprintf("%dGiB", swap.BootDiskProfile.SwapSizeGib))
+	target.SetKubeEnvEntry("NODE_SWAP_SIZE", fmt.Sprintf("%dGiB", swapGiB))
 	target.SetKubeEnvEntry("NODE_SWAP_ENCRYPTION", fmt.Sprintf(`"%t"`, encrypted))
 }
 
