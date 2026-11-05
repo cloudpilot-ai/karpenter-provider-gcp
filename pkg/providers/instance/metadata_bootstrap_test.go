@@ -20,10 +20,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/yaml"
@@ -334,4 +336,57 @@ func TestBuildInstance_KubeletSwapConfig(t *testing.T) {
 	require.Equal(t, "LimitedSwap", got.MemorySwap.SwapBehavior)
 	require.Equal(t, "10s", got.NodeStatusUpdateFrequency.Duration.String(),
 		"source kubelet-config entries the node class does not set must survive")
+}
+
+func TestBuildInstance_ShutdownGracePeriod(t *testing.T) {
+	for name, tc := range map[string]struct {
+		capacityType     string
+		kubelet          *v1alpha1.KubeletConfiguration
+		wantGate         bool
+		wantGrace        string
+		wantCriticalPods string
+	}{
+		"on-demand without node class values keeps graceful shutdown off": {
+			capacityType: karpv1.CapacityTypeOnDemand, wantGrace: "0s", wantCriticalPods: "0s",
+		},
+		"spot without node class values gets the spot defaults": {
+			capacityType: karpv1.CapacityTypeSpot, wantGate: true, wantGrace: "30s", wantCriticalPods: "15s",
+		},
+		"on-demand with node class values": {
+			capacityType: karpv1.CapacityTypeOnDemand,
+			kubelet: &v1alpha1.KubeletConfiguration{
+				ShutdownGracePeriod:             &metav1.Duration{Duration: 30 * time.Second},
+				ShutdownGracePeriodCriticalPods: &metav1.Duration{Duration: 15 * time.Second},
+			},
+			wantGate: true, wantGrace: "30s", wantCriticalPods: "15s",
+		},
+		"node class values replace the spot defaults": {
+			capacityType: karpv1.CapacityTypeSpot,
+			kubelet: &v1alpha1.KubeletConfiguration{
+				ShutdownGracePeriod:             &metav1.Duration{Duration: 2 * time.Minute},
+				ShutdownGracePeriodCriticalPods: &metav1.Duration{Duration: 20 * time.Second},
+			},
+			wantGate: true, wantGrace: "2m0s", wantCriticalPods: "20s",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			provider := makeProvider()
+			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{KubeletConfiguration: tc.kubelet}}
+
+			instance, err := provider.buildInstance(
+				context.Background(),
+				spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), makeSourceMetadata("max-pods-per-node=110,max-pods=110"),
+				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+				"us-central1-a", "karpenter-shutdown-test",
+				tc.capacityType, nil, 0, "pods",
+			)
+			require.NoError(t, err)
+
+			var got kubeletconfig.KubeletConfiguration
+			require.NoError(t, yaml.Unmarshal([]byte(metadataValue(instance.Metadata, metadata.KubeletConfigKey)), &got))
+			require.Equal(t, tc.wantGate, got.FeatureGates["GracefulNodeShutdown"])
+			require.Equal(t, tc.wantGrace, got.ShutdownGracePeriod.Duration.String())
+			require.Equal(t, tc.wantCriticalPods, got.ShutdownGracePeriodCriticalPods.Duration.String())
+		})
+	}
 }

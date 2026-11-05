@@ -368,6 +368,8 @@ _Appears in:_
 | `maxParallelImagePulls` _integer_ | MaxParallelImagePulls sets the maximum number of image pulls in parallel.<br />Values above 1 require SerializeImagePulls to be explicitly set to false.<br />Nodes with many DaemonSets pulling cold images concurrently (a common case<br />right after a fresh node joins the cluster) benefit most from raising this<br />above the kubelet default of 1. |  | Minimum: 1 <br />Optional: \{\} <br /> |
 | `failSwapOn` _boolean_ | FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.<br />Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap.<br />Default: true |  | Optional: \{\} <br /> |
 | `memorySwap` _[MemorySwapConfiguration](#memoryswapconfiguration)_ | MemorySwap configures swap memory available to container workloads. The<br />kubelet only uses swap the node already has: provisioning a swap device or<br />file is up to the node image or a DaemonSet. |  | Optional: \{\} <br /> |
+| `shutdownGracePeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | ShutdownGracePeriod is how long the node delays its shutdown so that pods<br />can terminate, for example when GCE stops or deletes the VM. It turns on<br />graceful node shutdown. Spot nodes default to 30s. |  | Optional: \{\} <br /> |
+| `shutdownGracePeriodCriticalPods` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | ShutdownGracePeriodCriticalPods is the part of shutdownGracePeriod<br />reserved for critical pods, which terminate after all other pods.<br />Spot nodes default to 15s. |  | Optional: \{\} <br /> |
 
 
 #### KubeletQuantity
