@@ -205,6 +205,80 @@ func TestBuildInstance_DropsStaleSourceHugepagesMetadata(t *testing.T) {
 	require.NotContains(t, kubeEnvFrom(t, instance), "HUGEPAGE_1G")
 }
 
+func swapNodeClass(swap *v1alpha1.SwapConfig) *v1alpha1.GCENodeClass {
+	return &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{LinuxNodeConfig: &v1alpha1.LinuxNodeConfig{Swap: swap}}}
+}
+
+func buildSwapInstanceKubeEnv(t *testing.T, nodeClass *v1alpha1.GCENodeClass, sourceKubeEnv string) string {
+	t.Helper()
+	provider := makeProvider()
+	sourceMetadata := computeMetadataValues(map[string]string{
+		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + sourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
+		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
+	})
+
+	instance, err := provider.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
+		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+		"us-central1-a", "karpenter-swap-test",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+	)
+	require.NoError(t, err)
+	return kubeEnvFrom(t, instance)
+}
+
+func TestBuildInstance_SwapBootDiskMetadata(t *testing.T) {
+	kubeEnv := buildSwapInstanceKubeEnv(t, swapNodeClass(&v1alpha1.SwapConfig{
+		Enabled:         true,
+		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: 4},
+	}), "")
+
+	require.Contains(t, kubeEnv, "NODE_SWAP_PROFILE: BOOT_DISK")
+	require.Contains(t, kubeEnv, "NODE_SWAP_SIZE: 4GiB")
+	require.Contains(t, kubeEnv, `NODE_SWAP_ENCRYPTION: "true"`)
+}
+
+func TestBuildInstance_SwapEncryptionDisabledMetadata(t *testing.T) {
+	kubeEnv := buildSwapInstanceKubeEnv(t, swapNodeClass(&v1alpha1.SwapConfig{
+		Enabled:          true,
+		EncryptionConfig: &v1alpha1.SwapEncryptionConfig{Disabled: lo.ToPtr(true)},
+		BootDiskProfile:  &v1alpha1.SwapBootDiskProfile{SwapSizeGib: 1},
+	}), "")
+
+	require.Contains(t, kubeEnv, "NODE_SWAP_SIZE: 1GiB")
+	require.Contains(t, kubeEnv, `NODE_SWAP_ENCRYPTION: "false"`)
+}
+
+func TestBuildInstance_DropsStaleSourceSwapMetadata(t *testing.T) {
+	const sourceSwap = "NODE_SWAP_PROFILE: DEDICATED_LOCAL_SSD\nNODE_SWAP_SIZE: 100GiB\nNODE_SWAP_ENCRYPTION: \"true\"\n" +
+		"NODE_SWAP_DEDICATED_LOCAL_SSD_COUNT: \"1\"\nNODE_ZSWAP_ENABLED: \"true\"\nNODE_ZSWAP_COMPRESSOR: zstd\nNODE_ZSWAP_MAX_POOL_PERCENT: \"20\"\n"
+
+	for name, nodeClass := range map[string]*v1alpha1.GCENodeClass{
+		"no linuxNodeConfig": {},
+		"swap disabled":      swapNodeClass(&v1alpha1.SwapConfig{Enabled: false}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			kubeEnv := buildSwapInstanceKubeEnv(t, nodeClass, sourceSwap)
+			require.NotContains(t, kubeEnv, "NODE_SWAP_")
+			require.NotContains(t, kubeEnv, "NODE_ZSWAP_")
+		})
+	}
+}
+
+func TestBuildInstance_SwapReplacesSourceSwapMetadata(t *testing.T) {
+	kubeEnv := buildSwapInstanceKubeEnv(t, swapNodeClass(&v1alpha1.SwapConfig{
+		Enabled:         true,
+		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: 2},
+	}), "NODE_SWAP_PROFILE: DEDICATED_LOCAL_SSD\nNODE_SWAP_DEDICATED_LOCAL_SSD_COUNT: \"1\"\nNODE_ZSWAP_ENABLED: \"true\"\n")
+
+	require.Contains(t, kubeEnv, "NODE_SWAP_PROFILE: BOOT_DISK")
+	require.Contains(t, kubeEnv, "NODE_SWAP_SIZE: 2GiB")
+	require.NotContains(t, kubeEnv, "DEDICATED_LOCAL_SSD")
+	require.NotContains(t, kubeEnv, "NODE_ZSWAP_")
+}
+
 func timeSharingNodeClass(clients int32) *v1alpha1.GCENodeClass {
 	return &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUSharingConfig: &v1alpha1.GPUSharingConfig{
 		Strategy:               v1alpha1.GPUSharingStrategyTimeSharing,

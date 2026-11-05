@@ -156,9 +156,29 @@ kubeletConfiguration:
 - `failSwapOn` — whether kubelet refuses to start while swap is active; defaults to `true`
 - `memorySwap.swapBehavior` — `NoSwap` (the kubelet default: no pod uses swap) or `LimitedSwap` (a Burstable pod's containers may swap, each up to a limit proportionate to its memory request; Guaranteed and BestEffort pods never swap)
 
-These settings only let kubelet use swap the node already has. Provisioning the swap device or file is up to the node image or a DaemonSet. Swap does not change node capacity, so scheduling is unaffected.
+These settings only let kubelet use swap the node already has. Swap does not change node capacity, so scheduling is unaffected.
 
 > **Note:** `swapBehavior: LimitedSwap` requires `failSwapOn: false`; admission otherwise fails with `memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false`.
+
+To have the node create the swap, as `swap_config.boot_disk_profile` does on a GKE node pool, set `spec.linuxNodeConfig.swap`:
+
+```yaml
+kubeletConfiguration:
+  failSwapOn: false
+  memorySwap:
+    swapBehavior: LimitedSwap
+linuxNodeConfig:
+  swap:
+    enabled: true
+    bootDiskProfile:
+      swapSizeGib: 4
+```
+
+- `enabled` — create a swap file at boot, before the kubelet starts
+- `bootDiskProfile.swapSizeGib` — size of the swap file on the boot disk; at most half of the boot disk
+- `encryptionConfig.disabled` — set `true` to skip encryption; by default the file is encrypted with a key the node generates at boot (`/dev/mapper/encswap`)
+
+`enabled: true` requires `bootDiskProfile` and `kubeletConfiguration.failSwapOn: false`. Nodes don't inherit swap or zswap from the GKE node pool that Karpenter uses as its bootstrap template. Without `linuxNodeConfig.swap`, provisioning the swap device or file is up to the node image or a DaemonSet.
 
 ## Static hugepages
 
