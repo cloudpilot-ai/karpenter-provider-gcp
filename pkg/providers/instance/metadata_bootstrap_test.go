@@ -26,6 +26,7 @@ import (
 	"google.golang.org/api/compute/v1"
 	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
@@ -271,4 +272,66 @@ func TestBuildInstance_DropsStaleSourceGPUSharingMetadata(t *testing.T) {
 	kubeEnv := kubeEnvFrom(t, instance)
 	require.NotContains(t, kubeEnv, "GPU_SHARING_STRATEGY")
 	require.NotContains(t, kubeEnv, "SHARED_CLIENTS_PER_GPU")
+}
+
+func TestApplyNodeClassKubeletConfigSetsSwap(t *testing.T) {
+	config := &kubeletconfig.KubeletConfiguration{FailSwapOn: lo.ToPtr(true)}
+	overlay := &v1alpha1.KubeletConfiguration{
+		FailSwapOn: lo.ToPtr(false),
+		MemorySwap: &v1alpha1.MemorySwapConfiguration{SwapBehavior: "LimitedSwap"},
+	}
+
+	applyNodeClassKubeletConfig(config, overlay)
+
+	require.NotNil(t, config.FailSwapOn)
+	require.False(t, *config.FailSwapOn)
+	require.Equal(t, "LimitedSwap", config.MemorySwap.SwapBehavior)
+}
+
+func TestApplyNodeClassKubeletConfigLeavesSwapUnsetWhenOverlayOmitsIt(t *testing.T) {
+	config := &kubeletconfig.KubeletConfiguration{
+		FailSwapOn: lo.ToPtr(true),
+		MemorySwap: kubeletconfig.MemorySwapConfiguration{SwapBehavior: "NoSwap"},
+	}
+	overlay := &v1alpha1.KubeletConfiguration{
+		MaxPods:    lo.ToPtr[int32](64),
+		MemorySwap: &v1alpha1.MemorySwapConfiguration{},
+	}
+
+	applyNodeClassKubeletConfig(config, overlay)
+
+	require.NotNil(t, config.FailSwapOn)
+	require.True(t, *config.FailSwapOn, "the source template's failSwapOn must survive an overlay that omits it")
+	require.Equal(t, "NoSwap", config.MemorySwap.SwapBehavior,
+		"an empty memorySwap must not clear the source template's swapBehavior")
+}
+
+func TestBuildInstance_KubeletSwapConfig(t *testing.T) {
+	provider := makeProvider()
+	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{KubeletConfiguration: &v1alpha1.KubeletConfiguration{
+		FailSwapOn: lo.ToPtr(false),
+		MemorySwap: &v1alpha1.MemorySwapConfiguration{SwapBehavior: "LimitedSwap"},
+	}}}
+	sourceMetadata := computeMetadataValues(map[string]string{
+		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
+		metadata.KubeletConfigKey: "failSwapOn: true\nnodeStatusUpdateFrequency: 10s\n",
+	})
+
+	instance, err := provider.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
+		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+		"us-central1-a", "karpenter-swap-test",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+	)
+	require.NoError(t, err)
+
+	var got kubeletconfig.KubeletConfiguration
+	require.NoError(t, yaml.Unmarshal([]byte(metadataValue(instance.Metadata, metadata.KubeletConfigKey)), &got))
+	require.NotNil(t, got.FailSwapOn)
+	require.False(t, *got.FailSwapOn, "the node class must override the source template's failSwapOn")
+	require.Equal(t, "LimitedSwap", got.MemorySwap.SwapBehavior)
+	require.Equal(t, "10s", got.NodeStatusUpdateFrequency.Duration.String(),
+		"source kubelet-config entries the node class does not set must survive")
 }

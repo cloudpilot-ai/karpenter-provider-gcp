@@ -142,6 +142,24 @@ kubeletConfiguration:
 
 > **Note:** Setting `maxParallelImagePulls` to `2` or greater requires `serializeImagePulls: false`; admission otherwise fails with `maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false`. `maxParallelImagePulls: 1` on its own is accepted without any `serializeImagePulls` change, and omitting both fields preserves the default serialized behavior.
 
+### Swap
+
+Let Burstable pods use swap, as a GKE node pool with swap enabled (Terraform `linux_node_config.swap_config`) does:
+
+```yaml
+kubeletConfiguration:
+  failSwapOn: false
+  memorySwap:
+    swapBehavior: LimitedSwap
+```
+
+- `failSwapOn` — whether kubelet refuses to start while swap is active; defaults to `true`
+- `memorySwap.swapBehavior` — `NoSwap` (the kubelet default: no pod uses swap) or `LimitedSwap` (a Burstable pod's containers may swap, each up to a limit proportionate to its memory request; Guaranteed and BestEffort pods never swap)
+
+These settings only let kubelet use swap the node already has. Provisioning the swap device or file is up to the node image or a DaemonSet. Swap does not change node capacity, so scheduling is unaffected.
+
+> **Note:** `swapBehavior: LimitedSwap` requires `failSwapOn: false`; admission otherwise fails with `memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false`.
+
 ## Static hugepages
 
 Set `spec.linuxNodeConfig.hugepages` to pre-allocate hugepages on every node that the GCENodeClass provisions. The node allocates the pages at boot, before the kubelet starts, and reports them as `hugepages-2Mi` and `hugepages-1Gi` node capacity.

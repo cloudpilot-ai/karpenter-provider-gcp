@@ -405,6 +405,12 @@ spec:
                     x-kubernetes-validations:
                     - message: valid keys for evictionSoftGracePeriod are ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available']
                       rule: self.all(x, x in ['memory.available','nodefs.available','nodefs.inodesFree','imagefs.available','imagefs.inodesFree','pid.available'])
+                  failSwapOn:
+                    description: |-
+                      FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.
+                      Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap.
+                      Default: true
+                    type: boolean
                   imageGCHighThresholdPercent:
                     description: |-
                       ImageGCHighThresholdPercent is the percent of disk usage after which image
@@ -461,6 +467,22 @@ spec:
                     format: int32
                     minimum: 0
                     type: integer
+                  memorySwap:
+                    description: |-
+                      MemorySwap configures swap memory available to container workloads. The
+                      kubelet only uses swap the node already has: provisioning a swap device or
+                      file is up to the node image or a DaemonSet.
+                    properties:
+                      swapBehavior:
+                        description: |-
+                          SwapBehavior is NoSwap (workloads cannot use swap, the kubelet default) or
+                          LimitedSwap (a container's swap limit is proportionate to its memory request,
+                          for Burstable pods only).
+                        enum:
+                        - NoSwap
+                        - LimitedSwap
+                        type: string
+                    type: object
                   podsPerCore:
                     description: |-
                       PodsPerCore is an override for the number of pods that can run on a worker node
@@ -511,6 +533,11 @@ spec:
                   rule: '!has(self.maxParallelImagePulls) || self.maxParallelImagePulls
                     < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls
                     == false)'
+                - message: memorySwap.swapBehavior LimitedSwap requires failSwapOn
+                    to be explicitly set to false
+                  rule: '!has(self.memorySwap) || !has(self.memorySwap.swapBehavior)
+                    || self.memorySwap.swapBehavior != ''LimitedSwap'' || (has(self.failSwapOn)
+                    && self.failSwapOn == false)'
               labels:
                 additionalProperties:
                   type: string

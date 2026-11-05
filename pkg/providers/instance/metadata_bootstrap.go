@@ -198,6 +198,12 @@ func applyNodeClassRuntimeKubeletConfig(config *kubeletconfig.KubeletConfigurati
 	if overlay.MaxParallelImagePulls != nil {
 		config.MaxParallelImagePulls = overlay.MaxParallelImagePulls
 	}
+	if overlay.FailSwapOn != nil {
+		config.FailSwapOn = overlay.FailSwapOn
+	}
+	if overlay.MemorySwap != nil && overlay.MemorySwap.SwapBehavior != "" {
+		config.MemorySwap.SwapBehavior = overlay.MemorySwap.SwapBehavior
+	}
 }
 
 func mergeKubeletQuantityMap(target *map[string]string, overlay map[string]v1alpha1.KubeletQuantity) {

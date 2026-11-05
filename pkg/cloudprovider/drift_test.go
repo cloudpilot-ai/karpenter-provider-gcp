@@ -409,6 +409,17 @@ func TestNodeClassDriftFieldCoverage(t *testing.T) {
 			want: NodeClassDrift,
 		},
 		{
+			name: "KubeletConfigurationMemorySwap",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				failSwapOn := false
+				nc.Spec.KubeletConfiguration = &v1alpha1.KubeletConfiguration{
+					FailSwapOn: &failSwapOn,
+					MemorySwap: &v1alpha1.MemorySwapConfiguration{SwapBehavior: "LimitedSwap"},
+				}
+			},
+			want: NodeClassDrift,
+		},
+		{
 			name:   "Labels",
 			mutate: func(nc *v1alpha1.GCENodeClass) { nc.Spec.Labels = map[string]string{"env": "test"} },
 			want:   NodeClassDrift,

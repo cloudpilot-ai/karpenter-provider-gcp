@@ -366,6 +366,8 @@ _Appears in:_
 | `cpuCFSQuota` _boolean_ | CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits. |  | Optional: \{\} <br /> |
 | `serializeImagePulls` _boolean_ | SerializeImagePulls, when enabled, tells the kubelet to pull images one at a<br />time. Must be explicitly set to false to set MaxParallelImagePulls above 1.<br />Default: true |  | Optional: \{\} <br /> |
 | `maxParallelImagePulls` _integer_ | MaxParallelImagePulls sets the maximum number of image pulls in parallel.<br />Values above 1 require SerializeImagePulls to be explicitly set to false.<br />Nodes with many DaemonSets pulling cold images concurrently (a common case<br />right after a fresh node joins the cluster) benefit most from raising this<br />above the kubelet default of 1. |  | Minimum: 1 <br />Optional: \{\} <br /> |
+| `failSwapOn` _boolean_ | FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.<br />Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap.<br />Default: true |  | Optional: \{\} <br /> |
+| `memorySwap` _[MemorySwapConfiguration](#memoryswapconfiguration)_ | MemorySwap configures swap memory available to container workloads. The<br />kubelet only uses swap the node already has: provisioning a swap device or<br />file is up to the node image or a DaemonSet. |  | Optional: \{\} <br /> |
 
 
 #### KubeletQuantity
@@ -414,6 +416,23 @@ _Appears in:_
 | --- | --- |
 | `RawBlock` | LocalSSDModeRawBlock leaves local SSDs unformatted.<br /> |
 | `Ephemeral` | LocalSSDModeEphemeral uses local SSDs for kubelet ephemeral storage.<br /> |
+
+
+#### MemorySwapConfiguration
+
+
+
+MemorySwapConfiguration configures swap memory available to container workloads.
+https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#MemorySwapConfiguration
+
+
+
+_Appears in:_
+- [KubeletConfiguration](#kubeletconfiguration)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `swapBehavior` _string_ | SwapBehavior is NoSwap (workloads cannot use swap, the kubelet default) or<br />LimitedSwap (a container's swap limit is proportionate to its memory request,<br />for Burstable pods only). |  | Enum: [NoSwap LimitedSwap] <br />Optional: \{\} <br /> |
 
 
 #### NetworkConfig
