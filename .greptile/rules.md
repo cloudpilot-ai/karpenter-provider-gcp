@@ -11,6 +11,20 @@ For `pkg/metadata`, flag any change that adds GCP/Kubernetes API calls, source n
 
 Flag changes that duplicate GKE API reads across providers, let bootstrap metadata helpers perform API calls, mutate caller-owned Compute metadata templates in place, or mix Kubernetes object metadata with GCE instance labels/tags.
 
+## GCENodeClass ergonomics: follow GKE node configuration
+
+For new or materially changed GCENodeClass settings with a GKE equivalent, prefer the names, nesting, and semantics operators already know from [GKE NodeConfig](https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/NodeConfig) and [Terraform `google_container_node_pool.node_config`](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/container_node_pool#node_config). Translate Terraform snake_case to Kubernetes camelCase; do not copy HCL syntax or add a `spec.nodeConfig` wrapper, since `spec` already holds node configuration.
+
+Examples motivated by review of [#718](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/718#discussion_r4432047492) and [#727](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/727):
+
+- Prefer `spec.advancedMachineFeatures.threadsPerCore` (Terraform `node_config.advanced_machine_features.threads_per_core`), not a flat `spec.threadsPerCore`.
+- Prefer `spec.gvnic.enabled` (Terraform `node_config.gvnic.enabled`), not a raw GCE `spec.networkConfig.nicType` enum.
+- Keep `spec.minCpuPlatform` aligned with GKE `minCpuPlatform` / Terraform `node_config.min_cpu_platform`.
+
+Compare types, allowed values, units, defaults, and omitted versus explicit false/zero behavior, not just spelling. Allow Kubernetes API conventions and documented differences required by Karpenter scheduling, direct GCE provisioning, or backward compatibility. Do not demand Terraform resource lifecycle behavior, support for every GKE feature, or renames of unchanged existing fields.
+
+Only flag concrete, avoidable mismatches introduced or materially changed by the PR. Cite the equivalent GKE/Terraform field and reference, suggest the aligned API shape, and account for any documented reason for divergence. Verify that generated CRDs, reference docs, and examples match the chosen API; do not report an already-correct nested field or a justified exception as a violation.
+
 ## End-to-end coverage opportunities
 
 For new or materially changed user-visible behavior, consider whether an end-to-end test would cover integration risk that unit tests cannot. Recommend one only when the behavior crosses real GKE, GCP, Kubernetes, controller, or node boundaries; has stable observable outcomes; and can be exercised economically in the existing `test/suites` environment.
