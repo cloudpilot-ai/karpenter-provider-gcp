@@ -286,7 +286,7 @@ func TestGCENodeClassCRDSwapRequiresFailSwapOnFalse(t *testing.T) {
 func TestGCENodeClassCRDLimitsSwapToHalfTheBootDisk(t *testing.T) {
 	requireXValidation(t, specSchema(t),
 		`!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !has(self.linuxNodeConfig.swap.bootDiskProfile) || `+
-			`!has(self.disks) || self.disks.all(d, !d.boot || !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swap.bootDiskProfile.swapSizeGib <= d.sizeGiB)`,
+			`!has(self.disks) || self.disks.all(d, !has(d.boot) || !d.boot || !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swap.bootDiskProfile.swapSizeGib <= d.sizeGiB)`,
 		"linuxNodeConfig.swap.bootDiskProfile.swapSizeGib must be at most half of the boot disk sizeGiB")
 }
 

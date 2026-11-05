@@ -178,6 +178,8 @@ linuxNodeConfig:
 - `bootDiskProfile.swapSizeGib` — size of the swap file on the boot disk; at most half of the boot disk
 - `encryptionConfig.disabled` — set `true` to skip encryption; by default the file is encrypted with a key the node generates at boot (`/dev/mapper/encswap`)
 
+The swap file takes its space from the boot disk, so Karpenter adds its size to the `ephemeral-storage` kube-reserved, on top of any `kubeletConfiguration.kubeReserved` value, unless `localSsdMode: Ephemeral` puts pod storage on Local SSDs. Node capacity stays the size of the disk.
+
 `enabled: true` requires `bootDiskProfile` and `kubeletConfiguration.failSwapOn: false`. Nodes don't inherit swap or zswap from the GKE node pool that Karpenter uses as its bootstrap template. Without `linuxNodeConfig.swap`, provisioning the swap device or file is up to the node image or a DaemonSet.
 
 ## Static hugepages

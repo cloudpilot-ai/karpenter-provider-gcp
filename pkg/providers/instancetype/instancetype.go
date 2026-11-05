@@ -181,7 +181,8 @@ func (p *DefaultProvider) getStaticInstanceTypes(ctx context.Context, nodeClass 
 	if amf := nodeClass.Spec.AdvancedMachineFeatures; amf != nil && amf.ThreadsPerCore != nil {
 		threadsPerCore = *amf.ThreadsPerCore
 	}
-	key := fmt.Sprintf("%d-%d-%d-%s-%d-%d", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode, gpuSharingHash, threadsPerCore)
+	// A boot-disk swap file changes the ephemeral storage reserved from pods.
+	key := fmt.Sprintf("%d-%d-%d-%s-%d-%d-%d", atomic.LoadUint64(&p.instanceTypesSeqNum), kcHash, disksHash, nodeClass.Spec.LocalSsdMode, gpuSharingHash, threadsPerCore, nodeClass.BootDiskSwapGiB())
 
 	if item, ok := p.staticInstanceTypesCache.Get(key); ok {
 		return item.([]staticInstanceType), nil

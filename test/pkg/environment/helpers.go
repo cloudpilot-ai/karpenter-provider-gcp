@@ -214,6 +214,17 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 	name, imageFamily string,
 	kubeletConfig map[string]any,
 ) {
+	e.CreateNodeClassWithKubeletAndLinuxNodeConfig(ctx, name, imageFamily, kubeletConfig, nil)
+}
+
+// CreateNodeClassWithKubeletAndLinuxNodeConfig is CreateNodeClassWithKubeletConfig
+// with spec.linuxNodeConfig also set, when linuxNodeConfig is not nil. Its keys
+// must match the JSON field names on v1alpha1.LinuxNodeConfig.
+func (e *Environment) CreateNodeClassWithKubeletAndLinuxNodeConfig(
+	ctx context.Context,
+	name, imageFamily string,
+	kubeletConfig, linuxNodeConfig map[string]any,
+) {
 	diskGiB := int64(DefaultE2EDiskGiB)
 	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
 		diskGiB = 50
@@ -234,6 +245,9 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 			"kubeletConfiguration": kubeletConfig,
 		},
 	}}
+	if linuxNodeConfig != nil {
+		obj.Object["spec"].(map[string]any)["linuxNodeConfig"] = linuxNodeConfig
+	}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
 	e.trackNodeClass(name)

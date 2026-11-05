@@ -117,7 +117,7 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 	storageQuantity := resource.NewQuantity(totalStorageBytes, resource.BinarySI)
 
 	overhead := cloudprovider.InstanceTypeOverhead{
-		KubeReserved:      mergeKubeReserved(computedKubeReserved, kc),
+		KubeReserved:      reserveBootDiskSwap(mergeKubeReserved(computedKubeReserved, kc), nodeClass.BootDiskSwapGiB(), kubeletEphemeralSSDGiB),
 		SystemReserved:    kcSystemReserved(computedSystemReserved, kc),
 		EvictionThreshold: evictionThreshold(memoryQuantity, storageQuantity, computedEviction, kc),
 	}
