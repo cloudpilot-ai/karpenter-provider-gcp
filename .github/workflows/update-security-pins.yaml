@@ -30,21 +30,23 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: updatecli/updatecli-action@93ae2608256484ef8598e902aa675bbc9e278e4e # v3.10.0
         with:
-          go-version-file: go.mod
-      - name: Install registry reader
-        run: cd hack/tools && go install github.com/google/go-containerregistry/cmd/crane
+          version: v0.123.0
+      - name: Validate updater manifest
+        run: updatecli manifest validate --strict --config .github/updatecli/security-pins.yaml
       - name: Refresh compiler patch and base index
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           if [[ "$DRY_RUN" == true ]]; then
-            bash hack/update-security-pins.sh --dry-run
+            updatecli pipeline diff --config .github/updatecli/security-pins.yaml --disable-udash-report --disable-changelog
           else
-            bash hack/update-security-pins.sh
-            git diff --check
+            updatecli pipeline apply --config .github/updatecli/security-pins.yaml --disable-udash-report --disable-changelog
           fi
+          git diff --check
+      # Keep publication separate: Updatecli's native PR cleanup posts comments.
+      # Actions PR creation must be permitted; bot-created workflow runs need maintainer approval.
       - name: Open draft update PR
         if: github.event_name == 'schedule' || !inputs.dry_run
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
@@ -55,6 +57,7 @@ jobs:
           draft: true
           signoff: true
           sign-commits: true
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           commit-message: 'chore(security): refresh Go patch and controller base'
           title: 'chore(security): refresh Go patch and controller base'
           add-paths: |
@@ -81,4 +84,4 @@ jobs:
             - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
 
             #### Special notes for your reviewer:
-            Created with `github.token`: Actions checks do not automatically start. A maintainer must close/reopen this draft PR to trigger checks and verify their results before merging. Inspect both architecture scans; rebuilding is required to deliver fixes in published images.
+            Created with `github.token`: a maintainer may need to approve the generated PR's workflow runs. Verify checks before merging. Rebuilding is required to deliver fixes in published images.
