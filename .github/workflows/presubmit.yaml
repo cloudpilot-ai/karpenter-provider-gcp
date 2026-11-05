@@ -10,6 +10,16 @@ permissions:
   pull-requests: read
 
 jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          license-check: false
+          comment-summary-in-pr: never
+
   presubmit:
     runs-on: ubuntu-latest
     steps:
@@ -36,3 +46,6 @@ jobs:
 
       - name: Verify
         run: make ci
+
+      - name: Check reachable Go vulnerabilities
+        run: make vulncheck
