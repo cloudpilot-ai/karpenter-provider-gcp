@@ -273,3 +273,12 @@ func TestGCENodeClassCRDBoundsShutdownGracePeriodCriticalPods(t *testing.T) {
 	}
 	require.True(t, found, "the kubelet does not start when shutdownGracePeriodCriticalPods exceeds shutdownGracePeriod")
 }
+
+func TestGCENodeClassCRDShutdownGracePeriodsAreDurations(t *testing.T) {
+	for _, name := range []string{"shutdownGracePeriod", "shutdownGracePeriodCriticalPods"} {
+		field := kubeletConfigurationSchema(t).Properties[name]
+		require.Equal(t, "string", field.Type, name)
+		require.Equal(t, `^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$`, field.Pattern,
+			"%s must be a non-negative Go duration: the controller cannot decode any other string", name)
+	}
+}
