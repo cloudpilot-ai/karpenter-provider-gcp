@@ -106,6 +106,15 @@ delete: ## Delete the controller from your kubeconfig cluster
 	helm uninstall karpenter --namespace ${KARPENTER_NAMESPACE}
 	kubectl delete ns ${KARPENTER_NAMESPACE}
 
+# Resolve the pinned scanner from the existing tools module, then analyze this module.
+GOVULNCHECK = $(shell cd hack/tools && GOOS= GOARCH= go tool -n govulncheck)
+VULNCHECK_FLAGS ?=
+vulncheck: ## Check reachable controller and unit-test vulnerabilities
+	@$(GOVULNCHECK) -test $(VULNCHECK_FLAGS) ./cmd/controller/... ./pkg/...
+
+security-test: ## Test compiler/base-pin refresh without network access
+	bash hack/test-security-pins.sh
+
 ut-test: ## Run unit tests
 	go test -race ./pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=.
@@ -234,7 +243,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run vulncheck security-test ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

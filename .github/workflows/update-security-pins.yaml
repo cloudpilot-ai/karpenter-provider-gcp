@@ -1,0 +1,86 @@
+name: Update security pins
+
+on:
+  schedule:
+    - cron: '15 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Resolve updates without changing files or opening a PR
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-security-pins
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Install registry reader
+        run: cd hack/tools && go install github.com/google/go-containerregistry/cmd/crane
+      - name: Test updater
+        run: make security-test
+      - name: Refresh compiler patch and base index
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [[ "$DRY_RUN" == true ]]; then
+            bash hack/update-security-pins.sh --dry-run
+          else
+            bash hack/update-security-pins.sh
+            git diff --check
+          fi
+      - name: Open draft update PR
+        if: github.event_name == 'schedule' || !inputs.dry_run
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ github.token }}
+          branch: automated/security-pins
+          base: main
+          draft: true
+          signoff: true
+          sign-commits: true
+          commit-message: 'chore(security): refresh Go patch and controller base'
+          title: 'chore(security): refresh Go patch and controller base'
+          add-paths: |
+            go.mod
+            hack/tools/go.mod
+            hack/crd-tools/go.mod
+            hack/pdcsi-data/go.mod
+            .ko.yaml
+          body: |
+            #### What type of PR is this?
+            /kind cleanup
+
+            #### What this PR does / why we need it:
+            Refresh Go within the current minor release and the controller base-image digest to pick up upstream security fixes. No module dependency upgrades or automatic merge.
+
+            #### Related proposal (if applicable):
+            N/A
+
+            #### Which issue(s) this PR fixes:
+            N/A
+
+            #### Docs and examples
+            - [x] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+            - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
+
+            #### Special notes for your reviewer:
+            Created with `github.token`: Actions checks do not automatically start. A maintainer must close/reopen this draft PR to trigger checks and verify their results before merging. Inspect both architecture scans; rebuilding is required to deliver fixes in published images.

@@ -1,0 +1,69 @@
+name: Image vulnerability scan
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Immutable published controller image reference
+        type: string
+        required: true
+      upload-sarif:
+        description: Upload only when the caller has a supported branch analysis ref
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      IMAGE: ${{ inputs.image }}
+      PLATFORM: linux/${{ matrix.arch }}
+    steps:
+      - name: Validate image reference
+        run: |
+          [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]]
+          mkdir reports
+          printf '%s\n%s\n' "$IMAGE" "$PLATFORM" > reports/image.txt
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.76.1
+          cache: false
+      - name: Scan OS and Go dependencies
+        id: scan
+        run: |
+          trivy image --image-src remote --platform "$PLATFORM" --scanners vuln \
+            --pkg-types os,library --timeout 15m --format json --output reports/trivy.json "$IMAGE"
+      - name: Generate complete SARIF report
+        id: report
+        run: trivy convert --format sarif --output reports/trivy.sarif reports/trivy.json
+      - name: Fail on fixable high or critical vulnerabilities
+        if: steps.report.outcome == 'success'
+        run: |
+          jq '[.Results[]?.Vulnerabilities[]? |
+            select((.Severity == "HIGH" or .Severity == "CRITICAL") and ((.FixedVersion // "") != ""))]' \
+            reports/trivy.json > reports/blocking-vulnerabilities.json
+          jq -e 'length == 0' reports/blocking-vulnerabilities.json
+      - name: Upload image findings to code scanning
+        if: ${{ !cancelled() && steps.report.outcome == 'success' && inputs.upload-sarif }}
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          sarif_file: reports/trivy.sarif
+          category: trivy/released-controller-linux-${{ matrix.arch }}
+      - name: Retain image inventory and findings
+        if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-security-linux-${{ matrix.arch }}
+          path: reports/
+          if-no-files-found: error

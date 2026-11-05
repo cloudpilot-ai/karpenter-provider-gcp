@@ -7,6 +7,8 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 jobs:
   image-publish:
+    outputs:
+      reference: ${{ steps.image.outputs.reference }}
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     permissions:
@@ -95,6 +97,18 @@ jobs:
           name: release-image-sboms
           path: ${{ runner.temp }}/sboms/
           if-no-files-found: error
+
+  # Detection after publication; never interrupt signing or provenance on findings.
+  image-security:
+    needs: image-publish
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/image-security.yaml
+    with:
+      image: ${{ needs.image-publish.outputs.reference }}
+      # Tag-triggered reports are artifacts; scheduled main runs upload the release baseline.
+      upload-sarif: false
 
   package-chart:
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'

@@ -1,0 +1,108 @@
+name: Security checks
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  schedule:
+    - cron: '45 6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          license-check: false
+          comment-summary-in-pr: never
+
+  updater-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: make security-test
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      GOOS: linux
+      GOARCH: amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Report Go vulnerabilities
+        id: report
+        run: make vulncheck VULNCHECK_FLAGS='-format sarif' > govulncheck.sarif
+      # SARIF output exits zero even on findings; text mode supplies the real gate.
+      - name: Fail on reachable Go vulnerabilities
+        if: steps.report.outcome == 'success'
+        run: make vulncheck
+      - name: Upload Go findings to code scanning
+        if: >-
+          !cancelled() && steps.report.outcome == 'success' &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          sarif_file: govulncheck.sarif
+          category: govulncheck/controller-linux-amd64
+      - name: Retain Go findings (including fork PRs)
+        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: govulncheck-sarif
+          path: govulncheck.sarif
+          if-no-files-found: error
+
+  released-image:
+    if: github.event_name != 'pull_request' && github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    runs-on: ubuntu-latest
+    outputs:
+      reference: ${{ steps.image.outputs.reference }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install registry reader
+        run: cd hack/tools && go install github.com/google/go-containerregistry/cmd/crane
+      - name: Resolve latest release to immutable image
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/latest --jq .tag_name)
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          REPOSITORY=public.ecr.aws/cloudpilotai/gcp/karpenter
+          DIGEST=$(crane digest "$REPOSITORY:$TAG")
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "reference=$REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
+
+  scan-released-image:
+    needs: released-image
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/image-security.yaml
+    with:
+      image: ${{ needs.released-image.outputs.reference }}
+      # Only default-branch analyses populate the ongoing release baseline.
+      upload-sarif: ${{ github.ref == 'refs/heads/main' }}
