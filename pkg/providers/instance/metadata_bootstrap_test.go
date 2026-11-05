@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
@@ -334,4 +335,59 @@ func TestBuildInstance_KubeletSwapConfig(t *testing.T) {
 	require.Equal(t, "LimitedSwap", got.MemorySwap.SwapBehavior)
 	require.Equal(t, "10s", got.NodeStatusUpdateFrequency.Duration.String(),
 		"source kubelet-config entries the node class does not set must survive")
+}
+
+// The GCFSD_CACHE_SIZE_MIB values GKE 1.37 wrote into node pool templates.
+func TestGCFSDCacheSizeMatchesGKENodePoolTemplates(t *testing.T) {
+	for machineType, tc := range map[string]struct {
+		memoryMiB int64
+		want      int64
+	}{
+		"e2-standard-2":  {memoryMiB: 8 * 1024, want: 72},
+		"e2-standard-4":  {memoryMiB: 16 * 1024, want: 104},
+		"n2-standard-8":  {memoryMiB: 32 * 1024, want: 144},
+		"c4-standard-16": {memoryMiB: 60 * 1024, want: 213},
+		"n2-standard-16": {memoryMiB: 64 * 1024, want: 222},
+	} {
+		require.Equal(t, tc.want, gcfsdCacheSizeMiB(tc.memoryMiB), machineType)
+	}
+	require.Zero(t, gcfsdCacheSizeMiB(512), "GKE reserves nothing below 1 GiB")
+}
+
+func buildGCFSDInstanceKubeEnv(t *testing.T, sourceKubeEnv string, mt *computepb.MachineType) string {
+	t.Helper()
+	provider := makeProvider()
+	sourceMetadata := computeMetadataValues(map[string]string{
+		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + sourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
+		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
+	})
+
+	instance, err := provider.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(), sourceMetadata,
+		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+		"us-central1-a", "karpenter-gcfsd-test",
+		karpv1.CapacityTypeOnDemand, mt, 0, "pods",
+	)
+	require.NoError(t, err)
+	return kubeEnvFrom(t, instance)
+}
+
+func TestBuildInstance_SizesGCFSDCacheForMachineType(t *testing.T) {
+	kubeEnv := buildGCFSDInstanceKubeEnv(t, "GCFSD_CACHE_SIZE_MIB: \"72\"\n", &computepb.MachineType{MemoryMb: lo.ToPtr[int32](60 * 1024)})
+
+	require.Contains(t, kubeEnv, `GCFSD_CACHE_SIZE_MIB: "213"`)
+}
+
+func TestBuildInstance_GCFSDCacheAbsentWithoutImageStreaming(t *testing.T) {
+	kubeEnv := buildGCFSDInstanceKubeEnv(t, "", &computepb.MachineType{MemoryMb: lo.ToPtr[int32](60 * 1024)})
+
+	require.NotContains(t, kubeEnv, "GCFSD_CACHE_SIZE_MIB")
+}
+
+func TestBuildInstance_KeepsSourceGCFSDCacheWithoutMachineMemory(t *testing.T) {
+	kubeEnv := buildGCFSDInstanceKubeEnv(t, "GCFSD_CACHE_SIZE_MIB: \"72\"\n", nil)
+
+	require.Contains(t, kubeEnv, `GCFSD_CACHE_SIZE_MIB: "72"`)
 }
