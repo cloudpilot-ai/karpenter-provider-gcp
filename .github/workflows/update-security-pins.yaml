@@ -34,15 +34,15 @@ jobs:
         with:
           version: v0.123.0
       - name: Validate updater manifest
-        run: updatecli manifest validate --strict --config .github/updatecli/security-pins.yaml
+        run: updatecli manifest validate --strict --config .github/updatecli/go-version-and-controller-base-image.yaml
       - name: Refresh compiler patch and base index
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           if [[ "$DRY_RUN" == true ]]; then
-            updatecli pipeline diff --config .github/updatecli/security-pins.yaml --disable-udash-report --disable-changelog
+            updatecli pipeline diff --config .github/updatecli/go-version-and-controller-base-image.yaml --disable-udash-report --disable-changelog
           else
-            updatecli pipeline apply --config .github/updatecli/security-pins.yaml --disable-udash-report --disable-changelog
+            updatecli pipeline apply --config .github/updatecli/go-version-and-controller-base-image.yaml --disable-udash-report --disable-changelog
           fi
           git diff --check
       # Keep publication separate: Updatecli's native PR cleanup posts comments.

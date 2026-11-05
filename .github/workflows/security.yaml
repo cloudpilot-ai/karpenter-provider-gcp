@@ -61,11 +61,22 @@ jobs:
           path: govulncheck.sarif
           if-no-files-found: error
 
-  released-image:
-    if: github.event_name != 'pull_request' && github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+  main-image:
+    if: >-
+      github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    outputs:
-      reference: ${{ steps.image.outputs.reference }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      PLATFORM: linux/${{ matrix.arch }}
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -73,28 +84,53 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: false
-      - name: Install registry reader
-        run: cd hack/tools && go install github.com/google/go-containerregistry/cmd/crane
-      - name: Resolve latest release to immutable image
-        id: image
+          cache-dependency-path: |
+            go.sum
+            hack/tools/go.sum
+      - name: Install image builder
+        run: cd hack/tools && go install github.com/google/ko
+      - name: Build local controller image
         env:
-          GH_TOKEN: ${{ github.token }}
+          # ko requires a repository even with --push=false.
+          KO_DOCKER_REPO: example.invalid/karpenter
         run: |
-          TAG=$(gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/latest --jq .tag_name)
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          REPOSITORY=public.ecr.aws/cloudpilotai/gcp/karpenter
-          DIGEST=$(crane digest "$REPOSITORY:$TAG")
-          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
-          echo "reference=$REPOSITORY@$DIGEST" >> "$GITHUB_OUTPUT"
-
-  scan-released-image:
-    needs: released-image
-    permissions:
-      contents: read
-      security-events: write
-    uses: ./.github/workflows/image-security.yaml
-    with:
-      image: ${{ needs.released-image.outputs.reference }}
-      # Only default-branch analyses populate the ongoing release baseline.
-      upload-sarif: ${{ github.ref == 'refs/heads/main' }}
+          mkdir reports
+          printf 'commit: %s\nplatform: %s\ncompiler: %s\n' \
+            "$GITHUB_SHA" "$PLATFORM" "$(go env GOVERSION)" > reports/build.txt
+          grep '^defaultBaseImage:' .ko.yaml >> reports/build.txt
+          ko build --bare --push=false --platform "$PLATFORM" --tarball "$RUNNER_TEMP/controller.tar" \
+            ./cmd/controller > reports/image.txt
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.76.1
+          cache: false
+      - name: Scan OS and Go dependencies
+        id: scan
+        # A stable input path keeps SARIF locations consistent across runs.
+        working-directory: ${{ runner.temp }}
+        run: |
+          trivy image --input controller.tar --scanners vuln --pkg-types os,library \
+            --timeout 15m --format json --output "$GITHUB_WORKSPACE/reports/trivy.json"
+      - name: Generate complete SARIF report
+        id: report
+        run: trivy convert --format sarif --output reports/trivy.sarif reports/trivy.json
+      - name: Fail on fixable high or critical vulnerabilities
+        if: steps.report.outcome == 'success'
+        run: |
+          jq '[.Results[]?.Vulnerabilities[]? |
+            select((.Severity == "HIGH" or .Severity == "CRITICAL") and ((.FixedVersion // "") != ""))]' \
+            reports/trivy.json > reports/blocking-vulnerabilities.json
+          jq -e 'length == 0' reports/blocking-vulnerabilities.json
+      - name: Upload image findings to code scanning
+        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          sarif_file: reports/trivy.sarif
+          category: trivy/main-controller-linux-${{ matrix.arch }}
+      - name: Retain image inventory and findings
+        if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: main-image-security-linux-${{ matrix.arch }}
+          path: reports/
+          if-no-files-found: error

@@ -5,7 +5,6 @@ go 1.27.3
 tool (
 	github.com/bwplotka/mdox
 	github.com/elastic/crd-ref-docs
-	github.com/google/go-containerregistry/cmd/crane
 	github.com/google/ko
 	github.com/norwoodj/helm-docs/cmd/helm-docs
 	github.com/onsi/ginkgo/v2/ginkgo

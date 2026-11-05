@@ -1,4 +1,4 @@
-name: Refresh security build pins
+name: Update Go version and controller base image
 
 sources:
   currentGo:
