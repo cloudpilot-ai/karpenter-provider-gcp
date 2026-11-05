@@ -21,6 +21,12 @@
       "severity": "high"
     },
     {
+      "id": "gcenodeclass-gke-ergonomics",
+      "rule": "For new or materially changed GCENodeClass settings with a GKE equivalent, prefer GKE NodeConfig / Terraform google_container_node_pool.node_config naming, nesting, and semantics where practical, translating Terraform snake_case to Kubernetes camelCase. GCENodeClass spec already represents node configuration: do not add a nodeConfig wrapper. For example, use spec.advancedMachineFeatures.threadsPerCore rather than spec.threadsPerCore, spec.gvnic.enabled rather than a raw spec.networkConfig.nicType enum, and spec.minCpuPlatform for node_config.min_cpu_platform. Compare types, allowed values, units, defaults, and omitted versus explicit false/zero behavior; allow Kubernetes API conventions and documented differences required by Karpenter, GCE, or backward compatibility. Do not demand Terraform-only lifecycle behavior, unsupported GKE features, or renames of unchanged existing fields. Only flag a concrete avoidable mismatch, cite the equivalent GKE/Terraform field and reference, suggest the aligned shape, and account for any documented reason for divergence. Check that generated CRDs, docs, and examples agree with the chosen API.",
+      "scope": ["pkg/apis/**", "pkg/providers/**", "charts/**", "docs/**", "examples/**", "proposals/**"],
+      "severity": "medium"
+    },
+    {
       "id": "unique-proposal-number",
       "rule": "New or renamed proposals must use a four-digit proposal number that has not already been used by another proposal. Check existing proposal filenames and proposal contents, including implemented or superseded proposals. If the new proposal explicitly declares its number in its contents, it must match the filename; references to other proposals do not declare the new proposal's number.",
       "scope": ["proposals/**"],
