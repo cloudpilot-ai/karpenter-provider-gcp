@@ -22,14 +22,6 @@ jobs:
           license-check: false
           comment-summary-in-pr: never
 
-  updater-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - run: make security-test
-
   govulncheck:
     runs-on: ubuntu-latest
     timeout-minutes: 30

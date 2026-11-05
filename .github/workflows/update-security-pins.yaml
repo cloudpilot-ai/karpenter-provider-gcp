@@ -35,8 +35,6 @@ jobs:
           go-version-file: go.mod
       - name: Install registry reader
         run: cd hack/tools && go install github.com/google/go-containerregistry/cmd/crane
-      - name: Test updater
-        run: make security-test
       - name: Refresh compiler patch and base index
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

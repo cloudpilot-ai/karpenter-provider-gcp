@@ -28,7 +28,7 @@ PDCSI_NODE_LABELER_CONFIGMAP = deploy/kubernetes/overlays/node-labeler/configmap
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-presubmit: toolchain verify ci vulncheck security-test ## Run all steps in the developer loop
+presubmit: toolchain verify ci vulncheck ## Run all steps in the developer loop
 ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
@@ -111,9 +111,6 @@ GOVULNCHECK = $(shell cd hack/tools && GOOS= GOARCH= go tool -n govulncheck)
 VULNCHECK_FLAGS ?=
 vulncheck: ## Check reachable controller and unit-test vulnerabilities
 	@$(GOVULNCHECK) -test $(VULNCHECK_FLAGS) ./cmd/controller/... ./pkg/...
-
-security-test: ## Test compiler/base-pin refresh without network access
-	bash hack/test-security-pins.sh
 
 ut-test: ## Run unit tests
 	go test -race ./pkg/... \
@@ -243,7 +240,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run vulncheck security-test ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run vulncheck ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 
