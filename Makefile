@@ -28,7 +28,7 @@ PDCSI_NODE_LABELER_CONFIGMAP = deploy/kubernetes/overlays/node-labeler/configmap
 help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-presubmit: toolchain verify ci ## Run all steps in the developer loop
+presubmit: toolchain verify ci vulncheck security-test ## Run all steps in the developer loop
 ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
