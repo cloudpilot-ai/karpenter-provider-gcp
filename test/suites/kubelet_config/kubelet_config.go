@@ -199,7 +199,7 @@ func runKubeletConfigTest(ctx context.Context, c kubeletConfigCase) {
 	if imageFamily == "" {
 		imageFamily = gcpv1alpha1.ImageFamilyContainerOptimizedOS
 	}
-	env.CreateNodeClassWithKubeletAndLinuxNodeConfig(ctx, name, imageFamily, c.kubeletConfig, c.linuxNodeConfig)
+	env.CreateNodeClassWithKubeletConfig(ctx, name, imageFamily, c.kubeletConfig, c.linuxNodeConfig)
 	env.WaitForNodeClassReady(ctx, name)
 	env.CreateNodePool(ctx, name, name, c.tc)
 	env.WaitForNodePoolReady(ctx, name)

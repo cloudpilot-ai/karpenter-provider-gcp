@@ -208,19 +208,10 @@ func (e *Environment) CreateNodeClassForLocalSSD(
 // kubeletConfig is a map[string]any whose keys must match the JSON field
 // names on v1alpha1.KubeletConfiguration (systemReserved, kubeReserved,
 // evictionHard, podsPerCore, etc.). Used by e2e tests verifying issue
-// #398 (kubelet honors user reservations).
+// #398 (kubelet honors user reservations). spec.linuxNodeConfig is set too
+// when linuxNodeConfig is not nil; its keys must match the JSON field names
+// on v1alpha1.LinuxNodeConfig.
 func (e *Environment) CreateNodeClassWithKubeletConfig(
-	ctx context.Context,
-	name, imageFamily string,
-	kubeletConfig map[string]any,
-) {
-	e.CreateNodeClassWithKubeletAndLinuxNodeConfig(ctx, name, imageFamily, kubeletConfig, nil)
-}
-
-// CreateNodeClassWithKubeletAndLinuxNodeConfig is CreateNodeClassWithKubeletConfig
-// with spec.linuxNodeConfig also set, when linuxNodeConfig is not nil. Its keys
-// must match the JSON field names on v1alpha1.LinuxNodeConfig.
-func (e *Environment) CreateNodeClassWithKubeletAndLinuxNodeConfig(
 	ctx context.Context,
 	name, imageFamily string,
 	kubeletConfig, linuxNodeConfig map[string]any,
