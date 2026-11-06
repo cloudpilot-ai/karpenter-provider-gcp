@@ -14,7 +14,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - uses: actions/dependency-review-action@v5.0.0
         with:
           fail-on-severity: high
           license-check: false
@@ -23,21 +23,28 @@ jobs:
   presubmit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: true
           fetch-depth: 0
 
+      - name: Verify action dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh extension install github/gh-actions-lock --pin v0.4.1
+          gh actions-lock --verify
+
       - name: Select Go toolchain
         id: go-toolchain
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
 
       - name: Restore Go CI cache
         id: setup-go
-        uses: cloudx-io/setup-go@0bbd76c0381c065220668df9b6694845b937aaa0 # main: restore-only support
+        uses: cloudx-io/setup-go@main
         with:
           go-version: "${{ steps.go-toolchain.outputs.go-version }}"
           cache-key-prefix: ${{ github.job }}
@@ -49,14 +56,14 @@ jobs:
 
       - name: Restore lint analysis cache
         id: lint-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v4.3.0
         with:
           path: ${{ runner.temp }}/golangci-lint
           key: lint-v2.15.0-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-toolchain.outputs.go-version }}-${{ hashFiles('**/go.*', '**/vendor/modules.txt') }}-${{ hashFiles('.golangci*') }}-${{ github.sha }}
           restore-keys: lint-v2.15.0-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-toolchain.outputs.go-version }}-${{ hashFiles('**/go.*', '**/vendor/modules.txt') }}-${{ hashFiles('.golangci*') }}-
 
       - name: Lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        uses: golangci/golangci-lint-action@v9.3.0
         env:
           GOLANGCI_LINT_CACHE: ${{ runner.temp }}/golangci-lint
         with:
@@ -72,7 +79,7 @@ jobs:
 
       - name: Save lint analysis cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.lint-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v4.3.0
         with:
           path: ${{ runner.temp }}/golangci-lint
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
