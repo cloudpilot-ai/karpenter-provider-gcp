@@ -149,7 +149,7 @@ It sends nothing that names a pod, node or workload. Telemetry is off by default
 
 When a launch fails because GCE has no capacity, Karpenter marks that instance type, zone and capacity type unavailable, deletes the NodeClaim, and creates a new NodeClaim from the remaining offerings in its next provisioning batch. How long the offering stays unavailable depends on the GCE error: `STOCKOUT_TTL` for `ZONE_RESOURCE_POOL_EXHAUSTED`, `IP_SPACE_EXHAUSTED_TTL` for `IP_SPACE_EXHAUSTED`, `UNSUPPORTED_CONFIGURATION_TTL` for `MACHINE_TYPE_UNSUPPORTED` and `configuration_availability`, and `QUOTA_EXCEEDED_TTL` for quota errors. A shorter TTL retries the offering sooner. A longer TTL moves new NodeClaims to other instance types and zones for longer.
 
-Other launch errors keep the NodeClaim and retry with exponential backoff from 1s to 1m. If the NodeClaim has still not launched after `LAUNCH_TIMEOUT`, Karpenter deletes it and creates a new one. All of these values must be positive.
+Other launch errors keep the NodeClaim and retry with exponential backoff from 1s to 1m. If the NodeClaim has still not launched after `LAUNCH_TIMEOUT`, Karpenter deletes it and creates a new one. `STOCKOUT_TTL`, `IP_SPACE_EXHAUSTED_TTL`, `UNSUPPORTED_CONFIGURATION_TTL` and `LAUNCH_TIMEOUT` must be positive; `QUOTA_EXCEEDED_TTL` also accepts `0s` to disable quota backoff.
 
 ### Service account resolution
 
