@@ -124,12 +124,22 @@ DRA is a Kubernetes-level feature. Review the [Kubernetes DRA documentation](htt
 | Bootstrap pool name | `DEFAULT_NODEPOOL_TEMPLATE_NAME`   | `controller.settings.defaultNodePoolTemplateName`   | No       | Pin the GKE node pool used as the bootstrap metadata source. When set, Karpenter uses this pool exclusively. Leave empty to use automatic discovery (`default-pool` → first alphabetical RUNNING pool → `karpenter-fallback` creation). See [Bootstrap pool selection](bootstrap-pool.md). |
 | Default SA          | `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` | `controller.settings.defaultNodepoolServiceAccount` | No       | Default service account for provisioned nodes (see [Service account resolution](#service-account-resolution)).                                                                                                                                                                             |
 | Quota backoff       | `QUOTA_EXCEEDED_TTL`               | `controller.settings.quotaExceededTTL`              | No       | How long an instance type stays unavailable after a launch fails with `QUOTA_EXCEEDED` (default `30m`). Set to `0s` to disable (see [Quota exhaustion](#quota-exhaustion)).                                                                                                                |
+| Stockout backoff | `STOCKOUT_TTL` | `controller.settings.stockoutTTL` | No | How long an instance type stays unavailable in a zone after a launch fails with `ZONE_RESOURCE_POOL_EXHAUSTED` (default `5m`). See [Launch failure backoff](#launch-failure-backoff). |
+| IP space backoff | `IP_SPACE_EXHAUSTED_TTL` | `controller.settings.ipSpaceExhaustedTTL` | No | How long an instance type stays unavailable in a zone after a launch fails with `IP_SPACE_EXHAUSTED` on every pod range (default `30s`). |
+| Unsupported config backoff | `UNSUPPORTED_CONFIGURATION_TTL` | `controller.settings.unsupportedConfigurationTTL` | No | How long an instance type stays unavailable in a zone after GCE reports the zone does not support the requested configuration (default `1h`). |
+| Launch timeout | `LAUNCH_TIMEOUT` | `controller.settings.launchTimeout` | No | How long a NodeClaim may keep failing to launch with a non-capacity error before Karpenter deletes and replaces it (default `5m`). |
 
 ### Quota exhaustion
 
 When GCE rejects a launch because a project quota is exhausted (for example `N2_CPUS` or `NVIDIA_L4_GPUS`), Karpenter marks that instance type unavailable for the same capacity type in every zone of the region, because GCE enforces these quotas per region. Karpenter then tries the next instance type, and a Spot NodeClaim can fall back to on-demand. The offering becomes available again after `QUOTA_EXCEEDED_TTL`. Other instance types in the same machine family share the quota, so each is marked unavailable when its own launch fails.
 
 Setting `QUOTA_EXCEEDED_TTL=0s` restores the previous behavior: the failed launch still moves on to the next instance type, but nothing is marked unavailable and the next NodeClaim retries the same instance type.
+
+### Launch failure backoff
+
+When a launch fails because GCE has no capacity, Karpenter marks that instance type, zone and capacity type unavailable, deletes the NodeClaim, and creates a new NodeClaim from the remaining offerings in its next provisioning batch. How long the offering stays unavailable depends on the GCE error: `STOCKOUT_TTL` for `ZONE_RESOURCE_POOL_EXHAUSTED`, `IP_SPACE_EXHAUSTED_TTL` for `IP_SPACE_EXHAUSTED`, `UNSUPPORTED_CONFIGURATION_TTL` for `MACHINE_TYPE_UNSUPPORTED` and `configuration_availability`, and `QUOTA_EXCEEDED_TTL` for quota errors. A shorter TTL retries the offering sooner. A longer TTL moves new NodeClaims to other instance types and zones for longer.
+
+Other launch errors keep the NodeClaim and retry with exponential backoff from 1s to 1m. If the NodeClaim has still not launched after `LAUNCH_TIMEOUT`, Karpenter deletes it and creates a new one. All of these values must be positive.
 
 ### Service account resolution
 

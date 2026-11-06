@@ -47,10 +47,30 @@ const (
 	defaultNodePoolTemplateNameFlagName   = "default-nodepool-template-name"
 	quotaExceededTTLEnvVarName            = "QUOTA_EXCEEDED_TTL"
 	quotaExceededTTLFlagName              = "quota-exceeded-ttl"
+	stockoutTTLEnvVarName                 = "STOCKOUT_TTL"
+	stockoutTTLFlagName                   = "stockout-ttl"
+	ipSpaceExhaustedTTLEnvVarName         = "IP_SPACE_EXHAUSTED_TTL"
+	ipSpaceExhaustedTTLFlagName           = "ip-space-exhausted-ttl"
+	unsupportedConfigurationTTLEnvVarName = "UNSUPPORTED_CONFIGURATION_TTL"
+	unsupportedConfigurationTTLFlagName   = "unsupported-configuration-ttl"
+	launchTimeoutEnvVarName               = "LAUNCH_TIMEOUT"
+	launchTimeoutFlagName                 = "launch-timeout"
 
 	// DefaultQuotaExceededTTL is how long an instance type stays unavailable in a
 	// region after GCE rejects it for exceeded quota.
 	DefaultQuotaExceededTTL = 30 * time.Minute
+	// DefaultStockoutTTL is how long an offering stays unavailable after GCE
+	// reports ZONE_RESOURCE_POOL_EXHAUSTED.
+	DefaultStockoutTTL = 5 * time.Minute
+	// DefaultIPSpaceExhaustedTTL is how long an offering stays unavailable after
+	// GCE reports IP_SPACE_EXHAUSTED and no other pod range is left to try.
+	DefaultIPSpaceExhaustedTTL = 30 * time.Second
+	// DefaultUnsupportedConfigurationTTL is how long an offering stays unavailable
+	// after GCE reports the zone cannot serve the requested configuration.
+	DefaultUnsupportedConfigurationTTL = time.Hour
+	// DefaultLaunchTimeout matches the karpenter core default for how long a
+	// NodeClaim may fail to launch before it is deleted and replaced.
+	DefaultLaunchTimeout = 5 * time.Minute
 )
 
 func init() {
@@ -74,6 +94,18 @@ type Options struct {
 	// QuotaExceededTTL is how long an instance type stays unavailable after a
 	// QUOTA_EXCEEDED launch failure. Zero disables quota backoff.
 	QuotaExceededTTL time.Duration
+	// StockoutTTL is how long an offering stays unavailable after a
+	// ZONE_RESOURCE_POOL_EXHAUSTED launch failure.
+	StockoutTTL time.Duration
+	// IPSpaceExhaustedTTL is how long an offering stays unavailable after an
+	// IP_SPACE_EXHAUSTED launch failure.
+	IPSpaceExhaustedTTL time.Duration
+	// UnsupportedConfigurationTTL is how long an offering stays unavailable after
+	// GCE reports the zone does not support the requested configuration.
+	UnsupportedConfigurationTTL time.Duration
+	// LaunchTimeout is how long a NodeClaim may keep failing to launch with a
+	// non-capacity error before karpenter core deletes and replaces it.
+	LaunchTimeout time.Duration
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -87,6 +119,10 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.DefaultNodePoolTemplateName, defaultNodePoolTemplateNameFlagName, env.WithDefaultString(defaultNodePoolTemplateNameEnvVarName, ""), "Pin the bootstrap source pool by name. If set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 	fs.DurationVar(&o.QuotaExceededTTL, quotaExceededTTLFlagName, env.WithDefaultDuration(quotaExceededTTLEnvVarName, DefaultQuotaExceededTTL), "How long an instance type stays unavailable in the region after a launch fails with QUOTA_EXCEEDED. Set to 0 to disable quota backoff.")
+	fs.DurationVar(&o.StockoutTTL, stockoutTTLFlagName, env.WithDefaultDuration(stockoutTTLEnvVarName, DefaultStockoutTTL), "How long an instance type, zone and capacity type stays unavailable after a launch fails with ZONE_RESOURCE_POOL_EXHAUSTED. Must be positive.")
+	fs.DurationVar(&o.IPSpaceExhaustedTTL, ipSpaceExhaustedTTLFlagName, env.WithDefaultDuration(ipSpaceExhaustedTTLEnvVarName, DefaultIPSpaceExhaustedTTL), "How long an instance type, zone and capacity type stays unavailable after a launch fails with IP_SPACE_EXHAUSTED on every pod range. Must be positive.")
+	fs.DurationVar(&o.UnsupportedConfigurationTTL, unsupportedConfigurationTTLFlagName, env.WithDefaultDuration(unsupportedConfigurationTTLEnvVarName, DefaultUnsupportedConfigurationTTL), "How long an instance type, zone and capacity type stays unavailable after GCE reports the zone does not support the requested configuration (MACHINE_TYPE_UNSUPPORTED or configuration_availability). Must be positive.")
+	fs.DurationVar(&o.LaunchTimeout, launchTimeoutFlagName, env.WithDefaultDuration(launchTimeoutEnvVarName, DefaultLaunchTimeout), "How long a NodeClaim may keep failing to launch with a non-capacity error before it is deleted and replaced. Must be positive.")
 }
 
 func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
