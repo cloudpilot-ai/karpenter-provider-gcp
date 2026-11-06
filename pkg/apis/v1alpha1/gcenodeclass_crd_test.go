@@ -259,3 +259,26 @@ func TestGCENodeClassCRDSwapBehaviorEnum(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"NoSwap", "LimitedSwap"}, values)
 }
+
+func TestGCENodeClassCRDBoundsShutdownGracePeriodCriticalPods(t *testing.T) {
+	const rule = `!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod) && ` +
+		`duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))`
+
+	var found bool
+	for _, v := range kubeletConfigurationSchema(t).XValidations {
+		if v.Rule == rule {
+			found = true
+			require.Equal(t, "shutdownGracePeriodCriticalPods requires shutdownGracePeriod and must not exceed it", v.Message)
+		}
+	}
+	require.True(t, found, "the kubelet does not start when shutdownGracePeriodCriticalPods exceeds shutdownGracePeriod")
+}
+
+func TestGCENodeClassCRDShutdownGracePeriodsAreDurations(t *testing.T) {
+	for _, name := range []string{"shutdownGracePeriod", "shutdownGracePeriodCriticalPods"} {
+		field := kubeletConfigurationSchema(t).Properties[name]
+		require.Equal(t, "string", field.Type, name)
+		require.Equal(t, `^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$`, field.Pattern,
+			"%s must be a non-negative Go duration: the controller cannot decode any other string", name)
+	}
+}

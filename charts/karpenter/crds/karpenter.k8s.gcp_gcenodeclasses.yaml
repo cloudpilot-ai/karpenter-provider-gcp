@@ -494,6 +494,23 @@ spec:
                       time. Must be explicitly set to false to set MaxParallelImagePulls above 1.
                       Default: true
                     type: boolean
+                  shutdownGracePeriod:
+                    description: |-
+                      ShutdownGracePeriod is how long the node delays its shutdown so that pods
+                      can terminate, for example when GCE stops or deletes the VM. It turns on
+                      graceful node shutdown. Spot nodes default to 30s; on-demand nodes keep
+                      the source node pool's value.
+                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+                    type: string
+                  shutdownGracePeriodCriticalPods:
+                    description: |-
+                      ShutdownGracePeriodCriticalPods is the part of shutdownGracePeriod
+                      reserved for critical pods, which terminate after all other pods.
+                      Spot nodes default to 15s; on-demand nodes keep the source node pool's
+                      value. When only shutdownGracePeriod is set, a default or source value
+                      larger than it is lowered to shutdownGracePeriod.
+                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+                    type: string
                   systemReserved:
                     additionalProperties:
                       description: KubeletQuantity is a bounded kubelet resource quantity
@@ -535,6 +552,10 @@ spec:
                   rule: '!has(self.memorySwap) || !has(self.memorySwap.swapBehavior)
                     || self.memorySwap.swapBehavior != ''LimitedSwap'' || (has(self.failSwapOn)
                     && self.failSwapOn == false)'
+                - message: shutdownGracePeriodCriticalPods requires shutdownGracePeriod
+                    and must not exceed it
+                  rule: '!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod)
+                    && duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))'
               labels:
                 additionalProperties:
                   type: string
