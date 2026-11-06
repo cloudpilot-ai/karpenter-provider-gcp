@@ -88,6 +88,8 @@ controller:
     repository: "public.ecr.aws/cloudpilotai/gcp/karpenter"
     # Overrides the chart's appVersion if set (defaults to `.Chart.AppVersion`)
     tag: ""
+    # Image digest (sha256:...) overrides tag when set.
+    digest: ""
     pullPolicy: IfNotPresent
   priorityClassName: gmp-critical
   terminationGracePeriodSeconds: 30

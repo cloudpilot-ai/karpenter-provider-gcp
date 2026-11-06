@@ -109,6 +109,7 @@ serviceMonitor:
 | controller.featureGates.terminateFirstDrift | bool | `false` | terminateFirstDrift is ALPHA and is disabled by default. Allows drift to terminate a node before launching its replacement on a capacity-constrained NodePool. |
 | controller.featureGates.terminateFirstRepair | bool | `false` | terminateFirstRepair is ALPHA and is disabled by default. Allows repair to terminate an unhealthy node before launching its replacement on a capacity-constrained NodePool. Only takes effect with nodeRepair enabled and legacyNodeRepair disabled. |
 | controller.healthProbe.port | int | `8081` |  |
+| controller.image.digest | string | `""` |  |
 | controller.image.pullPolicy | string | `"IfNotPresent"` |  |
 | controller.image.repository | string | `"public.ecr.aws/cloudpilotai/gcp/karpenter"` |  |
 | controller.image.tag | string | `""` |  |

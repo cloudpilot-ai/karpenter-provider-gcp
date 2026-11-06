@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
@@ -32,11 +33,15 @@ import (
 )
 
 const (
-	leaseName     = "karpenter-e2e-tests"
-	leaseTokenKey = "karpenter.k8s.gcp/runner-token"
-	leaseDuration = int32(600)
-	renewInterval = time.Minute
+	leaseNamespace = "karpenter-system"
+	leaseName      = "karpenter-e2e-tests"
+	leaseTokenKey  = "karpenter.k8s.gcp/runner-token"
+	maintenanceKey = "karpenter.k8s.gcp/maintenance-required"
+	leaseDuration  = int32(600)
+	renewInterval  = time.Minute
 )
+
+var errTargetMaintenance = errors.New("maintenance-required: target is blocked or abandoned")
 
 type leaseClient interface {
 	Get(context.Context, string, metav1.GetOptions) (*coordinationv1.Lease, error)
@@ -59,11 +64,10 @@ func newLeaseClient() (leaseClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	namespace, _ := controllerTarget()
-	return client.CoordinationV1().Leases(namespace), nil
+	return client.CoordinationV1().Leases(leaseNamespace), nil
 }
 
-func acquireLease(ctx context.Context, client leaseClient, holder string) (*e2eLease, error) {
+func acquireLease(ctx context.Context, client leaseClient, holder string, bootstrap bool) (*e2eLease, error) {
 	if holder == "" {
 		return nil, fmt.Errorf("lock ID must not be empty")
 	}
@@ -74,9 +78,16 @@ func acquireLease(ctx context.Context, client leaseClient, holder string) (*e2eL
 	lock := &e2eLease{client: client, holder: holder, token: fmt.Sprintf("%x", nonce)}
 	current, err := client.Get(ctx, leaseName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		if bootstrap {
+			return nil, fmt.Errorf("lease bootstrap unavailable: %w", err)
+		}
 		current = &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: leaseName}}
 	} else if err != nil {
 		return nil, err
+	} else if current.Annotations[maintenanceKey] != "" {
+		return nil, errTargetMaintenance
+	} else if current.Spec.HolderIdentity != nil && *current.Spec.HolderIdentity != "" && !activeLease(current, time.Now()) {
+		return nil, errTargetMaintenance
 	} else if activeLease(current, time.Now()) {
 		return nil, fmt.Errorf("e2e tests locked by %q", *current.Spec.HolderIdentity)
 	}
@@ -125,8 +136,8 @@ func (l *e2eLease) renew(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !l.owned(lease) {
-		return fmt.Errorf("e2e lease ownership lost")
+	if !l.owned(lease) || !activeLease(lease, time.Now()) {
+		return fmt.Errorf("e2e lease ownership lost or expired")
 	}
 	now := metav1.NewMicroTime(time.Now())
 	lease.Spec.RenewTime = &now
@@ -139,8 +150,8 @@ func (l *e2eLease) release(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !l.owned(lease) {
-		return fmt.Errorf("e2e lease ownership lost")
+	if !l.owned(lease) || !activeLease(lease, time.Now()) {
+		return fmt.Errorf("e2e lease ownership lost or expired")
 	}
 	lease.Spec.HolderIdentity = nil
 	lease.Spec.RenewTime = nil
@@ -149,28 +160,56 @@ func (l *e2eLease) release(ctx context.Context) error {
 	return err
 }
 
-func withLease(ctx context.Context, client leaseClient, id string, run func(context.Context) error) (err error) {
-	lease, err := acquireLease(ctx, client, id)
+// leaseOwner's heartbeat outlives ordinary test cancellation, but never loss or
+// uncertainty of ownership. All mutating child processes use its contexts.
+var errLeaseUncertain = errors.New("maintenance-required: lease ownership uncertain")
+
+type leaseOwner struct {
+	lease  *e2eLease
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	mu     sync.Mutex
+}
+
+func (o *leaseOwner) confirm(ctx context.Context) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err := context.Cause(o.ctx); err != nil {
+		return err
+	}
+	check, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := o.lease.renew(check); err != nil {
+		cause := fmt.Errorf("%w: %w", errLeaseUncertain, err)
+		o.cancel(cause)
+		return cause
+	}
+	return nil
+}
+
+func (o *leaseOwner) cleanupContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(o.ctx, timeout)
+}
+
+func withLease(ctx context.Context, client leaseClient, id string, run func(context.Context) error) error {
+	return withOwnedLease(ctx, client, id, false, func(runCtx context.Context, _ *leaseOwner) error { return run(runCtx) })
+}
+
+func withOwnedLease(ctx context.Context, client leaseClient, id string, bootstrap bool, run func(context.Context, *leaseOwner) error) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	lease, err := acquireLease(ctx, client, id, bootstrap)
 	if err != nil {
 		return err
 	}
-	runCtx, cancel := context.WithCancelCause(ctx)
-	stop := lease.maintain(runCtx, cancel)
-	defer func() {
-		stop()
-		cancel(nil)
-		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer releaseCancel()
-		err = errors.Join(err, lease.release(releaseCtx))
-	}()
-	result := run(runCtx)
-	if cause := context.Cause(runCtx); cause != nil && cause != context.Canceled {
-		return errors.Join(result, cause)
-	}
-	return result
-}
-
-func (l *e2eLease) maintain(ctx context.Context, cancel context.CancelCauseFunc) func() {
+	lifetime, cancel := context.WithCancelCause(context.Background())
+	owner := &leaseOwner{lease: lease, ctx: lifetime, cancel: cancel}
+	runCtx, stopRun := context.WithCancelCause(lifetime)
+	stopSignal := context.AfterFunc(ctx, func() { stopRun(context.Cause(ctx)) })
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
@@ -180,15 +219,54 @@ func (l *e2eLease) maintain(ctx context.Context, cancel context.CancelCauseFunc)
 			select {
 			case <-stop:
 				return
-			case <-ctx.Done():
+			case <-lifetime.Done():
 				return
 			case <-ticker.C:
-				if err := l.renew(ctx); err != nil {
-					cancel(fmt.Errorf("renewing e2e lease: %w", err))
+				if owner.confirm(lifetime) != nil {
 					return
 				}
 			}
 		}
 	}()
-	return func() { close(stop); <-done }
+	defer func() {
+		close(stop)
+		<-done
+		stopSignal()
+		stopRun(nil)
+		if cause := context.Cause(lifetime); cause != nil {
+			err = errors.Join(err, cause)
+		} else {
+			releaseCtx, releaseCancel := context.WithTimeout(lifetime, 10*time.Second)
+			if releaseErr := lease.release(releaseCtx); releaseErr != nil {
+				err = errors.Join(err, fmt.Errorf("%w: releasing: %w", errLeaseUncertain, releaseErr))
+			}
+			releaseCancel()
+		}
+		cancel(nil)
+	}()
+	return run(runCtx, owner)
+}
+
+// A blocked target can only be cleared by an explicitly approved maintenance
+// procedure. No normal runner path clears this marker, including lease release.
+func (o *leaseOwner) requireMaintenance(ctx context.Context) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if cause := context.Cause(o.ctx); cause != nil {
+		return cause
+	}
+	check, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	lease, err := o.lease.client.Get(check, leaseName, metav1.GetOptions{})
+	if err == nil && (!o.lease.owned(lease) || !activeLease(lease, time.Now())) {
+		err = fmt.Errorf("lease ownership lost")
+	}
+	if err == nil {
+		lease.Annotations[maintenanceKey] = "incomplete-drain"
+		_, err = o.lease.client.Update(check, lease, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		o.cancel(fmt.Errorf("%w: marking target failed: %w", errLeaseUncertain, err))
+	}
+	return err
 }

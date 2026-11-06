@@ -17,15 +17,22 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func controllerTarget() (string, string) {
@@ -120,4 +127,111 @@ func dumpControllerLogs(ctx context.Context, path string, since time.Time) error
 		return fmt.Errorf("no controller logs during test run")
 	}
 	return nil
+}
+
+var preparedImagePattern = regexp.MustCompile(`^[^\s@]+@sha256:[a-f0-9]{64}$`)
+
+// verifyPreparedController never consults runtime git. Both desired and running
+// image identities and every ready controller's full embedded SHA must agree.
+func verifyPreparedController(ctx context.Context, image, sha string) error {
+	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(sha) || !preparedImagePattern.MatchString(image) {
+		return fmt.Errorf("invalid prepared controller identity")
+	}
+	namespace, deployment := controllerTarget()
+	if _, err := boundedCommandOutput(ctx, "kubectl", "-n", namespace, "rollout", "status", "deployment/"+deployment, "--timeout=120s"); err != nil {
+		return fmt.Errorf("controller rollout: %w", err)
+	}
+	data, err := boundedCommandOutput(ctx, "kubectl", "-n", namespace, "get", "deployment", deployment, "-o", "json")
+	if err != nil {
+		return err
+	}
+	var deployed appsv1.Deployment
+	if err := json.Unmarshal(data, &deployed); err != nil {
+		return err
+	}
+	if len(deployed.Spec.Template.Spec.Containers) != 1 || deployed.Spec.Template.Spec.Containers[0].Image != image || deployed.Spec.Selector == nil || deployed.Spec.Replicas == nil || *deployed.Spec.Replicas < 1 {
+		return fmt.Errorf("deployment does not match prepared controller image")
+	}
+	container := deployed.Spec.Template.Spec.Containers[0].Name
+	selector, err := metav1.LabelSelectorAsSelector(deployed.Spec.Selector)
+	if err != nil || selector.Empty() {
+		return fmt.Errorf("missing controller pod selector")
+	}
+	data, err = boundedCommandOutput(ctx, "kubectl", "-n", namespace, "get", "pods", "-l", selector.String(), "-o", "json")
+	if err != nil {
+		return err
+	}
+	var pods corev1.PodList
+	if err := json.Unmarshal(data, &pods); err != nil {
+		return err
+	}
+	if len(pods.Items) != int(*deployed.Spec.Replicas) {
+		return fmt.Errorf("controller replica count does not match rollout")
+	}
+	digest := strings.SplitN(image, "@", 2)[1]
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp != nil {
+			return fmt.Errorf("controller pod is terminating")
+		}
+		ready := false
+		for _, spec := range pod.Spec.Containers {
+			if spec.Name == container && spec.Image == image {
+				for _, status := range pod.Status.ContainerStatuses {
+					actual := status.ImageID
+					if i := strings.LastIndex(actual, "@"); i >= 0 {
+						actual = actual[i+1:]
+					}
+					actual = strings.TrimPrefix(actual, "containerd://")
+					ready = ready || status.Name == container && status.Ready && actual == digest
+				}
+			}
+		}
+		if !ready {
+			return fmt.Errorf("running controller digest is not the prepared image")
+		}
+		logs, err := boundedCommandOutput(ctx, "kubectl", "-n", namespace, "logs", pod.Name, "-c", container, "--tail=1000", "--limit-bytes=1048576")
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, line := range strings.Split(string(logs), "\n") {
+			var entry struct {
+				Commit string `json:"commit"`
+			}
+			if json.Unmarshal([]byte(line), &entry) == nil && entry.Commit != "" {
+				if entry.Commit != sha {
+					return fmt.Errorf("embedded controller SHA differs from prepared source")
+				}
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("full embedded controller SHA unavailable")
+		}
+	}
+	return nil
+}
+
+func boundedCommandOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	var output bytes.Buffer
+	command := exec.CommandContext(ctx, name, args...)
+	command.Stdout = &limitedWriter{Writer: &output, Remaining: 2 << 20}
+	if err := runIsolated(command); err != nil {
+		return nil, err
+	}
+	return output.Bytes(), nil
+}
+
+type limitedWriter struct {
+	io.Writer
+	Remaining int
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	if len(p) > w.Remaining {
+		return 0, fmt.Errorf("output limit exceeded")
+	}
+	n, err := w.Writer.Write(p)
+	w.Remaining -= n
+	return n, err
 }

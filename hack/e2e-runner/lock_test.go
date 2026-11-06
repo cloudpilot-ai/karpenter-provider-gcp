@@ -34,11 +34,11 @@ import (
 func TestLeaseLifecycle(t *testing.T) {
 	ctx := context.Background()
 	client := &memoryLeaseClient{}
-	first, err := acquireLease(ctx, client, "host:123")
+	first, err := acquireLease(ctx, client, "host:123", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acquireLease(ctx, client, "host:456"); err == nil || !strings.Contains(err.Error(), "host:123") {
+	if _, err := acquireLease(ctx, client, "host:456", false); err == nil || !strings.Contains(err.Error(), "host:123") {
 		t.Fatalf("expected busy lease with holder, got %v", err)
 	}
 	if err := first.renew(ctx); err != nil {
@@ -47,7 +47,7 @@ func TestLeaseLifecycle(t *testing.T) {
 	if err := first.release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acquireLease(ctx, client, "host:456"); err != nil {
+	if _, err := acquireLease(ctx, client, "host:456", false); err != nil {
 		t.Fatalf("expected released lease to be available: %v", err)
 	}
 }
@@ -55,7 +55,7 @@ func TestLeaseLifecycle(t *testing.T) {
 func TestExpiredLeaseCannotBeReleasedByOldOwner(t *testing.T) {
 	ctx := context.Background()
 	client := &memoryLeaseClient{}
-	old, err := acquireLease(ctx, client, "shared")
+	old, err := acquireLease(ctx, client, "shared", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,21 @@ func TestExpiredLeaseCannotBeReleasedByOldOwner(t *testing.T) {
 	if _, err := client.Update(ctx, lease, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	current, err := acquireLease(ctx, client, "shared")
+	if _, err := acquireLease(ctx, client, "shared", false); err == nil {
+		t.Fatal("abandoned target recovered without maintenance")
+	}
+	// Explicit maintenance clears the abandoned holder after investigation;
+	// normal acquisition never performs this recovery automatically.
+	lease.Spec.HolderIdentity = nil
+	storedExpired, err := client.Get(ctx, leaseName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.ResourceVersion = storedExpired.ResourceVersion
+	if _, err := client.Update(ctx, lease, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := acquireLease(ctx, client, "shared", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +114,7 @@ func TestExistingUnexpiredLease(t *testing.T) {
 			RenewTime:            ptr(metav1.NewMicroTime(time.Now())),
 		},
 	}}
-	if _, err := acquireLease(ctx, client, "me"); err == nil {
+	if _, err := acquireLease(ctx, client, "me", false); err == nil {
 		t.Fatal("expected live lease to block")
 	}
 }
@@ -116,7 +130,7 @@ func TestInterruptedLeaseIsReleased(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected interrupted run to fail")
 	}
-	if _, err := acquireLease(context.Background(), client, "next"); err != nil {
+	if _, err := acquireLease(context.Background(), client, "next", false); err != nil {
 		t.Fatalf("lease was not released on interruption: %v", err)
 	}
 }

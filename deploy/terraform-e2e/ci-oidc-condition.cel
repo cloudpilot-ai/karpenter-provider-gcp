@@ -1,0 +1,7 @@
+assertion.repository_id == '863038341' &&
+assertion.repository_owner_id == '166281999' &&
+assertion.ref == 'refs/heads/main' &&
+assertion.workflow_ref == 'cloudpilot-ai/karpenter-provider-gcp/.github/workflows/e2e.yaml@refs/heads/main' &&
+assertion.event_name == 'workflow_dispatch' &&
+assertion.environment == 'e2e-runtime' &&
+assertion.sub == 'repo:cloudpilot-ai/karpenter-provider-gcp:environment:e2e-runtime'

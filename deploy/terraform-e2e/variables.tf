@@ -152,3 +152,44 @@ variable "control_plane_cidr" {
     error_message = "Set a reviewed non-overlapping /28 control-plane CIDR."
   }
 }
+
+variable "ci_enabled" {
+  type        = bool
+  default     = false
+  nullable    = false
+  description = "Opt in to upstream manual CI runtime IAM/WIF. Does not enable workflow runs or provision Kubernetes bootstrap."
+  validation {
+    condition     = !var.ci_enabled || var.controller_role_id != "${replace(var.prefix, "-", "_")}_ci_runtime"
+    error_message = "The CI custom role ID must not collide with controller_role_id."
+  }
+}
+
+variable "ci_pod_range_names" {
+  type = object({
+    small = string
+    large = string
+  })
+  default     = null
+  description = "Explicit existing additional_pod_ranges keys for CI. Required when ci_enabled; small must be IPv4 /22 or richer, large strictly richer. No ranges are inferred or created by CI."
+  validation {
+    condition     = !var.ci_enabled || var.ci_pod_range_names != null
+    error_message = "CI requires explicit small and large additional pod range keys."
+  }
+  validation {
+    condition = !var.ci_enabled || try(
+      contains(keys(var.additional_pod_ranges), var.ci_pod_range_names.small) &&
+      contains(keys(var.additional_pod_ranges), var.ci_pod_range_names.large), false
+    )
+    error_message = "CI range keys must be members of the existing additional_pod_ranges map."
+  }
+  validation {
+    condition = !var.ci_enabled || try(
+      var.ci_pod_range_names.small != var.ci_pod_range_names.large &&
+      can(cidrnetmask(var.additional_pod_ranges[var.ci_pod_range_names.small])) &&
+      can(cidrnetmask(var.additional_pod_ranges[var.ci_pod_range_names.large])) &&
+      tonumber(split("/", var.additional_pod_ranges[var.ci_pod_range_names.small])[1]) <= 22 &&
+      tonumber(split("/", var.additional_pod_ranges[var.ci_pod_range_names.small])[1]) > tonumber(split("/", var.additional_pod_ranges[var.ci_pod_range_names.large])[1]), false
+    )
+    error_message = "Select distinct IPv4 ranges: small must be /22 or richer and large strictly richer than small."
+  }
+}
