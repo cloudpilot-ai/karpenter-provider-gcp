@@ -194,6 +194,51 @@ var _ = Describe("Disk Selection", Label("suite:storage"), func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(diskType).To(Equal("pd-balanced"))
 	}, SpecTimeout(15*time.Minute))
+
+	It("should attach named data disks that the guest exposes under /dev/disk/by-id", func(ctx SpecContext) {
+		name := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "named-disk") + "-" + environment.UniqueSuffix()
+		deviceNames := []string{"e2e-data-a", "e2e-data-b"}
+		var provisionedNodeName string
+		DeferCleanup(func(ctx context.Context) {
+			_ = env.KubeClient.CoreV1().Pods(environment.TestNamespace).Delete(ctx, name+"-paths", metav1.DeleteOptions{})
+			env.DeleteDeployment(ctx, name)
+			env.DeleteNodePool(ctx, name)
+			if provisionedNodeName != "" {
+				Expect(env.WaitForNodeRemoval(ctx, provisionedNodeName)).To(Succeed())
+			}
+			env.DeleteNodeClass(ctx, name)
+		})
+
+		env.CreateNodeClassWithNamedDataDisks(ctx, name, 10, deviceNames)
+		env.WaitForNodeClassReady(ctx, name)
+		env.CreateNodePool(ctx, name, name, environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2"},
+		})
+		env.WaitForNodePoolReady(ctx, name)
+		env.CreateDeployment(ctx, name, name, name, karpv1.ArchitectureAmd64)
+
+		pod := env.WaitForRunningPod(ctx, name)
+		Expect(pod.Spec.NodeName).NotTo(BeEmpty())
+		provisionedNodeName = pod.Spec.NodeName
+		node, err := env.KubeClient.CoreV1().Nodes().Get(ctx, provisionedNodeName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(node.Spec.ProviderID).NotTo(BeEmpty())
+
+		instance, err := env.GetGCEInstance(ctx, node.Spec.ProviderID)
+		Expect(err).NotTo(HaveOccurred())
+		var attachedNames []string
+		for _, disk := range instance.Disks {
+			if !disk.Boot {
+				attachedNames = append(attachedNames, disk.DeviceName)
+			}
+		}
+		Expect(attachedNames).To(ConsistOf(deviceNames), "expected GCE to attach the data disks under their device names")
+
+		expectGuestDiskPaths(ctx, name+"-paths", provisionedNodeName, name, deviceNames)
+	}, SpecTimeout(15*time.Minute))
 })
 
 var _ = Describe("PDCSI Disk Type Labels", Label("suite:storage"), func() {
