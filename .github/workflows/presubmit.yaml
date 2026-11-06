@@ -39,6 +39,25 @@ jobs:
         cache-key-prefix: ${{ github.job }}
         cache-dependency-path: '**/go.*'
         save: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-cache-trial/go-cache-20261106') }}
+    - name: Locate trial Go cache paths
+      id: trial-cache-paths
+      shell: bash
+      run: 'printf ''gocache=%s\n'' "$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+        printf ''gomodcache=%s\n'' "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+        '
+    - name: Restore warmed trial Go cache
+      id: trial-go-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: '${{ steps.trial-cache-paths.outputs.gocache }}
+
+          ${{ steps.trial-cache-paths.outputs.gomodcache }}
+
+          '
+        key: go-cache-Linux-X64-presubmit-1.27.3-ci-cache-trial/go-cache-20261106-c263673cf447ddbb0cb40d23c6c043338275f301d24b7183c023d55dafba9d12-42251101344
+        fail-on-cache-miss: true
     - name: Install toolchain
       run: make toolchain
     - name: Restore lint analysis cache
