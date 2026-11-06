@@ -29,24 +29,27 @@ on:
         default: false
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   update-pricing:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: true
+          persist-credentials: false
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
 
       - name: Authenticate to GCP
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        uses: google-github-actions/auth@v3.0.0
         with:
           credentials_json: ${{ secrets.GCP_PRICING_SA_KEY }}
 
@@ -56,19 +59,34 @@ jobs:
       - name: Update initial-prices.json
         run: make update-pricing
 
-      - name: Prepare PR body
-        run: |
-          {
-            echo 'Automated refresh of `pkg/providers/pricing/initial-prices.json`'
-          } > /tmp/pr-body.md
-
       - name: Create PR if pricing changed
         if: ${{ !inputs.dry_run }}
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        uses: peter-evans/create-pull-request@v8.1.1
         with:
+          token: ${{ github.token }}
+          draft: true
+          add-paths: pkg/providers/pricing/initial-prices.json
           commit-message: "chore(pricing): update initial-prices.json"
           title: "chore(pricing): scheduled pricing data refresh"
-          body-path: /tmp/pr-body.md
+          body: |
+            #### What type of PR is this?
+            /kind cleanup
+
+            #### What this PR does / why we need it:
+            Refresh generated GCP pricing data in `pkg/providers/pricing/initial-prices.json`.
+
+            #### Related proposal (if applicable):
+            N/A
+
+            #### Which issue(s) this PR fixes:
+            N/A
+
+            #### Docs and examples
+            - [x] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+            - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
+
+            #### Special notes for your reviewer:
+            Automated pricing refresh; review the generated data before merging.
           branch: automated/update-pricing
           signoff: true
           sign-commits: true
