@@ -208,11 +208,13 @@ func (e *Environment) CreateNodeClassForLocalSSD(
 // kubeletConfig is a map[string]any whose keys must match the JSON field
 // names on v1alpha1.KubeletConfiguration (systemReserved, kubeReserved,
 // evictionHard, podsPerCore, etc.). Used by e2e tests verifying issue
-// #398 (kubelet honors user reservations).
+// #398 (kubelet honors user reservations). spec.linuxNodeConfig is set too
+// when linuxNodeConfig is not nil; its keys must match the JSON field names
+// on v1alpha1.LinuxNodeConfig.
 func (e *Environment) CreateNodeClassWithKubeletConfig(
 	ctx context.Context,
 	name, imageFamily string,
-	kubeletConfig map[string]any,
+	kubeletConfig, linuxNodeConfig map[string]any,
 ) {
 	diskGiB := int64(DefaultE2EDiskGiB)
 	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
@@ -234,6 +236,9 @@ func (e *Environment) CreateNodeClassWithKubeletConfig(
 			"kubeletConfiguration": kubeletConfig,
 		},
 	}}
+	if linuxNodeConfig != nil {
+		obj.Object["spec"].(map[string]any)["linuxNodeConfig"] = linuxNodeConfig
+	}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
 	e.trackNodeClass(name)

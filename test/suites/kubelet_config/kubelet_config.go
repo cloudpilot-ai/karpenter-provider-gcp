@@ -36,9 +36,13 @@ import (
 // resulting node's status. Mirrors environment.TestCase fields for the
 // provisioning side; assertions live in assert.
 type kubeletConfigCase struct {
-	tc            environment.TestCase
-	kubeletConfig map[string]any
-	assert        func(node *corev1.Node)
+	tc              environment.TestCase
+	kubeletConfig   map[string]any
+	linuxNodeConfig map[string]any
+	assert          func(node *corev1.Node)
+	// assertOnNode, when set, runs after assert and may create workloads on
+	// the node.
+	assertOnNode func(ctx context.Context, node *corev1.Node)
 }
 
 var env *environment.Environment
@@ -140,6 +144,31 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 		},
 		assert: assertMaxPodsCapacity(50),
 	}, SpecTimeout(15*time.Minute)),
+
+	// Boot-disk swap: the GKE bootstrap creates an encrypted 1 GiB swap file
+	// before the kubelet starts. The node being Ready shows the kubelet
+	// started with swap active and failSwapOn false.
+	Entry("COS: boot-disk swap is active and encrypted", kubeletConfigCase{
+		tc: environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-4"},
+			ImageFamily:   gcpv1alpha1.ImageFamilyContainerOptimizedOS,
+		},
+		kubeletConfig: map[string]any{
+			"failSwapOn": false,
+			"memorySwap": map[string]any{"swapBehavior": "LimitedSwap"},
+		},
+		linuxNodeConfig: map[string]any{
+			"swap": map[string]any{
+				"enabled":         true,
+				"bootDiskProfile": map[string]any{"swapSizeGib": int64(1)},
+			},
+		},
+		assert:       assertSwapCapacity(resource.MustParse("1Gi")),
+		assertOnNode: assertEncryptedSwapDevice,
+	}, SpecTimeout(15*time.Minute)),
 )
 
 // runKubeletConfigTest provisions a node with the given kubeletConfig and
@@ -170,7 +199,7 @@ func runKubeletConfigTest(ctx context.Context, c kubeletConfigCase) {
 	if imageFamily == "" {
 		imageFamily = gcpv1alpha1.ImageFamilyContainerOptimizedOS
 	}
-	env.CreateNodeClassWithKubeletConfig(ctx, name, imageFamily, c.kubeletConfig)
+	env.CreateNodeClassWithKubeletConfig(ctx, name, imageFamily, c.kubeletConfig, c.linuxNodeConfig)
 	env.WaitForNodeClassReady(ctx, name)
 	env.CreateNodePool(ctx, name, name, c.tc)
 	env.WaitForNodePoolReady(ctx, name)
@@ -190,6 +219,9 @@ func runKubeletConfigTest(ctx context.Context, c kubeletConfigCase) {
 	Expect(c.tc.InstanceTypes).To(ContainElement(node.Labels[corev1.LabelInstanceTypeStable]))
 
 	c.assert(node)
+	if c.assertOnNode != nil {
+		c.assertOnNode(ctx, node)
+	}
 }
 
 // assertSystemReservedReducesAllocatable verifies that the user-configured
@@ -253,6 +285,62 @@ func assertMaxPodsCapacity(want int64) func(*corev1.Node) {
 		Expect(pods.Value()).To(Equal(want),
 			"capacity.pods %s must equal kubeletConfiguration.maxPods", pods.String())
 	}
+}
+
+// assertSwapCapacity returns an assertion that the kubelet reports active swap
+// of the given size. mkswap keeps one page for its header, so the reported
+// total is allowed to be up to 1 MiB short of the file.
+func assertSwapCapacity(size resource.Quantity) func(*corev1.Node) {
+	return func(node *corev1.Node) {
+		swap := node.Status.NodeInfo.Swap
+		Expect(swap).NotTo(BeNil(), "node %s reports no swap", node.Name)
+		Expect(swap.Capacity).NotTo(BeNil(), "node %s reports no swap capacity", node.Name)
+		Expect(*swap.Capacity).To(And(
+			BeNumerically("<=", size.Value()),
+			BeNumerically(">", size.Value()-1024*1024),
+		), "swap capacity on node %s", node.Name)
+	}
+}
+
+// assertEncryptedSwapDevice runs a pause pod on the node that mounts
+// /dev/mapper/encswap as a hostPath of type BlockDevice. The kubelet checks
+// the type before it starts the container, so the pod only runs when the
+// bootstrap opened the swap file through dm-crypt.
+func assertEncryptedSwapDevice(ctx context.Context, node *corev1.Node) {
+	name := node.Name + "-encswap"
+	blockDevice := corev1.HostPathBlockDev
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: corev1.PodSpec{
+			NodeName:      node.Name,
+			RestartPolicy: corev1.RestartPolicyNever,
+			Tolerations:   []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+			Containers: []corev1.Container{{
+				Name:         "probe",
+				Image:        environment.PauseImage,
+				VolumeMounts: []corev1.VolumeMount{{Name: "encswap", MountPath: "/encswap", ReadOnly: true}},
+			}},
+			Volumes: []corev1.Volume{{
+				Name: "encswap",
+				VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{
+					Path: "/dev/mapper/encswap",
+					Type: &blockDevice,
+				}},
+			}},
+		},
+	}
+	_, err := env.KubeClient.CoreV1().Pods(pod.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating probe pod %s", name)
+	DeferCleanup(func(ctx context.Context) {
+		_ = env.KubeClient.CoreV1().Pods(pod.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	})
+
+	Eventually(func(g Gomega) {
+		got, err := env.KubeClient.CoreV1().Pods(pod.Namespace).Get(ctx, name, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(got.Status.Phase).To(Equal(corev1.PodRunning),
+			"probe pod %s must run: /dev/mapper/encswap must be a block device on node %s", name, node.Name)
+	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 }
 
 func osSlug(imageFamily string) string {

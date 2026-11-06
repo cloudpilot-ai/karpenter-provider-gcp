@@ -259,3 +259,47 @@ func TestGCENodeClassCRDSwapBehaviorEnum(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"NoSwap", "LimitedSwap"}, values)
 }
+
+func requireXValidation(t *testing.T, schema apiextensionsv1.JSONSchemaProps, rule, message string) {
+	t.Helper()
+	for _, v := range schema.XValidations {
+		if v.Rule == rule {
+			require.Equal(t, message, v.Message)
+			return
+		}
+	}
+	require.Failf(t, "missing x-kubernetes-validations rule", "%s", rule)
+}
+
+func swapSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return specSchema(t).Properties["linuxNodeConfig"].Properties["swap"]
+}
+
+func TestGCENodeClassCRDSwapRequiresFailSwapOnFalse(t *testing.T) {
+	requireXValidation(t, specSchema(t),
+		`!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !self.linuxNodeConfig.swap.enabled || `+
+			`(has(self.kubeletConfiguration) && has(self.kubeletConfiguration.failSwapOn) && self.kubeletConfiguration.failSwapOn == false)`,
+		"linuxNodeConfig.swap.enabled requires kubeletConfiguration.failSwapOn to be explicitly set to false")
+}
+
+func TestGCENodeClassCRDLimitsSwapToHalfTheBootDisk(t *testing.T) {
+	requireXValidation(t, specSchema(t),
+		`!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap) || !has(self.linuxNodeConfig.swap.bootDiskProfile) || `+
+			`!has(self.disks) || self.disks.all(d, !has(d.boot) || !d.boot || !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swap.bootDiskProfile.swapSizeGib <= d.sizeGiB)`,
+		"linuxNodeConfig.swap.bootDiskProfile.swapSizeGib must be at most half of the boot disk sizeGiB")
+}
+
+func TestGCENodeClassCRDSwapProfileFollowsEnabled(t *testing.T) {
+	requireXValidation(t, swapSchema(t), `!self.enabled || has(self.bootDiskProfile)`,
+		"bootDiskProfile is required when swap is enabled")
+	requireXValidation(t, swapSchema(t), `self.enabled || (!has(self.bootDiskProfile) && !has(self.encryptionConfig))`,
+		"bootDiskProfile and encryptionConfig must not be set when swap is disabled")
+	require.Contains(t, swapSchema(t).Required, "enabled")
+}
+
+func TestGCENodeClassCRDRejectsZeroSwapSize(t *testing.T) {
+	field := swapSchema(t).Properties["bootDiskProfile"].Properties["swapSizeGib"]
+	require.NotNil(t, field.Minimum)
+	require.Equal(t, float64(1), *field.Minimum)
+}

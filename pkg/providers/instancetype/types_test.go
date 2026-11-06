@@ -1392,3 +1392,86 @@ func TestNewStaticInstanceTypeThreadsPerCore(t *testing.T) {
 		assert.Equal(t, int64(1), got.Value())
 	})
 }
+
+func withBootDiskSwap(nodeClass *v1alpha1.GCENodeClass, swapGiB int64) *v1alpha1.GCENodeClass {
+	out := nodeClass.DeepCopy()
+	out.Spec.KubeletConfiguration = &v1alpha1.KubeletConfiguration{FailSwapOn: lo.ToPtr(false)}
+	if nodeClass.Spec.KubeletConfiguration != nil {
+		out.Spec.KubeletConfiguration = nodeClass.Spec.KubeletConfiguration.DeepCopy()
+		out.Spec.KubeletConfiguration.FailSwapOn = lo.ToPtr(false)
+	}
+	out.Spec.LinuxNodeConfig = &v1alpha1.LinuxNodeConfig{Swap: &v1alpha1.SwapConfig{
+		Enabled:         true,
+		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: swapGiB},
+	}}
+	return out
+}
+
+// A boot-disk swap file takes space that the kubelet would otherwise offer to
+// pods, so it is reserved from them; the node's capacity is still the disk.
+func TestNewStaticInstanceTypeReservesBootDiskSwap(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	const swapGiB = 50
+	gib := int64(1024 * 1024 * 1024)
+	n2d := &computepb.MachineType{Name: lo.ToPtr("n2d-standard-4"), GuestCpus: lo.ToPtr[int32](4), MemoryMb: lo.ToPtr[int32](16384)}
+	bootDisk := []v1alpha1.Disk{{Boot: true, SizeGiB: 200, Category: "pd-balanced"}}
+
+	for name, tc := range map[string]struct {
+		nodeClass    *v1alpha1.GCENodeClass
+		ssdCount     int
+		wantAddedGiB int64
+	}{
+		"boot disk holds ephemeral storage": {
+			nodeClass:    &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{Disks: bootDisk}},
+			wantAddedGiB: swapGiB,
+		},
+		"kubeReserved override is kept and swap is added to it": {
+			nodeClass: &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{Disks: bootDisk, KubeletConfiguration: &v1alpha1.KubeletConfiguration{
+				KubeReserved: map[string]v1alpha1.KubeletQuantity{"ephemeral-storage": "20Gi"},
+			}}},
+			wantAddedGiB: swapGiB,
+		},
+		"raw block Local SSDs leave ephemeral storage on the boot disk": {
+			nodeClass:    &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{Disks: bootDisk, LocalSsdMode: v1alpha1.LocalSSDModeRawBlock}},
+			ssdCount:     2,
+			wantAddedGiB: swapGiB,
+		},
+		"ephemeral Local SSDs hold ephemeral storage": {
+			nodeClass: &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{Disks: bootDisk, LocalSsdMode: v1alpha1.LocalSSDModeEphemeral}},
+			ssdCount:  2,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			without := NewStaticInstanceType(ctx, n2d, tc.nodeClass, tc.ssdCount)
+			with := NewStaticInstanceType(ctx, n2d, withBootDiskSwap(tc.nodeClass, swapGiB), tc.ssdCount)
+
+			require.Equal(t,
+				without.Overhead.KubeReserved.StorageEphemeral().Value()+tc.wantAddedGiB*gib,
+				with.Overhead.KubeReserved.StorageEphemeral().Value())
+			require.True(t, without.Capacity.StorageEphemeral().Equal(*with.Capacity.StorageEphemeral()),
+				"swap must not change the node's ephemeral storage capacity")
+		})
+	}
+}
+
+func TestListCacheKeyCoversBootDiskSwap(t *testing.T) {
+	ctx := options.ToContext(context.Background(), &options.Options{VMMemoryOverheadPercent: 0.07})
+	p := newTestProvider()
+	base := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		Disks: []v1alpha1.Disk{{Boot: true, SizeGiB: 200, Category: "hyperdisk-balanced"}},
+	}}
+	small, large := withBootDiskSwap(base, 1), withBootDiskSwap(base, 50)
+
+	itsSmall, err := p.List(ctx, small)
+	require.NoError(t, err)
+	require.NotEmpty(t, itsSmall)
+	itsLarge, err := p.List(ctx, large)
+	require.NoError(t, err)
+	require.NotEmpty(t, itsLarge)
+
+	gib := int64(1024 * 1024 * 1024)
+	require.Equal(t,
+		itsSmall[0].Overhead.KubeReserved.StorageEphemeral().Value()+49*gib,
+		itsLarge[0].Overhead.KubeReserved.StorageEphemeral().Value(),
+		"a different swap size must not reuse the cached reservation")
+}

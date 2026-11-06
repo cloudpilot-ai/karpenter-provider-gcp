@@ -72,6 +72,21 @@ func mergeKubeReserved(computed corev1.ResourceList, kc *v1alpha1.KubeletConfigu
 	return out
 }
 
+// reserveBootDiskSwap adds the boot-disk swap file to the ephemeral storage
+// reserved from pods. The swap file takes its space from the boot disk, which
+// also holds the kubelet's ephemeral storage unless ephemeral Local SSDs do.
+// It is added after a kubeReserved override, which cannot know the swap size.
+// Node capacity stays the size of the disk.
+func reserveBootDiskSwap(reserved corev1.ResourceList, swapGiB, kubeletEphemeralSSDGiB int64) corev1.ResourceList {
+	if swapGiB == 0 || kubeletEphemeralSSDGiB > 0 {
+		return reserved
+	}
+	storage := reserved[corev1.ResourceEphemeralStorage]
+	storage.Add(*resource.NewQuantity(swapGiB*1024*1024*1024, resource.BinarySI))
+	reserved[corev1.ResourceEphemeralStorage] = storage
+	return reserved
+}
+
 // evictionThreshold returns the eviction overhead used by the scheduler.
 // Only evictionHard is factored into overhead; evictionSoft is a warning
 // threshold with a grace period and is not modeled here, matching

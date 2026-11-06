@@ -111,6 +111,37 @@ func patchHugepagesKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha
 	}
 }
 
+// swapKubeEnvEntries are the kube-env entries that the GKE node bootstrap
+// (setup-swap in configure-helper.sh) reads to create swap. The node class
+// owns all of them, zswap included, so a node never inherits the swap of the
+// source node pool.
+var swapKubeEnvEntries = []string{
+	"NODE_SWAP_SIZE",
+	"NODE_SWAP_PROFILE",
+	"NODE_SWAP_ENCRYPTION",
+	"NODE_SWAP_DEDICATED_LOCAL_SSD_COUNT",
+	"NODE_ZSWAP_ENABLED",
+	"NODE_ZSWAP_COMPRESSOR",
+	"NODE_ZSWAP_MAX_POOL_PERCENT",
+}
+
+func patchSwapKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass) {
+	for _, key := range swapKubeEnvEntries {
+		target.UnsetKubeEnvEntry(key)
+	}
+	swapGiB := nodeClass.BootDiskSwapGiB()
+	if swapGiB == 0 {
+		return
+	}
+	swap := nodeClass.Spec.LinuxNodeConfig.Swap
+	// The bootstrap passes NODE_SWAP_SIZE to fallocate -l and wraps the file
+	// in dm-crypt (/dev/mapper/encswap) when NODE_SWAP_ENCRYPTION is "true".
+	encrypted := swap.EncryptionConfig == nil || swap.EncryptionConfig.Disabled == nil || !*swap.EncryptionConfig.Disabled
+	target.SetKubeEnvEntry("NODE_SWAP_PROFILE", "BOOT_DISK")
+	target.SetKubeEnvEntry("NODE_SWAP_SIZE", fmt.Sprintf("%dGiB", swapGiB))
+	target.SetKubeEnvEntry("NODE_SWAP_ENCRYPTION", fmt.Sprintf(`"%t"`, encrypted))
+}
+
 // gpuSharingKubeEnvEntries are the kube-env entries GKE writes on shared-GPU node pools;
 // the GPU device plugin reads them to advertise MaxSharedClientsPerGPU replicas per GPU.
 var gpuSharingKubeEnvEntries = []string{
