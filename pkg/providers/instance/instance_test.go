@@ -1064,6 +1064,34 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
 }
 
+func TestRenderDiskProperties_DeviceName(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("hyperdisk-balanced", nil, nil)
+	nodeClass.Spec.Disks = append(nodeClass.Spec.Disks,
+		v1alpha1.Disk{SizeGiB: 3072, Category: "hyperdisk-balanced", DeviceName: "e2b-data"},
+		v1alpha1.Disk{SizeGiB: 20, Category: "pd-ssd"},
+		v1alpha1.Disk{SecondaryBootImage: "projects/project-a/global/images/cache-image", SecondaryBootMode: "CONTAINER_IMAGE_CACHE"},
+	)
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	require.NoError(t, err)
+	require.Len(t, disks, 4)
+
+	require.True(t, disks[0].Boot)
+	require.Empty(t, disks[0].DeviceName, "GCE names the boot disk")
+
+	require.Equal(t, "e2b-data", disks[1].DeviceName)
+	require.Empty(t, disks[1].InitializeParams.SourceImage, "a named data disk is blank")
+	require.Equal(t, int64(3072), disks[1].InitializeParams.DiskSizeGb)
+
+	require.Equal(t, "gke--disk", disks[2].DeviceName, "an unnamed data disk keeps the name it had before deviceName existed")
+
+	require.Equal(t, "gke-cache-image-disk", disks[3].DeviceName)
+	require.Equal(t, "projects/project-a/global/images/cache-image", disks[3].InitializeParams.SourceImage)
+}
+
 func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
 	t.Parallel()
 

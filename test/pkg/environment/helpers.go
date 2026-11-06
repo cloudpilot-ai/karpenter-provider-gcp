@@ -448,6 +448,33 @@ func (e *Environment) CreateNodeClassWithGvnicAndMinCpuPlatform(ctx context.Cont
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithNamedDataDisks creates a GCENodeClass with a pd-balanced
+// boot disk plus one blank pd-balanced data disk per entry in deviceNames.
+func (e *Environment) CreateNodeClassWithNamedDataDisks(ctx context.Context, name string, dataDiskGiB int64, deviceNames []string) {
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	disks := []any{
+		map[string]any{"category": "pd-balanced", "sizeGiB": int64(DefaultE2EDiskGiB), "boot": true},
+	}
+	for _, deviceName := range deviceNames {
+		disks = append(disks, map[string]any{"category": "pd-balanced", "sizeGiB": dataDiskGiB, "deviceName": deviceName})
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": "ContainerOptimizedOS@latest"},
+			},
+			"disks":           disks,
+			"subnetRangeName": e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithPrivateNetwork creates a GCENodeClass identical to
 // CreateNodeClass but with networkConfig.enablePrivateNodes set to true,
 // so Karpenter provisions nodes with no external (public) IP.
