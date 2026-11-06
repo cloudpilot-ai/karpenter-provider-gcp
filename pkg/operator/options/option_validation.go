@@ -16,6 +16,7 @@ package options
 
 import (
 	"fmt"
+	"time"
 
 	"go.uber.org/multierr"
 )
@@ -24,12 +25,23 @@ func (o *Options) Validate() error {
 	return multierr.Combine(
 		o.validateRequiredFields(),
 		o.validateQuotaExceededTTL(),
+		validatePositiveDuration(stockoutTTLFlagName, o.StockoutTTL),
+		validatePositiveDuration(ipSpaceExhaustedTTLFlagName, o.IPSpaceExhaustedTTL),
+		validatePositiveDuration(unsupportedConfigurationTTLFlagName, o.UnsupportedConfigurationTTL),
+		validatePositiveDuration(launchTimeoutFlagName, o.LaunchTimeout),
 	)
 }
 
 func (o *Options) validateQuotaExceededTTL() error {
 	if o.QuotaExceededTTL < 0 {
 		return fmt.Errorf("%s must not be negative, got %s", quotaExceededTTLFlagName, o.QuotaExceededTTL)
+	}
+	return nil
+}
+
+func validatePositiveDuration(flagName string, d time.Duration) error {
+	if d <= 0 {
+		return fmt.Errorf("%s must be positive, got %s", flagName, d)
 	}
 	return nil
 }

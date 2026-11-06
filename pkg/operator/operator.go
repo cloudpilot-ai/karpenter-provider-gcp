@@ -31,6 +31,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
@@ -67,6 +68,9 @@ type Operator struct {
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	os.Setenv(options.GCPAuth, options.FromContext(ctx).GCPAuth)
+	// Core reads this package variable from its liveness controller, which
+	// starts after NewOperator returns.
+	lifecycle.LaunchTimeout = options.FromContext(ctx).LaunchTimeout
 
 	region, err := determineRegion(ctx, options.FromContext(ctx).ProjectID, options.FromContext(ctx).ClusterLocation)
 	if err != nil {
