@@ -28,32 +28,19 @@ jobs:
           submodules: true
           fetch-depth: 0
 
+      - name: Verify action dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh extension install github/gh-actions-lock --pin v0.4.1
+          gh actions-lock --verify
+
       - name: Select Go toolchain
         id: go-toolchain
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
-
-      # Temporary until github/gh-actions-lock#275 ships in a release.
-      - name: Build action dependency verifier
-        env:
-          VERIFIER_SHA: 64f5baafe07607763e23fad4a973defeb28af20d
-        run: |
-          set -euo pipefail
-          src="$RUNNER_TEMP/gh-actions-lock-275"
-          rm -rf "$src"
-          git init -q "$src"
-          git -C "$src" remote add origin https://github.com/dm3ch/gh-actions-lock.git
-          git -C "$src" fetch -q --depth=1 origin "$VERIFIER_SHA"
-          git -C "$src" checkout -q FETCH_HEAD
-          test "$(git -C "$src" rev-parse HEAD)" = "$VERIFIER_SHA"
-          (cd "$src" && GOTOOLCHAIN=local go build -o "$RUNNER_TEMP/gh-actions-lock" ./cmd/gh-actions-lock)
-
-      - name: Verify action dependencies
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: '"$RUNNER_TEMP/gh-actions-lock" --verify'
 
       - name: Restore Go CI cache
         id: setup-go
