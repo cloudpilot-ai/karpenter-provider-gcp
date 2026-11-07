@@ -4,8 +4,8 @@ Action dependencies are locked in `.github/workflows/actions.lock`, including
 transitive actions. The lockfile determines which commits run; readable tags or
 branches in workflow files do not advance those commits automatically.
 
-After adding a workflow or changing an action reference, use the same generator
-version as presubmit:
+After adding a workflow or changing an action reference, use the pinned release
+generator for lockfile maintenance (presubmit's temporary verifier is described below):
 
 ```sh
 gh extension install github/gh-actions-lock --pin v0.4.1
@@ -21,6 +21,18 @@ Do not automatically accept moved or unreachable references.
 upstream provenance. Presubmit uses the networked `--verify` check. Existing
 Dependabot configuration updates dependencies and lock entries for onboarded
 workflows; new workflows still require generator onboarding.
+
+Presubmit temporarily builds the verifier from pinned commit
+`39dd6b04a53288324a194d616f80c70477020131` in `dm3ch/gh-actions-lock` instead
+of installing released v0.4.1. That commit adds the anonymous fallback for
+public repositories whose organization IP allowlist rejects authenticated API
+access ([#275](https://github.com/github/gh-actions-lock/pull/275) for
+[#274](https://github.com/github/gh-actions-lock/issues/274)); released v0.4.1
+fails closed on `aquasecurity/setup-trivy`. Keep the pinned commit literal and
+its `HEAD` assertion, retire both when a release includes the fix, and update
+the generator version only after it does. The verifier source is built under
+`$RUNNER_TEMP` so its `go.mod` is not discovered by provider Make targets. In
+that workflow, `GH_TOKEN` is scoped to the verification step, not the build.
 
 The lockfile covers action code, not tools downloaded by actions, container
 images, or job-level reusable-workflow calls. Repository policy enforcement is a
