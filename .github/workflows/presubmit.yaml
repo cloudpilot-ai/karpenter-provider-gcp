@@ -38,7 +38,7 @@ jobs:
       # Temporary until github/gh-actions-lock#275 ships in a release.
       - name: Build action dependency verifier
         env:
-          VERIFIER_SHA: e0d3c10c3f75aa676c32d171b9bec3281703ab15
+          VERIFIER_SHA: 64f5baafe07607763e23fad4a973defeb28af20d
         run: |
           set -euo pipefail
           src="$RUNNER_TEMP/gh-actions-lock-275"
