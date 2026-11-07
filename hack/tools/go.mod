@@ -1,6 +1,6 @@
 module github.com/cloudpilot-ai/karpenter-provider-gcp/hack/tools
 
-go 1.27.0
+go 1.27.3
 
 tool (
 	github.com/bwplotka/mdox
@@ -9,6 +9,7 @@ tool (
 	github.com/norwoodj/helm-docs/cmd/helm-docs
 	github.com/onsi/ginkgo/v2/ginkgo
 	golang.org/x/tools/cmd/deadcode
+	golang.org/x/vuln/cmd/govulncheck
 	k8s.io/code-generator/cmd/deepcopy-gen
 	sigs.k8s.io/controller-tools/cmd/controller-gen
 )
@@ -251,10 +252,11 @@ require (
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/telemetry v0.0.0-20261009151841-97e8ea77aa2a // indirect
+	golang.org/x/telemetry v0.0.0-20261010193011-f71dc92da45e // indirect
 	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
+	golang.org/x/vuln v1.9.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261012220534-4341edf3f941 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8 // indirect

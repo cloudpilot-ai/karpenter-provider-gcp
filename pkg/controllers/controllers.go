@@ -85,10 +85,12 @@ func NewController(
 		))
 	}
 
-	controllers = append(controllers, telemetry.NewController(
-		kubeClient,
-		metricsclientset.NewForConfigOrDie(restConfig),
-	))
+	if options.FromContext(ctx).Telemetry {
+		controllers = append(controllers, telemetry.NewController(
+			kubeClient,
+			metricsclientset.NewForConfigOrDie(restConfig),
+		))
+	}
 
 	return controllers
 }

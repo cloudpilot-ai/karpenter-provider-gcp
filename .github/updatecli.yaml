@@ -1,0 +1,110 @@
+name: Update Go version and controller base image
+
+sources:
+  currentGo:
+    kind: golang/gomod
+    spec:
+      file: go.mod
+  goPatch:
+    kind: golang
+    dependson:
+      - source#currentGo
+    spec:
+      versionfilter:
+        kind: semver
+        pattern: '~{{ source "currentGo" }}'
+  baseImage:
+    kind: dockerdigest
+    spec:
+      image: cgr.dev/chainguard/static
+      tag: latest
+
+# All conditions must pass before any target is updated.
+conditions:
+  toolsGo:
+    kind: golang/gomod
+    sourceid: currentGo
+    spec:
+      file: hack/tools/go.mod
+  crdToolsGo:
+    kind: golang/gomod
+    sourceid: currentGo
+    spec:
+      file: hack/crd-tools/go.mod
+  pdcsiGo:
+    kind: golang/gomod
+    sourceid: currentGo
+    spec:
+      file: hack/pdcsi-data/go.mod
+  controllerToolchain:
+    kind: file
+    disablesourceinput: true
+    failwhen: true
+    spec:
+      file: go.mod
+      matchpattern: '(?m)^toolchain[ \t]'
+  toolsToolchain:
+    kind: file
+    disablesourceinput: true
+    failwhen: true
+    spec:
+      file: hack/tools/go.mod
+      matchpattern: '(?m)^toolchain[ \t]'
+  crdToolsToolchain:
+    kind: file
+    disablesourceinput: true
+    failwhen: true
+    spec:
+      file: hack/crd-tools/go.mod
+      matchpattern: '(?m)^toolchain[ \t]'
+  pdcsiToolchain:
+    kind: file
+    disablesourceinput: true
+    failwhen: true
+    spec:
+      file: hack/pdcsi-data/go.mod
+      matchpattern: '(?m)^toolchain[ \t]'
+  baseRepository:
+    kind: file
+    disablesourceinput: true
+    spec:
+      file: .ko.yaml
+      matchpattern: '(?m)^defaultBaseImage: cgr\.dev/chainguard/static:latest@sha256:[a-f0-9]{64}$'
+  basePlatforms:
+    kind: dockerimage
+    sourceid: baseImage
+    spec:
+      image: cgr.dev/chainguard/static
+      architectures:
+        - linux/amd64
+        - linux/arm64
+
+targets:
+  controllerGo:
+    kind: golang/gomod
+    sourceid: goPatch
+    spec:
+      file: go.mod
+  toolsGo:
+    kind: golang/gomod
+    sourceid: goPatch
+    spec:
+      file: hack/tools/go.mod
+  crdToolsGo:
+    kind: golang/gomod
+    sourceid: goPatch
+    spec:
+      file: hack/crd-tools/go.mod
+  pdcsiGo:
+    kind: golang/gomod
+    sourceid: goPatch
+    spec:
+      file: hack/pdcsi-data/go.mod
+  baseImage:
+    kind: yaml
+    sourceid: baseImage
+    transformers:
+      - addprefix: 'cgr.dev/chainguard/static:'
+    spec:
+      file: .ko.yaml
+      key: $.defaultBaseImage

@@ -47,6 +47,8 @@ const (
 	defaultNodePoolTemplateNameFlagName   = "default-nodepool-template-name"
 	quotaExceededTTLEnvVarName            = "QUOTA_EXCEEDED_TTL"
 	quotaExceededTTLFlagName              = "quota-exceeded-ttl"
+	telemetryEnvVarName                   = "TELEMETRY"
+	telemetryFlagName                     = "telemetry"
 
 	// DefaultQuotaExceededTTL is how long an instance type stays unavailable in a
 	// region after GCE rejects it for exceeded quota.
@@ -74,6 +76,9 @@ type Options struct {
 	// QuotaExceededTTL is how long an instance type stays unavailable after a
 	// QUOTA_EXCEEDED launch failure. Zero disables quota backoff.
 	QuotaExceededTTL time.Duration
+	// Telemetry sends anonymized resource totals and Spot interruption events
+	// to CloudPilot AI. Off unless enabled.
+	Telemetry bool
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
@@ -87,6 +92,7 @@ func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.DefaultNodePoolTemplateName, defaultNodePoolTemplateNameFlagName, env.WithDefaultString(defaultNodePoolTemplateNameEnvVarName, ""), "Pin the bootstrap source pool by name. If set, Karpenter uses this pool exclusively and returns an error if it is not RUNNING.")
 	fs.BoolVar(&o.Interruption, gkeEnableInterruption, env.WithDefaultBool(gkeEnableInterruption, true), "Enable interruption handling.")
 	fs.DurationVar(&o.QuotaExceededTTL, quotaExceededTTLFlagName, env.WithDefaultDuration(quotaExceededTTLEnvVarName, DefaultQuotaExceededTTL), "How long an instance type stays unavailable in the region after a launch fails with QUOTA_EXCEEDED. Set to 0 to disable quota backoff.")
+	fs.BoolVar(&o.Telemetry, telemetryFlagName, env.WithDefaultBool(telemetryEnvVarName, false), "Send anonymized resource totals and Spot interruption events to CloudPilot AI.")
 }
 
 func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
