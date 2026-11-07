@@ -38,7 +38,7 @@ jobs:
       # Temporary until github/gh-actions-lock#275 ships in a release.
       - name: Build action dependency verifier
         env:
-          VERIFIER_SHA: 39dd6b04a53288324a194d616f80c70477020131
+          VERIFIER_SHA: e0d3c10c3f75aa676c32d171b9bec3281703ab15
         run: |
           set -euo pipefail
           src="$RUNNER_TEMP/gh-actions-lock-275"
@@ -48,8 +48,6 @@ jobs:
           git -C "$src" fetch -q --depth=1 origin "$VERIFIER_SHA"
           git -C "$src" checkout -q FETCH_HEAD
           test "$(git -C "$src" rev-parse HEAD)" = "$VERIFIER_SHA"
-          # Temporary allowlisted diagnostics around the unchanged verifier logic.
-          git -C "$src" apply --unidiff-zero "$GITHUB_WORKSPACE/hack/gh-actions-lock-policy-diagnostic.patch"
           (cd "$src" && GOTOOLCHAIN=local go build -o "$RUNNER_TEMP/gh-actions-lock" ./cmd/gh-actions-lock)
 
       - name: Verify action dependencies
