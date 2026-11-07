@@ -124,12 +124,22 @@ DRA is a Kubernetes-level feature. Review the [Kubernetes DRA documentation](htt
 | Bootstrap pool name | `DEFAULT_NODEPOOL_TEMPLATE_NAME`   | `controller.settings.defaultNodePoolTemplateName`   | No       | Pin the GKE node pool used as the bootstrap metadata source. When set, Karpenter uses this pool exclusively. Leave empty to use automatic discovery (`default-pool` → first alphabetical RUNNING pool → `karpenter-fallback` creation). See [Bootstrap pool selection](bootstrap-pool.md). |
 | Default SA          | `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` | `controller.settings.defaultNodepoolServiceAccount` | No       | Default service account for provisioned nodes (see [Service account resolution](#service-account-resolution)).                                                                                                                                                                             |
 | Quota backoff       | `QUOTA_EXCEEDED_TTL`               | `controller.settings.quotaExceededTTL`              | No       | How long an instance type stays unavailable after a launch fails with `QUOTA_EXCEEDED` (default `30m`). Set to `0s` to disable (see [Quota exhaustion](#quota-exhaustion)).                                                                                                                |
+| Telemetry           | `TELEMETRY`                        | `controller.settings.telemetry`                     | No       | Send anonymized resource totals and Spot interruption events to CloudPilot AI (default `false`; see [Telemetry](#telemetry)).                                                                                                                                                              |
 
 ### Quota exhaustion
 
 When GCE rejects a launch because a project quota is exhausted (for example `N2_CPUS` or `NVIDIA_L4_GPUS`), Karpenter marks that instance type unavailable for the same capacity type in every zone of the region, because GCE enforces these quotas per region. Karpenter then tries the next instance type, and a Spot NodeClaim can fall back to on-demand. The offering becomes available again after `QUOTA_EXCEEDED_TTL`. Other instance types in the same machine family share the quota, so each is marked unavailable when its own launch fails.
 
 Setting `QUOTA_EXCEEDED_TTL=0s` restores the previous behavior: the failed launch still moves on to the next instance type, but nothing is marked unavailable and the next NodeClaim retries the same instance type.
+
+### Telemetry
+
+With `TELEMETRY=true`, the controller sends CloudPilot AI two kinds of reports, keyed by a hash of the cluster's `kube-system` namespace UID:
+
+- Once per controller start: resource totals with different scopes. CPU and memory capacity, and the list of instance types, cover only nodes Karpenter has initialized, so a cluster that also runs GKE-managed node pools reports less capacity than it has. CPU and memory requests cover every pod in the cluster, and usage covers every node the metrics API reports.
+- Every 10 seconds, when there are any: Spot interruption events, each with the node's region, zone, instance type and creation time.
+
+It sends nothing that names a pod, node or workload. Telemetry is off by default, and with it off the telemetry controller does not run.
 
 ### Service account resolution
 

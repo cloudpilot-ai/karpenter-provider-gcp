@@ -69,3 +69,36 @@ func TestQuotaExceededTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestTelemetry(t *testing.T) {
+	requiredArgs := []string{"--project-id=p", "--cluster-name=c", "--cluster-location=us-central1"}
+
+	tests := []struct {
+		name string
+		env  *string
+		args []string
+		want bool
+	}{
+		{name: "unset is off", want: false},
+		{name: "env true turns it on", env: ptr.To("true"), want: true},
+		{name: "env false keeps it off", env: ptr.To("false"), want: false},
+		{name: "flag turns it on", args: []string{"--telemetry"}, want: true},
+		{name: "flag takes precedence over env", env: ptr.To("true"), args: []string{"--telemetry=false"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(telemetryEnvVarName, "")
+			if tt.env != nil {
+				t.Setenv(telemetryEnvVarName, *tt.env)
+			} else {
+				require.NoError(t, os.Unsetenv(telemetryEnvVarName))
+			}
+
+			o := &Options{}
+			fs := &coreoptions.FlagSet{FlagSet: flag.NewFlagSet("test", flag.ContinueOnError)}
+			o.AddFlags(fs)
+			require.NoError(t, o.Parse(fs, append(requiredArgs, tt.args...)...))
+			require.Equal(t, tt.want, o.Telemetry)
+		})
+	}
+}
