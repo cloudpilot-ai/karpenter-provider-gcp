@@ -192,6 +192,10 @@ controller:
     # QUOTA_EXCEEDED (e.g. `1h`). Leave empty for the controller default of 30m; set to `0s`
     # to disable quota backoff. Corresponds to the QUOTA_EXCEEDED_TTL env var.
     quotaExceededTTL: ""
+    # -- Send anonymized cluster resource totals (CPU and memory capacity, requests and usage, and
+    # instance types) and Spot interruption events to CloudPilot AI. Off by default.
+    # Corresponds to the TELEMETRY env var.
+    telemetry: false
 
 # -- Optional node-problem-detector deployment that watches the GCE metadata server
 # for Spot preemption notices and sets the GCESpotPreempting node condition, which

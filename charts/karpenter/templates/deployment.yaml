@@ -140,6 +140,8 @@ spec:
             - name: QUOTA_EXCEEDED_TTL
               value: "{{ . }}"
             {{- end }}
+            - name: TELEMETRY
+              value: "{{ .Values.controller.settings.telemetry }}"
             - name: METRICS_PORT
               value: "{{ .Values.controller.metrics.port }}"
             - name: KARPENTER_SERVICE

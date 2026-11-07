@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+### Telemetry is off by default
+
+The controller no longer sends cluster resource totals and Spot interruption events to CloudPilot AI unless `TELEMETRY` is `true` (Helm: `controller.settings.telemetry`). To keep sending them, set it to `true`. See [Telemetry](docs/settings.md#telemetry).
+
 ### Instance types that hit GCE quota are skipped for 30 minutes
 
 A launch can fail because a GCE project quota, such as `N2_CPUS` or `NVIDIA_L4_GPUS`, is exhausted (`QUOTA_EXCEEDED`). Karpenter now marks that instance type unavailable for the same capacity type in every zone of the region for 30 minutes. New NodeClaims try other instance types instead of retrying the quota-blocked one. A Spot NodeClaim whose Spot attempts all fail for capacity or quota can fall back to on-demand. Previously, every new NodeClaim retried the same instance type.
