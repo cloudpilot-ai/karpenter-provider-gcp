@@ -1,6 +1,8 @@
 name: Security checks
 
 on:
+  push:
+    branches: [ "main" ]
   schedule:
     - cron: '45 6 * * *'
   workflow_dispatch: {}
@@ -98,10 +100,11 @@ jobs:
       - name: Generate complete SARIF report
         id: report
         run: trivy convert --format sarif --output reports/trivy.sarif reports/trivy.json
-      - name: Fail on fixable high or critical vulnerabilities
+      # govulncheck gates reachable Go vulnerabilities; retain all image findings above.
+      - name: Fail on fixable high or critical OS vulnerabilities
         if: steps.report.outcome == 'success'
         run: |
-          jq '[.Results[]?.Vulnerabilities[]? |
+          jq '[.Results[]? | select(.Class == "os-pkgs") | .Vulnerabilities[]? |
             select((.Severity == "HIGH" or .Severity == "CRITICAL") and ((.FixedVersion // "") != ""))]' \
             reports/trivy.json > reports/blocking-vulnerabilities.json
           jq -e 'length == 0' reports/blocking-vulnerabilities.json
