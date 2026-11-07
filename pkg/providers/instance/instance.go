@@ -62,14 +62,11 @@ import (
 )
 
 const (
-	maxInstanceTypes               = 20
-	maxNodeCIDR                    = 23
-	instanceCacheExpiration        = 15 * time.Second
-	zoneOperationPollInterval      = 1 * time.Second
-	defaultZoneOperationTimeout    = 2 * time.Minute
-	ipSpaceInsufficientCapacityTTL = 30 * time.Second
-	stockoutTTL                    = 5 * time.Minute
-	unsupportedConfigurationTTL    = 1 * time.Hour
+	maxInstanceTypes            = 20
+	maxNodeCIDR                 = 23
+	instanceCacheExpiration     = 15 * time.Second
+	zoneOperationPollInterval   = 1 * time.Second
+	defaultZoneOperationTimeout = 2 * time.Minute
 
 	instanceTerminationActionDelete = "DELETE"
 
@@ -356,16 +353,20 @@ func quotaExceededTTL(ctx context.Context) time.Duration {
 	return options.DefaultQuotaExceededTTL
 }
 
+// insufficientCapacityBackoffTTL returns how long the failed offering stays
+// unavailable. Options validation rejects non-positive values, so a zero value
+// only means the options were not populated and the default applies.
 func insufficientCapacityBackoffTTL(ctx context.Context, details insufficientCapacityDetails) time.Duration {
+	opts := lo.FromPtr(options.FromContext(ctx))
 	switch {
 	case isQuotaExceeded(details):
 		return quotaExceededTTL(ctx)
 	case isIPSpaceExhausted(details):
-		return ipSpaceInsufficientCapacityTTL
+		return lo.CoalesceOrEmpty(opts.IPSpaceExhaustedTTL, options.DefaultIPSpaceExhaustedTTL)
 	case isUnsupportedConfiguration(details):
-		return unsupportedConfigurationTTL
+		return lo.CoalesceOrEmpty(opts.UnsupportedConfigurationTTL, options.DefaultUnsupportedConfigurationTTL)
 	default:
-		return stockoutTTL
+		return lo.CoalesceOrEmpty(opts.StockoutTTL, options.DefaultStockoutTTL)
 	}
 }
 

@@ -142,6 +142,22 @@ spec:
             {{- end }}
             - name: TELEMETRY
               value: "{{ .Values.controller.settings.telemetry }}"
+            {{- with .Values.controller.settings.stockoutTTL }}
+            - name: STOCKOUT_TTL
+              value: "{{ . }}"
+            {{- end }}
+            {{- with .Values.controller.settings.ipSpaceExhaustedTTL }}
+            - name: IP_SPACE_EXHAUSTED_TTL
+              value: "{{ . }}"
+            {{- end }}
+            {{- with .Values.controller.settings.unsupportedConfigurationTTL }}
+            - name: UNSUPPORTED_CONFIGURATION_TTL
+              value: "{{ . }}"
+            {{- end }}
+            {{- with .Values.controller.settings.launchTimeout }}
+            - name: LAUNCH_TIMEOUT
+              value: "{{ . }}"
+            {{- end }}
             - name: METRICS_PORT
               value: "{{ .Values.controller.metrics.port }}"
             - name: KARPENTER_SERVICE
