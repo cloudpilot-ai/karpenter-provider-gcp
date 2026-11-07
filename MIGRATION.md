@@ -7,7 +7,7 @@
 
 ### Telemetry is off by default
 
-The controller no longer sends cluster resource totals and Spot interruption events to CloudPilot AI unless `TELEMETRY` is `true` (Helm: `controller.settings.telemetry`). To keep sending them, set it to `true`. See [Telemetry](docs/settings.md#telemetry).
+The controller no longer sends resource totals and Spot interruption events to CloudPilot AI unless `TELEMETRY` is `true` (Helm: `controller.settings.telemetry`). To keep sending them, set it to `true`. See [Telemetry](docs/settings.md#telemetry).
 
 ### Instance types that hit GCE quota are skipped for 30 minutes
 

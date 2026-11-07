@@ -444,7 +444,7 @@
             },
             "telemetry": {
               "type": "boolean",
-              "description": "Send anonymized cluster resource totals and Spot interruption events to CloudPilot AI.",
+              "description": "Send anonymized resource totals and Spot interruption events to CloudPilot AI. See docs/settings.md#telemetry for exactly what is sent.",
               "default": false
             }
           }

@@ -131,7 +131,7 @@ serviceMonitor:
 | controller.settings.projectID | string | `""` | The GCP project ID. |
 | controller.settings.quotaExceededTTL | string | `""` | How long an instance type stays unavailable in the region after a launch fails with QUOTA_EXCEEDED (e.g. `1h`). Leave empty for the controller default of 30m; set to `0s` to disable quota backoff. Corresponds to the QUOTA_EXCEEDED_TTL env var. |
 | controller.settings.schedulerConfig | object | `{}` | Optional kube-scheduler behavior to mirror during scheduling simulations. Supports podTopologySpread.defaultConstraints; leave empty unless matching a known cluster scheduler configuration. |
-| controller.settings.telemetry | bool | `false` | Send anonymized cluster resource totals (CPU and memory capacity, requests and usage, and instance types) and Spot interruption events to CloudPilot AI. Off by default. Corresponds to the TELEMETRY env var. |
+| controller.settings.telemetry | bool | `false` | Send anonymized resource totals and Spot interruption events to CloudPilot AI. Off by default. See docs/settings.md#telemetry for exactly what is sent. Corresponds to the TELEMETRY env var. |
 | controller.settings.vmMemoryOverheadPercent | float | `0.065` | The VM memory overhead as a percent that will be subtracted from the total memory for all instance types. The value of `0.075` equals to 7.5%. |
 | controller.strategy.rollingUpdate.maxUnavailable | int | `1` |  |
 | controller.terminationGracePeriodSeconds | int | `30` |  |
