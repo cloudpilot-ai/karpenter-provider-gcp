@@ -1233,9 +1233,10 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	patchSecondaryBootDisksKubeEnv(target, nodeClass)
 	patchHugepagesKubeEnv(target, nodeClass)
 	patchGPUSharingKubeEnv(target, nodeClass, isGPUInstance)
+	target.UnsetKubeletFeatureGate("GracefulNodeShutdown")
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)
-		applySpotShutdownKubeletConfig(config, provisioningModel)
+		applyShutdownKubeletDefaults(config, provisioningModel)
 		applyNodeClassKubeletConfig(config, nodeClass.Spec.KubeletConfiguration)
 	})
 	if err := p.patchKubeEnvServerBinaryForArch(ctx, target, instanceType); err != nil {

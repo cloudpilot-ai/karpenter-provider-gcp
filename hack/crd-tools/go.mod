@@ -5,6 +5,14 @@ go 1.27.4
 tool sigs.k8s.io/kubectl-validate
 
 require (
+	github.com/stretchr/testify v1.11.1
+	k8s.io/apiextensions-apiserver v0.30.1
+	k8s.io/apimachinery v0.30.1
+	k8s.io/apiserver v0.30.1
+	sigs.k8s.io/yaml v1.4.0
+)
+
+require (
 	github.com/NYTimes/gziphandler v1.1.1 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr/v4 v4.0.0-20230305170008-8188dc5388df // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
@@ -44,6 +52,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.16.0 // indirect
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
@@ -83,9 +92,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.30.1 // indirect
-	k8s.io/apiextensions-apiserver v0.30.1 // indirect
-	k8s.io/apimachinery v0.30.1 // indirect
-	k8s.io/apiserver v0.30.1 // indirect
 	k8s.io/client-go v0.30.1 // indirect
 	k8s.io/component-base v0.30.1 // indirect
 	k8s.io/klog/v2 v2.120.1 // indirect
@@ -95,5 +101,4 @@ require (
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/kubectl-validate v0.0.4 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.7.0 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
 )

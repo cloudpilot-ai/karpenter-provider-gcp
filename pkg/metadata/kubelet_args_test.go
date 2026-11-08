@@ -34,6 +34,26 @@ func TestParseSourceKubeletArgsDropsTargetOwnedFields(t *testing.T) {
 	require.NotContains(t, args.String(), "--register-with-taints=")
 }
 
+func TestUnsetKubeletFeatureGate(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, want string
+	}{
+		{name: "mixed gates", source: "--v=2 --feature-gates=GracefulNodeShutdown=false,NodeSwap=true --experimental-flag=value", want: "--v=2 --feature-gates=NodeSwap=true --experimental-flag=value"},
+		{name: "sole gate", source: "--feature-gates=GracefulNodeShutdown=true --v=2", want: "--v=2"},
+		{name: "separate value and repeated flags", source: "--feature-gates GracefulNodeShutdown=false --feature-gates=NodeSwap=true,GracefulNodeShutdown=true", want: "--feature-gates=NodeSwap=true"},
+		{name: "unrelated gates", source: "--feature-gates=GracefulNodeShutdownBasedOnPodPriority=true,NodeSwap=false", want: "--feature-gates=GracefulNodeShutdownBasedOnPodPriority=true,NodeSwap=false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metadata := InstanceMetadata{}
+			metadata.kubeEnv.kubeletArgs = ParseSourceKubeletArgs(tc.source)
+
+			metadata.UnsetKubeletFeatureGate("GracefulNodeShutdown")
+
+			require.Equal(t, tc.want, metadata.kubeEnv.kubeletArgs.String())
+		})
+	}
+}
+
 func TestKubeletArgsStringRendersBootstrapFlags(t *testing.T) {
 	maxPods := int32(32)
 	args := KubeletArgs{

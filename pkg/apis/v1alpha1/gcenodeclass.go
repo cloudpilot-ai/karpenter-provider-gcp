@@ -428,20 +428,21 @@ type KubeletConfiguration struct {
 	MemorySwap *MemorySwapConfiguration `json:"memorySwap,omitempty"`
 	// ShutdownGracePeriod is how long the node delays its shutdown so that pods
 	// can terminate, for example when GCE stops or deletes the VM. It turns on
-	// graceful node shutdown. Spot nodes default to 30s; on-demand nodes keep
-	// the source node pool's value.
+	// graceful node shutdown. Spot nodes default to 30s; on-demand nodes default
+	// to 0s. Source node pool shutdown settings are not inherited.
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$`
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('0s')",message="must be a non-negative duration within Go's supported range"
 	ShutdownGracePeriod *metav1.Duration `json:"shutdownGracePeriod,omitempty"`
 	// ShutdownGracePeriodCriticalPods is the part of shutdownGracePeriod
 	// reserved for critical pods, which terminate after all other pods.
-	// Spot nodes default to 15s; on-demand nodes keep the source node pool's
-	// value. When only shutdownGracePeriod is set, a default or source value
-	// larger than it is lowered to shutdownGracePeriod.
+	// Spot nodes default to 15s; on-demand nodes default to 0s. When only
+	// shutdownGracePeriod is set, a larger Spot default is lowered to it.
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$`
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('0s')",message="must be a non-negative duration within Go's supported range"
 	ShutdownGracePeriodCriticalPods *metav1.Duration `json:"shutdownGracePeriodCriticalPods,omitempty"`
 }
 

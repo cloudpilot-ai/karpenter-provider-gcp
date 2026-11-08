@@ -193,7 +193,13 @@ func applyInstanceTypeKubeReserved(config *kubeletconfig.KubeletConfiguration, i
 	})
 }
 
-func applySpotShutdownKubeletConfig(config *kubeletconfig.KubeletConfiguration, provisioningModel string) {
+// applyShutdownKubeletDefaults replaces source-pool shutdown policy with provider
+// defaults. NodeClass settings are applied afterward.
+func applyShutdownKubeletDefaults(config *kubeletconfig.KubeletConfiguration, provisioningModel string) {
+	config.ShutdownGracePeriod = metav1.Duration{}
+	config.ShutdownGracePeriodCriticalPods = metav1.Duration{}
+	config.ShutdownGracePeriodByPodPriority = nil
+	delete(config.FeatureGates, "GracefulNodeShutdown")
 	if provisioningModel != karpv1.CapacityTypeSpot {
 		return
 	}
@@ -273,8 +279,8 @@ func applyNodeClassShutdownKubeletConfig(config *kubeletconfig.KubeletConfigurat
 		config.ShutdownGracePeriodCriticalPods = *overlay.ShutdownGracePeriodCriticalPods
 	}
 	// The kubelet does not start when the critical-pods period exceeds the
-	// total. The CRD keeps an explicit pair valid; a Spot default or source
-	// template value left in place by a shorter shutdownGracePeriod is lowered.
+	// total. The CRD keeps an explicit pair valid; a Spot default left in place
+	// by a shorter shutdownGracePeriod is lowered.
 	if config.ShutdownGracePeriodCriticalPods.Duration > config.ShutdownGracePeriod.Duration {
 		config.ShutdownGracePeriodCriticalPods = config.ShutdownGracePeriod
 	}

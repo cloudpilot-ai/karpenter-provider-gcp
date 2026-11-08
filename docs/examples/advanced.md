@@ -193,9 +193,11 @@ kubeletConfiguration:
 - `shutdownGracePeriod` — how long the node delays its shutdown for pods to terminate; setting it turns on graceful node shutdown
 - `shutdownGracePeriodCriticalPods` — the part of `shutdownGracePeriod` reserved for critical pods, which terminate last
 
-Spot nodes default to `30s` and `15s`. On-demand nodes keep the values in the kubelet configuration of the GKE node pool that Karpenter uses as its bootstrap template, and have no graceful shutdown when that pool has none. GKE enables it on some machine types and not others, so the result depends on which pool is the template. Set both fields to make every node the same.
+Spot nodes default to `30s` total and `15s` for critical pods, matching [GKE Spot defaults](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/spot-vms). On-demand nodes default to `0s` for both fields (graceful node shutdown disabled), matching the upstream kubelet defaults and verified GKE 1.35 on-demand behavior. This is a fixed provider policy, not a guarantee that every GKE version and machine family uses the same defaults.
 
-Values in the GCENodeClass replace the Spot defaults and the template's values. When only `shutdownGracePeriod` is set, a default or template value of `shutdownGracePeriodCriticalPods` that is larger is lowered to `shutdownGracePeriod`. Both fields take a Go duration such as `30s` or `1m30s`.
+Source node pool shutdown settings, including priority-based shutdown periods, are never inherited. Values in the GCENodeClass replace the provider defaults. When only `shutdownGracePeriod` is set on Spot, a larger default `shutdownGracePeriodCriticalPods` is lowered to it; on-demand keeps the critical-pods period at `0s` unless explicitly configured. Both fields take a non-negative Go duration such as `30s` or `1m30s`, within Go's supported duration range.
+
+These settings do not extend the underlying VM's shutdown deadline. In particular, increasing a Spot kubelet grace period does not by itself enable GKE's extended Spot termination window. Normal Karpenter node draining is separate from kubelet handling of OS shutdown.
 
 > **Note:** `shutdownGracePeriodCriticalPods` requires `shutdownGracePeriod` and must not exceed it, because the kubelet does not start otherwise.
 

@@ -83,6 +83,35 @@ func (m *InstanceMetadata) SetKubeletMaxPods(maxPods int32) {
 	m.kubeEnv.kubeletArgs.maxPods = &maxPods
 }
 
+// UnsetKubeletFeatureGate removes a CLI feature-gate override without changing
+// unrelated gates or flags. Provider policy selects which overrides to remove.
+func (m *InstanceMetadata) UnsetKubeletFeatureGate(name string) {
+	if m == nil {
+		return
+	}
+	other := m.kubeEnv.kubeletArgs.other
+	var filtered []string
+	for i := 0; i < len(other); i++ {
+		value, found := strings.CutPrefix(other[i], "--feature-gates=")
+		if other[i] == "--feature-gates" && i+1 < len(other) {
+			i++
+			value, found = other[i], true
+		}
+		if !found {
+			filtered = append(filtered, other[i])
+			continue
+		}
+		gates := slices.DeleteFunc(strings.Split(value, ","), func(gate string) bool {
+			key, _, _ := strings.Cut(gate, "=")
+			return key == name
+		})
+		if len(gates) != 0 {
+			filtered = append(filtered, "--feature-gates="+strings.Join(gates, ","))
+		}
+	}
+	m.kubeEnv.kubeletArgs.other = filtered
+}
+
 // SetNodeTaints replaces the node taints this metadata model will render when
 // the instance registers as a Kubernetes node.
 func (m *InstanceMetadata) SetNodeTaints(taints Taints) {

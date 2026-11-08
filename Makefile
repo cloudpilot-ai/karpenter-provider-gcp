@@ -67,6 +67,7 @@ chart-lint: chart-deps ## Lint the Helm charts (validates values.schema.json and
 # CRD admission validation uses embedded Kubernetes libraries; an empty version skips GitHub schema discovery.
 # Remove nojsonv2 once kubectl-validate no longer uses its legacy vendored JSON implementation.
 verify-crds: ## Validate generated CRDs with Kubernetes API server validation logic
+	cd hack/crd-tools && GOEXPERIMENT=nojsonv2 go test ./...
 	@tmpdir=$$(mktemp -d); \
 	trap 'rm -rf "$$tmpdir"' EXIT; \
 	helm template karpenter-crd charts/karpenter-crd --include-crds > "$$tmpdir/karpenter-crd.yaml"; \
