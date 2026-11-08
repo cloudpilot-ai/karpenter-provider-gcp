@@ -36,6 +36,7 @@ type GCENodeClassSpec struct {
 	ServiceAccount string `json:"serviceAccount,omitempty"`
 	// Disk defines the disks to attach to the provisioned instance.
 	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:XValidation:message="deviceName must be unique across disks",rule="self.all(d, !has(d.deviceName) || self.filter(e, has(e.deviceName) && e.deviceName == d.deviceName).size() == 1)"
 	// +optional
 	Disks []Disk `json:"disks,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
@@ -440,6 +441,7 @@ type MemorySwapConfiguration struct {
 // +kubebuilder:validation:XValidation:message="provisionedIOPS is only applicable for pd-extreme, hyperdisk-balanced, hyperdisk-balanced-high-availability, and hyperdisk-extreme",rule="!has(self.provisionedIOPS) || self.category in ['pd-extreme', 'hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-extreme']"
 // +kubebuilder:validation:XValidation:message="provisionedThroughput is only applicable for hyperdisk-balanced, hyperdisk-balanced-high-availability, hyperdisk-throughput, and hyperdisk-ml",rule="!has(self.provisionedThroughput) || self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-throughput', 'hyperdisk-ml']"
 // +kubebuilder:validation:XValidation:message="provisionedIOPS and provisionedThroughput must both be set or both be unset for hyperdisk-balanced and hyperdisk-balanced-high-availability",rule="!(self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability']) || (has(self.provisionedIOPS) == has(self.provisionedThroughput))"
+// +kubebuilder:validation:XValidation:message="deviceName is only supported on a data disk, not the boot disk or a secondary boot disk",rule="!has(self.deviceName) || (!(has(self.boot) && self.boot) && !has(self.secondaryBootImage))"
 type Disk struct {
 	// SizeGiB is the size of the disk. Unit: GiB
 	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 10"
@@ -454,6 +456,17 @@ type Disk struct {
 	// SecondaryBootImage is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME).
 	// +optional
 	SecondaryBootImage string `json:"secondaryBootImage,omitempty"`
+	// DeviceName is the device name of a data disk: the guest sees the disk as
+	// /dev/disk/by-id/google-<deviceName>, so node bootstrap can find it by a
+	// fixed path. Not supported on the boot disk or a secondary boot disk,
+	// whose device names the provider sets. Prefixes that GCE or GKE assign
+	// themselves are reserved.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:message="deviceName must not start with persistent-disk-, local-ssd- or gke-, which GCE and GKE assign",rule="!self.startsWith('persistent-disk-') && !self.startsWith('local-ssd-') && !self.startsWith('gke-')"
+	// +optional
+	DeviceName string `json:"deviceName,omitempty"`
 	// SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE).
 	// +optional
 	SecondaryBootMode SecondaryBootDiskMode `json:"secondaryBootMode,omitempty"`

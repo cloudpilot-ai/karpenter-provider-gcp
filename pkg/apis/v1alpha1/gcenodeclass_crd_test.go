@@ -259,3 +259,25 @@ func TestGCENodeClassCRDSwapBehaviorEnum(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"NoSwap", "LimitedSwap"}, values)
 }
+
+func TestGCENodeClassCRDDiskDeviceName(t *testing.T) {
+	disks := specSchema(t).Properties["disks"]
+	field := disks.Items.Schema.Properties["deviceName"]
+	require.Equal(t, `^[a-z]([-a-z0-9]*[a-z0-9])?$`, field.Pattern)
+	require.NotNil(t, field.MaxLength)
+	require.Equal(t, int64(63), *field.MaxLength)
+
+	var reserved, dataOnly, unique bool
+	for _, v := range field.XValidations {
+		reserved = reserved || v.Message == "deviceName must not start with persistent-disk-, local-ssd- or gke-, which GCE and GKE assign"
+	}
+	for _, v := range disks.Items.Schema.XValidations {
+		dataOnly = dataOnly || v.Message == "deviceName is only supported on a data disk, not the boot disk or a secondary boot disk"
+	}
+	for _, v := range disks.XValidations {
+		unique = unique || v.Message == "deviceName must be unique across disks"
+	}
+	require.True(t, reserved, "GCE assigns persistent-disk-N and local-ssd-N, and the provider names secondary boot disks gke-<image>-disk")
+	require.True(t, dataOnly, "the provider sets the boot and secondary boot disks' device names itself")
+	require.True(t, unique, "GCE rejects an instance whose disks share a device name")
+}

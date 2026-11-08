@@ -965,15 +965,8 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 			attachedDisk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
 		}
 
-		if disk.Boot {
-			targetImage, found := imagefamily.FindImage(nodeClass.Status.Images, instanceType.Requirements)
-			if !found {
-				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
-			}
-			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
-		} else {
-			attachedDisk.DeviceName = secondaryBootDiskImageDeviceName(disk.SecondaryBootImage)
-			attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
+		if err := setDiskSource(attachedDisk, disk, nodeClass, instanceType); err != nil {
+			return nil, err
 		}
 
 		// Add disk encryption key if specified
@@ -989,6 +982,27 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 
 	attachedDisks = append(attachedDisks, p.localSSDDisks(instanceType.Name, zone, ssdCount)...)
 	return attachedDisks, nil
+}
+
+// setDiskSource sets the image and device name of one attached disk: the node
+// image on the boot disk, the cache image on a secondary boot disk, and the
+// configured device name on a blank data disk.
+func setDiskSource(attachedDisk *compute.AttachedDisk, disk v1alpha1.Disk, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) error {
+	switch {
+	case disk.Boot:
+		targetImage, found := imagefamily.FindImage(nodeClass.Status.Images, instanceType.Requirements)
+		if !found {
+			return fmt.Errorf("no target image found for node class %s", nodeClass.Name)
+		}
+		attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+	case disk.DeviceName != "":
+		// The CRD allows deviceName only on a data disk, which has no source image.
+		attachedDisk.DeviceName = disk.DeviceName
+	default:
+		attachedDisk.DeviceName = secondaryBootDiskImageDeviceName(disk.SecondaryBootImage)
+		attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
+	}
+	return nil
 }
 
 func (p *DefaultProvider) localSSDDisks(instanceType, zone string, count int) []*compute.AttachedDisk {
