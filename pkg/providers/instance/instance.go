@@ -1041,6 +1041,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
+	patchGCFSDCacheSizeKubeEnv(instanceMetadata, int64(mt.GetMemoryMb()))
 	interfaces, err := p.setupPodNetwork(clusterConfig, nodeClass, instanceMetadata, podRange)
 	if err != nil {
 		return nil, err
