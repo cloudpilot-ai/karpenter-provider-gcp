@@ -96,10 +96,8 @@ jobs:
         id: scan
         # A stable input path keeps SARIF locations consistent across runs.
         working-directory: ${{ runner.temp }}
-        env:
-          GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
         run: |
-          "$GRYPE_CMD" docker-archive:controller.tar \
+          "${{ steps.grype.outputs.cmd }}" docker-archive:controller.tar \
             --output "json=$GITHUB_WORKSPACE/reports/grype.json" \
             --output "sarif=$GITHUB_WORKSPACE/reports/grype.sarif"
       # govulncheck gates reachable Go vulnerabilities; retain all image findings above.
