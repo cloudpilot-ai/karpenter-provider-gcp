@@ -36,6 +36,7 @@ type GCENodeClassSpec struct {
 	ServiceAccount string `json:"serviceAccount,omitempty"`
 	// Disk defines the disks to attach to the provisioned instance.
 	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:XValidation:message="deviceName must be unique across disks",rule="self.all(d, !has(d.deviceName) || self.filter(e, has(e.deviceName) && e.deviceName == d.deviceName).size() == 1)"
 	// +optional
 	Disks []Disk `json:"disks,omitempty"`
 	// ImageSelectorTerms is a list of or image selector terms. The terms are ORed.
@@ -330,6 +331,7 @@ type KubeletQuantity string
 // https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
 // +kubebuilder:validation:XValidation:message="maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false",rule="!has(self.maxParallelImagePulls) || self.maxParallelImagePulls < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls == false)"
 // +kubebuilder:validation:XValidation:message="memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false",rule="!has(self.memorySwap) || !has(self.memorySwap.swapBehavior) || self.memorySwap.swapBehavior != 'LimitedSwap' || (has(self.failSwapOn) && self.failSwapOn == false)"
+// +kubebuilder:validation:XValidation:message="shutdownGracePeriodCriticalPods requires shutdownGracePeriod and must not exceed it",rule="!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod) && duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))"
 type KubeletConfiguration struct {
 	// clusterDNS is a list of IP addresses for the cluster DNS server.
 	// Note that not all providers may use all addresses.
@@ -424,6 +426,24 @@ type KubeletConfiguration struct {
 	// file is up to the node image or a DaemonSet.
 	// +optional
 	MemorySwap *MemorySwapConfiguration `json:"memorySwap,omitempty"`
+	// ShutdownGracePeriod is how long the node delays its shutdown so that pods
+	// can terminate, for example when GCE stops or deletes the VM. It turns on
+	// graceful node shutdown. Spot nodes default to 30s; on-demand nodes default
+	// to 0s. Source node pool shutdown settings are not inherited.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('0s')",message="must be a non-negative duration within Go's supported range"
+	ShutdownGracePeriod *metav1.Duration `json:"shutdownGracePeriod,omitempty"`
+	// ShutdownGracePeriodCriticalPods is the part of shutdownGracePeriod
+	// reserved for critical pods, which terminate after all other pods.
+	// Spot nodes default to 15s; on-demand nodes default to 0s. When only
+	// shutdownGracePeriod is set, a larger Spot default is lowered to it.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('0s')",message="must be a non-negative duration within Go's supported range"
+	ShutdownGracePeriodCriticalPods *metav1.Duration `json:"shutdownGracePeriodCriticalPods,omitempty"`
 }
 
 // MemorySwapConfiguration configures swap memory available to container workloads.
@@ -440,6 +460,7 @@ type MemorySwapConfiguration struct {
 // +kubebuilder:validation:XValidation:message="provisionedIOPS is only applicable for pd-extreme, hyperdisk-balanced, hyperdisk-balanced-high-availability, and hyperdisk-extreme",rule="!has(self.provisionedIOPS) || self.category in ['pd-extreme', 'hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-extreme']"
 // +kubebuilder:validation:XValidation:message="provisionedThroughput is only applicable for hyperdisk-balanced, hyperdisk-balanced-high-availability, hyperdisk-throughput, and hyperdisk-ml",rule="!has(self.provisionedThroughput) || self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability', 'hyperdisk-throughput', 'hyperdisk-ml']"
 // +kubebuilder:validation:XValidation:message="provisionedIOPS and provisionedThroughput must both be set or both be unset for hyperdisk-balanced and hyperdisk-balanced-high-availability",rule="!(self.category in ['hyperdisk-balanced', 'hyperdisk-balanced-high-availability']) || (has(self.provisionedIOPS) == has(self.provisionedThroughput))"
+// +kubebuilder:validation:XValidation:message="deviceName is only supported on a data disk, not the boot disk or a secondary boot disk",rule="!has(self.deviceName) || (!(has(self.boot) && self.boot) && !has(self.secondaryBootImage))"
 type Disk struct {
 	// SizeGiB is the size of the disk. Unit: GiB
 	// +kubebuilder:validation:XValidation:message="size invalid",rule="self >= 10"
@@ -454,6 +475,17 @@ type Disk struct {
 	// SecondaryBootImage is the secondary boot disk image name (e.g. global/images/DISK_IMAGE_NAME).
 	// +optional
 	SecondaryBootImage string `json:"secondaryBootImage,omitempty"`
+	// DeviceName is the device name of a data disk: the guest sees the disk as
+	// /dev/disk/by-id/google-<deviceName>, so node bootstrap can find it by a
+	// fixed path. Not supported on the boot disk or a secondary boot disk,
+	// whose device names the provider sets. Prefixes that GCE or GKE assign
+	// themselves are reserved.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:message="deviceName must not start with persistent-disk-, local-ssd- or gke-, which GCE and GKE assign",rule="!self.startsWith('persistent-disk-') && !self.startsWith('local-ssd-') && !self.startsWith('gke-')"
+	// +optional
+	DeviceName string `json:"deviceName,omitempty"`
 	// SecondaryBootMode is the secondary boot disk mode (e.g. CONTAINER_IMAGE_CACHE).
 	// +optional
 	SecondaryBootMode SecondaryBootDiskMode `json:"secondaryBootMode,omitempty"`

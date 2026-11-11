@@ -232,14 +232,14 @@ func TestInsufficientCapacityBackoffTTL(t *testing.T) {
 		wantTTL    time.Duration
 		wantStatus string
 	}{
-		{"stockout without reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED"}, stockoutTTL, unavailable},
-		{"stockout with resource reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "resource_availability"}, stockoutTTL, unavailable},
-		{"stockout with unknown reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "some_new_reason"}, stockoutTTL, unavailable},
-		{"configuration availability", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "configuration_availability"}, unsupportedConfigurationTTL, unsupported},
-		{"machine type unsupported", insufficientCapacityDetails{code: "MACHINE_TYPE_UNSUPPORTED", structuredReason: "MACHINE_TYPE_UNSUPPORTED"}, unsupportedConfigurationTTL, unsupported},
-		{"ip space exhausted", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED"}, ipSpaceInsufficientCapacityTTL, unavailable},
-		{"ip space exhausted with details", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}, ipSpaceInsufficientCapacityTTL, unavailable},
-		{"ip space exhausted with configuration reason", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS", structuredReason: "configuration_availability"}, ipSpaceInsufficientCapacityTTL, unavailable},
+		{"stockout without reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED"}, options.DefaultStockoutTTL, unavailable},
+		{"stockout with resource reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "resource_availability"}, options.DefaultStockoutTTL, unavailable},
+		{"stockout with unknown reason", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "some_new_reason"}, options.DefaultStockoutTTL, unavailable},
+		{"configuration availability", insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS", structuredReason: "configuration_availability"}, options.DefaultUnsupportedConfigurationTTL, unsupported},
+		{"machine type unsupported", insufficientCapacityDetails{code: "MACHINE_TYPE_UNSUPPORTED", structuredReason: "MACHINE_TYPE_UNSUPPORTED"}, options.DefaultUnsupportedConfigurationTTL, unsupported},
+		{"ip space exhausted", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED"}, options.DefaultIPSpaceExhaustedTTL, unavailable},
+		{"ip space exhausted with details", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS"}, options.DefaultIPSpaceExhaustedTTL, unavailable},
+		{"ip space exhausted with configuration reason", insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED_WITH_DETAILS", structuredReason: "configuration_availability"}, options.DefaultIPSpaceExhaustedTTL, unavailable},
 		{"quota exceeded", insufficientCapacityDetails{code: "QUOTA_EXCEEDED"}, options.DefaultQuotaExceededTTL, quota},
 	}
 	for _, tt := range tests {
@@ -283,7 +283,7 @@ func TestHandleZoneOperationErrorUnsupportedConfiguration(t *testing.T) {
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.ErrorContains(t, err, "n2-standard-4 on-demand/us-east4-a unsupported configuration 1h0m0s")
 	require.ErrorContains(t, err, "reason=configuration_availability")
-	requireStoredTTL(t, c, "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, unsupportedConfigurationTTL)
+	requireStoredTTL(t, c, "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, options.DefaultUnsupportedConfigurationTTL)
 }
 
 // A capacity error returned synchronously by Insert is classified by code:
@@ -296,9 +296,9 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 		wantTTL       time.Duration
 		wantRetryable bool
 	}{
-		{"ZONE_RESOURCE_POOL_EXHAUSTED", stockoutTTL, true},
-		{"MACHINE_TYPE_UNSUPPORTED", unsupportedConfigurationTTL, true},
-		{"IP_SPACE_EXHAUSTED", ipSpaceInsufficientCapacityTTL, false},
+		{"ZONE_RESOURCE_POOL_EXHAUSTED", options.DefaultStockoutTTL, true},
+		{"MACHINE_TYPE_UNSUPPORTED", options.DefaultUnsupportedConfigurationTTL, true},
+		{"IP_SPACE_EXHAUSTED", options.DefaultIPSpaceExhaustedTTL, false},
 		{"quotaExceeded", options.DefaultQuotaExceededTTL, true},
 	}
 	for _, tt := range tests {
@@ -1062,6 +1062,34 @@ func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	require.Len(t, disks, 1)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedIops)
 	require.Zero(t, disks[0].InitializeParams.ProvisionedThroughput)
+}
+
+func TestRenderDiskProperties_DeviceName(t *testing.T) {
+	t.Parallel()
+
+	p := &DefaultProvider{projectID: "my-project"}
+	nodeClass := bootDiskNodeClass("hyperdisk-balanced", nil, nil)
+	nodeClass.Spec.Disks = append(nodeClass.Spec.Disks,
+		v1alpha1.Disk{SizeGiB: 3072, Category: "hyperdisk-balanced", DeviceName: "e2b-data"},
+		v1alpha1.Disk{SizeGiB: 20, Category: "pd-ssd"},
+		v1alpha1.Disk{SecondaryBootImage: "projects/project-a/global/images/cache-image", SecondaryBootMode: "CONTAINER_IMAGE_CACHE"},
+	)
+
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0)
+	require.NoError(t, err)
+	require.Len(t, disks, 4)
+
+	require.True(t, disks[0].Boot)
+	require.Empty(t, disks[0].DeviceName, "GCE names the boot disk")
+
+	require.Equal(t, "e2b-data", disks[1].DeviceName)
+	require.Empty(t, disks[1].InitializeParams.SourceImage, "a named data disk is blank")
+	require.Equal(t, int64(3072), disks[1].InitializeParams.DiskSizeGb)
+
+	require.Equal(t, "gke--disk", disks[2].DeviceName, "an unnamed data disk keeps the name it had before deviceName existed")
+
+	require.Equal(t, "gke-cache-image-disk", disks[3].DeviceName)
+	require.Equal(t, "projects/project-a/global/images/cache-image", disks[3].InitializeParams.SourceImage)
 }
 
 func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
@@ -1862,7 +1890,7 @@ func TestCreate_FallsBackToOnDemandAfterSpotStockout(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, karpv1.CapacityTypeOnDemand, instance.CapacityType)
 	require.Equal(t, []string{"n2-standard-4/spot", "n2-standard-4/on-demand"}, inserts())
-	requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot, stockoutTTL)
+	requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot, options.DefaultStockoutTTL)
 }
 
 func TestCreate_FallbackOrdersInstanceTypesByOnDemandPrice(t *testing.T) {
@@ -3555,3 +3583,18 @@ func TestPatchLocalSSDMetadata(t *testing.T) {
 }
 
 func (*fakeGKEProvider) InvalidateClusterConfig() {}
+
+func TestInsufficientCapacityBackoffTTLUsesOptions(t *testing.T) {
+	t.Parallel()
+
+	ctx := options.ToContext(context.Background(), &options.Options{
+		StockoutTTL:                 2 * time.Minute,
+		IPSpaceExhaustedTTL:         10 * time.Second,
+		UnsupportedConfigurationTTL: 3 * time.Hour,
+		QuotaExceededTTL:            time.Hour,
+	})
+	require.Equal(t, 2*time.Minute, insufficientCapacityBackoffTTL(ctx, insufficientCapacityDetails{code: "ZONE_RESOURCE_POOL_EXHAUSTED"}))
+	require.Equal(t, 10*time.Second, insufficientCapacityBackoffTTL(ctx, insufficientCapacityDetails{code: "IP_SPACE_EXHAUSTED"}))
+	require.Equal(t, 3*time.Hour, insufficientCapacityBackoffTTL(ctx, insufficientCapacityDetails{code: "MACHINE_TYPE_UNSUPPORTED"}))
+	require.Equal(t, time.Hour, insufficientCapacityBackoffTTL(ctx, insufficientCapacityDetails{code: "QUOTA_EXCEEDED"}))
+}

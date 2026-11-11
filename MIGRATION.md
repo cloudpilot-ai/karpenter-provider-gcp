@@ -11,6 +11,21 @@ Previously, when the GKE node pool that Karpenter uses as its bootstrap template
 
 **Action required** if your Karpenter nodes rely on swap from that node pool: when you upgrade, set `spec.linuxNodeConfig.swap` with a `bootDiskProfile`, and set `kubeletConfiguration.failSwapOn: false`. Otherwise, new nodes boot without swap. GCENodeClass supports only the boot disk swap profile; Local SSD swap and zswap aren't available. See [Swap](docs/examples/advanced.md#swap).
 
+### On-demand shutdown settings no longer depend on the source pool
+
+New on-demand nodes use `0s` for both kubelet shutdown grace periods instead of inheriting shutdown settings from the bootstrap source node pool. Priority-based shutdown periods from the source are also discarded. Spot defaults remain `30s` total and `15s` for critical pods.
+
+If you relied on source-pool graceful shutdown, set the desired values explicitly on each affected GCENodeClass before provisioning replacement nodes:
+
+```yaml
+spec:
+  kubeletConfiguration:
+    shutdownGracePeriod: 30s
+    shutdownGracePeriodCriticalPods: 15s
+```
+
+This changes newly provisioned nodes only; existing nodes are not reconfigured in place. Changing NodeClass settings can trigger normal drift replacement. No hash-version bump or forced rollout is introduced for the default-policy change. See [Graceful node shutdown](docs/examples/advanced.md#graceful-node-shutdown).
+
 ### Telemetry is off by default
 
 The controller no longer sends resource totals and Spot interruption events to CloudPilot AI unless `TELEMETRY` is `true` (Helm: `controller.settings.telemetry`). To keep sending them, set it to `true`. See [Telemetry](docs/settings.md#telemetry).

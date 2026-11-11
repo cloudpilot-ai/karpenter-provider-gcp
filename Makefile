@@ -106,7 +106,7 @@ delete: ## Delete the controller from your kubeconfig cluster
 	helm uninstall karpenter --namespace ${KARPENTER_NAMESPACE}
 	kubectl delete ns ${KARPENTER_NAMESPACE}
 
-# Resolve the pinned scanner from the existing tools module, then analyze this module.
+# Keep recursive expansion: resolve the pinned scanner only when vulncheck runs.
 GOVULNCHECK = $(shell cd hack/tools && GOOS= GOARCH= go tool -n govulncheck)
 VULNCHECK_FLAGS ?=
 vulncheck: ## Check reachable controller and unit-test vulnerabilities

@@ -19,6 +19,7 @@ package instance
 import (
 	"fmt"
 	"maps"
+	"math"
 	"strings"
 	"time"
 
@@ -111,6 +112,57 @@ func patchHugepagesKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha
 	}
 }
 
+// gcfsdCacheTiers are the image streaming memory reservation tiers GKE
+// documents, in basis points of each band of node memory:
+// https://cloud.google.com/kubernetes-engine/docs/how-to/image-streaming
+var gcfsdCacheTiers = []struct {
+	bandMiB     int64
+	basisPoints int64
+}{
+	{bandMiB: 4 * 1024, basisPoints: 100},
+	{bandMiB: 4 * 1024, basisPoints: 80},
+	{bandMiB: 8 * 1024, basisPoints: 40},
+	{bandMiB: 112 * 1024, basisPoints: 24},
+	{bandMiB: math.MaxInt64, basisPoints: 8},
+}
+
+// gcfsdCacheSizeMiB returns the GCFSD_CACHE_SIZE_MIB that GKE writes for a
+// machine with memoryMiB of memory: the documented image streaming
+// reservation, rounded to MiB, less 2 MiB. The 2 MiB is not documented; it
+// matches every GKE 1.37 node pool template checked (8 to 64 GiB machines).
+func gcfsdCacheSizeMiB(memoryMiB int64) int64 {
+	if memoryMiB < 1024 {
+		return 0
+	}
+	var total, left int64 = 0, memoryMiB
+	for _, tier := range gcfsdCacheTiers {
+		band := min(left, tier.bandMiB)
+		total += band * tier.basisPoints
+		left -= band
+		if left == 0 {
+			break
+		}
+	}
+	return max((total+5000)/10000-2, 0)
+}
+
+// patchGCFSDCacheSizeKubeEnv sizes the image streaming cache for the machine
+// being launched. GKE writes GCFSD_CACHE_SIZE_MIB into a node pool template
+// for that pool's machine type, and the node bootstrap passes half of it to
+// each of gcfsd's two caches, so a value copied from the source node pool
+// sizes the cache for a different machine. The entry is only present when
+// image streaming is on, and stays absent otherwise.
+func patchGCFSDCacheSizeKubeEnv(target *metadata.InstanceMetadata, memoryMiB int64) {
+	if _, ok := target.GetKubeEnvEntry("GCFSD_CACHE_SIZE_MIB"); !ok || memoryMiB <= 0 {
+		return
+	}
+	if size := gcfsdCacheSizeMiB(memoryMiB); size > 0 {
+		target.SetKubeEnvEntry("GCFSD_CACHE_SIZE_MIB", fmt.Sprintf(`"%d"`, size))
+	} else {
+		target.UnsetKubeEnvEntry("GCFSD_CACHE_SIZE_MIB")
+	}
+}
+
 // gpuSharingKubeEnvEntries are the kube-env entries GKE writes on shared-GPU node pools;
 // the GPU device plugin reads them to advertise MaxSharedClientsPerGPU replicas per GPU.
 var gpuSharingKubeEnvEntries = []string{
@@ -141,7 +193,9 @@ func applyInstanceTypeKubeReserved(config *kubeletconfig.KubeletConfiguration, i
 	})
 }
 
-func applySpotShutdownKubeletConfig(config *kubeletconfig.KubeletConfiguration, provisioningModel string) {
+// applyShutdownKubeletDefaults sets capacity-specific defaults after source
+// shutdown settings have been excluded. NodeClass settings are applied afterward.
+func applyShutdownKubeletDefaults(config *kubeletconfig.KubeletConfiguration, provisioningModel string) {
 	if provisioningModel != karpv1.CapacityTypeSpot {
 		return
 	}
@@ -203,6 +257,28 @@ func applyNodeClassRuntimeKubeletConfig(config *kubeletconfig.KubeletConfigurati
 	}
 	if overlay.MemorySwap != nil && overlay.MemorySwap.SwapBehavior != "" {
 		config.MemorySwap.SwapBehavior = overlay.MemorySwap.SwapBehavior
+	}
+	applyNodeClassShutdownKubeletConfig(config, overlay)
+}
+
+// applyNodeClassShutdownKubeletConfig runs after the Spot defaults, so a node
+// class value replaces them.
+func applyNodeClassShutdownKubeletConfig(config *kubeletconfig.KubeletConfiguration, overlay *v1alpha1.KubeletConfiguration) {
+	if overlay.ShutdownGracePeriod != nil {
+		if config.FeatureGates == nil {
+			config.FeatureGates = map[string]bool{}
+		}
+		config.FeatureGates["GracefulNodeShutdown"] = true
+		config.ShutdownGracePeriod = *overlay.ShutdownGracePeriod
+	}
+	if overlay.ShutdownGracePeriodCriticalPods != nil {
+		config.ShutdownGracePeriodCriticalPods = *overlay.ShutdownGracePeriodCriticalPods
+	}
+	// The kubelet does not start when the critical-pods period exceeds the
+	// total. The CRD keeps an explicit pair valid; a Spot default left in place
+	// by a shorter shutdownGracePeriod is lowered.
+	if config.ShutdownGracePeriodCriticalPods.Duration > config.ShutdownGracePeriod.Duration {
+		config.ShutdownGracePeriodCriticalPods = config.ShutdownGracePeriod
 	}
 }
 

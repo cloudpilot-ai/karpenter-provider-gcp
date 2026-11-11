@@ -62,14 +62,11 @@ import (
 )
 
 const (
-	maxInstanceTypes               = 20
-	maxNodeCIDR                    = 23
-	instanceCacheExpiration        = 15 * time.Second
-	zoneOperationPollInterval      = 1 * time.Second
-	defaultZoneOperationTimeout    = 2 * time.Minute
-	ipSpaceInsufficientCapacityTTL = 30 * time.Second
-	stockoutTTL                    = 5 * time.Minute
-	unsupportedConfigurationTTL    = 1 * time.Hour
+	maxInstanceTypes            = 20
+	maxNodeCIDR                 = 23
+	instanceCacheExpiration     = 15 * time.Second
+	zoneOperationPollInterval   = 1 * time.Second
+	defaultZoneOperationTimeout = 2 * time.Minute
 
 	instanceTerminationActionDelete = "DELETE"
 
@@ -356,16 +353,20 @@ func quotaExceededTTL(ctx context.Context) time.Duration {
 	return options.DefaultQuotaExceededTTL
 }
 
+// insufficientCapacityBackoffTTL returns how long the failed offering stays
+// unavailable. Options validation rejects non-positive values, so a zero value
+// only means the options were not populated and the default applies.
 func insufficientCapacityBackoffTTL(ctx context.Context, details insufficientCapacityDetails) time.Duration {
+	opts := lo.FromPtr(options.FromContext(ctx))
 	switch {
 	case isQuotaExceeded(details):
 		return quotaExceededTTL(ctx)
 	case isIPSpaceExhausted(details):
-		return ipSpaceInsufficientCapacityTTL
+		return lo.CoalesceOrEmpty(opts.IPSpaceExhaustedTTL, options.DefaultIPSpaceExhaustedTTL)
 	case isUnsupportedConfiguration(details):
-		return unsupportedConfigurationTTL
+		return lo.CoalesceOrEmpty(opts.UnsupportedConfigurationTTL, options.DefaultUnsupportedConfigurationTTL)
 	default:
-		return stockoutTTL
+		return lo.CoalesceOrEmpty(opts.StockoutTTL, options.DefaultStockoutTTL)
 	}
 }
 
@@ -964,15 +965,8 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 			attachedDisk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
 		}
 
-		if disk.Boot {
-			targetImage, found := imagefamily.FindImage(nodeClass.Status.Images, instanceType.Requirements)
-			if !found {
-				return nil, fmt.Errorf("no target image found for node class %s", nodeClass.Name)
-			}
-			attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
-		} else {
-			attachedDisk.DeviceName = secondaryBootDiskImageDeviceName(disk.SecondaryBootImage)
-			attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
+		if err := setDiskSource(attachedDisk, disk, nodeClass, instanceType); err != nil {
+			return nil, err
 		}
 
 		// Add disk encryption key if specified
@@ -988,6 +982,27 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 
 	attachedDisks = append(attachedDisks, p.localSSDDisks(instanceType.Name, zone, ssdCount)...)
 	return attachedDisks, nil
+}
+
+// setDiskSource sets the image and device name of one attached disk: the node
+// image on the boot disk, the cache image on a secondary boot disk, and the
+// configured device name on a blank data disk.
+func setDiskSource(attachedDisk *compute.AttachedDisk, disk v1alpha1.Disk, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) error {
+	switch {
+	case disk.Boot:
+		targetImage, found := imagefamily.FindImage(nodeClass.Status.Images, instanceType.Requirements)
+		if !found {
+			return fmt.Errorf("no target image found for node class %s", nodeClass.Name)
+		}
+		attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+	case disk.DeviceName != "":
+		// The CRD allows deviceName only on a data disk, which has no source image.
+		attachedDisk.DeviceName = disk.DeviceName
+	default:
+		attachedDisk.DeviceName = secondaryBootDiskImageDeviceName(disk.SecondaryBootImage)
+		attachedDisk.InitializeParams.SourceImage = disk.SecondaryBootImage
+	}
+	return nil
 }
 
 func (p *DefaultProvider) localSSDDisks(instanceType, zone string, count int) []*compute.AttachedDisk {
@@ -1026,6 +1041,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
+	patchGCFSDCacheSizeKubeEnv(instanceMetadata, int64(mt.GetMemoryMb()))
 	interfaces, err := p.setupPodNetwork(clusterConfig, nodeClass, instanceMetadata, podRange)
 	if err != nil {
 		return nil, err
@@ -1219,8 +1235,8 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	patchGPUSharingKubeEnv(target, nodeClass, isGPUInstance)
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)
+		applyShutdownKubeletDefaults(config, provisioningModel)
 		applyNodeClassKubeletConfig(config, nodeClass.Spec.KubeletConfiguration)
-		applySpotShutdownKubeletConfig(config, provisioningModel)
 	})
 	if err := p.patchKubeEnvServerBinaryForArch(ctx, target, instanceType); err != nil {
 		return nil, err

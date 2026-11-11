@@ -48,6 +48,26 @@ Pre-load container images onto a secondary boot disk to reduce node startup late
 
 See [`examples/nodeclass/secondary-disk-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/secondary-disk-gcenodeclass.yaml).
 
+## Data disks
+
+A `spec.disks[]` entry that is neither the boot disk nor a secondary boot disk attaches a blank persistent disk. It is created with the VM and deleted with it. Set `deviceName` so node bootstrap can find the disk at a fixed path, `/dev/disk/by-id/google-<deviceName>`:
+
+```yaml
+disks:
+  - boot: true
+    sizeGiB: 100
+    category: hyperdisk-balanced
+  - sizeGiB: 3072
+    category: hyperdisk-balanced
+    deviceName: e2b-data   # /dev/disk/by-id/google-e2b-data
+```
+
+- `deviceName` must be a lowercase RFC 1035 name of at most 63 characters, unique across the node class's disks.
+- It is not supported on the boot disk or a secondary boot disk, whose device names the provider sets.
+- The prefixes `persistent-disk-`, `local-ssd-` and `gke-` are reserved, because GCE and GKE assign names that start with them.
+
+A data disk without `deviceName` keeps its existing device name, `gke--disk`.
+
 ## Custom kubelet settings
 
 Configure kubelet behavior on provisioned nodes using `spec.kubeletConfiguration`. These settings apply at boot time and inform Karpenter's scheduler for bin-packing calculations.
@@ -159,6 +179,27 @@ kubeletConfiguration:
 These settings only let kubelet use swap the node already has. Provisioning the swap device or file is up to the node image or a DaemonSet. Swap does not change node capacity, so scheduling is unaffected.
 
 > **Note:** `swapBehavior: LimitedSwap` requires `failSwapOn: false`; admission otherwise fails with `memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false`.
+
+### Graceful node shutdown
+
+Give pods time to terminate when GCE stops or deletes the VM:
+
+```yaml
+kubeletConfiguration:
+  shutdownGracePeriod: 30s
+  shutdownGracePeriodCriticalPods: 15s
+```
+
+- `shutdownGracePeriod` — how long the node delays its shutdown for pods to terminate; setting it turns on graceful node shutdown
+- `shutdownGracePeriodCriticalPods` — the part of `shutdownGracePeriod` reserved for critical pods, which terminate last
+
+Spot nodes default to `30s` total and `15s` for critical pods, matching [GKE Spot defaults](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/spot-vms). On-demand nodes default to `0s` for both fields (graceful node shutdown disabled), matching the upstream kubelet defaults and verified GKE 1.35 on-demand behavior. This is a fixed provider policy, not a guarantee that every GKE version and machine family uses the same defaults.
+
+Source node pool shutdown settings, including priority-based shutdown periods, are never inherited. Values in the GCENodeClass replace the provider defaults. When only `shutdownGracePeriod` is set on Spot, a larger default `shutdownGracePeriodCriticalPods` is lowered to it; on-demand keeps the critical-pods period at `0s` unless explicitly configured. Both fields take a non-negative Go duration such as `30s` or `1m30s`, within Go's supported duration range.
+
+These settings do not extend the underlying VM's shutdown deadline. In particular, increasing a Spot kubelet grace period does not by itself enable GKE's extended Spot termination window. Normal Karpenter node draining is separate from kubelet handling of OS shutdown.
+
+> **Note:** `shutdownGracePeriodCriticalPods` requires `shutdownGracePeriod` and must not exceed it, because the kubelet does not start otherwise.
 
 ## Static hugepages
 

@@ -20,10 +20,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"cloud.google.com/go/compute/apiv1/computepb"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/yaml"
@@ -334,4 +337,185 @@ func TestBuildInstance_KubeletSwapConfig(t *testing.T) {
 	require.Equal(t, "LimitedSwap", got.MemorySwap.SwapBehavior)
 	require.Equal(t, "10s", got.NodeStatusUpdateFrequency.Duration.String(),
 		"source kubelet-config entries the node class does not set must survive")
+}
+
+// The GCFSD_CACHE_SIZE_MIB values GKE 1.37 wrote into node pool templates.
+func TestGCFSDCacheSizeMatchesGKENodePoolTemplates(t *testing.T) {
+	for machineType, tc := range map[string]struct {
+		memoryMiB int64
+		want      int64
+	}{
+		"e2-standard-2":  {memoryMiB: 8 * 1024, want: 72},
+		"e2-standard-4":  {memoryMiB: 16 * 1024, want: 104},
+		"n2-standard-8":  {memoryMiB: 32 * 1024, want: 144},
+		"c4-standard-16": {memoryMiB: 60 * 1024, want: 213},
+		"n2-standard-16": {memoryMiB: 64 * 1024, want: 222},
+	} {
+		require.Equal(t, tc.want, gcfsdCacheSizeMiB(tc.memoryMiB), machineType)
+	}
+	require.Zero(t, gcfsdCacheSizeMiB(512), "GKE reserves nothing below 1 GiB")
+}
+
+func buildGCFSDInstanceKubeEnv(t *testing.T, sourceKubeEnv string, mt *computepb.MachineType) string {
+	t.Helper()
+	provider := makeProvider()
+	sourceMetadata := computeMetadataValues(map[string]string{
+		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
+		metadata.KubeEnvKey:       requiredSourceKubeEnv + sourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
+		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
+	})
+
+	instance, err := provider.buildInstance(
+		context.Background(),
+		spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(), sourceMetadata,
+		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+		"us-central1-a", "karpenter-gcfsd-test",
+		karpv1.CapacityTypeOnDemand, mt, 0, "pods",
+	)
+	require.NoError(t, err)
+	return kubeEnvFrom(t, instance)
+}
+
+func TestBuildInstance_SizesGCFSDCacheForMachineType(t *testing.T) {
+	kubeEnv := buildGCFSDInstanceKubeEnv(t, "GCFSD_CACHE_SIZE_MIB: \"72\"\n", &computepb.MachineType{MemoryMb: lo.ToPtr[int32](60 * 1024)})
+
+	require.Contains(t, kubeEnv, `GCFSD_CACHE_SIZE_MIB: "213"`)
+}
+
+func TestBuildInstance_GCFSDCacheAbsentWithoutImageStreaming(t *testing.T) {
+	kubeEnv := buildGCFSDInstanceKubeEnv(t, "", &computepb.MachineType{MemoryMb: lo.ToPtr[int32](60 * 1024)})
+
+	require.NotContains(t, kubeEnv, "GCFSD_CACHE_SIZE_MIB")
+}
+
+func TestBuildInstance_KeepsSourceGCFSDCacheWithoutMachineMemory(t *testing.T) {
+	kubeEnv := buildGCFSDInstanceKubeEnv(t, "GCFSD_CACHE_SIZE_MIB: \"72\"\n", nil)
+
+	require.Contains(t, kubeEnv, `GCFSD_CACHE_SIZE_MIB: "72"`)
+}
+
+// gkeShutdownKubeletConfig is the kubelet-config shutdown section GKE writes
+// on node pools that enable graceful node shutdown.
+const gkeShutdownKubeletConfig = "nodeStatusUpdateFrequency: 10s\nfeatureGates:\n  GracefulNodeShutdown: true\nshutdownGracePeriod: 30s\nshutdownGracePeriodCriticalPods: 15s\n"
+
+const priorityShutdownKubeletConfig = "featureGates:\n  GracefulNodeShutdown: true\nshutdownGracePeriodByPodPriority:\n- priority: 0\n  shutdownGracePeriodSeconds: 60\n"
+
+func TestBuildInstance_ShutdownGracePeriod(t *testing.T) {
+	for name, tc := range map[string]struct {
+		capacityType        string
+		sourceKubeletConfig string
+		sourceKubeletArgs   string
+		kubelet             *v1alpha1.KubeletConfiguration
+		wantGate            bool
+		wantGrace           string
+		wantCriticalPods    string
+	}{
+		"on-demand without node class values keeps graceful shutdown off": {
+			capacityType: karpv1.CapacityTypeOnDemand, wantGrace: "0s", wantCriticalPods: "0s",
+		},
+		"on-demand ignores source pool shutdown settings": {
+			capacityType: karpv1.CapacityTypeOnDemand, sourceKubeletConfig: gkeShutdownKubeletConfig,
+			wantGrace: "0s", wantCriticalPods: "0s",
+		},
+		"on-demand ignores source shutdown settings with an unrelated overlay": {
+			capacityType: karpv1.CapacityTypeOnDemand, sourceKubeletConfig: gkeShutdownKubeletConfig,
+			kubelet:   &v1alpha1.KubeletConfiguration{MaxPods: lo.ToPtr[int32](64)},
+			wantGrace: "0s", wantCriticalPods: "0s",
+		},
+		"on-demand ignores source priority based shutdown": {
+			capacityType: karpv1.CapacityTypeOnDemand, sourceKubeletConfig: priorityShutdownKubeletConfig,
+			wantGrace: "0s", wantCriticalPods: "0s",
+		},
+		"spot ignores source priority based shutdown": {
+			capacityType: karpv1.CapacityTypeSpot, sourceKubeletConfig: priorityShutdownKubeletConfig,
+			wantGate: true, wantGrace: "30s", wantCriticalPods: "15s",
+		},
+		"spot without node class values gets the spot defaults": {
+			capacityType: karpv1.CapacityTypeSpot, wantGate: true, wantGrace: "30s", wantCriticalPods: "15s",
+		},
+		"on-demand with node class values": {
+			capacityType: karpv1.CapacityTypeOnDemand,
+			kubelet: &v1alpha1.KubeletConfiguration{
+				ShutdownGracePeriod:             &metav1.Duration{Duration: 30 * time.Second},
+				ShutdownGracePeriodCriticalPods: &metav1.Duration{Duration: 15 * time.Second},
+			},
+			wantGate: true, wantGrace: "30s", wantCriticalPods: "15s",
+		},
+		"node class values override a source CLI shutdown gate": {
+			capacityType:      karpv1.CapacityTypeOnDemand,
+			sourceKubeletArgs: "--feature-gates=GracefulNodeShutdown=false,NodeSwap=true",
+			kubelet: &v1alpha1.KubeletConfiguration{
+				ShutdownGracePeriod:             &metav1.Duration{Duration: 30 * time.Second},
+				ShutdownGracePeriodCriticalPods: &metav1.Duration{Duration: 15 * time.Second},
+			},
+			wantGate: true, wantGrace: "30s", wantCriticalPods: "15s",
+		},
+		"node class values replace the spot defaults": {
+			capacityType: karpv1.CapacityTypeSpot,
+			kubelet: &v1alpha1.KubeletConfiguration{
+				ShutdownGracePeriod:             &metav1.Duration{Duration: 2 * time.Minute},
+				ShutdownGracePeriodCriticalPods: &metav1.Duration{Duration: 20 * time.Second},
+			},
+			wantGate: true, wantGrace: "2m0s", wantCriticalPods: "20s",
+		},
+		"a shorter period alone lowers the spot default for critical pods": {
+			capacityType: karpv1.CapacityTypeSpot,
+			kubelet:      &v1alpha1.KubeletConfiguration{ShutdownGracePeriod: &metav1.Duration{Duration: 10 * time.Second}},
+			wantGate:     true, wantGrace: "10s", wantCriticalPods: "10s",
+		},
+		"on-demand total alone uses zero critical pods grace regardless of source": {
+			capacityType: karpv1.CapacityTypeOnDemand, sourceKubeletConfig: gkeShutdownKubeletConfig,
+			kubelet:  &v1alpha1.KubeletConfiguration{ShutdownGracePeriod: &metav1.Duration{Duration: 10 * time.Second}},
+			wantGate: true, wantGrace: "10s", wantCriticalPods: "0s",
+		},
+		"a longer period alone keeps the spot default for critical pods": {
+			capacityType: karpv1.CapacityTypeSpot,
+			kubelet:      &v1alpha1.KubeletConfiguration{ShutdownGracePeriod: &metav1.Duration{Duration: time.Minute}},
+			wantGate:     true, wantGrace: "1m0s", wantCriticalPods: "15s",
+		},
+		"an explicit 0s period alone turns graceful shutdown off on spot": {
+			capacityType: karpv1.CapacityTypeSpot,
+			kubelet:      &v1alpha1.KubeletConfiguration{ShutdownGracePeriod: &metav1.Duration{}},
+			wantGate:     true, wantGrace: "0s", wantCriticalPods: "0s",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			provider := makeProvider()
+			nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{KubeletConfiguration: tc.kubelet}}
+			sourceMetadata := makeSourceMetadata("max-pods-per-node=110,max-pods=110")
+			if tc.sourceKubeletConfig != "" || tc.sourceKubeletArgs != "" {
+				sourceMetadata = computeMetadataValues(map[string]string{
+					metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
+					metadata.KubeEnvKey:       requiredSourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110 " + tc.sourceKubeletArgs + "\n",
+					metadata.KubeletConfigKey: tc.sourceKubeletConfig,
+				})
+			}
+
+			instance, err := provider.buildInstance(
+				context.Background(),
+				spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
+				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
+				"us-central1-a", "karpenter-shutdown-test",
+				tc.capacityType, nil, 0, "pods",
+			)
+			require.NoError(t, err)
+
+			var got kubeletconfig.KubeletConfiguration
+			require.NoError(t, yaml.Unmarshal([]byte(metadataValue(instance.Metadata, metadata.KubeletConfigKey)), &got))
+			if tc.sourceKubeletArgs != "" {
+				kubeEnv := kubeEnvFrom(t, instance)
+				require.NotContains(t, kubeEnv, "GracefulNodeShutdown=false")
+				require.Contains(t, kubeEnv, "--feature-gates=NodeSwap=true")
+			}
+			require.Equal(t, tc.wantGate, got.FeatureGates["GracefulNodeShutdown"])
+			require.Equal(t, tc.wantGrace, got.ShutdownGracePeriod.Duration.String())
+			require.Equal(t, tc.wantCriticalPods, got.ShutdownGracePeriodCriticalPods.Duration.String())
+			require.Empty(t, got.ShutdownGracePeriodByPodPriority, "source priority-based shutdown must not override provider policy")
+			if tc.sourceKubeletConfig == gkeShutdownKubeletConfig {
+				require.Equal(t, "10s", got.NodeStatusUpdateFrequency.Duration.String(), "unrelated source config must survive")
+			}
+			require.LessOrEqual(t, got.ShutdownGracePeriodCriticalPods.Duration, got.ShutdownGracePeriod.Duration,
+				"the kubelet does not start when the critical-pods period exceeds the total")
+		})
+	}
 }

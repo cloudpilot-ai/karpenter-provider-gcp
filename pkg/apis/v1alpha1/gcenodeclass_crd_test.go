@@ -17,11 +17,13 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -258,4 +260,70 @@ func TestGCENodeClassCRDSwapBehaviorEnum(t *testing.T) {
 		values = append(values, strings.Trim(string(v.Raw), `"`))
 	}
 	require.ElementsMatch(t, []string{"NoSwap", "LimitedSwap"}, values)
+}
+
+func TestGCENodeClassCRDDiskDeviceName(t *testing.T) {
+	disks := specSchema(t).Properties["disks"]
+	field := disks.Items.Schema.Properties["deviceName"]
+	require.Equal(t, `^[a-z]([-a-z0-9]*[a-z0-9])?$`, field.Pattern)
+	require.NotNil(t, field.MaxLength)
+	require.Equal(t, int64(63), *field.MaxLength)
+
+	var reserved, dataOnly, unique bool
+	for _, v := range field.XValidations {
+		reserved = reserved || v.Message == "deviceName must not start with persistent-disk-, local-ssd- or gke-, which GCE and GKE assign"
+	}
+	for _, v := range disks.Items.Schema.XValidations {
+		dataOnly = dataOnly || v.Message == "deviceName is only supported on a data disk, not the boot disk or a secondary boot disk"
+	}
+	for _, v := range disks.XValidations {
+		unique = unique || v.Message == "deviceName must be unique across disks"
+	}
+	require.True(t, reserved, "GCE assigns persistent-disk-N and local-ssd-N, and the provider names secondary boot disks gke-<image>-disk")
+	require.True(t, dataOnly, "the provider sets the boot and secondary boot disks' device names itself")
+	require.True(t, unique, "GCE rejects an instance whose disks share a device name")
+}
+
+func TestGCENodeClassCRDBoundsShutdownGracePeriodCriticalPods(t *testing.T) {
+	const rule = `!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod) && ` +
+		`duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))`
+
+	var found bool
+	for _, v := range kubeletConfigurationSchema(t).XValidations {
+		if v.Rule == rule {
+			found = true
+			require.Equal(t, "shutdownGracePeriodCriticalPods requires shutdownGracePeriod and must not exceed it", v.Message)
+		}
+	}
+	require.True(t, found, "the kubelet does not start when shutdownGracePeriodCriticalPods exceeds shutdownGracePeriod")
+}
+
+func TestGCENodeClassCRDShutdownDurationsSurviveTypedRoundTrip(t *testing.T) {
+	var config KubeletConfiguration
+	require.NoError(t, json.Unmarshal([]byte("{\"shutdownGracePeriod\":\"2us\",\"shutdownGracePeriodCriticalPods\":\"1us\"}"), &config))
+	require.Equal(t, 2*time.Microsecond, config.ShutdownGracePeriod.Duration)
+	require.Equal(t, time.Microsecond, config.ShutdownGracePeriodCriticalPods.Duration)
+
+	raw, err := json.Marshal(config)
+	require.NoError(t, err)
+	var fields map[string]string
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.Equal(t, "2µs", fields["shutdownGracePeriod"])
+	require.Equal(t, "1µs", fields["shutdownGracePeriodCriticalPods"])
+	for _, name := range []string{"shutdownGracePeriod", "shutdownGracePeriodCriticalPods"} {
+		pattern := kubeletConfigurationSchema(t).Properties[name].Pattern
+		require.Regexp(t, pattern, fields[name], "%s must accept the typed client's canonical duration", name)
+	}
+	var roundTripped KubeletConfiguration
+	require.NoError(t, json.Unmarshal(raw, &roundTripped))
+	require.Equal(t, config, roundTripped)
+}
+
+func TestGCENodeClassCRDShutdownGracePeriodsAreDurations(t *testing.T) {
+	for _, name := range []string{"shutdownGracePeriod", "shutdownGracePeriodCriticalPods"} {
+		field := kubeletConfigurationSchema(t).Properties[name]
+		require.Equal(t, "string", field.Type, name)
+		require.Equal(t, `^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`, field.Pattern,
+			"%s must be a non-negative Go duration: the controller cannot decode any other string", name)
+	}
 }

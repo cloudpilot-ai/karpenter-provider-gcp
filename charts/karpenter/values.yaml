@@ -196,6 +196,22 @@ controller:
     # default. See docs/settings.md#telemetry for exactly what is sent. Corresponds to the
     # TELEMETRY env var.
     telemetry: false
+    # -- How long an instance type, zone and capacity type stays unavailable after a launch fails
+    # with ZONE_RESOURCE_POOL_EXHAUSTED (e.g. `2m`). Leave empty for the controller default of 5m.
+    # Must be positive. Corresponds to the STOCKOUT_TTL env var.
+    stockoutTTL: ""
+    # -- How long an instance type, zone and capacity type stays unavailable after a launch fails
+    # with IP_SPACE_EXHAUSTED on every pod range (e.g. `1m`). Leave empty for the controller default
+    # of 30s. Must be positive. Corresponds to the IP_SPACE_EXHAUSTED_TTL env var.
+    ipSpaceExhaustedTTL: ""
+    # -- How long an instance type, zone and capacity type stays unavailable after GCE reports the
+    # zone does not support the requested configuration (e.g. `6h`). Leave empty for the controller
+    # default of 1h. Must be positive. Corresponds to the UNSUPPORTED_CONFIGURATION_TTL env var.
+    unsupportedConfigurationTTL: ""
+    # -- How long a NodeClaim may keep failing to launch with a non-capacity error before it is
+    # deleted and replaced (e.g. `10m`). Leave empty for the controller default of 5m. Must be
+    # positive. Corresponds to the LAUNCH_TIMEOUT env var.
+    launchTimeout: ""
 
 # -- Optional node-problem-detector deployment that watches the GCE metadata server
 # for Spot preemption notices and sets the GCESpotPreempting node condition, which
