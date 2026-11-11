@@ -282,7 +282,15 @@ GC only deletes instances that carry the Karpenter cluster tag and have no corre
 
 ## Insufficient capacity errors
 
-When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable. The duration depends on the error: 5 minutes for a stockout, 1 hour when GCE reports that the zone does not support the requested configuration (`configuration_availability` or `MACHINE_TYPE_UNSUPPORTED`), and 30 seconds for IP space exhaustion. Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones can recover and become available again.
+When Karpenter cannot provision an instance due to insufficient capacity (Spot or on-demand), it logs the error and marks the zone/instance-type/capacity-type combination as unavailable. The duration depends on the error, and you can configure each one:
+
+- Stockout (`ZONE_RESOURCE_POOL_EXHAUSTED`): `STOCKOUT_TTL`, default 5 minutes.
+- Unsupported configuration (`configuration_availability` or `MACHINE_TYPE_UNSUPPORTED`): `UNSUPPORTED_CONFIGURATION_TTL`, default 1 hour.
+- IP space exhaustion (`IP_SPACE_EXHAUSTED`): `IP_SPACE_EXHAUSTED_TTL`, default 30 seconds.
+
+Karpenter skips these cached entries during zone selection, allowing the TTL to expire naturally so zones can recover and become available again.
+
+A NodePool limited to one machine type in one zone has no other offering to fall back to. During a stockout, its pods stay Pending until the entry expires. Lower `STOCKOUT_TTL` to retry the zone sooner. See [Launch failure backoff](settings.md#launch-failure-backoff).
 
 GCE enforces project quotas per region. When a launch fails with `QUOTA_EXCEEDED`, Karpenter marks the instance type unavailable for that capacity type in every zone of the region. The entry lasts for `QUOTA_EXCEEDED_TTL`, which defaults to 30 minutes. After you raise the quota in the Google Cloud console, wait for the TTL to expire or restart the controller to clear the entry. See [Quota exhaustion](settings.md#quota-exhaustion).
 

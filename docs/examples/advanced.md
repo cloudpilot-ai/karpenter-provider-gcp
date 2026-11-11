@@ -48,6 +48,26 @@ Pre-load container images onto a secondary boot disk to reduce node startup late
 
 See [`examples/nodeclass/secondary-disk-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/secondary-disk-gcenodeclass.yaml).
 
+## Data disks
+
+A `spec.disks[]` entry that is neither the boot disk nor a secondary boot disk attaches a blank persistent disk. It is created with the VM and deleted with it. Set `deviceName` so node bootstrap can find the disk at a fixed path, `/dev/disk/by-id/google-<deviceName>`:
+
+```yaml
+disks:
+  - boot: true
+    sizeGiB: 100
+    category: hyperdisk-balanced
+  - sizeGiB: 3072
+    category: hyperdisk-balanced
+    deviceName: e2b-data   # /dev/disk/by-id/google-e2b-data
+```
+
+- `deviceName` must be a lowercase RFC 1035 name of at most 63 characters, unique across the node class's disks.
+- It is not supported on the boot disk or a secondary boot disk, whose device names the provider sets.
+- The prefixes `persistent-disk-`, `local-ssd-` and `gke-` are reserved, because GCE and GKE assign names that start with them.
+
+A data disk without `deviceName` keeps its existing device name, `gke--disk`.
+
 ## Custom kubelet settings
 
 Configure kubelet behavior on provisioned nodes using `spec.kubeletConfiguration`. These settings apply at boot time and inform Karpenter's scheduler for bin-packing calculations.

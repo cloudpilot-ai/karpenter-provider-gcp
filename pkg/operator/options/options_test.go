@@ -69,3 +69,90 @@ func TestQuotaExceededTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestTelemetry(t *testing.T) {
+	requiredArgs := []string{"--project-id=p", "--cluster-name=c", "--cluster-location=us-central1"}
+
+	tests := []struct {
+		name string
+		env  *string
+		args []string
+		want bool
+	}{
+		{name: "unset is off", want: false},
+		{name: "env true turns it on", env: ptr.To("true"), want: true},
+		{name: "env false keeps it off", env: ptr.To("false"), want: false},
+		{name: "flag turns it on", args: []string{"--telemetry"}, want: true},
+		{name: "flag takes precedence over env", env: ptr.To("true"), args: []string{"--telemetry=false"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(telemetryEnvVarName, "")
+			if tt.env != nil {
+				t.Setenv(telemetryEnvVarName, *tt.env)
+			} else {
+				require.NoError(t, os.Unsetenv(telemetryEnvVarName))
+			}
+
+			o := &Options{}
+			fs := &coreoptions.FlagSet{FlagSet: flag.NewFlagSet("test", flag.ContinueOnError)}
+			o.AddFlags(fs)
+			require.NoError(t, o.Parse(fs, append(requiredArgs, tt.args...)...))
+			require.Equal(t, tt.want, o.Telemetry)
+		})
+	}
+}
+
+func TestCapacityBackoffDurations(t *testing.T) {
+	requiredArgs := []string{"--project-id=p", "--cluster-name=c", "--cluster-location=us-central1"}
+
+	settings := []struct {
+		flag  string
+		env   string
+		def   time.Duration
+		value func(*Options) time.Duration
+	}{
+		{stockoutTTLFlagName, stockoutTTLEnvVarName, DefaultStockoutTTL, func(o *Options) time.Duration { return o.StockoutTTL }},
+		{ipSpaceExhaustedTTLFlagName, ipSpaceExhaustedTTLEnvVarName, DefaultIPSpaceExhaustedTTL, func(o *Options) time.Duration { return o.IPSpaceExhaustedTTL }},
+		{unsupportedConfigurationTTLFlagName, unsupportedConfigurationTTLEnvVarName, DefaultUnsupportedConfigurationTTL, func(o *Options) time.Duration { return o.UnsupportedConfigurationTTL }},
+		{launchTimeoutFlagName, launchTimeoutEnvVarName, DefaultLaunchTimeout, func(o *Options) time.Duration { return o.LaunchTimeout }},
+	}
+	for _, s := range settings {
+		tests := []struct {
+			name    string
+			env     *string
+			args    []string
+			want    time.Duration
+			wantErr string
+		}{
+			{name: "unset uses default", want: s.def},
+			{name: "env custom duration", env: ptr.To("7m"), want: 7 * time.Minute},
+			{name: "flag custom duration", args: []string{"--" + s.flag + "=45s"}, want: 45 * time.Second},
+			{name: "flag takes precedence over env", env: ptr.To("1h"), args: []string{"--" + s.flag + "=2h"}, want: 2 * time.Hour},
+			{name: "zero is rejected", args: []string{"--" + s.flag + "=0s"}, wantErr: s.flag + " must be positive"},
+			{name: "negative is rejected", env: ptr.To("-5m"), wantErr: s.flag + " must be positive"},
+		}
+		for _, tt := range tests {
+			t.Run(s.flag+"/"+tt.name, func(t *testing.T) {
+				t.Setenv(s.env, "")
+				if tt.env != nil {
+					t.Setenv(s.env, *tt.env)
+				} else {
+					require.NoError(t, os.Unsetenv(s.env))
+				}
+
+				o := &Options{}
+				fs := &coreoptions.FlagSet{FlagSet: flag.NewFlagSet("test", flag.ContinueOnError)}
+				o.AddFlags(fs)
+				err := o.Parse(fs, append(requiredArgs, tt.args...)...)
+
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, tt.want, s.value(o))
+			})
+		}
+	}
+}

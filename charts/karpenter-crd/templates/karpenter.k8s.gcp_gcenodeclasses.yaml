@@ -116,6 +116,22 @@ spec:
                       - pd-ssd
                       - pd-standard
                       type: string
+                    deviceName:
+                      description: |-
+                        DeviceName is the device name of a data disk: the guest sees the disk as
+                        /dev/disk/by-id/google-<deviceName>, so node bootstrap can find it by a
+                        fixed path. Not supported on the boot disk or a secondary boot disk,
+                        whose device names the provider sets. Prefixes that GCE or GKE assign
+                        themselves are reserved.
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                      x-kubernetes-validations:
+                      - message: deviceName must not start with persistent-disk-,
+                          local-ssd- or gke-, which GCE and GKE assign
+                        rule: '!self.startsWith(''persistent-disk-'') && !self.startsWith(''local-ssd-'')
+                          && !self.startsWith(''gke-'')'
                     kmsKeyName:
                       description: |-
                         KMSKeyName is the Cloud KMS key to use for disk encryption.
@@ -178,8 +194,16 @@ spec:
                       set or both be unset for hyperdisk-balanced and hyperdisk-balanced-high-availability
                     rule: '!(self.category in [''hyperdisk-balanced'', ''hyperdisk-balanced-high-availability''])
                       || (has(self.provisionedIOPS) == has(self.provisionedThroughput))'
+                  - message: deviceName is only supported on a data disk, not the
+                      boot disk or a secondary boot disk
+                    rule: '!has(self.deviceName) || (!(has(self.boot) && self.boot)
+                      && !has(self.secondaryBootImage))'
                 maxItems: 10
                 type: array
+                x-kubernetes-validations:
+                - message: deviceName must be unique across disks
+                  rule: self.all(d, !has(d.deviceName) || self.filter(e, has(e.deviceName)
+                    && e.deviceName == d.deviceName).size() == 1)
               gpuDriverVersion:
                 default: default
                 description: |-

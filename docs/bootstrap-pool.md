@@ -77,6 +77,7 @@ Karpenter reads kubelet bootstrap metadata from that instance template. Other in
 | Service account scopes                 | Karpenter sets `cloud-platform`                                                                                                                    |
 | Node labels                            | Rebuilt from Karpenter/provider target state, plus a known set of GKE readiness-gate labels carried over from the source pool template (see below) |
 | Node taints                            | Rebuilt from Karpenter/provider target state                                                                                                       |
+| Image streaming cache size             | Recomputed for each node's machine type when the bootstrap pool uses image streaming, matching what GKE sets for that machine type                 |
 
 Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls, plus the GKE readiness-gate labels described below.
 

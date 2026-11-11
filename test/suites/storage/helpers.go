@@ -98,6 +98,52 @@ func createDeploymentWithNodeSelector(ctx context.Context, name, appLabel, nodeP
 	Expect(err).NotTo(HaveOccurred(), "creating Deployment %s", name)
 }
 
+// expectGuestDiskPaths runs a pod bound to nodeName that mounts the node's
+// /dev and fails unless every /dev/disk/by-id/google-<deviceName> link resolves.
+// The links have relative targets such as ../../sdb, so the pod mounts all of
+// /dev rather than /dev/disk/by-id alone. The caller deletes the pod.
+func expectGuestDiskPaths(ctx context.Context, podName, nodeName, nodePoolName string, deviceNames []string) {
+	script := ""
+	for _, deviceName := range deviceNames {
+		script += fmt.Sprintf("test -e /host-dev/disk/by-id/google-%s || { echo missing google-%s; ls -l /host-dev/disk/by-id; exit 1; }\n", deviceName, deviceName)
+	}
+	zero := int64(0)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: environment.TestNamespace},
+		Spec: corev1.PodSpec{
+			NodeName:                      nodeName,
+			RestartPolicy:                 corev1.RestartPolicyNever,
+			TerminationGracePeriodSeconds: &zero,
+			Tolerations: []corev1.Toleration{{
+				Key:      "karpenter-e2e/nodepool",
+				Value:    nodePoolName,
+				Effect:   corev1.TaintEffectNoSchedule,
+				Operator: corev1.TolerationOpEqual,
+			}},
+			Containers: []corev1.Container{{
+				Name:         "check",
+				Image:        "mirror.gcr.io/library/busybox:1.36",
+				Command:      []string{"sh", "-c", script},
+				VolumeMounts: []corev1.VolumeMount{{Name: "dev", MountPath: "/host-dev", ReadOnly: true}},
+			}},
+			Volumes: []corev1.Volume{{
+				Name:         "dev",
+				VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/dev"}},
+			}},
+		},
+	}
+	pods := env.KubeClient.CoreV1().Pods(environment.TestNamespace)
+	_, err := pods.Create(ctx, pod, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating Pod %s", podName)
+
+	Eventually(func(g Gomega) corev1.PodPhase {
+		current, err := pods.Get(ctx, podName, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		return current.Status.Phase
+	}).WithTimeout(5*time.Minute).WithPolling(environment.DefaultPollInterval).
+		Should(Equal(corev1.PodSucceeded), "expected Pod %s to find %v under /dev/disk/by-id", podName, deviceNames)
+}
+
 func expectNoNodeClaimForNodePool(ctx context.Context, nodePoolName string, duration time.Duration) {
 	Consistently(func(g Gomega) int {
 		claims, err := env.ListNodeClaims(ctx)

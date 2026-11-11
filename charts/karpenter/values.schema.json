@@ -441,6 +441,31 @@
               "type": "string",
               "description": "How long an instance type stays unavailable in the region after a QUOTA_EXCEEDED launch failure (e.g. 1h). Leave empty for the controller default of 30m; 0s disables quota backoff.",
               "default": ""
+            },
+            "telemetry": {
+              "type": "boolean",
+              "description": "Send anonymized resource totals and Spot interruption events to CloudPilot AI. See docs/settings.md#telemetry for exactly what is sent.",
+              "default": false
+            },
+            "stockoutTTL": {
+              "type": "string",
+              "description": "How long an instance type, zone and capacity type stays unavailable after a launch fails with ZONE_RESOURCE_POOL_EXHAUSTED (e.g. 2m). Leave empty for the controller default of 5m. Must be positive.",
+              "default": ""
+            },
+            "ipSpaceExhaustedTTL": {
+              "type": "string",
+              "description": "How long an instance type, zone and capacity type stays unavailable after a launch fails with IP_SPACE_EXHAUSTED on every pod range (e.g. 1m). Leave empty for the controller default of 30s. Must be positive.",
+              "default": ""
+            },
+            "unsupportedConfigurationTTL": {
+              "type": "string",
+              "description": "How long an instance type, zone and capacity type stays unavailable after GCE reports the zone does not support the requested configuration (e.g. 6h). Leave empty for the controller default of 1h. Must be positive.",
+              "default": ""
+            },
+            "launchTimeout": {
+              "type": "string",
+              "description": "How long a NodeClaim may keep failing to launch with a non-capacity error before it is deleted and replaced (e.g. 10m). Leave empty for the controller default of 5m. Must be positive.",
+              "default": ""
             }
           }
         }
