@@ -193,7 +193,9 @@ func applyInstanceTypeKubeReserved(config *kubeletconfig.KubeletConfiguration, i
 	})
 }
 
-func applySpotShutdownKubeletConfig(config *kubeletconfig.KubeletConfiguration, provisioningModel string) {
+// applyShutdownKubeletDefaults sets capacity-specific defaults after source
+// shutdown settings have been excluded. NodeClass settings are applied afterward.
+func applyShutdownKubeletDefaults(config *kubeletconfig.KubeletConfiguration, provisioningModel string) {
 	if provisioningModel != karpv1.CapacityTypeSpot {
 		return
 	}
@@ -255,6 +257,28 @@ func applyNodeClassRuntimeKubeletConfig(config *kubeletconfig.KubeletConfigurati
 	}
 	if overlay.MemorySwap != nil && overlay.MemorySwap.SwapBehavior != "" {
 		config.MemorySwap.SwapBehavior = overlay.MemorySwap.SwapBehavior
+	}
+	applyNodeClassShutdownKubeletConfig(config, overlay)
+}
+
+// applyNodeClassShutdownKubeletConfig runs after the Spot defaults, so a node
+// class value replaces them.
+func applyNodeClassShutdownKubeletConfig(config *kubeletconfig.KubeletConfiguration, overlay *v1alpha1.KubeletConfiguration) {
+	if overlay.ShutdownGracePeriod != nil {
+		if config.FeatureGates == nil {
+			config.FeatureGates = map[string]bool{}
+		}
+		config.FeatureGates["GracefulNodeShutdown"] = true
+		config.ShutdownGracePeriod = *overlay.ShutdownGracePeriod
+	}
+	if overlay.ShutdownGracePeriodCriticalPods != nil {
+		config.ShutdownGracePeriodCriticalPods = *overlay.ShutdownGracePeriodCriticalPods
+	}
+	// The kubelet does not start when the critical-pods period exceeds the
+	// total. The CRD keeps an explicit pair valid; a Spot default left in place
+	// by a shorter shutdownGracePeriod is lowered.
+	if config.ShutdownGracePeriodCriticalPods.Duration > config.ShutdownGracePeriod.Duration {
+		config.ShutdownGracePeriodCriticalPods = config.ShutdownGracePeriod
 	}
 }
 

@@ -34,6 +34,23 @@ func TestParseSourceKubeletArgsDropsTargetOwnedFields(t *testing.T) {
 	require.NotContains(t, args.String(), "--register-with-taints=")
 }
 
+func TestParseSourceKubeletArgsDropsShutdownFeatureGate(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, want string
+	}{
+		{name: "mixed gates", source: "--v=2 --feature-gates=GracefulNodeShutdown=false,NodeSwap=true --experimental-flag=value", want: "--v=2 --feature-gates=NodeSwap=true --experimental-flag=value"},
+		{name: "sole gate", source: "--feature-gates=GracefulNodeShutdown=true --v=2", want: "--v=2"},
+		{name: "separate value and repeated flags", source: "--feature-gates GracefulNodeShutdown=false --feature-gates=NodeSwap=true,GracefulNodeShutdown=true", want: "--feature-gates=NodeSwap=true"},
+		{name: "unrelated gates", source: "--feature-gates=GracefulNodeShutdownBasedOnPodPriority=true,NodeSwap=false", want: "--feature-gates=GracefulNodeShutdownBasedOnPodPriority=true,NodeSwap=false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := ParseSourceKubeletArgs(tc.source)
+
+			require.Equal(t, tc.want, args.String())
+		})
+	}
+}
+
 func TestKubeletArgsStringRendersBootstrapFlags(t *testing.T) {
 	maxPods := int32(32)
 	args := KubeletArgs{

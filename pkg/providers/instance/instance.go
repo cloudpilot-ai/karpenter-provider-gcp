@@ -1235,8 +1235,8 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	patchGPUSharingKubeEnv(target, nodeClass, isGPUInstance)
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)
+		applyShutdownKubeletDefaults(config, provisioningModel)
 		applyNodeClassKubeletConfig(config, nodeClass.Spec.KubeletConfiguration)
-		applySpotShutdownKubeletConfig(config, provisioningModel)
 	})
 	if err := p.patchKubeEnvServerBinaryForArch(ctx, target, instanceType); err != nil {
 		return nil, err

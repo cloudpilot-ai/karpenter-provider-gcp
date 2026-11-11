@@ -18,6 +18,7 @@ package kubelet_config
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -39,6 +40,11 @@ type kubeletConfigCase struct {
 	tc            environment.TestCase
 	kubeletConfig map[string]any
 	assert        func(node *corev1.Node)
+	wantShutdown  *shutdownPeriods
+}
+
+type shutdownPeriods struct {
+	total, critical time.Duration
 }
 
 var env *environment.Environment
@@ -140,7 +146,36 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 		},
 		assert: assertMaxPodsCapacity(50),
 	}, SpecTimeout(15*time.Minute)),
+
+	Entry("COS: on-demand shutdown defaults", shutdownConfigCase(karpv1.CapacityTypeOnDemand, nil, 0, 0), SpecTimeout(15*time.Minute)),
+	Entry("COS: Spot shutdown defaults", shutdownConfigCase(karpv1.CapacityTypeSpot, nil, 30*time.Second, 15*time.Second), SpecTimeout(15*time.Minute)),
+	Entry("COS: on-demand shutdown overrides", shutdownConfigCase(karpv1.CapacityTypeOnDemand, map[string]any{
+		"shutdownGracePeriod": "40s", "shutdownGracePeriodCriticalPods": "10s",
+	}, 40*time.Second, 10*time.Second), SpecTimeout(15*time.Minute)),
+	Entry("COS: Spot shutdown overrides", shutdownConfigCase(karpv1.CapacityTypeSpot, map[string]any{
+		"shutdownGracePeriod": "20s", "shutdownGracePeriodCriticalPods": "5s",
+	}, 20*time.Second, 5*time.Second), SpecTimeout(15*time.Minute)),
+	Entry("COS: Spot shorter total clamps critical shutdown default", shutdownConfigCase(karpv1.CapacityTypeSpot, map[string]any{
+		"shutdownGracePeriod": "10s",
+	}, 10*time.Second, 10*time.Second), SpecTimeout(15*time.Minute)),
+	Entry("COS: Spot zero disables shutdown grace periods", shutdownConfigCase(karpv1.CapacityTypeSpot, map[string]any{
+		"shutdownGracePeriod": "0s",
+	}, 0, 0), SpecTimeout(15*time.Minute)),
 )
+
+func shutdownConfigCase(capacityType string, config map[string]any, total, critical time.Duration) kubeletConfigCase {
+	return kubeletConfigCase{
+		tc: environment.TestCase{
+			CapacityType:  capacityType,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-2"},
+			ImageFamily:   gcpv1alpha1.ImageFamilyContainerOptimizedOS,
+		},
+		kubeletConfig: config,
+		wantShutdown:  &shutdownPeriods{total: total, critical: critical},
+	}
+}
 
 // runKubeletConfigTest provisions a node with the given kubeletConfig and
 // invokes c.assert against the resulting Node. Mirrors
@@ -189,7 +224,43 @@ func runKubeletConfigTest(ctx context.Context, c kubeletConfigCase) {
 	Expect(environment.IsNodeReady(node)).To(BeTrue(), "node %s is not Ready", node.Name)
 	Expect(c.tc.InstanceTypes).To(ContainElement(node.Labels[corev1.LabelInstanceTypeStable]))
 
-	c.assert(node)
+	if c.assert != nil {
+		c.assert(node)
+	}
+	if c.wantShutdown != nil {
+		assertShutdownConfig(ctx, node.Name, *c.wantShutdown)
+	}
+}
+
+// assertShutdownConfig reads the running kubelet, not the instance metadata:
+// GKE bootstrap must deliver the settings all the way to the effective config.
+func assertShutdownConfig(ctx context.Context, nodeName string, want shutdownPeriods) {
+	requestCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	raw, err := env.KubeClient.CoreV1().RESTClient().Get().
+		Resource("nodes").Name(nodeName).SubResource("proxy").Suffix("configz").
+		DoRaw(requestCtx)
+	Expect(err).NotTo(HaveOccurred(), "reading kubelet configz requires node proxy access")
+
+	var response struct {
+		KubeletConfig *struct {
+			ShutdownGracePeriod              *metav1.Duration `json:"shutdownGracePeriod"`
+			ShutdownGracePeriodCriticalPods  *metav1.Duration `json:"shutdownGracePeriodCriticalPods"`
+			ShutdownGracePeriodByPodPriority []any            `json:"shutdownGracePeriodByPodPriority"`
+			FeatureGates                     map[string]bool  `json:"featureGates"`
+		} `json:"kubeletconfig"`
+	}
+	Expect(json.Unmarshal(raw, &response)).To(Succeed())
+	Expect(response.KubeletConfig).NotTo(BeNil(), "configz must include kubeletconfig")
+	config := response.KubeletConfig
+	Expect(config.ShutdownGracePeriod).NotTo(BeNil(), "configz must include shutdownGracePeriod")
+	Expect(config.ShutdownGracePeriodCriticalPods).NotTo(BeNil(), "configz must include shutdownGracePeriodCriticalPods")
+	Expect(config.ShutdownGracePeriod.Duration).To(Equal(want.total))
+	Expect(config.ShutdownGracePeriodCriticalPods.Duration).To(Equal(want.critical))
+	Expect(config.ShutdownGracePeriodByPodPriority).To(BeEmpty())
+	if want.total > 0 {
+		Expect(config.FeatureGates).To(HaveKeyWithValue("GracefulNodeShutdown", true))
+	}
 }
 
 // assertSystemReservedReducesAllocatable verifies that the user-configured

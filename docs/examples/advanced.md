@@ -180,6 +180,27 @@ These settings only let kubelet use swap the node already has. Provisioning the 
 
 > **Note:** `swapBehavior: LimitedSwap` requires `failSwapOn: false`; admission otherwise fails with `memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false`.
 
+### Graceful node shutdown
+
+Give pods time to terminate when GCE stops or deletes the VM:
+
+```yaml
+kubeletConfiguration:
+  shutdownGracePeriod: 30s
+  shutdownGracePeriodCriticalPods: 15s
+```
+
+- `shutdownGracePeriod` — how long the node delays its shutdown for pods to terminate; setting it turns on graceful node shutdown
+- `shutdownGracePeriodCriticalPods` — the part of `shutdownGracePeriod` reserved for critical pods, which terminate last
+
+Spot nodes default to `30s` total and `15s` for critical pods, matching [GKE Spot defaults](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/spot-vms). On-demand nodes default to `0s` for both fields (graceful node shutdown disabled), matching the upstream kubelet defaults and verified GKE 1.35 on-demand behavior. This is a fixed provider policy, not a guarantee that every GKE version and machine family uses the same defaults.
+
+Source node pool shutdown settings, including priority-based shutdown periods, are never inherited. Values in the GCENodeClass replace the provider defaults. When only `shutdownGracePeriod` is set on Spot, a larger default `shutdownGracePeriodCriticalPods` is lowered to it; on-demand keeps the critical-pods period at `0s` unless explicitly configured. Both fields take a non-negative Go duration such as `30s` or `1m30s`, within Go's supported duration range.
+
+These settings do not extend the underlying VM's shutdown deadline. In particular, increasing a Spot kubelet grace period does not by itself enable GKE's extended Spot termination window. Normal Karpenter node draining is separate from kubelet handling of OS shutdown.
+
+> **Note:** `shutdownGracePeriodCriticalPods` requires `shutdownGracePeriod` and must not exceed it, because the kubelet does not start otherwise.
+
 ## Static hugepages
 
 Set `spec.linuxNodeConfig.hugepages` to pre-allocate hugepages on every node that the GCENodeClass provisions. The node allocates the pages at boot, before the kubelet starts, and reports them as `hugepages-2Mi` and `hugepages-1Gi` node capacity.
