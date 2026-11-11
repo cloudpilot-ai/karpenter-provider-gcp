@@ -22,7 +22,7 @@ With `enabled: true`, Karpenter also supplies the kubelet settings swap needs wh
 
 A swap-enabled node class that does not configure `spec.disks` now gets a provider-created 100 GiB boot disk, matching the size Karpenter already assumed when estimating ephemeral storage. A configured boot disk is used unchanged but must set `sizeGiB`, so the half-disk limit can be checked. Enabled swap is supported on Container-Optimized OS and Ubuntu image families with a bootstrap manifests archive of GKE `1.34.1-gke.1341000` or newer; older bootstraps and custom images fail the launch instead of creating a node without swap.
 
-The automatic size is measured compatibility with GKE `1.35.8`, not a Google-published formula, and may need updating when GKE changes its defaults. This field was never released: the earlier unmerged spelling `linuxNodeConfig.swap` does not need a migration. See [Swap](docs/examples/advanced.md#swap) and [proposal 0012](proposals/0012-boot-disk-swap.md).
+The automatic size is measured compatibility with GKE `1.35.8-gke.1796000`, not a Google-published formula, and may need updating when GKE changes its defaults. This field was never released: the earlier unmerged spelling `linuxNodeConfig.swap` does not need a migration. See [Swap](docs/examples/advanced.md#swap).
 
 ### On-demand shutdown settings no longer depend on the source pool
 

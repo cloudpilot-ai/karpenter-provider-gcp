@@ -50,6 +50,37 @@ const (
 	oldServerURL          = "https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-amd64.tar.gz"
 )
 
+func TestValidateSwapBootstrapSupportReleaseVersions(t *testing.T) {
+	for _, tc := range []struct {
+		release   string
+		supported bool
+	}{
+		{release: "v1.34.1-gke.999"},
+		{release: "v1.34.1-gke.1339999"},
+		{release: "v1.34.1-gke.1341000", supported: true},
+		{release: "v1.34.1-gke.1341001", supported: true},
+		{release: "v1.34.2-gke.1", supported: true},
+		{release: "v1.35.0-gke.1", supported: true},
+		{release: "v1.33.9-gke.9999999"},
+		{release: "v1.34.1-gke.abc"},
+		{release: "v1.34.1-gke"},
+		{release: "v1.35.0"},
+		{release: "latest"},
+	} {
+		t.Run(tc.release, func(t *testing.T) {
+			target := metadata.NewInstanceMetadata()
+			target.SetKubeEnvEntry("KUBE_MANIFESTS_TAR_URL",
+				"https://storage.googleapis.com/gke-release/kubernetes/release/"+tc.release+"/kubernetes-manifests.tar.gz")
+			err := validateSwapBootstrapSupport(target)
+			if tc.supported {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
+
 // TestBuildInstance_BootDiskSwapFollowsTheBootstrapManifestsArchive protects
 // which archive decides support: the node bootstraps from
 // KUBE_MANIFESTS_TAR_URL's helper, while SERVER_BINARY_TAR_URL only names the

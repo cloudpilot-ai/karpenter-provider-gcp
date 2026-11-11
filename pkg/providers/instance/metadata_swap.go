@@ -18,22 +18,22 @@ package instance
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/version"
 	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
 )
 
-// minSwapBootstrapRelease is the oldest GKE release checked to create the
-// boot-disk swap file. setup-swap appeared in the bootstrap configure helper by
-// v1.34.1-gke.1341000 (proposals/0012); older bootstraps ignore NODE_SWAP_* and
-// would register a node with no swap.
+// minSwapBootstrapRelease is GKE's documented minimum for node memory swap.
 const minSwapBootstrapRelease = "v1.34.1-gke.1341000"
+
+var swapBootstrapReleasePattern = regexp.MustCompile(`/release/(v\d+\.\d+\.\d+-gke\.\d+)/`)
 
 // limitedSwapBehavior lets Burstable pods use the swap file, which is what GKE
 // nodes with swap enabled run.
@@ -74,15 +74,15 @@ func validateSwapBootstrapSupport(target *metadata.InstanceMetadata) error {
 	if !ok || url == "" {
 		return fmt.Errorf("linuxNodeConfig.swapConfig needs the source bootstrap release, but the source kube-env has no KUBE_MANIFESTS_TAR_URL")
 	}
-	match := gkeReleaseVersionRegex.FindStringSubmatch(url)
+	match := swapBootstrapReleasePattern.FindStringSubmatch(url)
 	if match == nil {
 		return fmt.Errorf("linuxNodeConfig.swapConfig cannot be checked against unknown bootstrap manifests archive %q: it does not name a GKE release", url)
 	}
-	supported, err := gke.GKEReleaseAtLeast(match[1], minSwapBootstrapRelease)
+	release, err := version.ParseSemantic(match[1])
 	if err != nil {
 		return fmt.Errorf("linuxNodeConfig.swapConfig cannot be checked against bootstrap manifests archive %q: %w", url, err)
 	}
-	if !supported {
+	if release.LessThan(version.MustParseSemantic(minSwapBootstrapRelease)) {
 		return fmt.Errorf("linuxNodeConfig.swapConfig needs a GKE bootstrap of %s or newer, but the bootstrap manifests archive is %s", minSwapBootstrapRelease, match[1])
 	}
 	return nil

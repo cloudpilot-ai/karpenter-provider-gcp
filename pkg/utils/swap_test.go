@@ -23,7 +23,7 @@ import (
 )
 
 // TestBootDiskSwapGiBAutomaticCases pins every size observed on GKE
-// 1.35.8-gke.1796000 (proposals/0012). The expectations are the recorded
+// 1.35.8-gke.1796000. The expectations are the recorded
 // observations, not values this package computes, so a change to the sizing
 // policy fails here instead of silently agreeing with itself.
 func TestBootDiskSwapGiBAutomaticCases(t *testing.T) {

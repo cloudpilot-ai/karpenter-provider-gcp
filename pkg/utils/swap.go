@@ -22,7 +22,7 @@ import (
 
 // automaticSwapMemoryGiB is the amount of memory that an automatic boot-disk
 // swap file duplicates: GKE sizes swap as twice the memory up to 8 GiB, then as
-// the memory plus 8 GiB. The measured cases are in proposals/0012.
+// the memory plus 8 GiB. The measured cases are in swap_test.go.
 const automaticSwapMemoryGiB int64 = 8
 
 // BootDiskSwapGiB resolves the size of the boot-disk swap file for one machine.
@@ -33,8 +33,8 @@ const automaticSwapMemoryGiB int64 = 8
 // size; a positive requestedGiB is validated against the half-disk limit that
 // GKE enforces and never clamped.
 //
-// The automatic size is empirically derived from the GKE 1.35.8 builds listed
-// in proposals/0012, not from a Google-published formula:
+// The automatic size is empirically derived from GKE 1.35.8-gke.1796000,
+// not from a Google-published formula:
 //
 //	ramGiB = machineMemoryMiB / 1024                      (integer truncation first)
 //	swapGiB = min(ramGiB + min(ramGiB, 8), bootDiskGiB/2)

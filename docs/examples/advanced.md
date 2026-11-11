@@ -199,7 +199,7 @@ ramGiB = machine memory MiB / 1024        (truncated to whole GiB first)
 swapGiB = min(ramGiB + min(ramGiB, 8), bootDiskGiB / 2)
 ```
 
-A 4 GiB machine on a 100 GiB disk gets 8 GiB, a 16 GiB machine gets 24 GiB, and a swap file larger than half of the boot disk is capped, never rounded up. This is measured compatibility with GKE 1.35.8, not a Google-published formula, so future releases may size differently; the measurements are recorded in `proposals/0012-boot-disk-swap.md`. Setting `swapSizeGib` overrides the automatic size, and a request larger than half of the boot disk is rejected.
+A 4 GiB machine on a 100 GiB disk gets 8 GiB, a 16 GiB machine gets 24 GiB, and a swap file larger than half of the boot disk is capped, never rounded up. This is measured compatibility with GKE `1.35.8-gke.1796000`, not a Google-published formula, so future releases may size differently. Sizing regression tests preserve the observed whole-GiB and fractional-memory cases, including 7.75 GiB of RAM producing 14 GiB of swap and a 21 GiB disk capping swap at 10 GiB. Setting `swapSizeGib` overrides the automatic size, and a request larger than half of the boot disk is rejected.
 
 An enabled `swapConfig` supplies the kubelet settings swap needs when the node class omits them: `failSwapOn` becomes `false` and `memorySwap.swapBehavior` becomes `LimitedSwap`, and the source node pool's values are replaced.
 
