@@ -5,6 +5,25 @@
 
 ## Unreleased
 
+### Boot-disk swap: `spec.linuxNodeConfig.swapConfig`
+
+`GCENodeClass` can now create a swap file on the boot disk, as a GKE node pool with `linux_node_config.swap_config` does:
+
+```yaml
+spec:
+  linuxNodeConfig:
+    swapConfig:
+      enabled: true
+```
+
+`enabled` defaults to `false`, and an omitted, empty or disabled `swapConfig` creates no swap file and keeps clearing swap and zswap entries inherited from the bootstrap source pool. Omit `bootDiskProfile.swapSizeGib` for the automatic size, or set it to an explicit size of at most half of the boot disk.
+
+With `enabled: true`, Karpenter also supplies the kubelet settings swap needs when the node class omits them: `failSwapOn` becomes `false` and `memorySwap.swapBehavior` becomes `LimitedSwap`. An explicit `NoSwap` is kept. An explicit `failSwapOn: true` is rejected at admission, because the kubelet does not start while swap is active. The swap file is reserved from pods as part of `kubeReserved.ephemeral-storage`, so the kubelet and the scheduler agree on the same reservation.
+
+A swap-enabled node class that does not configure `spec.disks` now gets a provider-created 100 GiB boot disk, matching the size Karpenter already assumed when estimating ephemeral storage. A configured boot disk is used unchanged but must set `sizeGiB`, so the half-disk limit can be checked. Enabled swap is supported on Container-Optimized OS and Ubuntu image families with a bootstrap manifests archive of GKE `1.34.1-gke.1341000` or newer; older bootstraps and custom images fail the launch instead of creating a node without swap.
+
+The automatic size is measured compatibility with GKE `1.35.8`, not a Google-published formula, and may need updating when GKE changes its defaults. This field was never released: the earlier unmerged spelling `linuxNodeConfig.swap` does not need a migration. See [Swap](docs/examples/advanced.md#swap) and [proposal 0012](proposals/0012-boot-disk-swap.md).
+
 ### On-demand shutdown settings no longer depend on the source pool
 
 New on-demand nodes use `0s` for both kubelet shutdown grace periods instead of inheriting shutdown settings from the bootstrap source node pool. Priority-based shutdown periods from the source are also discarded. Spot defaults remain `30s` total and `15s` for critical pods.

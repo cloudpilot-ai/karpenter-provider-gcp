@@ -177,21 +177,22 @@ var swapKubeEnvEntries = []string{
 	"NODE_ZSWAP_MAX_POOL_PERCENT",
 }
 
-func patchSwapKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass) {
+// patchSwapKubeEnv writes the boot-disk swap entries that the node bootstrap
+// consumes. swapGiB is the size the provider resolved for the machine being
+// launched: the bootstrap creates exactly the size it is given and never derives
+// one itself, so the provider has to pass the resolved size.
+func patchSwapKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, swapGiB int64) {
 	for _, key := range swapKubeEnvEntries {
 		target.UnsetKubeEnvEntry(key)
 	}
-	swapGiB := nodeClass.BootDiskSwapGiB()
-	if swapGiB == 0 {
+	if nodeClass.BootDiskSwapConfig() == nil {
 		return
 	}
-	swap := nodeClass.Spec.LinuxNodeConfig.Swap
 	// The bootstrap passes NODE_SWAP_SIZE to fallocate -l and wraps the file
 	// in dm-crypt (/dev/mapper/encswap) when NODE_SWAP_ENCRYPTION is "true".
-	encrypted := swap.EncryptionConfig == nil || swap.EncryptionConfig.Disabled == nil || !*swap.EncryptionConfig.Disabled
 	target.SetKubeEnvEntry("NODE_SWAP_PROFILE", "BOOT_DISK")
 	target.SetKubeEnvEntry("NODE_SWAP_SIZE", fmt.Sprintf("%dGiB", swapGiB))
-	target.SetKubeEnvEntry("NODE_SWAP_ENCRYPTION", fmt.Sprintf(`"%t"`, encrypted))
+	target.SetKubeEnvEntry("NODE_SWAP_ENCRYPTION", fmt.Sprintf(`"%t"`, nodeClass.BootDiskSwapEncrypted()))
 }
 
 // gpuSharingKubeEnvEntries are the kube-env entries GKE writes on shared-GPU node pools;

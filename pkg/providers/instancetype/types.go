@@ -58,7 +58,16 @@ func NewInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *
 }
 
 func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeClass *v1alpha1.GCENodeClass, ssdCount int) *cloudprovider.InstanceType {
-	bootDiskGiB, totalSSDGiB := calculateDiskConfigGiB(nodeClass, mt, ssdCount)
+	bootDiskSwap, err := ResolveBootDiskSwap(nodeClass, lo.FromPtr(mt.Name), int64(mt.GetMemoryMb()))
+	if err != nil {
+		// A machine whose boot disk or swap file cannot be resolved would
+		// launch a node that does not match the node class, so it must not
+		// reach the scheduling catalog.
+		log.FromContext(ctx).V(1).Info("skipping instance type for boot-disk swap", "instanceType", lo.FromPtr(mt.Name), "error", err.Error())
+		return nil
+	}
+	bootDiskGiB := bootDiskSwap.BootDiskGiB
+	totalSSDGiB := localssd.TotalGiB(lo.FromPtr(mt.Name), ssdCount)
 
 	// RawBlock SSDs do not contribute to kubelet ephemeral storage.
 	kubeletEphemeralSSDGiB, kubeletEphemeralSSDCount := totalSSDGiB, ssdCount
@@ -80,6 +89,13 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 		kubeletEphemeralSSDGiB,
 		int64(kubeletEphemeralSSDCount),
 	)
+	// A boot-disk swap file occupies the boot disk before the kubelet counts
+	// ephemeral storage, so the baseline reservation is resolved against the
+	// remaining disk; the eviction threshold stays on the whole disk. The swap
+	// file itself is added to the reservation once, below.
+	if bootDiskSwap.SwapGiB > 0 && kubeletEphemeralSSDGiB == 0 {
+		_, ephemeralSystem = utils.ResolveReservedEphemeralStorage(bootDiskGiB-bootDiskSwap.SwapGiB, 0, 0)
+	}
 
 	log.FromContext(ctx).V(1).Info("calculated ephemeral storage reservations",
 		"instanceType", lo.FromPtr(mt.Name),
@@ -117,7 +133,7 @@ func NewStaticInstanceType(ctx context.Context, mt *computepb.MachineType, nodeC
 	storageQuantity := resource.NewQuantity(totalStorageBytes, resource.BinarySI)
 
 	overhead := cloudprovider.InstanceTypeOverhead{
-		KubeReserved:      reserveBootDiskSwap(mergeKubeReserved(computedKubeReserved, kc), nodeClass.BootDiskSwapGiB(), kubeletEphemeralSSDGiB),
+		KubeReserved:      reserveBootDiskSwap(mergeKubeReserved(computedKubeReserved, kc), bootDiskSwap.SwapGiB, kubeletEphemeralSSDGiB),
 		SystemReserved:    kcSystemReserved(computedSystemReserved, kc),
 		EvictionThreshold: evictionThreshold(memoryQuantity, storageQuantity, computedEviction, kc),
 	}
@@ -301,18 +317,4 @@ func memory(ctx context.Context, mt *computepb.MachineType) *resource.Quantity {
 	osReservedPercent := options.FromContext(ctx).VMMemoryOverheadPercent
 	totalQuantity := int64(mt.GetMemoryMb()) * 1024 * 1024
 	return resource.NewQuantity(totalQuantity-int64(float64(totalQuantity)*osReservedPercent), resource.DecimalSI)
-}
-
-func calculateDiskConfigGiB(nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType, ssdCount int) (int64, int64) {
-	bootDiskGiB := int64(100) // Default boot disk size
-	if nodeClass != nil {
-		for _, disk := range nodeClass.Spec.Disks {
-			if disk.Boot && disk.SizeGiB > 0 {
-				bootDiskGiB = int64(disk.SizeGiB)
-				break
-			}
-		}
-	}
-	totalSSDGiB := localssd.TotalGiB(lo.FromPtr(mt.Name), ssdCount)
-	return bootDiskGiB, totalSSDGiB
 }

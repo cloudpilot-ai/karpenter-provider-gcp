@@ -114,6 +114,18 @@ func LabelsForInstanceType(instanceType string) (map[string]string, bool) {
 	return LabelsForFamily(Family(instanceType))
 }
 
+// SupportsDiskType reports whether the machine family of instanceType can use
+// the disk type, using the same compatibility data the provider labels nodes
+// with. It is false for a machine family with no compatibility data.
+func SupportsDiskType(instanceType, diskType string) bool {
+	labels, ok := LabelsForInstanceType(instanceType)
+	if !ok {
+		return false
+	}
+	_, supported := labels[labelPrefix+diskType]
+	return supported
+}
+
 // LabelsForFamily returns disk-type.gke.io labels for a GCE machine family.
 func LabelsForFamily(family string) (map[string]string, bool) {
 	labels, ok := compatibility[family]

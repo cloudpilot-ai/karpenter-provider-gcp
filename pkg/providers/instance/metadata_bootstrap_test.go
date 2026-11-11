@@ -209,16 +209,41 @@ func TestBuildInstance_DropsStaleSourceHugepagesMetadata(t *testing.T) {
 }
 
 func swapNodeClass(swap *v1alpha1.SwapConfig) *v1alpha1.GCENodeClass {
-	return &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{LinuxNodeConfig: &v1alpha1.LinuxNodeConfig{Swap: swap}}}
+	return &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageFamily:     lo.ToPtr(v1alpha1.ImageFamilyContainerOptimizedOS),
+		LinuxNodeConfig: &v1alpha1.LinuxNodeConfig{SwapConfig: swap},
+	}}
 }
 
 func buildSwapInstanceKubeEnv(t *testing.T, nodeClass *v1alpha1.GCENodeClass, sourceKubeEnv string) string {
 	t.Helper()
+	return buildSwapInstance(t, nodeClass, nil, sourceKubeEnv).kubeEnv
+}
+
+type swapInstance struct {
+	kubeEnv       string
+	kubeletConfig string
+	disks         []*compute.AttachedDisk
+}
+
+func buildSwapInstance(t *testing.T, nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType, sourceKubeEnv string) swapInstance {
+	t.Helper()
+	return buildSwapInstanceFromSource(t, nodeClass, mt, sourceKubeEnv, "nodeStatusUpdateFrequency: 10s\n")
+}
+
+// buildSwapInstanceFromSource renders one instance from a source kube-env and a
+// source kubelet-config, so a test can put source-pool kubelet settings where
+// they really come from.
+func buildSwapInstanceFromSource(t *testing.T, nodeClass *v1alpha1.GCENodeClass, mt *computepb.MachineType, sourceKubeEnv, sourceKubeletConfig string) swapInstance {
+	t.Helper()
+	if len(nodeClass.Status.Images) == 0 {
+		nodeClass.Status.Images = bootDiskNodeClass("pd-balanced", nil, nil).Status.Images
+	}
 	provider := makeProvider()
 	sourceMetadata := computeMetadataValues(map[string]string{
 		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
 		metadata.KubeEnvKey:       requiredSourceKubeEnv + sourceKubeEnv + "KUBELET_ARGS: --max-pods=110 --node-labels=max-pods-per-node=110,max-pods=110\n",
-		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
+		metadata.KubeletConfigKey: sourceKubeletConfig,
 	})
 
 	instance, err := provider.buildInstance(
@@ -226,16 +251,20 @@ func buildSwapInstanceKubeEnv(t *testing.T, nodeClass *v1alpha1.GCENodeClass, so
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, mt, 0, "pods",
 	)
 	require.NoError(t, err)
-	return kubeEnvFrom(t, instance)
+	return swapInstance{
+		kubeEnv:       kubeEnvFrom(t, instance),
+		kubeletConfig: metadataValue(instance.Metadata, metadata.KubeletConfigKey),
+		disks:         instance.Disks,
+	}
 }
 
 func TestBuildInstance_SwapBootDiskMetadata(t *testing.T) {
 	kubeEnv := buildSwapInstanceKubeEnv(t, swapNodeClass(&v1alpha1.SwapConfig{
 		Enabled:         true,
-		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: 4},
+		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: lo.ToPtr(int64(4))},
 	}), "")
 
 	require.Contains(t, kubeEnv, "NODE_SWAP_PROFILE: BOOT_DISK")
@@ -243,11 +272,42 @@ func TestBuildInstance_SwapBootDiskMetadata(t *testing.T) {
 	require.Contains(t, kubeEnv, `NODE_SWAP_ENCRYPTION: "true"`)
 }
 
+// TestBuildInstance_SwapAutomaticSizeUsesRawMachineMemory protects the measured
+// sizing: the automatic size comes from the machine's nominal memory, not from
+// memory after VM overhead is removed.
+func TestBuildInstance_SwapAutomaticSizeUsesRawMachineMemory(t *testing.T) {
+	mt := &computepb.MachineType{Name: lo.ToPtr("n2-standard-4"), GuestCpus: lo.ToPtr[int32](4), MemoryMb: lo.ToPtr[int32](16384)}
+
+	got := buildSwapInstance(t, swapNodeClass(&v1alpha1.SwapConfig{Enabled: true}), mt, "")
+
+	require.Contains(t, got.kubeEnv, "NODE_SWAP_SIZE: 24GiB")
+	require.Contains(t, got.kubeEnv, `NODE_SWAP_ENCRYPTION: "true"`)
+}
+
+// TestBuildInstance_SwapMaterializesDefaultBootDisk checks that the swap node
+// gets the boot disk the provider sizes and estimates with.
+func TestBuildInstance_SwapMaterializesDefaultBootDisk(t *testing.T) {
+	mt := &computepb.MachineType{Name: lo.ToPtr("n2-standard-4"), GuestCpus: lo.ToPtr[int32](4), MemoryMb: lo.ToPtr[int32](16384)}
+
+	got := buildSwapInstance(t, swapNodeClass(&v1alpha1.SwapConfig{Enabled: true}), mt, "")
+
+	var bootDisks []*compute.AttachedDisk
+	for _, disk := range got.disks {
+		if disk.Boot {
+			bootDisks = append(bootDisks, disk)
+		}
+	}
+	require.Len(t, bootDisks, 1, "the swap node must boot from exactly one disk")
+	require.Equal(t, int64(100), bootDisks[0].InitializeParams.DiskSizeGb)
+	require.Contains(t, bootDisks[0].InitializeParams.DiskType, "/diskTypes/pd-standard")
+	require.NotEmpty(t, bootDisks[0].InitializeParams.SourceImage)
+}
+
 func TestBuildInstance_SwapEncryptionDisabledMetadata(t *testing.T) {
 	kubeEnv := buildSwapInstanceKubeEnv(t, swapNodeClass(&v1alpha1.SwapConfig{
 		Enabled:          true,
 		EncryptionConfig: &v1alpha1.SwapEncryptionConfig{Disabled: lo.ToPtr(true)},
-		BootDiskProfile:  &v1alpha1.SwapBootDiskProfile{SwapSizeGib: 1},
+		BootDiskProfile:  &v1alpha1.SwapBootDiskProfile{SwapSizeGib: lo.ToPtr(int64(1))},
 	}), "")
 
 	require.Contains(t, kubeEnv, "NODE_SWAP_SIZE: 1GiB")
@@ -260,7 +320,8 @@ func TestBuildInstance_DropsStaleSourceSwapMetadata(t *testing.T) {
 
 	for name, nodeClass := range map[string]*v1alpha1.GCENodeClass{
 		"no linuxNodeConfig": {},
-		"swap disabled":      swapNodeClass(&v1alpha1.SwapConfig{Enabled: false}),
+		"swapConfig omitted": {Spec: v1alpha1.GCENodeClassSpec{LinuxNodeConfig: &v1alpha1.LinuxNodeConfig{}}},
+		"swap disabled":      swapNodeClass(&v1alpha1.SwapConfig{}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			kubeEnv := buildSwapInstanceKubeEnv(t, nodeClass, sourceSwap)
@@ -273,7 +334,7 @@ func TestBuildInstance_DropsStaleSourceSwapMetadata(t *testing.T) {
 func TestBuildInstance_SwapReplacesSourceSwapMetadata(t *testing.T) {
 	kubeEnv := buildSwapInstanceKubeEnv(t, swapNodeClass(&v1alpha1.SwapConfig{
 		Enabled:         true,
-		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: 2},
+		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: lo.ToPtr(int64(2))},
 	}), "NODE_SWAP_PROFILE: DEDICATED_LOCAL_SSD\nNODE_SWAP_DEDICATED_LOCAL_SSD_COUNT: \"1\"\nNODE_ZSWAP_ENABLED: \"true\"\n")
 
 	require.Contains(t, kubeEnv, "NODE_SWAP_PROFILE: BOOT_DISK")

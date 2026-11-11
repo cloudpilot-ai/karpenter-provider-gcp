@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -923,9 +924,14 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int,
+	nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int, defaultBootDisk *v1alpha1.Disk,
 ) ([]*compute.AttachedDisk, error) {
-	disks := nodeClass.Spec.Disks
+	// Boot-disk swap needs a disk the provider sizes itself when the node class
+	// configures none, so render that disk alongside the configured ones.
+	disks := slices.Clone(nodeClass.Spec.Disks)
+	if defaultBootDisk != nil {
+		disks = append(disks, *defaultBootDisk)
+	}
 	sort.Slice(disks, func(i, j int) bool {
 		return disks[i].Boot
 	})
@@ -1028,16 +1034,30 @@ func (p *DefaultProvider) scratchDisk(zone string) *compute.AttachedDisk {
 	}
 }
 
-func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, podRange string) (*compute.Instance, error) {
-	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClaim, nodeClass, zone, ssdCount)
+// launchDisks resolves the boot disk and the boot-disk swap file for the
+// candidate machine, then renders every disk the instance attaches.
+func (p *DefaultProvider) launchDisks(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, zone string, mt *computepb.MachineType, ssdCount int) ([]*compute.AttachedDisk, instancetype.BootDiskSwap, error) {
+	bootDiskSwap, err := instancetype.ResolveBootDiskSwap(nodeClass, instanceType.Name, int64(mt.GetMemoryMb()))
 	if err != nil {
-		return nil, fmt.Errorf("rendering disk properties: %w", err)
+		return nil, instancetype.BootDiskSwap{}, fmt.Errorf("resolving boot-disk swap: %w", err)
+	}
+	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClaim, nodeClass, zone, ssdCount, bootDiskSwap.DefaultBootDisk)
+	if err != nil {
+		return nil, instancetype.BootDiskSwap{}, fmt.Errorf("rendering disk properties: %w", err)
+	}
+	return attachedDisks, bootDiskSwap, nil
+}
+
+func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, podRange string) (*compute.Instance, error) {
+	attachedDisks, bootDiskSwap, err := p.launchDisks(nodeClaim, nodeClass, instanceType, zone, mt, ssdCount)
+	if err != nil {
+		return nil, err
 	}
 
 	isGPUInstance := instanceTypeHasGPU(instanceType)
 
 	// Setup metadata
-	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount)
+	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount, bootDiskSwap.SwapGiB)
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
@@ -1215,13 +1235,21 @@ func podCIDRRange(maxPods int32) int32 {
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance.
-func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool, ssdCount int) (*metadata.InstanceMetadata, error) {
+func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool, ssdCount int, swapGiB int64) (*metadata.InstanceMetadata, error) {
 	target, err := metadata.FromSourceTemplate(sourceMetadata)
 	if err != nil {
 		return nil, err
 	}
 	if err := validateSourceKubeEnv(target); err != nil {
 		return nil, err
+	}
+	if err := validateBootDiskSwapNodeClass(nodeClass); err != nil {
+		return nil, err
+	}
+	if swapGiB > 0 {
+		if err := validateSwapBootstrapSupport(target); err != nil {
+			return nil, err
+		}
 	}
 	target.SetCustomMetadata(metadata.CustomMetadata(nodeClass.Spec.Metadata))
 	provisioningModel := "standard"
@@ -1232,12 +1260,14 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	patchKubeEnvOSDistribution(target, nodeClass)
 	patchSecondaryBootDisksKubeEnv(target, nodeClass)
 	patchHugepagesKubeEnv(target, nodeClass)
-	patchSwapKubeEnv(target, nodeClass)
+	patchSwapKubeEnv(target, nodeClass, swapGiB)
 	patchGPUSharingKubeEnv(target, nodeClass, isGPUInstance)
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)
 		applyShutdownKubeletDefaults(config, provisioningModel)
 		applyNodeClassKubeletConfig(config, nodeClass.Spec.KubeletConfiguration)
+		applyBootDiskSwapKubeletDefaults(config, nodeClass)
+		applyBootDiskSwapReservation(config, instanceType, swapGiB)
 	})
 	if err := p.patchKubeEnvServerBinaryForArch(ctx, target, instanceType); err != nil {
 		return nil, err

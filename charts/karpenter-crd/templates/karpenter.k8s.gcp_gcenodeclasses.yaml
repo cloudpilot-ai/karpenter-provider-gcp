@@ -432,7 +432,9 @@ spec:
                   failSwapOn:
                     description: |-
                       FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.
-                      Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap.
+                      Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap, unless
+                      linuxNodeConfig.swapConfig creates the swap file: the provider then defaults it
+                      to false for the node.
                       Default: true
                     type: boolean
                   imageGCHighThresholdPercent:
@@ -493,9 +495,9 @@ spec:
                     type: integer
                   memorySwap:
                     description: |-
-                      MemorySwap configures swap memory available to container workloads. The
-                      kubelet only uses swap the node already has: provisioning a swap device or
-                      file is up to the node image or a DaemonSet.
+                      MemorySwap configures swap memory available to container workloads. Swap that
+                      the provider creates is requested separately through linuxNodeConfig.swapConfig;
+                      without it, providing a swap device or file is up to the node image or a DaemonSet.
                     properties:
                       swapBehavior:
                         description: |-
@@ -581,11 +583,6 @@ spec:
                   rule: '!has(self.maxParallelImagePulls) || self.maxParallelImagePulls
                     < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls
                     == false)'
-                - message: memorySwap.swapBehavior LimitedSwap requires failSwapOn
-                    to be explicitly set to false
-                  rule: '!has(self.memorySwap) || !has(self.memorySwap.swapBehavior)
-                    || self.memorySwap.swapBehavior != ''LimitedSwap'' || (has(self.failSwapOn)
-                    && self.failSwapOn == false)'
                 - message: shutdownGracePeriodCriticalPods requires shutdownGracePeriod
                     and must not exceed it
                   rule: '!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod)
@@ -634,29 +631,29 @@ spec:
                         minimum: 1
                         type: integer
                     type: object
-                  swap:
+                  swapConfig:
                     description: |-
-                      Swap configures the swap file that the node creates at boot, before the
-                      kubelet starts. Mirrors GKE node pool linux_node_config.swap_config.
-                      Workloads use the swap only when kubeletConfiguration sets failSwapOn to
-                      false and memorySwap.swapBehavior to LimitedSwap.
+                      SwapConfig configures the swap file that the node creates at boot, before
+                      the kubelet starts. Mirrors GKE node pool linux_node_config.swap_config.
                     properties:
                       bootDiskProfile:
-                        description: BootDiskProfile creates the swap file on the
-                          boot disk.
+                        description: |-
+                          BootDiskProfile creates the swap file on the boot disk. Omit it to use the
+                          automatic size GKE derives from the machine's memory and the boot disk.
                         properties:
                           swapSizeGib:
                             description: |-
-                              SwapSizeGib is the size of the swap file in GiB. GKE limits it to half
-                              of the boot disk.
+                              SwapSizeGib is the size of the swap file in GiB. Omit it to use the
+                              automatic size, which GKE derives from the machine's memory: twice the
+                              memory up to 8 GiB, plus 8 GiB above that, at most half of the boot disk.
                             format: int64
                             minimum: 1
                             type: integer
-                        required:
-                        - swapSizeGib
                         type: object
                       enabled:
-                        description: Enabled creates the swap file on the node.
+                        description: |-
+                          Enabled creates the swap file on the node. Defaults to false, which
+                          neither creates a swap file nor inherits the source node pool's swap.
                         type: boolean
                       encryptionConfig:
                         description: |-
@@ -669,15 +666,12 @@ spec:
                               swap file.
                             type: boolean
                         type: object
-                    required:
-                    - enabled
                     type: object
                     x-kubernetes-validations:
-                    - message: bootDiskProfile is required when swap is enabled
-                      rule: '!self.enabled || has(self.bootDiskProfile)'
                     - message: bootDiskProfile and encryptionConfig must not be set
-                        when swap is disabled
-                      rule: self.enabled || (!has(self.bootDiskProfile) && !has(self.encryptionConfig))
+                        when swapConfig is not enabled
+                      rule: (has(self.enabled) && self.enabled) || (!has(self.bootDiskProfile)
+                        && !has(self.encryptionConfig))
                 type: object
               localSsdMode:
                 default: RawBlock
@@ -871,18 +865,36 @@ spec:
             x-kubernetes-validations:
             - message: subnetRangeName and subnetRangeNames are mutually exclusive
               rule: '!(has(self.subnetRangeName) && has(self.subnetRangeNames))'
-            - message: linuxNodeConfig.swap.enabled requires kubeletConfiguration.failSwapOn
-                to be explicitly set to false
-              rule: '!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap)
-                || !self.linuxNodeConfig.swap.enabled || (has(self.kubeletConfiguration)
-                && has(self.kubeletConfiguration.failSwapOn) && self.kubeletConfiguration.failSwapOn
+            - message: 'linuxNodeConfig.swapConfig.enabled conflicts with kubeletConfiguration.failSwapOn
+                true: the kubelet does not start while swap is active'
+              rule: '!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swapConfig)
+                || !has(self.linuxNodeConfig.swapConfig.enabled) || !self.linuxNodeConfig.swapConfig.enabled
+                || !has(self.kubeletConfiguration) || !has(self.kubeletConfiguration.failSwapOn)
+                || !self.kubeletConfiguration.failSwapOn'
+            - message: memorySwap.swapBehavior LimitedSwap requires kubeletConfiguration.failSwapOn
+                to be explicitly set to false unless linuxNodeConfig.swapConfig is
+                enabled
+              rule: '!has(self.kubeletConfiguration) || !has(self.kubeletConfiguration.memorySwap)
+                || !has(self.kubeletConfiguration.memorySwap.swapBehavior) || self.kubeletConfiguration.memorySwap.swapBehavior
+                != ''LimitedSwap'' || (has(self.linuxNodeConfig) && has(self.linuxNodeConfig.swapConfig)
+                && has(self.linuxNodeConfig.swapConfig.enabled) && self.linuxNodeConfig.swapConfig.enabled)
+                || (has(self.kubeletConfiguration.failSwapOn) && self.kubeletConfiguration.failSwapOn
                 == false)'
-            - message: linuxNodeConfig.swap.bootDiskProfile.swapSizeGib must be at
-                most half of the boot disk sizeGiB
-              rule: '!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swap)
-                || !has(self.linuxNodeConfig.swap.bootDiskProfile) || !has(self.disks)
-                || self.disks.all(d, !has(d.boot) || !d.boot || !has(d.sizeGiB) ||
-                2 * self.linuxNodeConfig.swap.bootDiskProfile.swapSizeGib <= d.sizeGiB)'
+            - message: linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib must
+                be at most half of the boot disk sizeGiB
+              rule: '!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swapConfig)
+                || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile) || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib)
+                || !has(self.disks) || self.disks.all(d, !has(d.boot) || !d.boot ||
+                !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib
+                <= d.sizeGiB)'
+            - message: linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib must
+                be at most 50GiB when the provider creates the default 100GiB boot
+                disk
+              rule: '!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swapConfig)
+                || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile) || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib)
+                || (has(self.disks) && self.disks.exists(d, has(d.boot) && d.boot))
+                || self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib <=
+                50'
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass
             properties:
