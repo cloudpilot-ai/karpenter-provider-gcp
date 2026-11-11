@@ -11,11 +11,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: true
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
@@ -27,13 +27,13 @@ jobs:
           echo "AWS_DEFAULT_REGION=us-east-2" >> $GITHUB_ENV
 
       - name: AWS CLI Init
-        uses: unfor19/install-aws-cli-action@f5b46b7f32cf5e7ebd652656c5036bf83dd1e60c # v1.0.8
+        uses: unfor19/install-aws-cli-action@1.0.8
 
       - name: Config ECR
         run: |
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/cloudpilotai
 
-      - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
+      - uses: ko-build/setup-ko@v0.10
 
       - name: build and publish image
         run: |

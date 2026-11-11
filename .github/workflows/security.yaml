@@ -1,6 +1,8 @@
 name: Security checks
 
 on:
+  push:
+    branches: [ "main" ]
   schedule:
     - cron: '45 6 * * *'
   workflow_dispatch: {}
@@ -20,10 +22,10 @@ jobs:
       GOOS: linux
       GOARCH: amd64
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
       - name: Report Go vulnerabilities
@@ -35,13 +37,13 @@ jobs:
         run: make vulncheck
       - name: Upload Go findings to code scanning
         if: ${{ !cancelled() && steps.report.outcome == 'success' }}
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        uses: github/codeql-action/upload-sarif@v4.39.3
         with:
           sarif_file: govulncheck.sarif
           category: govulncheck/controller-linux-amd64
       - name: Retain Go findings
         if: ${{ !cancelled() && steps.report.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: govulncheck-sarif
           path: govulncheck.sarif
@@ -62,10 +64,10 @@ jobs:
       PLATFORM: linux/${{ matrix.arch }}
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: |
@@ -84,36 +86,40 @@ jobs:
           grep '^defaultBaseImage:' .ko.yaml >> reports/build.txt
           ko build --bare --push=false --platform "$PLATFORM" --tarball "$RUNNER_TEMP/controller.tar" \
             ./cmd/controller > reports/image.txt
-      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+      - name: Install image scanner
+        id: grype
+        uses: anchore/scan-action/download-grype@v7.4.2
         with:
-          version: v0.76.1
-          cache: false
+          grype-version: v0.118.0
+          cache-db: true
       - name: Scan OS and Go dependencies
         id: scan
         # A stable input path keeps SARIF locations consistent across runs.
         working-directory: ${{ runner.temp }}
         run: |
-          trivy image --input controller.tar --scanners vuln --pkg-types os,library \
-            --timeout 15m --format json --output "$GITHUB_WORKSPACE/reports/trivy.json"
-      - name: Generate complete SARIF report
-        id: report
-        run: trivy convert --format sarif --output reports/trivy.sarif reports/trivy.json
-      - name: Fail on fixable high or critical vulnerabilities
-        if: steps.report.outcome == 'success'
+          "${{ steps.grype.outputs.cmd }}" docker-archive:controller.tar \
+            --output "json=$GITHUB_WORKSPACE/reports/grype.json" \
+            --output "sarif=$GITHUB_WORKSPACE/reports/grype.sarif"
+      # govulncheck gates reachable Go vulnerabilities; retain all image findings above.
+      - name: Fail on fixable high or critical OS vulnerabilities
+        if: steps.scan.outcome == 'success'
         run: |
-          jq '[.Results[]?.Vulnerabilities[]? |
-            select((.Severity == "HIGH" or .Severity == "CRITICAL") and ((.FixedVersion // "") != ""))]' \
-            reports/trivy.json > reports/blocking-vulnerabilities.json
+          jq '[.matches[] |
+            select(.artifact.type | IN("deb", "rpm", "apk", "alpm", "portage")) |
+            select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") |
+            select(.vulnerability.fix.state == "fixed") |
+            select(any(.vulnerability.fix.versions[]?; type == "string" and length > 0))]' \
+            reports/grype.json > reports/blocking-vulnerabilities.json
           jq -e 'length == 0' reports/blocking-vulnerabilities.json
       - name: Upload image findings to code scanning
-        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+        uses: github/codeql-action/upload-sarif@v4.39.3
         with:
-          sarif_file: reports/trivy.sarif
-          category: trivy/main-controller-linux-${{ matrix.arch }}
+          sarif_file: reports/grype.sarif
+          category: grype/main-controller-linux-${{ matrix.arch }}
       - name: Retain image inventory and findings
         if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: main-image-security-linux-${{ matrix.arch }}
           path: reports/
