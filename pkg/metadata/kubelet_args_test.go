@@ -34,7 +34,7 @@ func TestParseSourceKubeletArgsDropsTargetOwnedFields(t *testing.T) {
 	require.NotContains(t, args.String(), "--register-with-taints=")
 }
 
-func TestUnsetKubeletFeatureGate(t *testing.T) {
+func TestParseSourceKubeletArgsDropsShutdownFeatureGate(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, want string
 	}{
@@ -44,12 +44,9 @@ func TestUnsetKubeletFeatureGate(t *testing.T) {
 		{name: "unrelated gates", source: "--feature-gates=GracefulNodeShutdownBasedOnPodPriority=true,NodeSwap=false", want: "--feature-gates=GracefulNodeShutdownBasedOnPodPriority=true,NodeSwap=false"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			metadata := InstanceMetadata{}
-			metadata.kubeEnv.kubeletArgs = ParseSourceKubeletArgs(tc.source)
+			args := ParseSourceKubeletArgs(tc.source)
 
-			metadata.UnsetKubeletFeatureGate("GracefulNodeShutdown")
-
-			require.Equal(t, tc.want, metadata.kubeEnv.kubeletArgs.String())
+			require.Equal(t, tc.want, args.String())
 		})
 	}
 }

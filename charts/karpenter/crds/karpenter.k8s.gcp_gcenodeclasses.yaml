@@ -524,7 +524,7 @@ spec:
                       can terminate, for example when GCE stops or deletes the VM. It turns on
                       graceful node shutdown. Spot nodes default to 30s; on-demand nodes default
                       to 0s. Source node pool shutdown settings are not inherited.
-                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$
                     type: string
                     x-kubernetes-validations:
                     - message: must be a non-negative duration within Go's supported
@@ -536,7 +536,7 @@ spec:
                       reserved for critical pods, which terminate after all other pods.
                       Spot nodes default to 15s; on-demand nodes default to 0s. When only
                       shutdownGracePeriod is set, a larger Spot default is lowered to it.
-                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$
                     type: string
                     x-kubernetes-validations:
                     - message: must be a non-negative duration within Go's supported

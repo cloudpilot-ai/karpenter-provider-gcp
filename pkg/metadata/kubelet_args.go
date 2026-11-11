@@ -28,8 +28,8 @@ import (
 const kubeletMaxPodsFlagName = "--max-pods"
 
 // ParseSourceKubeletArgs preserves only unknown kubelet args from a GKE source
-// template. Bootstrap labels, taints, and max pods are target-owned and should
-// be set explicitly by provider orchestration before rendering.
+// template. Registration labels, taints, max pods, and the shutdown feature gate
+// are target-owned and are set by provider orchestration before rendering.
 func ParseSourceKubeletArgs(raw string) KubeletArgs {
 	args := KubeletArgs{nodeLabels: Labels{}}
 	for _, field := range strings.Fields(raw) {
@@ -42,6 +42,7 @@ func ParseSourceKubeletArgs(raw string) KubeletArgs {
 			args.other = append(args.other, field)
 		}
 	}
+	args.unsetFeatureGate("GracefulNodeShutdown")
 	return args
 }
 
@@ -83,13 +84,8 @@ func (m *InstanceMetadata) SetKubeletMaxPods(maxPods int32) {
 	m.kubeEnv.kubeletArgs.maxPods = &maxPods
 }
 
-// UnsetKubeletFeatureGate removes a CLI feature-gate override without changing
-// unrelated gates or flags. Provider policy selects which overrides to remove.
-func (m *InstanceMetadata) UnsetKubeletFeatureGate(name string) {
-	if m == nil {
-		return
-	}
-	other := m.kubeEnv.kubeletArgs.other
+func (a *KubeletArgs) unsetFeatureGate(name string) {
+	other := a.other
 	var filtered []string
 	for i := 0; i < len(other); i++ {
 		value, found := strings.CutPrefix(other[i], "--feature-gates=")
@@ -109,7 +105,7 @@ func (m *InstanceMetadata) UnsetKubeletFeatureGate(name string) {
 			filtered = append(filtered, "--feature-gates="+strings.Join(gates, ","))
 		}
 	}
-	m.kubeEnv.kubeletArgs.other = filtered
+	a.other = filtered
 }
 
 // SetNodeTaints replaces the node taints this metadata model will render when

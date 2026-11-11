@@ -52,6 +52,50 @@ func TestFromSourceTemplateDropsSourceLabelsAndTaintsFromTargetState(t *testing.
 	require.NotContains(t, values[KubeEnvKey], "source=true:NoSchedule")
 }
 
+func TestFromSourceTemplateExcludesShutdownConfigBeforeDecoding(t *testing.T) {
+	for _, shutdown := range []string{
+		"shutdownGracePeriod: 30s\nshutdownGracePeriodCriticalPods: 15s\nshutdownGracePeriodByPodPriority:\n- priority: 0\n  shutdownGracePeriodSeconds: 60\n",
+		"shutdownGracePeriod: not-a-duration\nshutdownGracePeriodCriticalPods: [unused]\nshutdownGracePeriodByPodPriority: unused\n",
+	} {
+		source := &compute.Metadata{Items: []*compute.MetadataItems{
+			{Key: KubeletConfigKey, Value: lo.ToPtr(shutdown + "nodeStatusUpdateFrequency: 10s\nfeatureGates:\n  GracefulNodeShutdown: unused\n  NodeSwap: true\n")},
+		}}
+		original := *source.Items[0].Value
+
+		model, err := FromSourceTemplate(source)
+		require.NoError(t, err)
+		require.Zero(t, model.kubeletConfig.ShutdownGracePeriod.Duration)
+		require.Zero(t, model.kubeletConfig.ShutdownGracePeriodCriticalPods.Duration)
+		require.Empty(t, model.kubeletConfig.ShutdownGracePeriodByPodPriority)
+		require.NotContains(t, model.kubeletConfig.FeatureGates, "GracefulNodeShutdown")
+		require.True(t, model.kubeletConfig.FeatureGates["NodeSwap"])
+		require.Equal(t, "10s", model.kubeletConfig.NodeStatusUpdateFrequency.Duration.String())
+		require.Equal(t, original, *source.Items[0].Value)
+	}
+}
+
+func TestFromSourceTemplatePreservesRetainedYAMLScalarConversion(t *testing.T) {
+	model, err := FromSourceTemplate(&compute.Metadata{Items: []*compute.MetadataItems{
+		{Key: KubeletConfigKey, Value: lo.ToPtr("systemReserved:\n  cpu: 0\ncpuManagerPolicyOptions:\n  full-pcpus-only: true\n")},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, "0", model.kubeletConfig.SystemReserved["cpu"])
+	require.Equal(t, "true", model.kubeletConfig.CPUManagerPolicyOptions["full-pcpus-only"])
+}
+
+func TestFromSourceTemplateRejectsMalformedRetainedKubeletConfig(t *testing.T) {
+	for _, raw := range []string{
+		"nodeStatusUpdateFrequency: not-a-duration\n",
+		"featureGates:\n  NodeSwap: not-a-boolean\n",
+		"featureGates: not-a-map\n",
+	} {
+		_, err := FromSourceTemplate(&compute.Metadata{Items: []*compute.MetadataItems{
+			{Key: KubeletConfigKey, Value: lo.ToPtr(raw)},
+		}})
+		require.Error(t, err, raw)
+	}
+}
+
 func TestFromSourceTemplateRetainsExplicitGKEBootstrapMetadata(t *testing.T) {
 	source := map[string]string{
 		"cluster-location":           "europe-west4-a",

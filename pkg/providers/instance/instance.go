@@ -1233,7 +1233,6 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	patchSecondaryBootDisksKubeEnv(target, nodeClass)
 	patchHugepagesKubeEnv(target, nodeClass)
 	patchGPUSharingKubeEnv(target, nodeClass, isGPUInstance)
-	target.UnsetKubeletFeatureGate("GracefulNodeShutdown")
 	target.UpdateKubeletConfig(func(config *kubeletconfig.KubeletConfiguration) {
 		applyInstanceTypeKubeReserved(config, instanceType)
 		applyShutdownKubeletDefaults(config, provisioningModel)

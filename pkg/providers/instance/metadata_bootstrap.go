@@ -193,13 +193,9 @@ func applyInstanceTypeKubeReserved(config *kubeletconfig.KubeletConfiguration, i
 	})
 }
 
-// applyShutdownKubeletDefaults replaces source-pool shutdown policy with provider
-// defaults. NodeClass settings are applied afterward.
+// applyShutdownKubeletDefaults sets capacity-specific defaults after source
+// shutdown settings have been excluded. NodeClass settings are applied afterward.
 func applyShutdownKubeletDefaults(config *kubeletconfig.KubeletConfiguration, provisioningModel string) {
-	config.ShutdownGracePeriod = metav1.Duration{}
-	config.ShutdownGracePeriodCriticalPods = metav1.Duration{}
-	config.ShutdownGracePeriodByPodPriority = nil
-	delete(config.FeatureGates, "GracefulNodeShutdown")
 	if provisioningModel != karpv1.CapacityTypeSpot {
 		return
 	}
