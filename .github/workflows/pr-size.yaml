@@ -17,7 +17,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Ensure size labels exist
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        uses: actions/github-script@v9.0.0
         with:
           script: |
             const labels = [
@@ -53,16 +53,16 @@ jobs:
 
       - name: Determine size label
         id: size
-        uses: step-security/action-size@f21f11fd252174c4f0ee7af09a3ce79d25773bd7 # v2.2.0
+        uses: step-security/action-size@v2.2.0
 
       - name: Remove stale size labels
-        uses: step-security/action-remove-labels@0336f915cebfb9c55d1a00317ae094db2fb74208 # v1.3.1
+        uses: step-security/action-remove-labels@v1.3.1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           labels: ${{ steps.size.outputs.stale_labels }}
 
       - name: Add size label
-        uses: step-security/action-add-labels@7f7665088f060f0acf3619469ce85d680df45f3e # v1.1.1
+        uses: step-security/action-add-labels@v1.1.1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           labels: ${{ steps.size.outputs.new_label }}
