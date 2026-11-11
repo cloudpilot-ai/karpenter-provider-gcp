@@ -91,7 +91,7 @@ jobs:
         uses: anchore/scan-action/download-grype@v7.4.2
         with:
           grype-version: v0.118.0
-          cache-db: false
+          cache-db: true
       - name: Scan OS and Go dependencies
         id: scan
         # A stable input path keeps SARIF locations consistent across runs.
