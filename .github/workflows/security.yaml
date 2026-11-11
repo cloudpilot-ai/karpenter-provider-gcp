@@ -86,34 +86,39 @@ jobs:
           grep '^defaultBaseImage:' .ko.yaml >> reports/build.txt
           ko build --bare --push=false --platform "$PLATFORM" --tarball "$RUNNER_TEMP/controller.tar" \
             ./cmd/controller > reports/image.txt
-      - uses: aquasecurity/setup-trivy@v0.3.1
+      - name: Install image scanner
+        id: grype
+        uses: anchore/scan-action/download-grype@v7.4.2
         with:
-          version: v0.76.1
-          cache: false
+          grype-version: v0.118.0
+          cache-db: false
       - name: Scan OS and Go dependencies
         id: scan
         # A stable input path keeps SARIF locations consistent across runs.
         working-directory: ${{ runner.temp }}
+        env:
+          GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
         run: |
-          trivy image --input controller.tar --scanners vuln --pkg-types os,library \
-            --timeout 15m --format json --output "$GITHUB_WORKSPACE/reports/trivy.json"
-      - name: Generate complete SARIF report
-        id: report
-        run: trivy convert --format sarif --output reports/trivy.sarif reports/trivy.json
+          "$GRYPE_CMD" docker-archive:controller.tar \
+            --output "json=$GITHUB_WORKSPACE/reports/grype.json" \
+            --output "sarif=$GITHUB_WORKSPACE/reports/grype.sarif"
       # govulncheck gates reachable Go vulnerabilities; retain all image findings above.
       - name: Fail on fixable high or critical OS vulnerabilities
-        if: steps.report.outcome == 'success'
+        if: steps.scan.outcome == 'success'
         run: |
-          jq '[.Results[]? | select(.Class == "os-pkgs") | .Vulnerabilities[]? |
-            select((.Severity == "HIGH" or .Severity == "CRITICAL") and ((.FixedVersion // "") != ""))]' \
-            reports/trivy.json > reports/blocking-vulnerabilities.json
+          jq '[.matches[] |
+            select(.artifact.type | IN("deb", "rpm", "apk", "alpm", "portage")) |
+            select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") |
+            select(.vulnerability.fix.state == "fixed") |
+            select(any(.vulnerability.fix.versions[]?; type == "string" and length > 0))]' \
+            reports/grype.json > reports/blocking-vulnerabilities.json
           jq -e 'length == 0' reports/blocking-vulnerabilities.json
       - name: Upload image findings to code scanning
-        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
         uses: github/codeql-action/upload-sarif@v4.39.3
         with:
-          sarif_file: reports/trivy.sarif
-          category: trivy/main-controller-linux-${{ matrix.arch }}
+          sarif_file: reports/grype.sarif
+          category: grype/main-controller-linux-${{ matrix.arch }}
       - name: Retain image inventory and findings
         if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
         uses: actions/upload-artifact@v7.0.2
