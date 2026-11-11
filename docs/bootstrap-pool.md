@@ -68,16 +68,16 @@ The chain has to resolve completely. If any part of it cannot be read — the co
 
 Karpenter reads kubelet bootstrap metadata from that instance template. Other instance settings are derived from GCENodeClass, cluster config, or Karpenter/provider defaults.
 
-| Metadata                               | Source                                                                                                                                             |
-|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| Kubelet configuration (max-pods, etc.) | Bootstrap pool template, then patched by GCENodeClass settings                                                                                     |
-| Subnetwork                             | GCENodeClass `spec.networkConfig.subnetwork`; defaults to cluster subnetwork from GKE cluster config                                               |
-| Private-node setting                   | GCENodeClass `spec.networkConfig.enablePrivateNodes`; defaults to cluster private-node setting from GKE cluster config                             |
-| Service account                        | GCENodeClass `spec.serviceAccount`, `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`, or Compute Engine default service account                                  |
-| Service account scopes                 | Karpenter sets `cloud-platform`                                                                                                                    |
-| Node labels                            | Rebuilt from Karpenter/provider target state, plus a known set of GKE readiness-gate labels carried over from the source pool template (see below) |
-| Node taints                            | Rebuilt from Karpenter/provider target state                                                                                                       |
-| Image streaming cache size             | Recomputed for each node's machine type when the bootstrap pool uses image streaming, matching what GKE sets for that machine type                 |
+| Metadata                               | Source                                                                                                                                                                                           |
+|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Kubelet configuration (max-pods, etc.) | Bootstrap pool template, then patched by GCENodeClass settings. Shutdown grace periods use provider defaults instead (see [Graceful node shutdown](examples/advanced.md#graceful-node-shutdown)) |
+| Subnetwork                             | GCENodeClass `spec.networkConfig.subnetwork`; defaults to cluster subnetwork from GKE cluster config                                                                                             |
+| Private-node setting                   | GCENodeClass `spec.networkConfig.enablePrivateNodes`; defaults to cluster private-node setting from GKE cluster config                                                                           |
+| Service account                        | GCENodeClass `spec.serviceAccount`, `DEFAULT_NODEPOOL_SERVICE_ACCOUNT`, or Compute Engine default service account                                                                                |
+| Service account scopes                 | Karpenter sets `cloud-platform`                                                                                                                                                                  |
+| Node labels                            | Rebuilt from Karpenter/provider target state, plus a known set of GKE readiness-gate labels carried over from the source pool template (see below)                                               |
+| Node taints                            | Rebuilt from Karpenter/provider target state                                                                                                                                                     |
+| Image streaming cache size             | Recomputed for each node's machine type when the bootstrap pool uses image streaming, matching what GKE sets for that machine type                                                               |
 
 Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls, plus the GKE readiness-gate labels described below.
 
