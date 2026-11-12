@@ -6,7 +6,11 @@
   </p>
 </div>
 
-![GitHub stars](https://img.shields.io/github/stars/cloudpilot-ai/karpenter-provider-gcp) ![GitHub forks](https://img.shields.io/github/forks/cloudpilot-ai/karpenter-provider-gcp) [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/LICENSE) [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
+![GitHub stars](https://img.shields.io/github/stars/cloudpilot-ai/karpenter-provider-gcp)
+![GitHub forks](https://img.shields.io/github/forks/cloudpilot-ai/karpenter-provider-gcp)
+[![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](LICENSE.txt)
+[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
 
 > [!NOTE]
 >
@@ -72,6 +76,10 @@ See [GitHub Releases](https://github.com/cloudpilot-ai/karpenter-provider-gcp/re
 We want your contributions and suggestions! One of the easiest ways to contribute is to participate in discussions on the Github Issues/Discussion or chat on Slack.
 
 * [Slack channel](https://kubernetes.slack.com/archives/C0B20K4KWP8)
+* [Contributing](CONTRIBUTING.md) and [maintainers](MAINTAINERS.md)
+* [Proposed governance](GOVERNANCE.md) and [contributor ladder](CONTRIBUTOR_LADDER.md)
+* [Security reporting](SECURITY.md)
+* [CNCF Incubation readiness](docs/community/cncf-incubation-readiness.md) — draft policies and remaining application evidence; not a claim of CNCF admission or application readiness
 
 ## Sponsors
 
@@ -83,8 +91,8 @@ This project includes code derived from karpenter-provider-aws, used under the A
 
 ## Code Of Conduct
 
-Karpenter GCP Cloud Provider adopts [CNCF code of conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
+Karpenter GCP Cloud Provider adopts the [CNCF Code of Conduct](CODE_OF_CONDUCT.md). The linked policy also identifies the unresolved confidential project reporting route in this draft.
 
 ## License
 
-Karpenter GCP Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
+Karpenter GCP Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE.txt) file for details.
