@@ -30,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
@@ -192,8 +193,7 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 		omitBootDisk:    true,
 		linuxNodeConfig: map[string]any{"swapConfig": map[string]any{"enabled": true}},
 		// A 16 GiB machine gets the automatic 24 GiB swap file.
-		assert:       assertSwapCapacity(resource.MustParse("24Gi")),
-		assertOnNode: swapNodeAssertion{encrypted: true, wantBootDiskGiB: 100}.assert,
+		assertOnNode: swapNodeAssertion{encrypted: true, wantSwapGiB: 24, wantBootDiskGiB: 100}.assert,
 	}, SpecTimeout(15*time.Minute)),
 
 	Entry("COS: boot-disk swap without encryption", kubeletConfigCase{
@@ -209,8 +209,7 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 			"enabled":          true,
 			"encryptionConfig": map[string]any{"disabled": true},
 		}},
-		assert:       assertSwapCapacity(resource.MustParse("24Gi")),
-		assertOnNode: swapNodeAssertion{encrypted: false, wantBootDiskGiB: 100}.assert,
+		assertOnNode: swapNodeAssertion{encrypted: false, wantSwapGiB: 24, wantBootDiskGiB: 100}.assert,
 	}, SpecTimeout(15*time.Minute)),
 
 	Entry("Ubuntu: boot-disk swap defaults", kubeletConfigCase{
@@ -223,8 +222,7 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 		},
 		bootDiskGiB:     50,
 		linuxNodeConfig: map[string]any{"swapConfig": map[string]any{"enabled": true}},
-		assert:          assertSwapCapacity(resource.MustParse("24Gi")),
-		assertOnNode:    swapNodeAssertion{encrypted: true, wantBootDiskGiB: 50}.assert,
+		assertOnNode:    swapNodeAssertion{encrypted: true, wantSwapGiB: 24, wantBootDiskGiB: 50}.assert,
 	}, SpecTimeout(15*time.Minute)),
 
 	Entry("Ubuntu: boot-disk swap with explicit size and reservation", kubeletConfigCase{
@@ -244,10 +242,9 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 			"encryptionConfig": map[string]any{"disabled": true},
 			"bootDiskProfile":  map[string]any{"swapSizeGib": int64(4)},
 		}},
-		assert: assertSwapCapacity(resource.MustParse("4Gi")),
 		// The explicit 20Gi reservation plus the 4Gi swap file must survive the
 		// node class overlay as one 24Gi reservation.
-		assertOnNode: swapNodeAssertion{encrypted: false, wantBootDiskGiB: 100, wantKubeReserved: "24Gi"}.assert,
+		assertOnNode: swapNodeAssertion{encrypted: false, wantSwapGiB: 4, wantBootDiskGiB: 100, wantKubeReserved: "24Gi"}.assert,
 	}, SpecTimeout(15*time.Minute)),
 )
 
@@ -336,24 +333,13 @@ func runKubeletConfigTest(ctx context.Context, c kubeletConfigCase) {
 // assertShutdownConfig reads the running kubelet, not the instance metadata:
 // GKE bootstrap must deliver the settings all the way to the effective config.
 func assertShutdownConfig(ctx context.Context, nodeName string, want shutdownPeriods) {
-	requestCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	raw, err := env.KubeClient.CoreV1().RESTClient().Get().
-		Resource("nodes").Name(nodeName).SubResource("proxy").Suffix("configz").
-		DoRaw(requestCtx)
-	Expect(err).NotTo(HaveOccurred(), "reading kubelet configz requires node proxy access")
-
-	var response struct {
-		KubeletConfig *struct {
-			ShutdownGracePeriod              *metav1.Duration `json:"shutdownGracePeriod"`
-			ShutdownGracePeriodCriticalPods  *metav1.Duration `json:"shutdownGracePeriodCriticalPods"`
-			ShutdownGracePeriodByPodPriority []any            `json:"shutdownGracePeriodByPodPriority"`
-			FeatureGates                     map[string]bool  `json:"featureGates"`
-		} `json:"kubeletconfig"`
+	var config struct {
+		ShutdownGracePeriod              *metav1.Duration `json:"shutdownGracePeriod"`
+		ShutdownGracePeriodCriticalPods  *metav1.Duration `json:"shutdownGracePeriodCriticalPods"`
+		ShutdownGracePeriodByPodPriority []any            `json:"shutdownGracePeriodByPodPriority"`
+		FeatureGates                     map[string]bool  `json:"featureGates"`
 	}
-	Expect(json.Unmarshal(raw, &response)).To(Succeed())
-	Expect(response.KubeletConfig).NotTo(BeNil(), "configz must include kubeletconfig")
-	config := response.KubeletConfig
+	Expect(json.Unmarshal(kubeletConfigz(ctx, nodeName), &config)).To(Succeed())
 	Expect(config.ShutdownGracePeriod).NotTo(BeNil(), "configz must include shutdownGracePeriod")
 	Expect(config.ShutdownGracePeriodCriticalPods).NotTo(BeNil(), "configz must include shutdownGracePeriodCriticalPods")
 	Expect(config.ShutdownGracePeriod.Duration).To(Equal(want.total))
@@ -427,21 +413,6 @@ func assertMaxPodsCapacity(want int64) func(*corev1.Node) {
 	}
 }
 
-// assertSwapCapacity returns an assertion that the kubelet reports active swap
-// of the given size. mkswap keeps one page for its header, so the reported
-// total is allowed to be up to 1 MiB short of the file.
-func assertSwapCapacity(size resource.Quantity) func(*corev1.Node) {
-	return func(node *corev1.Node) {
-		swap := node.Status.NodeInfo.Swap
-		Expect(swap).NotTo(BeNil(), "node %s reports no swap", node.Name)
-		Expect(swap.Capacity).NotTo(BeNil(), "node %s reports no swap capacity", node.Name)
-		Expect(*swap.Capacity).To(And(
-			BeNumerically("<=", size.Value()),
-			BeNumerically(">", size.Value()-1024*1024),
-		), "swap capacity on node %s", node.Name)
-	}
-}
-
 // assertBootDiskSize checks the size of the boot disk GCE reports for the node.
 func assertBootDiskSize(ctx context.Context, node *corev1.Node, sizeGiB int64) {
 	disk, err := env.GetGCEBootDisk(ctx, node.Spec.ProviderID)
@@ -451,7 +422,7 @@ func assertBootDiskSize(ctx context.Context, node *corev1.Node, sizeGiB int64) {
 
 // kubeletConfigz returns the running kubelet's effective configuration. Reading
 // it through the node proxy proves the bootstrap metadata reached the kubelet.
-func kubeletConfigz(ctx context.Context, nodeName string) map[string]json.RawMessage {
+func kubeletConfigz(ctx context.Context, nodeName string) json.RawMessage {
 	requestCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	raw, err := env.KubeClient.CoreV1().RESTClient().Get().
@@ -460,28 +431,18 @@ func kubeletConfigz(ctx context.Context, nodeName string) map[string]json.RawMes
 	Expect(err).NotTo(HaveOccurred(), "reading kubelet configz requires node proxy access")
 
 	var response struct {
-		KubeletConfig map[string]json.RawMessage `json:"kubeletconfig"`
+		KubeletConfig *json.RawMessage `json:"kubeletconfig"`
 	}
 	Expect(json.Unmarshal(raw, &response)).To(Succeed())
 	Expect(response.KubeletConfig).NotTo(BeNil(), "configz must include kubeletconfig")
-	return response.KubeletConfig
+	return *response.KubeletConfig
 }
 
-// assertKubeletSwapDefaults checks that the kubelet runs with pod swap enabled,
-// which it only does when the swap file is present and failSwapOn is false.
-func assertKubeletSwapDefaults(ctx context.Context, node *corev1.Node) {
-	config := kubeletConfigz(ctx, node.Name)
-
-	var failSwapOn *bool
-	Expect(json.Unmarshal(config["failSwapOn"], &failSwapOn)).To(Succeed())
-	Expect(failSwapOn).NotTo(BeNil(), "configz must include failSwapOn")
-	Expect(*failSwapOn).To(BeFalse(), "the kubelet refuses to start with swap active unless failSwapOn is false")
-
-	var memorySwap struct {
-		SwapBehavior string `json:"swapBehavior"`
-	}
-	Expect(json.Unmarshal(config["memorySwap"], &memorySwap)).To(Succeed())
-	Expect(memorySwap.SwapBehavior).To(Equal("LimitedSwap"), "pods must be able to use the swap file")
+// assertKubeletSwapDefaults checks the running kubelet's effective swap policy.
+func assertKubeletSwapDefaults(config *kubeletconfig.KubeletConfiguration) {
+	Expect(config.FailSwapOn).NotTo(BeNil(), "configz must include failSwapOn")
+	Expect(*config.FailSwapOn).To(BeFalse(), "the kubelet refuses to start with swap active unless failSwapOn is false")
+	Expect(config.MemorySwap.SwapBehavior).To(Equal("LimitedSwap"), "the kubelet must enable pod swap")
 }
 
 // swapProbeImage is the shell image Kubernetes' own e2e tests use for node
@@ -500,6 +461,8 @@ type swapNodeAssertion struct {
 	// encswap. Otherwise the active swap must be GKE's plain swap file and no
 	// encswap device may exist.
 	encrypted bool
+	// wantSwapGiB checks the active entry in the host kernel's /proc/swaps.
+	wantSwapGiB int64
 	// wantBootDiskGiB, when non-zero, checks the size of the boot disk GCE
 	// reports for the node.
 	wantBootDiskGiB int64
@@ -509,9 +472,13 @@ type swapNodeAssertion struct {
 }
 
 func (a swapNodeAssertion) assert(ctx context.Context, node *corev1.Node) {
-	assertKubeletSwapDefaults(ctx, node)
-	assertSwapBacking(ctx, node, a.encrypted)
-	assertNodeStorageReservation(ctx, node, a.wantKubeReserved)
+	var config kubeletconfig.KubeletConfiguration
+	Expect(json.Unmarshal(kubeletConfigz(ctx, node.Name), &config)).To(Succeed())
+	assertKubeletSwapDefaults(&config)
+	assertSwapBacking(ctx, node, a.encrypted, a.wantSwapGiB)
+	current, err := env.KubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	assertNodeStorageReservation(current, &config, a.wantKubeReserved)
 	if a.wantBootDiskGiB > 0 {
 		assertBootDiskSize(ctx, node, a.wantBootDiskGiB)
 	}
@@ -522,7 +489,7 @@ func (a swapNodeAssertion) assert(ctx context.Context, node *corev1.Node) {
 // runs is backed by the expected device. A /dev/mapper link existing is not
 // enough: it does not show that the device is the active swap, nor that a node
 // with encryption disabled is actually unencrypted.
-func assertSwapBacking(ctx context.Context, node *corev1.Node, encrypted bool) {
+func assertSwapBacking(ctx context.Context, node *corev1.Node, encrypted bool, sizeGiB int64) {
 	name := node.Name + "-swap-probe"
 
 	volumes := []corev1.Volume{
@@ -536,30 +503,10 @@ func assertSwapBacking(ctx context.Context, node *corev1.Node, encrypted bool) {
 		{Name: "sys-block", MountPath: "/host/sys/block", ReadOnly: true},
 	}
 
-	var expectation string
-	if encrypted {
-		expectation = `test -n "$encswap" || { echo "no encswap device-mapper device"; exit 1; }
-grep -Eq "^($encswap|/dev/mapper/encswap) " "$swaps" || { echo "the encrypted device is not the active swap"; exit 1; }`
-	} else {
+	if !encrypted {
 		volumes = append(volumes, hostDirectoryVolume("swap-dir", "/mnt/stateful_partition/swap"))
 		mounts = append(mounts, corev1.VolumeMount{Name: "swap-dir", MountPath: "/host/swap", ReadOnly: true})
-		expectation = `test -z "$encswap" || { echo "encswap exists although encryption is disabled: $encswap"; exit 1; }
-grep -q "^` + gkeSwapFile + ` " "$swaps" || { echo "the GKE swap file is not the active swap"; exit 1; }
-test -f /host/swap/swapfile || { echo "swap file missing"; exit 1; }`
 	}
-
-	script := `set -eu
-swaps=/host/proc/swaps
-test -r "$swaps" || { echo "cannot read $swaps"; exit 1; }
-echo "active swaps:"; cat "$swaps"
-encswap=""
-for dmname in /host/sys/block/dm-*/dm/name; do
-  test -r "$dmname" || continue
-  if [ "$(cat "$dmname")" = "encswap" ]; then
-    encswap="/dev/$(basename "$(dirname "$(dirname "$dmname")")")"
-  fi
-done
-` + expectation + "\n"
 
 	runAsRoot, noGrace := int64(0), int64(0)
 	pod := &corev1.Pod{
@@ -582,7 +529,7 @@ done
 			Containers: []corev1.Container{{
 				Name:    "probe",
 				Image:   swapProbeImage,
-				Command: []string{"sh", "-c", script},
+				Command: []string{"sh", "-c", swapProbeScript(encrypted, sizeGiB)},
 				SecurityContext: &corev1.SecurityContext{
 					AllowPrivilegeEscalation: lo.ToPtr(false),
 					ReadOnlyRootFilesystem:   lo.ToPtr(true),
@@ -639,26 +586,21 @@ func hostDirectoryVolume(name, path string) corev1.Volume {
 // reservation the kubelet reports with the node's own capacity and allocatable,
 // so it does not assume the nominal disk size: a filesystem is smaller than the
 // disk that holds it.
-func assertNodeStorageReservation(ctx context.Context, node *corev1.Node, wantKubeReserved string) {
-	config := kubeletConfigz(ctx, node.Name)
-
-	kubeReserved := kubeletEphemeralQuantity(config["kubeReserved"])
+func assertNodeStorageReservation(node *corev1.Node, config *kubeletconfig.KubeletConfiguration, wantKubeReserved string) {
+	kubeReserved := kubeletEphemeralQuantity(config.KubeReserved)
 	if wantKubeReserved != "" {
 		expected := resource.MustParse(wantKubeReserved)
 		Expect(kubeReserved.Value()).To(Equal(expected.Value()),
 			"kubeReserved.ephemeral-storage of node %s must keep the swap file", node.Name)
 	}
-	systemReserved := kubeletEphemeralQuantity(config["systemReserved"])
+	systemReserved := kubeletEphemeralQuantity(config.SystemReserved)
 
 	capacity := node.Status.Capacity[corev1.ResourceEphemeralStorage]
 	allocatable := node.Status.Allocatable[corev1.ResourceEphemeralStorage]
 	Expect(capacity.Value()).To(BeNumerically(">", 0), "node %s reports no ephemeral storage capacity", node.Name)
 
 	reserved := capacity.Value() - allocatable.Value()
-	eviction := evictionHardEphemeralFloor(config["evictionHard"], capacity)
-	Expect(reserved).To(BeNumerically(">=", kubeReserved.Value()),
-		"node %s must not advertise the swap file's space: capacity %s, allocatable %s, kubeReserved %s",
-		node.Name, capacity.String(), allocatable.String(), kubeReserved.String())
+	eviction := evictionHardEphemeralFloor(config.EvictionHard["nodefs.available"], capacity)
 	Expect(reserved).To(BeNumerically(">=", kubeReserved.Value()+systemReserved.Value()+eviction),
 		"node %s must subtract the kubelet reservation and eviction threshold from ephemeral storage: capacity %s, allocatable %s, kubeReserved %s, systemReserved %s, eviction %d",
 		node.Name, capacity.String(), allocatable.String(), kubeReserved.String(), systemReserved.String(), eviction)
@@ -666,29 +608,17 @@ func assertNodeStorageReservation(ctx context.Context, node *corev1.Node, wantKu
 
 // kubeletEphemeralQuantity returns the ephemeral-storage value of a kubelet
 // reservation map, or zero when the map or key is absent.
-func kubeletEphemeralQuantity(raw json.RawMessage) resource.Quantity {
-	if len(raw) == 0 {
-		return resource.Quantity{}
+func kubeletEphemeralQuantity(values map[string]string) resource.Quantity {
+	if value, ok := values["ephemeral-storage"]; ok {
+		return resource.MustParse(value)
 	}
-	var values map[string]string
-	Expect(json.Unmarshal(raw, &values)).To(Succeed())
-	value, ok := values["ephemeral-storage"]
-	if !ok {
-		return resource.Quantity{}
-	}
-	return resource.MustParse(value)
+	return resource.Quantity{}
 }
 
 // evictionHardEphemeralFloor resolves the nodefs eviction threshold the kubelet
 // applies, rounding a percentage down so the check stays a lower bound.
-func evictionHardEphemeralFloor(raw json.RawMessage, capacity resource.Quantity) int64 {
-	if len(raw) == 0 {
-		return 0
-	}
-	var values map[string]string
-	Expect(json.Unmarshal(raw, &values)).To(Succeed())
-	signal, ok := values["nodefs.available"]
-	if !ok {
+func evictionHardEphemeralFloor(signal string, capacity resource.Quantity) int64 {
+	if signal == "" {
 		return 0
 	}
 	if strings.HasSuffix(signal, "%") {
