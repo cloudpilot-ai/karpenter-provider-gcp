@@ -8,4 +8,4 @@ This draft does **not** establish a project-specific confidential reporting cont
 
 The upstream Code of Conduct describes CNCF and Kubernetes reporting routes and [jurisdiction](https://github.com/cncf/foundation/blob/main/code-of-conduct/coc-committee-jurisdiction-policy.md). Adopting the code does not itself establish that a not-yet-admitted project is within a committee's jurisdiction, and this draft promises neither committee handling nor a response deadline. Reports concerning Kubernetes community spaces should follow that community's published reporting procedure.
 
-The [governance proposal](GOVERNANCE.md) and [readiness checklist](docs/community/cncf-incubation-readiness.md) track this gap.
+The [governance proposal](GOVERNANCE.md) and [policy alignment notes](docs/community/cncf-policy-alignment.md) track this gap.

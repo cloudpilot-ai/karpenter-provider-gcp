@@ -18,7 +18,7 @@ See the [maintainer roster](MAINTAINERS.md), [proposed governance](GOVERNANCE.md
 and [contributor ladder](CONTRIBUTOR_LADDER.md) for responsibilities and the
 proposed path from contributor to reviewer and maintainer. Project channels and
 outstanding community-policy gaps are listed in the
-[Incubation readiness checklist](docs/community/cncf-incubation-readiness.md).
+[CNCF policy alignment notes](docs/community/cncf-policy-alignment.md).
 
 ## Design Proposals
 

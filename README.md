@@ -79,7 +79,7 @@ We want your contributions and suggestions! One of the easiest ways to contribut
 * [Contributing](CONTRIBUTING.md) and [maintainers](MAINTAINERS.md)
 * [Proposed governance](GOVERNANCE.md) and [contributor ladder](CONTRIBUTOR_LADDER.md)
 * [Security reporting](SECURITY.md)
-* [CNCF Incubation readiness](docs/community/cncf-incubation-readiness.md) — draft policies and remaining application evidence; not a claim of CNCF admission or application readiness
+* [CNCF policy alignment](docs/community/cncf-policy-alignment.md) — early preparation and proposed community policies
 
 ## Sponsors
 

@@ -51,4 +51,4 @@ The project already adopts the CNCF Code of Conduct. Confidential project report
 
 ## Communication and project structure
 
-Public channels and gaps in the inventory, meeting schedule, roadmap, and subproject listing are tracked in the [Incubation readiness checklist](docs/community/cncf-incubation-readiness.md). No new meeting, private mailing list, or separate subproject is created by this proposal. Decisions made in chat or meetings must be summarized in a public issue or pull request, except for appropriately confidential matters.
+Public channels and gaps in the inventory, meeting schedule, roadmap, and subproject listing are tracked in the [CNCF policy alignment notes](docs/community/cncf-policy-alignment.md). No new meeting, private mailing list, or separate subproject is created by this proposal. Decisions made in chat or meetings must be summarized in a public issue or pull request, except for appropriately confidential matters.

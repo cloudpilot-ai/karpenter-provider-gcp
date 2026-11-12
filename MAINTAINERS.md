@@ -1,6 +1,6 @@
 # Maintainers
 
-The following people are recorded as project-wide approvers and reviewers in [OWNERS](OWNERS). This roster follows the [CNCF maintainer template](https://github.com/cncf/project-template/blob/e66ba44f724d00f66c84932593c5a229fee3564b/MAINTAINERS.md), with contact and responsibility columns for the Incubation application.
+The following people are recorded as project-wide approvers and reviewers in [OWNERS](OWNERS). This roster follows the [CNCF maintainer template](https://github.com/cncf/project-template/blob/e66ba44f724d00f66c84932593c5a229fee3564b/MAINTAINERS.md), with public contact and responsibility columns for clarity.
 
 | Name                   | GitHub ID / public contact                | Company/Organization | Recorded responsibility                                 |
 |------------------------|-------------------------------------------|----------------------|---------------------------------------------------------|
