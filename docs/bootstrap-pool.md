@@ -78,6 +78,7 @@ Karpenter reads kubelet bootstrap metadata from that instance template. Other in
 | Node labels                            | Rebuilt from Karpenter/provider target state, plus a known set of GKE readiness-gate labels carried over from the source pool template (see below)                                               |
 | Node taints                            | Rebuilt from Karpenter/provider target state                                                                                                                                                     |
 | Image streaming cache size             | Recomputed for each node's machine type when the bootstrap pool uses image streaming, matching what GKE sets for that machine type                                                               |
+| Swap and zswap                         | Boot-disk swap from GCENodeClass `spec.linuxNodeConfig.swapConfig`; swap and zswap settings are never inherited from the bootstrap pool (see [Swap](examples/advanced.md#swap))                  |
 
 Labels and taints configured on the bootstrap pool (such as `workload=karpenter` or `dedicated=karpenter:NoSchedule`) are intentionally discarded. Karpenter-provisioned nodes receive only labels and taints that Karpenter explicitly controls, plus the GKE readiness-gate labels described below.
 
