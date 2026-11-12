@@ -1,4 +1,4 @@
-name: Security checks
+name: Security
 
 on:
   pull_request: {}
@@ -6,6 +6,7 @@ on:
     branches: [ "main" ]
   schedule:
     - cron: '45 6 * * *'
+    - cron: '30 6 * * 1' # Preserve CodeQL's weekly schedule.
   workflow_dispatch: {}
 
 permissions:
@@ -13,6 +14,7 @@ permissions:
 
 jobs:
   dependency-review:
+    name: Dependency review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -27,7 +29,8 @@ jobs:
           comment-summary-in-pr: never
 
   actions-lock:
-    name: Verify action dependencies
+    name: Actions lockfile
+    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -42,7 +45,12 @@ jobs:
           gh actions-lock --verify
 
   codeql:
-    name: Analyze (${{ matrix.language }})
+    name: CodeQL (${{ matrix.language == 'go' && 'Go' || 'GitHub Actions' }})
+    # Match origin/main's standalone CodeQL triggers, not Security's broader ones.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name == 'schedule' && github.event.schedule == '30 6 * * 1')
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -85,24 +93,38 @@ jobs:
           category: /language:${{ matrix.language }}
 
   zizmor:
-    name: Workflow security
-    if: github.event_name == 'pull_request'
+    name: zizmor (GitHub Actions)
+    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ZIZMOR_VERSION: "1.32.0"
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: Fail on high-severity workflow findings
-        uses: zizmorcore/zizmor-action@v0.8.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
-          version: v1.32.0
-          online-audits: false
-          advanced-security: false
-          min-severity: high
+          version: "0.13.8"
+          enable-cache: false
+      - name: Generate zizmor SARIF
+        id: report
+        run: uvx "zizmor@${ZIZMOR_VERSION}" --offline --strict-collection --format sarif . > zizmor.sarif
+      # SARIF mode reports findings without failing; preserve the native PR gate.
+      - name: Fail on high-severity workflow findings
+        if: github.event_name == 'pull_request' && steps.report.outcome == 'success'
+        run: uvx "zizmor@${ZIZMOR_VERSION}" --offline --strict-collection --min-severity high .
+      - name: Retain zizmor findings
+        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: zizmor-sarif
+          path: zizmor.sarif
+          if-no-files-found: error
 
   govulncheck:
-    name: Go vulnerabilities
+    name: govulncheck (Go)
+    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -132,7 +154,8 @@ jobs:
           if-no-files-found: error
 
   container-image:
-    name: Image security (${{ matrix.arch }})
+    name: Grype (linux/${{ matrix.arch }})
+    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -198,70 +221,48 @@ jobs:
           path: reports/
           if-no-files-found: error
 
-  # Keep write permissions out of the Go and image scanning jobs, including PRs.
+  # Publish native reports without granting scanners code-scanning write access.
   sarif-report:
-    name: Publish security findings (${{ matrix.tool }})
-    needs: [govulncheck, container-image]
-    if: ${{ !cancelled() && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main' }}
+    name: Publish SARIF
+    needs: [zizmor, govulncheck, container-image]
+    if: >-
+      !cancelled() && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'schedule' || github.event.schedule == '45 6 * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - tool: govulncheck
-            artifact: govulncheck-sarif
-            file: govulncheck.sarif
-            category: govulncheck/controller-linux-amd64
-          - tool: grype-amd64
-            artifact: image-security-linux-amd64
-            file: grype.sarif
-            category: grype/main-controller-linux-amd64
-          - tool: grype-arm64
-            artifact: image-security-linux-arm64
-            file: grype.sarif
-            category: grype/main-controller-linux-arm64
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: Download security report
+      - name: Download scanner reports
         uses: actions/download-artifact@v8.0.2
         with:
-          name: ${{ matrix.artifact }}
           path: reports
-      - name: Upload findings to code scanning
+      - name: Upload zizmor findings
+        if: ${{ !cancelled() && hashFiles('reports/zizmor-sarif/zizmor.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v4.39.3
         with:
-          sarif_file: reports/${{ matrix.file }}
-          category: ${{ matrix.category }}
-
-  zizmor-report:
-    name: Report workflow security
-    if: github.event_name != 'pull_request' && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v7.0.1
+          sarif_file: reports/zizmor-sarif/zizmor.sarif
+          category: zizmor
+      - name: Upload govulncheck findings
+        if: ${{ !cancelled() && hashFiles('reports/govulncheck-sarif/govulncheck.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4.39.3
         with:
-          persist-credentials: false
-      - name: Analyze workflows and upload SARIF
-        id: zizmor
-        uses: zizmorcore/zizmor-action@v0.8.1
+          sarif_file: reports/govulncheck-sarif/govulncheck.sarif
+          category: govulncheck/controller-linux-amd64
+      - name: Upload Grype findings (amd64)
+        if: ${{ !cancelled() && hashFiles('reports/image-security-linux-amd64/grype.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4.39.3
         with:
-          version: v1.32.0
-          online-audits: false
-          advanced-security: true
-      - name: Retain SARIF report
-        if: ${{ !cancelled() && steps.zizmor.outputs.output-file != '' }}
-        uses: actions/upload-artifact@v7.0.2
+          sarif_file: reports/image-security-linux-amd64/grype.sarif
+          category: grype/main-controller-linux-amd64
+      - name: Upload Grype findings (arm64)
+        if: ${{ !cancelled() && hashFiles('reports/image-security-linux-arm64/grype.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4.39.3
         with:
-          name: zizmor-sarif
-          path: ${{ steps.zizmor.outputs.output-file }}
-          if-no-files-found: error
+          sarif_file: reports/image-security-linux-arm64/grype.sarif
+          category: grype/main-controller-linux-arm64

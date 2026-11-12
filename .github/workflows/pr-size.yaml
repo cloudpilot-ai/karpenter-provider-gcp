@@ -1,4 +1,4 @@
-name: PR size
+name: PR metadata
 
 on:
   # Label metadata only; never check out or execute pull-request code.
@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   label:
+    name: Size labels
     runs-on: ubuntu-latest
     concurrency:
       group: pr-size-${{ github.event.pull_request.number }}

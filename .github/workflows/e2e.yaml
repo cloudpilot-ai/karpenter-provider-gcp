@@ -1,4 +1,4 @@
-name: On-demand E2E
+name: E2E
 
 on:
   # github/command enforces write/maintain/admin before the dependent job runs.

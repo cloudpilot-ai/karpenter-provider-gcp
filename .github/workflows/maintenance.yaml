@@ -1,0 +1,166 @@
+name: Maintenance
+
+on:
+  schedule:
+    # Weekly on Monday at 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Update target
+        type: choice
+        options: [all, pricing, runtime]
+        default: all
+      dry_run:
+        description: Preview updates without opening pull requests
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  pricing:
+    name: Pricing data
+    if: >-
+      github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+      (github.event_name == 'schedule' || inputs.target == 'all' || inputs.target == 'pricing')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: update-pricing
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    # Pricing alone receives GCP credentials; retain the existing updater steps.
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          credentials_json: ${{ secrets.GCP_PRICING_SA_KEY }}
+
+      - name: Set GCP project
+        env:
+          PRICING_PROJECT: ${{ vars.GCP_PRICING_PROJECT }}
+        run: echo "GOOGLE_CLOUD_PROJECT=$PRICING_PROJECT" >> "$GITHUB_ENV"
+
+      - name: Update initial-prices.json
+        run: make update-pricing
+
+      - name: Create PR if pricing changed
+        if: github.event_name == 'schedule' || !inputs.dry_run
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          token: ${{ github.token }}
+          draft: true
+          add-paths: pkg/providers/pricing/initial-prices.json
+          commit-message: "chore(pricing): update initial-prices.json"
+          title: "chore(pricing): scheduled pricing data refresh"
+          body: |
+            #### What type of PR is this?
+            /kind cleanup
+
+            #### What this PR does / why we need it:
+            Refresh generated GCP pricing data in `pkg/providers/pricing/initial-prices.json`.
+
+            #### Related proposal (if applicable):
+            N/A
+
+            #### Which issue(s) this PR fixes:
+            N/A
+
+            #### Docs and examples
+            - [x] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+            - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
+
+            #### Special notes for your reviewer:
+            Automated pricing refresh; review the generated data before merging.
+          branch: automated/update-pricing
+          signoff: true
+          sign-commits: true
+          delete-branch: true
+          labels: pricing,automated
+
+  runtime:
+    name: Go and base image
+    if: >-
+      github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+      (github.event_name == 'schedule' || inputs.target == 'all' || inputs.target == 'runtime')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: update-security-pins
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: updatecli/updatecli-action@v3.10.0
+        with:
+          version: v0.123.0
+      - name: Validate updater manifest
+        run: updatecli manifest validate --strict --config .github/updatecli.yaml
+      - name: Refresh compiler patch and base index
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [[ "$DRY_RUN" == true ]]; then
+            updatecli pipeline diff --config .github/updatecli.yaml --disable-udash-report --disable-changelog
+          else
+            updatecli pipeline apply --config .github/updatecli.yaml --disable-udash-report --disable-changelog
+          fi
+          git diff --check
+      # Keep publication separate: Updatecli's native PR cleanup posts comments.
+      # Actions PR creation must be permitted; bot-created workflow runs need maintainer approval.
+      - name: Open draft update PR
+        if: github.event_name == 'schedule' || !inputs.dry_run
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          token: ${{ github.token }}
+          branch: automated/security-pins
+          base: main
+          draft: true
+          signoff: true
+          sign-commits: true
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          commit-message: 'chore(security): refresh Go patch and controller base'
+          title: 'chore(security): refresh Go patch and controller base'
+          add-paths: |
+            go.mod
+            hack/tools/go.mod
+            hack/crd-tools/go.mod
+            hack/pdcsi-data/go.mod
+            .ko.yaml
+          body: |
+            #### What type of PR is this?
+            /kind cleanup
+
+            #### What this PR does / why we need it:
+            Refresh Go within the current minor release and the controller base-image digest to pick up upstream security fixes. No module dependency upgrades or automatic merge.
+
+            #### Related proposal (if applicable):
+            N/A
+
+            #### Which issue(s) this PR fixes:
+            N/A
+
+            #### Docs and examples
+            - [x] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+            - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
+
+            #### Special notes for your reviewer:
+            Created with `github.token`: a maintainer may need to approve the generated PR's workflow runs. Verify checks before merging. Rebuilding is required to deliver fixes in published images.

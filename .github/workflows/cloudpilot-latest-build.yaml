@@ -1,4 +1,4 @@
-name: Latest image build
+name: Development image
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   latest-image-build-publish:
-    name:  Image publish
+    name: Publish image
     runs-on: ubuntu-latest
     permissions:
       contents: read

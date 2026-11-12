@@ -1,4 +1,4 @@
-name: Release image build
+name: Release
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 jobs:
   image-publish:
+    name: Publish image
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     permissions:
@@ -98,6 +99,7 @@ jobs:
           if-no-files-found: error
 
   package-chart:
+    name: Publish chart
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     concurrency:

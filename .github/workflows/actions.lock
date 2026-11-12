@@ -8,12 +8,15 @@ workflows:
         - 'actions/setup-go@v7.0.0'
         - 'ko-build/setup-ko@v0.10'
         - 'unfor19/install-aws-cli-action@1.0.8'
-    '.github/workflows/docs.yaml':
-        - 'actions/checkout@v7.0.1'
-        - 'actions/setup-go@v7.0.0'
     '.github/workflows/e2e.yaml':
         - 'github/command@v2.0.3'
         - 'marocchino/sticky-pull-request-comment@v3.0.5'
+    '.github/workflows/maintenance.yaml':
+        - 'actions/checkout@v7.0.1'
+        - 'actions/setup-go@v7.0.0'
+        - 'google-github-actions/auth@v3.0.0'
+        - 'peter-evans/create-pull-request@v8.1.1'
+        - 'updatecli/updatecli-action@v3.10.0'
     '.github/workflows/pr-size.yaml':
         - 'actions/github-script@v9.0.0'
         - 'step-security/action-add-labels@v1.1.1'
@@ -46,17 +49,8 @@ workflows:
         - 'actions/setup-go@v7.0.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'anchore/scan-action@v7.4.2'
+        - 'astral-sh/setup-uv@v10.3.3'
         - 'github/codeql-action@v4.39.3'
-        - 'zizmorcore/zizmor-action@v0.8.1'
-    '.github/workflows/update-pricing.yaml':
-        - 'actions/checkout@v7.0.1'
-        - 'actions/setup-go@v7.0.0'
-        - 'google-github-actions/auth@v3.0.0'
-        - 'peter-evans/create-pull-request@v8.1.1'
-    '.github/workflows/updatecli.yaml':
-        - 'actions/checkout@v7.0.1'
-        - 'peter-evans/create-pull-request@v8.1.1'
-        - 'updatecli/updatecli-action@v3.10.0'
 dependencies:
     'actions/attest-build-provenance@v4.2.2':
         ref: 'v4.2.2'
@@ -142,6 +136,11 @@ dependencies:
         commit: 'sha1-27805bf3b4e84b4a5c980df22ed233c00390a439'
         owner_id: 16208487
         repo_id: 212692077
+    'astral-sh/setup-uv@v10.3.3':
+        ref: 'v10.3.3'
+        commit: 'sha1-68559e99cc807c1eb7e9238fd43a15bba460eec2'
+        owner_id: 115962839
+        repo_id: 846733598
     'aws-actions/amazon-ecr-login@v2.1.7':
         ref: 'v2.1.7'
         commit: 'sha1-03f1aad4c6c7ffd436567f42f9384779290529bd'
@@ -170,11 +169,6 @@ dependencies:
         commit: 'sha1-2dc316deee8e90f13e1a351ab510b4d5bc0c82cd'
         owner_id: 1951866
         repo_id: 260488959
-    'github/codeql-action@9b3254085494b55a0f7c4c2b3d2d52cc712ce370':
-        ref: 'v4.39.1'
-        commit: 'sha1-9b3254085494b55a0f7c4c2b3d2d52cc712ce370'
-        owner_id: 9919
-        repo_id: 259445878
     'github/codeql-action@v4.39.3':
         ref: 'v4.39.3'
         commit: 'sha1-33d7b85da1a04171e211befe2c739303b9a4c066'
@@ -240,10 +234,3 @@ dependencies:
         commit: 'sha1-93ae2608256484ef8598e902aa675bbc9e278e4e'
         owner_id: 77246016
         repo_id: 360631255
-    'zizmorcore/zizmor-action@v0.8.1':
-        ref: 'v0.8.1'
-        commit: 'sha1-45d7276c9ca790aabd705e31ca99c6185c3e76dd'
-        owner_id: 210636713
-        repo_id: 985558803
-        uses:
-            - 'github/codeql-action@9b3254085494b55a0f7c4c2b3d2d52cc712ce370'
