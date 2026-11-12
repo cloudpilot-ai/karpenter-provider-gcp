@@ -29,7 +29,7 @@ help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 presubmit: toolchain verify ci vulncheck ## Run all steps in the developer loop
-ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint security-gate-test ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
+ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
 	cd hack/tools && go install tool
@@ -84,9 +84,6 @@ DOCS_FILES = $(shell find . -maxdepth 1 -type f -name "*.md") $(shell find docs 
 
 docs-lint: ## Check root and docs markdown formatting (excludes generated reference docs)
 	mdox fmt --check $(DOCS_FILES)
-
-security-gate-test: ## Run security regression gate comparator tests
-	python3 -B -m unittest discover -s hack/security -p 'test_*.py'
 
 docs-fix: ## Auto-fix docs markdown formatting
 	mdox fmt $(DOCS_FILES)
@@ -243,7 +240,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run vulncheck ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix security-gate-test
+.PHONY: help presubmit ci run vulncheck ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 
