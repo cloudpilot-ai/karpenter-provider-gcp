@@ -2231,7 +2231,7 @@ func makeGPUIT() *cloudprovider.InstanceType {
 // requiredSourceKubeEnv holds the kube-env entries that validateSourceKubeEnv
 // requires in every source template.
 // requiredSourceKubeEnv is the kube-env subset that every source template must
-// have. The release is the GKE version the boot-disk swap tests run against.
+// have. The archive URLs are fixtures and are never fetched by these tests.
 const requiredSourceKubeEnv = "CA_CERT: test-ca\n" +
 	"KUBE_MANIFESTS_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.8-gke.1796000/kubernetes-manifests.tar.gz\n" +
 	"KUBERNETES_MASTER_NAME: 10.0.0.2\n" +

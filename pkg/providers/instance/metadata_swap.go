@@ -18,22 +18,14 @@ package instance
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/util/version"
 	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
 )
-
-// minSwapBootstrapRelease is GKE's documented minimum for node memory swap.
-const minSwapBootstrapRelease = "v1.34.1-gke.1341000"
-
-var swapBootstrapReleasePattern = regexp.MustCompile(`/release/(v\d+\.\d+\.\d+-gke\.\d+)/`)
 
 // limitedSwapBehavior lets Burstable pods use the swap file, which is what GKE
 // nodes with swap enabled run.
@@ -55,35 +47,6 @@ func validateBootDiskSwapNodeClass(nodeClass *v1alpha1.GCENodeClass) error {
 	}
 	if kc := nodeClass.Spec.KubeletConfiguration; kc != nil && kc.FailSwapOn != nil && *kc.FailSwapOn {
 		return fmt.Errorf("linuxNodeConfig.swapConfig conflicts with kubeletConfiguration.failSwapOn true: the kubelet does not start while swap is active")
-	}
-	return nil
-}
-
-// validateSwapBootstrapSupport rejects boot-disk swap when the source bootstrap
-// release cannot create the swap file.
-//
-// The release comes from KUBE_MANIFESTS_TAR_URL, the archive the node actually
-// bootstraps from: configure-sh downloads that archive, copies its
-// gci-configure-helper.sh into /home/kubernetes/bin/configure-helper.sh, and
-// user-data runs that helper. SERVER_BINARY_TAR_URL names the Kubernetes server
-// binaries the bootstrap installs, so it can be a different release and says
-// nothing about whether the executed helper creates swap. The release is not
-// taken from the control-plane version for the same reason.
-func validateSwapBootstrapSupport(target *metadata.InstanceMetadata) error {
-	url, ok := target.GetKubeEnvEntry("KUBE_MANIFESTS_TAR_URL")
-	if !ok || url == "" {
-		return fmt.Errorf("linuxNodeConfig.swapConfig needs the source bootstrap release, but the source kube-env has no KUBE_MANIFESTS_TAR_URL")
-	}
-	match := swapBootstrapReleasePattern.FindStringSubmatch(url)
-	if match == nil {
-		return fmt.Errorf("linuxNodeConfig.swapConfig cannot be checked against unknown bootstrap manifests archive %q: it does not name a GKE release", url)
-	}
-	release, err := version.ParseSemantic(match[1])
-	if err != nil {
-		return fmt.Errorf("linuxNodeConfig.swapConfig cannot be checked against bootstrap manifests archive %q: %w", url, err)
-	}
-	if release.LessThan(version.MustParseSemantic(minSwapBootstrapRelease)) {
-		return fmt.Errorf("linuxNodeConfig.swapConfig needs a GKE bootstrap of %s or newer, but the bootstrap manifests archive is %s", minSwapBootstrapRelease, match[1])
 	}
 	return nil
 }

@@ -1246,11 +1246,6 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	if err := validateBootDiskSwapNodeClass(nodeClass); err != nil {
 		return nil, err
 	}
-	if swapGiB > 0 {
-		if err := validateSwapBootstrapSupport(target); err != nil {
-			return nil, err
-		}
-	}
 	target.SetCustomMetadata(metadata.CustomMetadata(nodeClass.Spec.Metadata))
 	provisioningModel := "standard"
 	if capacityType == karpv1.CapacityTypeSpot {

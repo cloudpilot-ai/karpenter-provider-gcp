@@ -178,7 +178,7 @@ Karpenter automatically sizes swap and defaults omitted kubelet settings to `fai
 - Set `encryptionConfig.disabled: true` to disable encryption.
 - Set `kubeletConfiguration.memorySwap.swapBehavior: NoSwap` for host-only swap. An explicit `failSwapOn: true` is incompatible with enabled swap.
 - Without a configured boot disk, Karpenter creates a compatible 100 GiB boot disk. An explicitly configured boot disk must set `sizeGiB`.
-- Swap requires Container-Optimized OS or Ubuntu and bootstrap manifests from GKE `1.34.1-gke.1341000` or newer.
+- Swap supports Container-Optimized OS and Ubuntu. Bootstrap manifests from GKE `1.34.1-gke.1341000` or newer are a prerequisite; Karpenter does not check their version at launch.
 
 Automatic sizing uses nominal machine memory, truncated to whole GiB, and caps swap at half the boot disk (also rounded down):
 
