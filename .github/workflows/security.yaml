@@ -11,9 +11,6 @@ on:
 permissions:
   contents: read
 
-env:
-  ZIZMOR_VERSION: "1.32.0"
-
 jobs:
   dependency-review:
     name: Dependency review
@@ -105,7 +102,6 @@ jobs:
       # Annotations need no code-scanning permission, so fork PRs work.
       - uses: zizmorcore/zizmor-action@v0.8.1
         with:
-          version: ${{ env.ZIZMOR_VERSION }}
           online-audits: false
           advanced-security: false
           annotations: true
@@ -132,7 +128,6 @@ jobs:
         id: zizmor
         uses: zizmorcore/zizmor-action@v0.8.1
         with:
-          version: ${{ env.ZIZMOR_VERSION }}
           online-audits: false
       - name: Retain zizmor findings
         if: ${{ !cancelled() && steps.zizmor.outcome == 'success' }}

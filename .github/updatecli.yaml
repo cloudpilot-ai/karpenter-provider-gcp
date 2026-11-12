@@ -1,20 +1,6 @@
-name: Update Go, controller base image and zizmor pin
+name: Update Go version and controller base image
 
 sources:
-  zizmor:
-    kind: githubrelease
-    spec:
-      owner: zizmorcore
-      repository: zizmor
-      typefilter:
-        release: true
-        draft: false
-        prerelease: false
-      versionfilter:
-        kind: semver
-        pattern: '>=1.0.0'
-    transformers:
-      - trimprefix: 'v'
   currentGo:
     kind: golang/gomod
     spec:
@@ -36,12 +22,6 @@ sources:
 # All conditions must pass before any target is updated.
 conditions:
 
-  zizmorVersion:
-    kind: file
-    disablesourceinput: true
-    spec:
-      file: .github/workflows/security.yaml
-      matchpattern: '(?m)^  ZIZMOR_VERSION: "?[0-9]+\.[0-9]+\.[0-9]+"?$'
   toolsGo:
     kind: golang/gomod
     sourceid: currentGo
@@ -129,9 +109,3 @@ targets:
     spec:
       file: .ko.yaml
       key: $.defaultBaseImage
-  zizmor:
-    kind: yaml
-    sourceid: zizmor
-    spec:
-      file: .github/workflows/security.yaml
-      key: $.env.ZIZMOR_VERSION
