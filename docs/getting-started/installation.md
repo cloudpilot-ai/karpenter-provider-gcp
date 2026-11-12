@@ -248,6 +248,23 @@ helm upgrade --install karpenter "./karpenter-${CHART_VERSION}.tgz" \
 
 Keep any additional values from Step 2, including the dedicated node service account setting when configured. The image reference includes both the release tag and digest (`repository:tag@sha256:...`); the digest determines which image is pulled. Continue with [Step 3 — Bind Workload Identity](#step-3--bind-workload-identity).
 
+## Verify development image provenance (optional)
+
+Development images published from `main` have GitHub build provenance and a `development-image-sboms` workflow artifact containing SPDX SBOMs and `image-reference.txt`. These additions apply to builds after their introduction; older development images may not have them. The SPDX files are retained inventories, not independently signed SBOM attestations.
+
+Use the immutable image reference from the expected build's `image-reference.txt` and the independently expected full source commit SHA. Do not assume that the mutable `latest` tag or the current tip of `main` still identifies that build. With an authenticated [GitHub CLI](https://cli.github.com/), replace the placeholders below:
+
+```sh
+REPOSITORY="cloudpilot-ai/karpenter-provider-gcp"
+IMAGE="public.ecr.aws/cloudpilotai/gcp/karpenter@sha256:<image-index-digest>"
+SOURCE_COMMIT="<expected-full-source-commit-sha>"
+gh attestation verify "oci://${IMAGE}" --repo "${REPOSITORY}" \
+  --signer-workflow "${REPOSITORY}/.github/workflows/development-image.yaml" \
+  --source-ref refs/heads/main --source-digest "${SOURCE_COMMIT}"
+```
+
+Stop if verification fails. Development provenance is not release provenance: do not use the development workflow identity to verify versioned releases. Build provenance does not prove reproducibility or absence of vulnerabilities. Image publication precedes attestation, so a failed attestation step can leave a published image without provenance.
+
 ## Upgrading
 
 See the [upgrade guide](upgrading.md).

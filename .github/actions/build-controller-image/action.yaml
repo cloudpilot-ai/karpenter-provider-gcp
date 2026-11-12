@@ -1,0 +1,47 @@
+name: Build controller image
+description: Publish the controller image with SPDX SBOMs and expose its immutable reference.
+inputs:
+  tag:
+    description: Image tag to publish.
+    required: true
+  sbom-artifact-name:
+    description: Workflow artifact name for the SPDX SBOMs and image reference.
+    required: true
+outputs:
+  reference:
+    description: Immutable controller image reference.
+    value: ${{ steps.build.outputs.reference }}
+  digest:
+    description: Controller image-index digest.
+    value: ${{ steps.build.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - name: Build and publish image
+      id: build
+      shell: bash
+      env:
+        IMAGE_TAG: ${{ inputs.tag }}
+      run: |
+        : "${IMAGE_TAG:?image tag is required}"
+        export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
+        IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
+          --tags "$IMAGE_TAG" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms")
+        # ko includes the tag before the digest; retain this build's immutable reference.
+        IMAGE=${IMAGE/":$IMAGE_TAG@"/@}
+        [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]] || {
+          echo 'Expected exactly one digest-qualified controller image from ko build' >&2
+          exit 1
+        }
+        echo "reference=$IMAGE" >> "$GITHUB_OUTPUT"
+        echo "digest=${IMAGE##*@}" >> "$GITHUB_OUTPUT"
+        printf '%s\n' "$IMAGE" > "$RUNNER_TEMP/sboms/image-reference.txt"
+
+    # Workflow lockfiles cannot lock composite action dependencies, and
+    # gh-actions-lock re-spells a bare SHA back to its recorded tag here.
+    - name: Retain SPDX SBOMs
+      uses: actions/upload-artifact@v7.0.2 # zizmor: ignore[unpinned-uses]
+      with:
+        name: ${{ inputs.sbom-artifact-name }}
+        path: ${{ runner.temp }}/sboms/
+        if-no-files-found: error
