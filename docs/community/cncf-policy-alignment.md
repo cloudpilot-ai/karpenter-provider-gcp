@@ -62,7 +62,13 @@ Before a future application, plan to review the following assessments and track 
 
 These tools are complementary: Best Practices is evidence-backed self-certification, Scorecard provides automated security checks, and [Insights health scoring](https://insights.linuxfoundation.org/docs/metrics/health-score) combines maintenance, security, and activity signals, including OpenSSF Scorecard. An Insights result is not a second independent security audit. Missing or stale data must be identified rather than interpreted as a pass, and none of these scores alone demonstrates security or CNCF compliance.
 
-No assessment has been completed or project score verified by this PR. Registrations, onboarding requests, external publication, CI integration, and repository-setting changes remain separate follow-ups requiring approval.
+### TODO when revisiting this work
+
+- [ ] Find an existing OpenSSF Best Practices entry or, with approval, register the project; complete evidence-backed answers and add a README badge showing the verified current status (in progress or passing).
+- [ ] Find the Linux Foundation Insights project dashboard or, with approval, request onboarding; verify repository coverage and add the dashboard link to the README.
+- [ ] Review a dated OpenSSF Scorecard baseline and record actionable findings.
+
+These TODOs are deferred, not completed by this PR. Registrations, onboarding requests, external publication, CI integration, and repository-setting changes require separate approval.
 
 ## If a future application is considered
 
