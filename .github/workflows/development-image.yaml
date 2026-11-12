@@ -7,12 +7,9 @@ on:
 jobs:
   latest-image-build-publish:
     name: Publish image
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -55,10 +52,3 @@ jobs:
         with:
           tag: latest
           sbom-artifact-name: development-image-sboms
-
-      - name: Attest image build provenance
-        uses: actions/attest-build-provenance@v4.2.2
-        with:
-          subject-name: public.ecr.aws/cloudpilotai/gcp/karpenter
-          subject-digest: ${{ steps.image.outputs.digest }}
-          push-to-registry: false

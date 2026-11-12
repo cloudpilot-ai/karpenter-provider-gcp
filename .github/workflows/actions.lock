@@ -4,7 +4,6 @@
 version: 'v0.0.3'
 workflows:
     '.github/workflows/development-image.yaml':
-        - 'actions/attest-build-provenance@v4.2.2'
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
         - 'actions/upload-artifact@v7.0.2'

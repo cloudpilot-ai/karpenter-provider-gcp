@@ -23,6 +23,8 @@ runs:
       env:
         IMAGE_TAG: ${{ inputs.tag }}
       run: |
+        # `required: true` is not enforced for action inputs; an empty tag would
+        # also bypass the tag-stripping substitution below.
         : "${IMAGE_TAG:?image tag is required}"
         export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
         IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
@@ -37,10 +39,13 @@ runs:
         echo "digest=${IMAGE##*@}" >> "$GITHUB_OUTPUT"
         printf '%s\n' "$IMAGE" > "$RUNNER_TEMP/sboms/image-reference.txt"
 
-    # Workflow lockfiles cannot lock composite action dependencies, and
-    # gh-actions-lock re-spells a bare SHA back to its recorded tag here.
+    # gh-actions-lock tracks this dependency under the workflows that call
+    # this action and re-spells a bare SHA here back to its recorded tag,
+    # while zizmor treats action definitions as unlocked and wants a hash
+    # pin. Keep the lockfile's tag form and suppress only that audit.
     - name: Retain SPDX SBOMs
-      uses: actions/upload-artifact@v7.0.2 # zizmor: ignore[unpinned-uses]
+      # zizmor: ignore[unpinned-uses]
+      uses: actions/upload-artifact@v7.0.2
       with:
         name: ${{ inputs.sbom-artifact-name }}
         path: ${{ runner.temp }}/sboms/
