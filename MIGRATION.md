@@ -7,7 +7,7 @@
 
 ### Source-pool swap and zswap settings are no longer inherited
 
-New nodes no longer inherit swap or zswap settings from the GKE bootstrap source pool, even when `linuxNodeConfig.swapConfig` is omitted. A source pool with Local SSD swap also no longer reserves Local SSDs on each node. Existing nodes are unchanged. If you relied on inherited boot-disk swap, configure `spec.linuxNodeConfig.swapConfig.enabled: true` before provisioning replacement nodes. Other swap profiles and zswap are not supported by this field. See [Swap](docs/examples/advanced.md#swap).
+New nodes no longer inherit swap or zswap settings from the GKE bootstrap source pool, even when `linuxNodeConfig.swapConfig` is omitted. Existing nodes are unchanged. If you relied on inherited boot-disk swap, configure `spec.linuxNodeConfig.swapConfig.enabled: true` before provisioning replacement nodes. Other swap profiles and zswap are not supported by this field. See [Swap](docs/examples/advanced.md#swap).
 
 ### On-demand shutdown settings no longer depend on the source pool
 
