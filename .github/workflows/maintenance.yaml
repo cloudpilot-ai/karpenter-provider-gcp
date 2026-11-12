@@ -101,8 +101,6 @@ jobs:
           ref: main
           persist-credentials: false
       - uses: updatecli/updatecli-action@v3.10.0
-        with:
-          version: v0.123.0
       - name: Validate updater manifest
         run: updatecli manifest validate --strict --config .github/updatecli.yaml
       - name: Refresh compiler patch and base index
