@@ -49,6 +49,10 @@ import (
 
 const (
 	e2eOwnerLabel = "karpenter-e2e/owned"
+	// E2EOwnerLabel marks objects the suite creates directly, so a leftover pod
+	// or workload is attributed to the suite the same way as the NodeClasses and
+	// NodePools the helpers create.
+	E2EOwnerLabel = e2eOwnerLabel
 
 	// DefaultE2EDiskGiB is the boot disk size for test nodes; 30 GiB meets the
 	// minimum required by ContainerOptimizedOS while keeping costs low.
@@ -208,31 +212,40 @@ func (e *Environment) CreateNodeClassForLocalSSD(
 // kubeletConfig is a map[string]any whose keys must match the JSON field
 // names on v1alpha1.KubeletConfiguration (systemReserved, kubeReserved,
 // evictionHard, podsPerCore, etc.). Used by e2e tests verifying issue
-// #398 (kubelet honors user reservations).
+// #398 (kubelet honors user reservations). spec.linuxNodeConfig is set too
+// when linuxNodeConfig is not nil; its keys must match the JSON field names
+// on v1alpha1.LinuxNodeConfig.
+//
+// bootDiskGiB 0 omits spec.disks, so the node class has to rely on the
+// provider's own boot disk, and a nil kubeletConfig omits
+// spec.kubeletConfiguration, so the provider's kubelet defaults apply.
 func (e *Environment) CreateNodeClassWithKubeletConfig(
 	ctx context.Context,
 	name, imageFamily string,
-	kubeletConfig map[string]any,
+	bootDiskGiB int64,
+	kubeletConfig, linuxNodeConfig map[string]any,
 ) {
-	diskGiB := int64(DefaultE2EDiskGiB)
-	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
-		diskGiB = 50
-	}
 	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	spec := map[string]any{
+		"imageSelectorTerms": []any{
+			map[string]any{"alias": imageFamily + "@latest"},
+		},
+		"subnetRangeName": e.PodsRangeName,
+	}
+	if bootDiskGiB > 0 {
+		spec["disks"] = []any{map[string]any{"sizeGiB": bootDiskGiB, "boot": true}}
+	}
+	if kubeletConfig != nil {
+		spec["kubeletConfiguration"] = kubeletConfig
+	}
+	if linuxNodeConfig != nil {
+		spec["linuxNodeConfig"] = linuxNodeConfig
+	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
 		"kind":       "GCENodeClass",
 		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
-		"spec": map[string]any{
-			"imageSelectorTerms": []any{
-				map[string]any{"alias": imageFamily + "@latest"},
-			},
-			"disks": []any{
-				map[string]any{"sizeGiB": diskGiB, "boot": true},
-			},
-			"subnetRangeName":      e.PodsRangeName,
-			"kubeletConfiguration": kubeletConfig,
-		},
+		"spec":       spec,
 	}}
 	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)

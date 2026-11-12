@@ -29,6 +29,10 @@ import (
 // GCENodeClassSpec is the top level specification for the GCP Karpenter Provider.
 // This will contain the configuration necessary to launch instances in GCP.
 // +kubebuilder:validation:XValidation:message="subnetRangeName and subnetRangeNames are mutually exclusive",rule="!(has(self.subnetRangeName) && has(self.subnetRangeNames))"
+// +kubebuilder:validation:XValidation:message="linuxNodeConfig.swapConfig.enabled conflicts with kubeletConfiguration.failSwapOn true: the kubelet does not start while swap is active",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swapConfig) || !has(self.linuxNodeConfig.swapConfig.enabled) || !self.linuxNodeConfig.swapConfig.enabled || !has(self.kubeletConfiguration) || !has(self.kubeletConfiguration.failSwapOn) || !self.kubeletConfiguration.failSwapOn"
+// +kubebuilder:validation:XValidation:message="memorySwap.swapBehavior LimitedSwap requires kubeletConfiguration.failSwapOn to be explicitly set to false unless linuxNodeConfig.swapConfig is enabled",rule="!has(self.kubeletConfiguration) || !has(self.kubeletConfiguration.memorySwap) || !has(self.kubeletConfiguration.memorySwap.swapBehavior) || self.kubeletConfiguration.memorySwap.swapBehavior != 'LimitedSwap' || (has(self.linuxNodeConfig) && has(self.linuxNodeConfig.swapConfig) && has(self.linuxNodeConfig.swapConfig.enabled) && self.linuxNodeConfig.swapConfig.enabled) || (has(self.kubeletConfiguration.failSwapOn) && self.kubeletConfiguration.failSwapOn == false)"
+// +kubebuilder:validation:XValidation:message="linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib must be at most half of the boot disk sizeGiB",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swapConfig) || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile) || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib) || !has(self.disks) || self.disks.all(d, !has(d.boot) || !d.boot || !has(d.sizeGiB) || 2 * self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib <= d.sizeGiB)"
+// +kubebuilder:validation:XValidation:message="linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib must be at most 50GiB when the provider creates the default 100GiB boot disk",rule="!has(self.linuxNodeConfig) || !has(self.linuxNodeConfig.swapConfig) || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile) || !has(self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib) || (has(self.disks) && self.disks.exists(d, has(d.boot) && d.boot)) || self.linuxNodeConfig.swapConfig.bootDiskProfile.swapSizeGib <= 50"
 type GCENodeClassSpec struct {
 	// ServiceAccount is the GCP IAM service account email to assign to the instance
 	// +kubebuilder:validation:Pattern=`^[^@]+@(developer\.gserviceaccount\.com|[^@]+\.iam\.gserviceaccount\.com)$`
@@ -330,7 +334,6 @@ type KubeletQuantity string
 // https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration
 // https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
 // +kubebuilder:validation:XValidation:message="maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false",rule="!has(self.maxParallelImagePulls) || self.maxParallelImagePulls < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls == false)"
-// +kubebuilder:validation:XValidation:message="memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false",rule="!has(self.memorySwap) || !has(self.memorySwap.swapBehavior) || self.memorySwap.swapBehavior != 'LimitedSwap' || (has(self.failSwapOn) && self.failSwapOn == false)"
 // +kubebuilder:validation:XValidation:message="shutdownGracePeriodCriticalPods requires shutdownGracePeriod and must not exceed it",rule="!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod) && duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))"
 type KubeletConfiguration struct {
 	// clusterDNS is a list of IP addresses for the cluster DNS server.
@@ -417,13 +420,15 @@ type KubeletConfiguration struct {
 	// +optional
 	MaxParallelImagePulls *int32 `json:"maxParallelImagePulls,omitempty"`
 	// FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.
-	// Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap.
+	// Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap, unless
+	// linuxNodeConfig.swapConfig creates the swap file: the provider then defaults it
+	// to false for the node.
 	// Default: true
 	// +optional
 	FailSwapOn *bool `json:"failSwapOn,omitempty"`
-	// MemorySwap configures swap memory available to container workloads. The
-	// kubelet only uses swap the node already has: provisioning a swap device or
-	// file is up to the node image or a DaemonSet.
+	// MemorySwap configures swap memory available to container workloads. Swap that
+	// the provider creates is requested separately through linuxNodeConfig.swapConfig;
+	// without it, providing a swap device or file is up to the node image or a DaemonSet.
 	// +optional
 	MemorySwap *MemorySwapConfiguration `json:"memorySwap,omitempty"`
 	// ShutdownGracePeriod is how long the node delays its shutdown so that pods
@@ -554,6 +559,10 @@ type LinuxNodeConfig struct {
 	// Mirrors GKE node pool linux_node_config.hugepages_config.
 	// +optional
 	Hugepages *HugepagesConfig `json:"hugepages,omitempty"`
+	// SwapConfig configures the swap file that the node creates at boot, before
+	// the kubelet starts. Mirrors GKE node pool linux_node_config.swap_config.
+	// +optional
+	SwapConfig *SwapConfig `json:"swapConfig,omitempty"`
 }
 
 // HugepagesConfig defines the static hugepages that a node allocates at boot.
@@ -568,6 +577,43 @@ type HugepagesConfig struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	HugepageSize1g *int32 `json:"hugepageSize1g,omitempty"`
+}
+
+// SwapConfig defines the swap file that a node creates at boot.
+// The GKE node bootstrap creates the file before the kubelet starts, so the
+// kubelet finds the swap already active at its first start.
+// +kubebuilder:validation:XValidation:message="bootDiskProfile and encryptionConfig must not be set when swapConfig is not enabled",rule="(has(self.enabled) && self.enabled) || (!has(self.bootDiskProfile) && !has(self.encryptionConfig))"
+type SwapConfig struct {
+	// Enabled creates the swap file on the node. Defaults to false, which
+	// neither creates a swap file nor inherits the source node pool's swap.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+	// EncryptionConfig configures the encryption of the swap file. The swap
+	// file is encrypted with a key that the node generates at boot, unless
+	// encryptionConfig.disabled is true.
+	// +optional
+	EncryptionConfig *SwapEncryptionConfig `json:"encryptionConfig,omitempty"`
+	// BootDiskProfile creates the swap file on the boot disk. Omit it to use the
+	// automatic size GKE derives from the machine's memory and the boot disk.
+	// +optional
+	BootDiskProfile *SwapBootDiskProfile `json:"bootDiskProfile,omitempty"`
+}
+
+// SwapEncryptionConfig defines the encryption of the swap file.
+type SwapEncryptionConfig struct {
+	// Disabled turns off the encryption of the swap file.
+	// +optional
+	Disabled *bool `json:"disabled,omitempty"`
+}
+
+// SwapBootDiskProfile defines a swap file on the boot disk.
+type SwapBootDiskProfile struct {
+	// SwapSizeGib is the size of the swap file in GiB. Omit it to use the
+	// automatic size, which GKE derives from the machine's memory: twice the
+	// memory up to 8 GiB, plus 8 GiB above that, at most half of the boot disk.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	SwapSizeGib *int64 `json:"swapSizeGib,omitempty"`
 }
 
 // AdvancedMachineFeatures defines advanced CPU and virtualisation options for a GCE instance.
@@ -698,6 +744,36 @@ func (in *GCENodeClass) GetMaxPods() int32 {
 		return *in.Spec.KubeletConfiguration.MaxPods
 	}
 	return KubeletMaxPods
+}
+
+// BootDiskSwapConfig returns the boot-disk swap configuration, or nil when the
+// node class does not enable it.
+func (in *GCENodeClass) BootDiskSwapConfig() *SwapConfig {
+	if in == nil || in.Spec.LinuxNodeConfig == nil {
+		return nil
+	}
+	swap := in.Spec.LinuxNodeConfig.SwapConfig
+	if swap == nil || !swap.Enabled {
+		return nil
+	}
+	return swap
+}
+
+// BootDiskSwapRequestedGiB returns the explicitly requested swap file size, or
+// 0 when the size is automatic.
+func (in *GCENodeClass) BootDiskSwapRequestedGiB() int64 {
+	swap := in.BootDiskSwapConfig()
+	if swap == nil || swap.BootDiskProfile == nil || swap.BootDiskProfile.SwapSizeGib == nil {
+		return 0
+	}
+	return *swap.BootDiskProfile.SwapSizeGib
+}
+
+// BootDiskSwapEncrypted reports whether the swap file is encrypted, which it is
+// unless encryptionConfig.disabled is true.
+func (in *GCENodeClass) BootDiskSwapEncrypted() bool {
+	swap := in.BootDiskSwapConfig()
+	return swap != nil && (swap.EncryptionConfig == nil || swap.EncryptionConfig.Disabled == nil || !*swap.EncryptionConfig.Disabled)
 }
 
 // GKEValue returns the strategy as GKE spells it in node labels and kube-env.

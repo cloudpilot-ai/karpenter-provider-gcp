@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -25,8 +26,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
+	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	celvalidator "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"sigs.k8s.io/yaml"
 )
 
@@ -236,20 +243,21 @@ func TestGCENodeClassCRDUbuntuVersionPinFormat(t *testing.T) {
 	}
 }
 
-func TestGCENodeClassCRDRestrictsLimitedSwapToFailSwapOnFalse(t *testing.T) {
-	const rule = `!has(self.memorySwap) || !has(self.memorySwap.swapBehavior) || ` +
-		`self.memorySwap.swapBehavior != 'LimitedSwap' || (has(self.failSwapOn) && self.failSwapOn == false)`
-
-	var found bool
+func TestGCENodeClassCRDMovesLimitedSwapRuleToTheSpec(t *testing.T) {
+	// The kubelet defaults of a node with provider-managed swap are decided at
+	// the spec level, so the LimitedSwap rule has to live there too: a nested
+	// rule cannot see linuxNodeConfig.swapConfig.
 	for _, v := range kubeletConfigurationSchema(t).XValidations {
-		if v.Rule == rule {
-			found = true
-			require.Equal(t,
-				"memorySwap.swapBehavior LimitedSwap requires failSwapOn to be explicitly set to false",
-				v.Message)
-		}
+		require.NotContains(t, v.Message, "LimitedSwap requires failSwapOn",
+			"a nested rule cannot allow the provider to default failSwapOn for enabled swap")
 	}
-	require.True(t, found, "LimitedSwap must require failSwapOn false: the kubelet refuses to start with swap active otherwise")
+
+	const message = "memorySwap.swapBehavior LimitedSwap requires kubeletConfiguration.failSwapOn to be explicitly set to false unless linuxNodeConfig.swapConfig is enabled"
+	var found bool
+	for _, v := range specSchema(t).XValidations {
+		found = found || v.Message == message
+	}
+	require.True(t, found, "LimitedSwap must still require an explicit failSwapOn false without provider-managed swap")
 }
 
 func TestGCENodeClassCRDSwapBehaviorEnum(t *testing.T) {
@@ -326,4 +334,197 @@ func TestGCENodeClassCRDShutdownGracePeriodsAreDurations(t *testing.T) {
 		require.Equal(t, `^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`, field.Pattern,
 			"%s must be a non-negative Go duration: the controller cannot decode any other string", name)
 	}
+}
+
+// validateSpecAdmission runs the generated CRD schema's CEL validation over a
+// spec, the way the API server does. The Kubernetes structural validator walks
+// every level of the schema, so the nested kubeletConfiguration, disk and
+// swapConfig rules run as well as the spec-level ones, instead of a
+// reimplementation of admission that only sees the root rules.
+func validateSpecAdmission(t *testing.T, spec map[string]any) field.ErrorList {
+	t.Helper()
+	specProperties := specSchema(t)
+	var internalSchema apiextensions.JSONSchemaProps
+	require.NoError(t, apiextensionsv1.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(&specProperties, &internalSchema, nil))
+	structural, err := structuralschema.NewStructural(&internalSchema)
+	require.NoError(t, err)
+	validator := celvalidator.NewValidator(structural, true, celconfig.PerCallLimit)
+	require.NotNil(t, validator, "the generated spec schema must carry CEL rules")
+	errs, _ := validator.Validate(context.Background(), field.NewPath("spec"), structural, spec, nil, celconfig.RuntimeCELCostBudget)
+	return errs
+}
+
+func requireAdmitted(t *testing.T, spec map[string]any) {
+	t.Helper()
+	require.Empty(t, validateSpecAdmission(t, spec), "the spec must be accepted")
+}
+
+func requireRejected(t *testing.T, spec map[string]any, message string) {
+	t.Helper()
+	errs := validateSpecAdmission(t, spec)
+	require.NotEmpty(t, errs, "the spec must be rejected")
+	require.Contains(t, errs.ToAggregate().Error(), message)
+}
+
+func swapSchema(t *testing.T) apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	return specSchema(t).Properties["linuxNodeConfig"].Properties["swapConfig"]
+}
+
+func swapSpec(swap map[string]any, extra map[string]any) map[string]any {
+	spec := map[string]any{"linuxNodeConfig": map[string]any{"swapConfig": swap}}
+	for key, value := range extra {
+		spec[key] = value
+	}
+	return spec
+}
+
+func bootDisk(sizeGiB int64) []any {
+	return []any{map[string]any{"boot": true, "sizeGiB": sizeGiB}}
+}
+
+func TestGCENodeClassCRDAcceptsMinimalEnabledSwap(t *testing.T) {
+	requireAdmitted(t, swapSpec(map[string]any{"enabled": true}, nil))
+}
+
+// TestGCENodeClassCRDAcceptsEnabledSwapWithLimitedSwapDefaults reproduces the
+// offline admission fixture: enabled swap with an explicit LimitedSwap and no
+// failSwapOn. The provider defaults failSwapOn to false for such a node, so
+// admission must not demand the explicit value that only a node without
+// provider-managed swap needs.
+func TestGCENodeClassCRDAcceptsEnabledSwapWithLimitedSwapDefaults(t *testing.T) {
+	requireAdmitted(t, swapSpec(map[string]any{"enabled": true}, map[string]any{
+		"kubeletConfiguration": map[string]any{
+			"memorySwap": map[string]any{"swapBehavior": "LimitedSwap"},
+		},
+	}))
+}
+
+func TestGCENodeClassCRDRejectsFailSwapOnTrueWithEnabledSwap(t *testing.T) {
+	requireRejected(t, swapSpec(map[string]any{"enabled": true}, map[string]any{
+		"kubeletConfiguration": map[string]any{"failSwapOn": true},
+	}), "conflicts with kubeletConfiguration.failSwapOn true")
+
+	requireAdmitted(t, swapSpec(map[string]any{"enabled": true}, map[string]any{
+		"kubeletConfiguration": map[string]any{"failSwapOn": false},
+	}))
+}
+
+// TestGCENodeClassCRDRejectsLimitedSwapWithoutFailSwapOnWithoutProviderSwap
+// keeps the existing kubelet contract for every node class that does not create
+// its own swap: the kubelet refuses to start with swap active otherwise.
+func TestGCENodeClassCRDRejectsLimitedSwapWithoutFailSwapOnWithoutProviderSwap(t *testing.T) {
+	limitedSwap := map[string]any{"memorySwap": map[string]any{"swapBehavior": "LimitedSwap"}}
+	const message = "LimitedSwap requires kubeletConfiguration.failSwapOn to be explicitly set to false"
+
+	requireRejected(t, map[string]any{"kubeletConfiguration": limitedSwap}, message)
+	requireRejected(t, swapSpec(map[string]any{"enabled": false}, map[string]any{
+		"kubeletConfiguration": limitedSwap,
+	}), message)
+	requireAdmitted(t, map[string]any{"kubeletConfiguration": map[string]any{
+		"failSwapOn": false,
+		"memorySwap": map[string]any{"swapBehavior": "LimitedSwap"},
+	}})
+}
+
+func TestGCENodeClassCRDRejectsSwapSettingsWhenDisabled(t *testing.T) {
+	// These rules live on the nested SwapConfig schema, so they also prove the
+	// structural traversal reaches nested validation.
+	for name, swap := range map[string]map[string]any{
+		"boot disk profile without enabled": {"bootDiskProfile": map[string]any{"swapSizeGib": int64(4)}},
+		"encryption without enabled":        {"encryptionConfig": map[string]any{"disabled": true}},
+		"explicitly disabled with profile":  {"enabled": false, "bootDiskProfile": map[string]any{"swapSizeGib": int64(4)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireRejected(t, swapSpec(swap, nil), "must not be set when swapConfig is not enabled")
+		})
+	}
+	requireAdmitted(t, swapSpec(map[string]any{"enabled": false}, nil))
+	requireAdmitted(t, swapSpec(map[string]any{}, nil))
+}
+
+// TestGCENodeClassCRDReachesNestedRules shows the validator used by these tests
+// evaluates rules below the spec, not only the spec-level ones.
+func TestGCENodeClassCRDReachesNestedRules(t *testing.T) {
+	requireRejected(t, map[string]any{
+		"disks": []any{map[string]any{"boot": true, "sizeGiB": int64(100), "deviceName": "data0"}},
+	}, "deviceName is only supported on a data disk")
+}
+
+func TestGCENodeClassCRDLimitsSwapOnDefaultBootDisk(t *testing.T) {
+	for name, extra := range map[string]map[string]any{
+		"no disks":        nil,
+		"only data disks": {"disks": []any{map[string]any{"sizeGiB": int64(200)}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireAdmitted(t, swapSpec(map[string]any{
+				"enabled": true, "bootDiskProfile": map[string]any{"swapSizeGib": int64(50)},
+			}, extra))
+			requireRejected(t, swapSpec(map[string]any{
+				"enabled": true, "bootDiskProfile": map[string]any{"swapSizeGib": int64(51)},
+			}, extra), "at most 50GiB")
+		})
+	}
+}
+
+func TestGCENodeClassCRDLimitsSwapToHalfTheBootDisk(t *testing.T) {
+	swap := map[string]any{"enabled": true, "bootDiskProfile": map[string]any{"swapSizeGib": int64(50)}}
+	requireAdmitted(t, swapSpec(swap, map[string]any{"disks": bootDisk(100)}))
+
+	for name, tc := range map[string]struct {
+		swap map[string]any
+		disk int64
+	}{
+		"oversize swap":                 {swap: map[string]any{"enabled": true, "bootDiskProfile": map[string]any{"swapSizeGib": int64(51)}}, disk: 100},
+		"swap larger than a small disk": {swap: map[string]any{"enabled": true, "bootDiskProfile": map[string]any{"swapSizeGib": int64(11)}}, disk: 20},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireRejected(t, swapSpec(tc.swap, map[string]any{"disks": bootDisk(tc.disk)}),
+				"must be at most half of the boot disk sizeGiB")
+		})
+	}
+
+	// An automatic size is resolved against the machine, so admission cannot
+	// bound it by the disk.
+	requireAdmitted(t, swapSpec(map[string]any{"enabled": true}, map[string]any{"disks": bootDisk(20)}))
+}
+
+func TestGCENodeClassCRDSwapRuleToleratesDisksWithoutBootField(t *testing.T) {
+	// A data disk that omits boot must not make the rule fail with
+	// "no such key: boot", which rejected valid node classes before.
+	requireAdmitted(t, swapSpec(map[string]any{"enabled": true}, map[string]any{
+		"disks": []any{
+			map[string]any{"boot": true, "sizeGiB": int64(100)},
+			map[string]any{"sizeGiB": int64(200)},
+		},
+	}))
+}
+
+func TestGCENodeClassCRDSwapSchemaShape(t *testing.T) {
+	swap := swapSchema(t)
+	require.NotContains(t, swap.Required, "enabled", "an omitted enabled keeps swap disabled")
+	require.NotContains(t, swap.Required, "bootDiskProfile", "an omitted bootDiskProfile selects the automatic size")
+
+	size := swap.Properties["bootDiskProfile"].Properties["swapSizeGib"]
+	require.NotNil(t, size.Minimum)
+	require.Equal(t, float64(1), *size.Minimum)
+	require.NotContains(t, swap.Properties["bootDiskProfile"].Required, "swapSizeGib",
+		"an omitted swapSizeGib selects the automatic size")
+}
+
+func TestGCENodeClassSwapConfigDeepCopyKeepsAutomaticSize(t *testing.T) {
+	nodeClass := &GCENodeClass{Spec: GCENodeClassSpec{LinuxNodeConfig: &LinuxNodeConfig{
+		SwapConfig: &SwapConfig{Enabled: true},
+	}}}
+	copied := nodeClass.DeepCopy()
+	require.True(t, copied.BootDiskSwapConfig().Enabled)
+	require.Zero(t, copied.BootDiskSwapRequestedGiB(), "an omitted size stays automatic")
+	require.True(t, copied.BootDiskSwapEncrypted(), "encryption is on unless disabled")
+
+	nodeClass.Spec.LinuxNodeConfig.SwapConfig.BootDiskProfile = &SwapBootDiskProfile{SwapSizeGib: lo.ToPtr(int64(8))}
+	nodeClass.Spec.LinuxNodeConfig.SwapConfig.EncryptionConfig = &SwapEncryptionConfig{Disabled: lo.ToPtr(true)}
+	copied = nodeClass.DeepCopy()
+	require.Equal(t, int64(8), copied.BootDiskSwapRequestedGiB())
+	require.False(t, copied.BootDiskSwapEncrypted())
+	require.Nil(t, (&GCENodeClass{}).BootDiskSwapConfig())
 }

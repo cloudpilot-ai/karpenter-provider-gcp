@@ -1,0 +1,39 @@
+# Creates an encrypted volume swap file on the boot disk before the kubelet
+# starts, sized the way GKE sizes it from the machine's memory and the boot disk
+# (24 GiB for a 16 GiB machine on the 100 GiB boot disk below). The kubelet then
+# lets Burstable pods use the swap. Omit bootDiskProfile.swapSizeGib for GKE's
+# automatic size, or set it for an explicit size of at most half of the disk.
+apiVersion: karpenter.k8s.gcp/v1alpha1
+kind: GCENodeClass
+metadata:
+  name: swap-example
+spec:
+  imageSelectorTerms:
+    - alias: ContainerOptimizedOS@latest
+  linuxNodeConfig:
+    swapConfig:
+      enabled: true
+  disks:
+    - sizeGiB: 100
+      boot: true
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: swap-example
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.gcp
+        kind: GCENodeClass
+        name: swap-example
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values:
+            - on-demand
+        - key: kubernetes.io/arch
+          operator: In
+          values:
+            - amd64

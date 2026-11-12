@@ -367,8 +367,8 @@ _Appears in:_
 | `cpuCFSQuota` _boolean_ | CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits. |  | Optional: \{\} <br /> |
 | `serializeImagePulls` _boolean_ | SerializeImagePulls, when enabled, tells the kubelet to pull images one at a<br />time. Must be explicitly set to false to set MaxParallelImagePulls above 1.<br />Default: true |  | Optional: \{\} <br /> |
 | `maxParallelImagePulls` _integer_ | MaxParallelImagePulls sets the maximum number of image pulls in parallel.<br />Values above 1 require SerializeImagePulls to be explicitly set to false.<br />Nodes with many DaemonSets pulling cold images concurrently (a common case<br />right after a fresh node joins the cluster) benefit most from raising this<br />above the kubelet default of 1. |  | Minimum: 1 <br />Optional: \{\} <br /> |
-| `failSwapOn` _boolean_ | FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.<br />Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap.<br />Default: true |  | Optional: \{\} <br /> |
-| `memorySwap` _[MemorySwapConfiguration](#memoryswapconfiguration)_ | MemorySwap configures swap memory available to container workloads. The<br />kubelet only uses swap the node already has: provisioning a swap device or<br />file is up to the node image or a DaemonSet. |  | Optional: \{\} <br /> |
+| `failSwapOn` _boolean_ | FailSwapOn tells the kubelet to fail to start if swap is enabled on the node.<br />Must be explicitly set to false for memorySwap.swapBehavior LimitedSwap, unless<br />linuxNodeConfig.swapConfig creates the swap file: the provider then defaults it<br />to false for the node.<br />Default: true |  | Optional: \{\} <br /> |
+| `memorySwap` _[MemorySwapConfiguration](#memoryswapconfiguration)_ | MemorySwap configures swap memory available to container workloads. Swap that<br />the provider creates is requested separately through linuxNodeConfig.swapConfig;<br />without it, providing a swap device or file is up to the node image or a DaemonSet. |  | Optional: \{\} <br /> |
 | `shutdownGracePeriod` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | ShutdownGracePeriod is how long the node delays its shutdown so that pods<br />can terminate, for example when GCE stops or deletes the VM. It turns on<br />graceful node shutdown. Spot nodes default to 30s; on-demand nodes default<br />to 0s. Source node pool shutdown settings are not inherited. |  | Pattern: `^([0-9]+(\.[0-9]+)?(ns\|us\|µs\|ms\|s\|m\|h))+$` <br />Type: string <br />Optional: \{\} <br /> |
 | `shutdownGracePeriodCriticalPods` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#duration-v1-meta)_ | ShutdownGracePeriodCriticalPods is the part of shutdownGracePeriod<br />reserved for critical pods, which terminate after all other pods.<br />Spot nodes default to 15s; on-demand nodes default to 0s. When only<br />shutdownGracePeriod is set, a larger Spot default is lowered to it. |  | Pattern: `^([0-9]+(\.[0-9]+)?(ns\|us\|µs\|ms\|s\|m\|h))+$` <br />Type: string <br />Optional: \{\} <br /> |
 
@@ -401,6 +401,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `hugepages` _[HugepagesConfig](#hugepagesconfig)_ | Hugepages configures the static hugepages that the node allocates at boot.<br />Mirrors GKE node pool linux_node_config.hugepages_config. |  | Optional: \{\} <br /> |
+| `swapConfig` _[SwapConfig](#swapconfig)_ | SwapConfig configures the swap file that the node creates at boot, before<br />the kubelet starts. Mirrors GKE node pool linux_node_config.swap_config. |  | Optional: \{\} <br /> |
 
 
 #### LocalSSDMode
@@ -540,6 +541,58 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `name` _string_ | Name is the subnetwork secondary IPv4 range name. |  | Required: \{\} <br /> |
 | `totalFreeIP` _integer_ | TotalFreeIP is the Compute-reported number of free IPv4 addresses in this<br />secondary range. Omitted when unknown; zero means no free addresses were reported.<br />Counts are snapshots, not a guarantee of an allocatable contiguous pod CIDR block. |  | Minimum: 0 <br />Optional: \{\} <br /> |
+
+
+#### SwapBootDiskProfile
+
+
+
+SwapBootDiskProfile defines a swap file on the boot disk.
+
+
+
+_Appears in:_
+- [SwapConfig](#swapconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `swapSizeGib` _integer_ | SwapSizeGib is the size of the swap file in GiB. Omit it to use the<br />automatic size, which GKE derives from the machine's memory: twice the<br />memory up to 8 GiB, plus 8 GiB above that, at most half of the boot disk. |  | Minimum: 1 <br />Optional: \{\} <br /> |
+
+
+#### SwapConfig
+
+
+
+SwapConfig defines the swap file that a node creates at boot.
+The GKE node bootstrap creates the file before the kubelet starts, so the
+kubelet finds the swap already active at its first start.
+
+
+
+_Appears in:_
+- [LinuxNodeConfig](#linuxnodeconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled creates the swap file on the node. Defaults to false, which<br />neither creates a swap file nor inherits the source node pool's swap. |  | Optional: \{\} <br /> |
+| `encryptionConfig` _[SwapEncryptionConfig](#swapencryptionconfig)_ | EncryptionConfig configures the encryption of the swap file. The swap<br />file is encrypted with a key that the node generates at boot, unless<br />encryptionConfig.disabled is true. |  | Optional: \{\} <br /> |
+| `bootDiskProfile` _[SwapBootDiskProfile](#swapbootdiskprofile)_ | BootDiskProfile creates the swap file on the boot disk. Omit it to use the<br />automatic size GKE derives from the machine's memory and the boot disk. |  | Optional: \{\} <br /> |
+
+
+#### SwapEncryptionConfig
+
+
+
+SwapEncryptionConfig defines the encryption of the swap file.
+
+
+
+_Appears in:_
+- [SwapConfig](#swapconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `disabled` _boolean_ | Disabled turns off the encryption of the swap file. |  | Optional: \{\} <br /> |
 
 
 #### VirtualNIC
