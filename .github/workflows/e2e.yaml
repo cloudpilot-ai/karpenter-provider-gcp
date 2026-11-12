@@ -1,16 +1,18 @@
 name: On-demand E2E
 
 on:
-  issue_comment:
+  # github/command enforces write/maintain/admin before the dependent job runs.
+  # Neither job checks out or executes pull-request code.
+  issue_comment: # zizmor: ignore[dangerous-triggers]
     types: [created]
 
-permissions:
-  issues: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   gate:
     name: Comment gate
+    permissions:
+      pull-requests: write # react to commands on PR comments only
     if: github.event.issue.pull_request && (github.event.comment.body == '/e2e' || startsWith(github.event.comment.body, '/e2e '))
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -33,6 +35,8 @@ jobs:
 
   e2e:
     name: E2E run
+    permissions:
+      pull-requests: write # update the sticky PR comment
     needs: gate
     if: needs.gate.outputs.accepted == 'true'
     runs-on: ubuntu-latest
@@ -47,6 +51,7 @@ jobs:
         id: run
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMIT_SHA: ${{ needs.gate.outputs.sha }}
         run: |
           set -euo pipefail
           preset="${COMMENT_BODY#/e2e}"
@@ -54,11 +59,15 @@ jobs:
           if [[ -z "${preset}" ]]; then
             preset="standard"
           fi
-          echo "preset=${preset}" >> "${GITHUB_OUTPUT}"
+          if [[ "$preset" == *$'\n'* || "$preset" == *$'\r'* ]]; then
+            echo "E2E selection must be a single line" >&2
+            exit 1
+          fi
+          printf 'preset=%s\n' "$preset" >> "$GITHUB_OUTPUT"
 
           echo "e2e run is not implemented"
           echo "preset: ${preset}"
-          echo "commit: ${{ needs.gate.outputs.sha }}"
+          echo "commit: $COMMIT_SHA"
 
       - name: Update sticky comment
         uses: marocchino/sticky-pull-request-comment@v3.0.5

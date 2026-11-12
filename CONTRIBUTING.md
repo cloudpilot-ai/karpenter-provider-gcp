@@ -140,6 +140,38 @@ This guides breaks down into two parts
    make run
    ```
 
+### GitHub Actions security
+
+The `GitHub Actions security` workflow runs [zizmor](https://docs.zizmor.sh/) on
+pull requests with read-only permissions. High-severity findings fail the check.
+Main-branch pushes, a weekly schedule, and manual runs on canonical `main` upload
+all severities to GitHub code scanning as SARIF and retain a `zizmor-sarif`
+artifact, including when the code-scanning upload fails. SARIF reporting does not
+itself fail on findings. Low-severity checkout credential warnings and medium
+Dependabot cooldown suggestions are report-only; no cooldown policy is imposed.
+
+To reproduce the checks locally with zizmor 1.32.0 installed:
+
+```bash
+zizmor --offline --min-severity high .
+zizmor --offline --format sarif . > zizmor.sarif
+```
+
+Both CI modes disable online audits, so they do not check online-only action
+advisories. Run from the Git repository root: zizmor 1.32.0 recognizes
+`.github/workflows/actions.lock` in a Git checkout and does not require direct
+SHA pins for locked action steps. Presubmit separately verifies the lockfile.
+Reusable workflow calls are not covered by the native lockfile and still require
+full SHA pins. No pinning-rule exceptions are configured. Run `gh actions-lock`
+after workflow dependency changes and review the generated lockfile diff. When
+updating zizmor, update both workflow jobs and choose an action release that
+supports that tool version.
+
+The two inline trigger exceptions are intentional: PR-size only labels metadata
+without checking out PR code, and the E2E placeholder requires a
+write/maintain/admin command gate. Preserve those trust boundaries rather than
+broadening the exceptions when extending either workflow.
+
 ### End-to-end tests
 
 E2e tests run against a real GKE cluster. The cluster is **not** torn down between runs — it is reused across test sessions to save setup time.

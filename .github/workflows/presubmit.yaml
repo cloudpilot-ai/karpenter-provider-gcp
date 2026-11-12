@@ -27,6 +27,7 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify action dependencies
         env:

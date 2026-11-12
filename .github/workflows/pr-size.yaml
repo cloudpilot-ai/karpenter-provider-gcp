@@ -1,7 +1,8 @@
 name: PR size
 
 on:
-  pull_request_target:
+  # Label metadata only; never check out or execute pull-request code.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, reopened, synchronize]
 
 permissions:
