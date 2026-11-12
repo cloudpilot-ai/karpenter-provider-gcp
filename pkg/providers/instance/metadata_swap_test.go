@@ -355,32 +355,49 @@ func TestBuildInstance_BootDiskSwapAutomaticSizeNeedsMachineFacts(t *testing.T) 
 // TestBuildInstance_BootDiskSwapKeepsSourceMetadata makes sure the provider
 // renders its own swap entries without mutating the source template it copies.
 func TestBuildInstance_BootDiskSwapKeepsSourceMetadata(t *testing.T) {
-	provider := makeProvider()
-	const sourceSwap = "NODE_SWAP_SIZE: 100GiB\n"
-	sourceMetadata := computeMetadataValues(map[string]string{
-		metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
-		metadata.KubeEnvKey:       requiredSourceKubeEnv + sourceSwap,
-		metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
-	})
-	nodeClass := withSwapTestImages(swapNodeClass(&v1alpha1.SwapConfig{
-		Enabled:         true,
-		BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: lo.ToPtr(int64(4))},
-	}))
+	const sourceSwap = "NODE_SWAP_PROFILE: DEDICATED_LOCAL_SSD\nNODE_SWAP_SIZE: 100GiB\nNODE_SWAP_ENCRYPTION: \"false\"\n" +
+		"NODE_SWAP_DEDICATED_LOCAL_SSD_COUNT: \"1\"\nNODE_ZSWAP_ENABLED: \"true\"\nNODE_ZSWAP_COMPRESSOR: zstd\nNODE_ZSWAP_MAX_POOL_PERCENT: \"20\"\n"
+	for name, swap := range map[string]*v1alpha1.SwapConfig{
+		"omitted":  nil,
+		"disabled": {Enabled: false},
+		"enabled": {
+			Enabled:         true,
+			BootDiskProfile: &v1alpha1.SwapBootDiskProfile{SwapSizeGib: lo.ToPtr(int64(4))},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			provider := makeProvider()
+			sourceMetadata := computeMetadataValues(map[string]string{
+				metadata.KubeLabelsKey:    "max-pods-per-node=110,max-pods=110",
+				metadata.KubeEnvKey:       requiredSourceKubeEnv + sourceSwap,
+				metadata.KubeletConfigKey: "nodeStatusUpdateFrequency: 10s\n",
+			})
+			nodeClass := withSwapTestImages(swapNodeClass(swap))
 
-	instance, err := provider.buildInstance(
-		context.Background(),
-		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
-		makeCluster("net", "subnet", "pods", false),
-		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods",
-	)
-	require.NoError(t, err)
+			instance, err := provider.buildInstance(
+				context.Background(),
+				spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
+				makeCluster("net", "subnet", "pods", false),
+				"us-central1-a", "karpenter-swap-test",
+				karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods",
+			)
+			require.NoError(t, err)
 
-	require.Contains(t, kubeEnvFrom(t, instance), "NODE_SWAP_SIZE: 4GiB")
-	for _, item := range sourceMetadata.Items {
-		if item.Key == metadata.KubeEnvKey {
-			require.Contains(t, *item.Value, "NODE_SWAP_SIZE: 100GiB",
-				"the source template must keep the values the provider copied from")
-		}
+			kubeEnv := kubeEnvFrom(t, instance)
+			require.NotContains(t, kubeEnv, "NODE_ZSWAP_")
+			require.NotContains(t, kubeEnv, "NODE_SWAP_DEDICATED_LOCAL_SSD_COUNT")
+			if swap != nil && swap.Enabled {
+				require.Contains(t, kubeEnv, "NODE_SWAP_PROFILE: BOOT_DISK")
+				require.Contains(t, kubeEnv, "NODE_SWAP_SIZE: 4GiB")
+				require.Contains(t, kubeEnv, `NODE_SWAP_ENCRYPTION: "true"`)
+				require.NotContains(t, kubeEnv, "DEDICATED_LOCAL_SSD")
+				require.NotContains(t, kubeEnv, "100GiB")
+				require.NotContains(t, kubeEnv, `NODE_SWAP_ENCRYPTION: "false"`)
+			} else {
+				require.NotContains(t, kubeEnv, "NODE_SWAP_")
+			}
+			require.Equal(t, requiredSourceKubeEnv+sourceSwap, metadataValue(sourceMetadata, metadata.KubeEnvKey),
+				"clearing inherited swap settings must not mutate the source template")
+		})
 	}
 }

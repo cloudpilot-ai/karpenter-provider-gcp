@@ -164,7 +164,34 @@ kubeletConfiguration:
 
 ### Swap
 
-Let Burstable pods use swap, as a GKE node pool with swap enabled (Terraform `linux_node_config.swap_config`) does:
+Create an encrypted boot-disk swap file and let Burstable pods use it:
+
+```yaml
+linuxNodeConfig:
+  swapConfig:
+    enabled: true
+```
+
+Karpenter automatically sizes swap and defaults omitted kubelet settings to `failSwapOn: false` and `memorySwap.swapBehavior: LimitedSwap`. Guaranteed and BestEffort pods do not use swap.
+
+- Set `bootDiskProfile.swapSizeGib` for an explicit size, at most half the boot disk; larger requests are rejected.
+- Set `encryptionConfig.disabled: true` to disable encryption.
+- Set `kubeletConfiguration.memorySwap.swapBehavior: NoSwap` for host-only swap. An explicit `failSwapOn: true` is incompatible with enabled swap.
+- Without a configured boot disk, Karpenter creates a compatible 100 GiB boot disk. An explicitly configured boot disk must set `sizeGiB`.
+- Swap requires Container-Optimized OS or Ubuntu and bootstrap manifests from GKE `1.34.1-gke.1341000` or newer.
+
+Automatic sizing uses nominal machine memory, truncated to whole GiB, and caps swap at half the boot disk (also rounded down):
+
+```text
+ramGiB = machine memory MiB / 1024
+swapGiB = min(ramGiB + min(ramGiB, 8), bootDiskGiB / 2)
+```
+
+> **Sizing provenance:** This formula was reconstructed from eleven observations of GKE `1.35.8-gke.1796000` defaults in generated bootstrap metadata from zero-node pools—not running-node measurements. It is not a published formula or a guarantee for other releases. The [GKE API reference](https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/LinuxNodeConfig#BootDiskProfile) says: "If omitted, GKE determines an optimal size based on node memory." The [GKE swap guide](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/node-memory-swap) documents the 50% boot-disk limit.
+
+Swap does not increase schedulable memory. Its space is added to `kubeReserved.ephemeral-storage`, including explicit overrides, unless pods use ephemeral Local SSDs. For example, a `20Gi` reservation plus `4Gi` swap reserves `24Gi`.
+
+Omitted or disabled `swapConfig` creates no swap, and nodes never inherit source-pool swap or zswap settings. To use swap supplied by an image or DaemonSet instead, omit `swapConfig` and configure:
 
 ```yaml
 kubeletConfiguration:
@@ -173,43 +200,7 @@ kubeletConfiguration:
     swapBehavior: LimitedSwap
 ```
 
-- `failSwapOn` — whether kubelet refuses to start while swap is active; defaults to `true`
-- `memorySwap.swapBehavior` — `NoSwap` (the kubelet default: no pod uses swap) or `LimitedSwap` (a Burstable pod's containers may swap, each up to a limit proportionate to its memory request; Guaranteed and BestEffort pods never swap)
-
-These settings only let kubelet use swap the node already has. Swap does not change node capacity, so scheduling is unaffected.
-
-> **Note:** `swapBehavior: LimitedSwap` requires `failSwapOn: false`; admission otherwise fails with `memorySwap.swapBehavior LimitedSwap requires kubeletConfiguration.failSwapOn to be explicitly set to false`. When `linuxNodeConfig.swapConfig` creates the swap file, the provider defaults `failSwapOn` to `false`, so the explicit value is not needed but an explicit `true` is still rejected.
-
-To have the node create the swap file, as `swap_config` does on a GKE node pool, set `spec.linuxNodeConfig.swapConfig`:
-
-```yaml
-linuxNodeConfig:
-  swapConfig:
-    enabled: true
-```
-
-- `enabled` — create a swap file at boot, before the kubelet starts. Defaults to `false`; an omitted, empty or disabled `swapConfig` creates no swap file
-- `bootDiskProfile.swapSizeGib` — optional size of the swap file in GiB, at most half of the boot disk. Omit it for the automatic size
-- `encryptionConfig.disabled` — set `true` to skip encryption; by default the file is encrypted with a key the node generates at boot (`/dev/mapper/encswap`)
-
-With `enabled: true` and no `bootDiskProfile.swapSizeGib`, Karpenter resolves the size the way the tested GKE release does, from the machine's nominal memory and the boot disk:
-
-```text
-ramGiB = machine memory MiB / 1024        (truncated to whole GiB first)
-swapGiB = min(ramGiB + min(ramGiB, 8), bootDiskGiB / 2)
-```
-
-A 4 GiB machine on a 100 GiB disk gets 8 GiB, a 16 GiB machine gets 24 GiB, and a swap file larger than half of the boot disk is capped, never rounded up. This is measured compatibility with GKE `1.35.8-gke.1796000`, not a Google-published formula, so future releases may size differently. Sizing regression tests preserve the observed whole-GiB and fractional-memory cases, including 7.75 GiB of RAM producing 14 GiB of swap and a 21 GiB disk capping swap at 10 GiB. Setting `swapSizeGib` overrides the automatic size, and a request larger than half of the boot disk is rejected.
-
-An enabled `swapConfig` supplies the kubelet settings swap needs when the node class omits them: `failSwapOn` becomes `false` and `memorySwap.swapBehavior` becomes `LimitedSwap`, and the source node pool's values are replaced.
-
-An explicit `memorySwap.swapBehavior: NoSwap` is kept, for a node that provisions the swap file but lets no pod use it. An explicit `failSwapOn: true` conflicts with `swapConfig.enabled: true` because the kubelet does not start while swap is active, so admission rejects it.
-
-A swap file needs a boot disk whose size Karpenter knows. Nodes that enable `swapConfig` without `spec.disks` get a provider-created 100 GiB boot disk, the size GKE documents and the provider already assumes when it estimates ephemeral storage, with a disk type the machine family supports (pd-standard, then pd-balanced, then hyperdisk-balanced). If `spec.disks` contains the boot disk, that disk is used unchanged and must set `sizeGiB`, because the half-disk limit cannot be checked otherwise. Configure one boot disk: several boot disks or an unknown machine family fail the launch instead of producing a node with no swap.
-
-The swap file takes its space from the boot disk, so Karpenter reserves it from pods: the `ephemeral-storage` kube-reserved baseline is computed against the disk left after the swap file, and the swap size is then added once, on top of any explicit `kubeletConfiguration.kubeReserved` value. An explicit 20 GiB reservation plus a 4 GiB swap file therefore reserves 24 GiB. Pod storage on ephemeral Local SSDs is not charged for the swap file, and raw-block Local SSDs leave pod storage on the boot disk. Node capacity stays the size of the disk.
-
-Nodes don't inherit swap or zswap from the GKE node pool that Karpenter uses as its bootstrap template, and Karpenter removes those entries before it writes its own. Enabled swap needs a GKE bootstrap that creates the file (`1.34.1-gke.1341000` or newer, read from the source template's bootstrap manifests archive) and a Container-Optimized OS or Ubuntu image; older bootstraps and custom images are rejected rather than launching a node without swap. Without `linuxNodeConfig.swapConfig`, provisioning the swap device or file is up to the node image or a DaemonSet.
+See the [complete example](../../examples/nodeclass/swap-gcenodeclass.yaml) and [GCENodeClass reference](../reference/gcenodeclass.md).
 
 ### Graceful node shutdown
 
