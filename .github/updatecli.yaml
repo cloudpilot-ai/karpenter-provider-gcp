@@ -21,7 +21,6 @@ sources:
 
 # All conditions must pass before any target is updated.
 conditions:
-
   toolsGo:
     kind: golang/gomod
     sourceid: currentGo

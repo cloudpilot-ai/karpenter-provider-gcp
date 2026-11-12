@@ -85,7 +85,7 @@ jobs:
           labels: pricing,automated
 
   security-pins:
-    name: Security pins (Go, base image, CI tools)
+    name: Security pins (Go, base image)
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -126,21 +126,20 @@ jobs:
           signoff: true
           sign-commits: true
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
-          commit-message: 'chore(security): refresh Go patch, base image and CI tools'
-          title: 'chore(security): refresh Go patch, base image and CI tools'
+          commit-message: 'chore(security): refresh Go patch and controller base'
+          title: 'chore(security): refresh Go patch and controller base'
           add-paths: |
             go.mod
             hack/tools/go.mod
             hack/crd-tools/go.mod
             hack/pdcsi-data/go.mod
             .ko.yaml
-            .github/workflows/security.yaml
           body: |
             #### What type of PR is this?
             /kind cleanup
 
             #### What this PR does / why we need it:
-            Refresh Go within the current minor release, the controller base-image digest and the pinned `zizmor`/`uv` versions to pick up upstream security fixes. No module dependency upgrades or automatic merge.
+            Refresh Go within the current minor release and the controller base-image digest to pick up upstream security fixes. No module dependency upgrades or automatic merge.
 
             #### Related proposal (if applicable):
             N/A
