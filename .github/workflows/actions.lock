@@ -8,9 +8,6 @@ workflows:
         - 'actions/setup-go@v7.0.0'
         - 'ko-build/setup-ko@v0.10'
         - 'unfor19/install-aws-cli-action@1.0.8'
-    '.github/workflows/e2e.yaml':
-        - 'github/command@v2.0.3'
-        - 'marocchino/sticky-pull-request-comment@v3.0.5'
     '.github/workflows/maintenance.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
@@ -174,11 +171,6 @@ dependencies:
         commit: 'sha1-33d7b85da1a04171e211befe2c739303b9a4c066'
         owner_id: 9919
         repo_id: 259445878
-    'github/command@v2.0.3':
-        ref: 'v2.0.3'
-        commit: 'sha1-3442f3fa1efe01bdb024b157083c337902d17372'
-        owner_id: 9919
-        repo_id: 663291669
     'golangci/golangci-lint-action@v9.3.0':
         ref: 'v9.3.0'
         commit: 'sha1-ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a'
@@ -194,11 +186,6 @@ dependencies:
         commit: 'sha1-61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445'
         owner_id: 111438175
         repo_id: 362126375
-    'marocchino/sticky-pull-request-comment@v3.0.5':
-        ref: 'v3.0.5'
-        commit: 'sha1-5770ad5eb8f42dd2c4f34da00c94c5381e49af88'
-        owner_id: 128431
-        repo_id: 223043916
     'peter-evans/create-pull-request@v8.1.1':
         ref: 'v8.1.1'
         commit: 'sha1-5f6978faf089d4d20b00c7766989d076bb2fc7f1'

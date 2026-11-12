@@ -203,10 +203,6 @@ The runner verifies the deployed controller matches the test checkout, acquires 
 
 For one-spec debugging, `make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"` remains available, but it bypasses the Lease and report: do not use it on a shared cluster. Run a focused Ginkgo spec through `hack/e2e-runner` instead if locking is required.
 
-#### On-demand PR e2e
-
-The `/e2e` pull-request comment workflow is currently a placeholder; run local e2e using the commands above.
-
 #### Retire e2e infrastructure
 
 `make e2e-teardown` is retired. Follow the separately approved retirement procedure in [`deploy/terraform-e2e/README.md`](deploy/terraform-e2e/README.md); normal test runs do not destroy the cluster.
