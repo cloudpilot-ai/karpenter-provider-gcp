@@ -105,13 +105,16 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
+      # Pull requests get inline annotations: they need no code-scanning
+      # permission, so fork PRs work. Only trusted refs produce SARIF, which the
+      # main-only publisher uploads.
+      - name: Annotate pull request findings
+        if: github.event_name == 'pull_request'
+        run: uvx "zizmor@${ZIZMOR_VERSION}" --offline --strict-collection --format github --min-severity high .
       - name: Generate zizmor SARIF
         id: report
+        if: github.event_name != 'pull_request'
         run: uvx "zizmor@${ZIZMOR_VERSION}" --offline --strict-collection --format sarif . > zizmor.sarif
-      # SARIF mode reports findings without failing; preserve the native PR gate.
-      - name: Fail on high-severity workflow findings
-        if: github.event_name == 'pull_request' && steps.report.outcome == 'success'
-        run: uvx "zizmor@${ZIZMOR_VERSION}" --offline --strict-collection --min-severity high .
       - name: Retain zizmor findings
         if: ${{ !cancelled() && steps.report.outcome == 'success' }}
         uses: actions/upload-artifact@v7.0.2
