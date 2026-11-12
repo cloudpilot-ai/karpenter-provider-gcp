@@ -18,6 +18,7 @@ package kubelet_config
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -447,11 +448,10 @@ func assertKubeletSwapDefaults(config *kubeletconfig.KubeletConfiguration) {
 
 // swapProbeImage is the shell image Kubernetes' own e2e tests use for node
 // probes. It only reads host files: the probe is unprivileged and read-only.
-const (
-	swapProbeImage = "registry.k8s.io/e2e-test-images/busybox:1.37.0-2"
-	// gkeSwapFile is the boot-disk swap file the GKE bootstrap creates.
-	gkeSwapFile = "/mnt/stateful_partition/swap/swapfile"
-)
+const swapProbeImage = "registry.k8s.io/e2e-test-images/busybox:1.37.0-2"
+
+//go:embed testdata/swap_probe.sh
+var swapProbeScript string
 
 // swapNodeAssertion is the set of checks every boot-disk swap node must pass:
 // the effective kubelet defaults, the active swap backing device, the storage
@@ -529,7 +529,7 @@ func assertSwapBacking(ctx context.Context, node *corev1.Node, encrypted bool, s
 			Containers: []corev1.Container{{
 				Name:    "probe",
 				Image:   swapProbeImage,
-				Command: []string{"sh", "-c", swapProbeScript(encrypted, sizeGiB)},
+				Command: []string{"sh", "-c", swapProbeScript, "swap-probe", strconv.FormatBool(encrypted), strconv.FormatInt(sizeGiB*1024*1024, 10)},
 				SecurityContext: &corev1.SecurityContext{
 					AllowPrivilegeEscalation: lo.ToPtr(false),
 					ReadOnlyRootFilesystem:   lo.ToPtr(true),

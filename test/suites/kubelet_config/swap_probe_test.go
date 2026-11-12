@@ -29,10 +29,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Exercise the script sent to the real probe, with only /host relocated to a
-// temporary fixture directory. These tests never contact Kubernetes or GCP.
+// Run the same script embedded in the probe against temporary host-state fixtures.
+// These tests never contact Kubernetes or GCP.
 func TestSwapProbeScript(t *testing.T) {
 	const sizeKiB int64 = 4194304 // 4 GiB, independent of the sizing resolver.
+	const gkeSwapFile = "/mnt/stateful_partition/swap/swapfile"
 	for name, tc := range map[string]struct {
 		encrypted bool
 		encswap   bool
@@ -80,10 +81,16 @@ func TestSwapProbeScript(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 			}
 
-			script := strings.ReplaceAll(swapProbeScript(tc.encrypted, 4), "/host/", root+"/")
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			output, err := exec.CommandContext(ctx, "sh", "-c", script).CombinedOutput()
+			encrypted := "false"
+			if tc.encrypted {
+				encrypted = "true"
+			}
+			cmd := exec.CommandContext(ctx, "sh", "-s", "--", encrypted, "4194304", ".")
+			cmd.Dir = root
+			cmd.Stdin = strings.NewReader(swapProbeScript)
+			output, err := cmd.CombinedOutput()
 			if tc.wantError == "" {
 				require.NoError(t, err, "%s", output)
 				return
