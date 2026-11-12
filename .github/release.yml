@@ -1,7 +1,6 @@
 changelog:
   exclude:
     labels:
-      - dependencies
       - release-prep
     authors:
       - dependabot
@@ -31,3 +30,6 @@ changelog:
         - kind cleanup
         - test
         - kind flake
+    - title: Other Changes
+      labels:
+        - "*"
