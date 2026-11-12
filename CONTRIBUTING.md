@@ -142,9 +142,9 @@ This guides breaks down into two parts
 
 ### GitHub Actions security
 
-The `GitHub Actions security` workflow runs [zizmor](https://docs.zizmor.sh/) on
+The existing `Security checks` workflow runs [zizmor](https://docs.zizmor.sh/) on
 pull requests with read-only permissions. High-severity findings fail the check.
-Main-branch pushes, a weekly schedule, and manual runs on canonical `main` upload
+Main-branch pushes, the daily schedule, and manual runs on canonical `main` upload
 all severities to GitHub code scanning as SARIF and retain a `zizmor-sarif`
 artifact, including when the code-scanning upload fails. SARIF reporting does not
 itself fail on findings. Low-severity checkout credential warnings and medium

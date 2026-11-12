@@ -1,6 +1,7 @@
 name: Security checks
 
 on:
+  pull_request: {}
   push:
     branches: [ "main" ]
   schedule:
@@ -125,4 +126,48 @@ jobs:
         with:
           name: main-image-security-linux-${{ matrix.arch }}
           path: reports/
+          if-no-files-found: error
+
+  zizmor-check:
+    name: Check workflow security
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fail on high-severity findings
+        uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          version: v1.32.0
+          online-audits: false
+          advanced-security: false
+          min-severity: high
+
+  zizmor-report:
+    name: Report workflow security
+    if: github.event_name != 'pull_request' && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Analyze workflows and upload SARIF
+        id: zizmor
+        uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          version: v1.32.0
+          online-audits: false
+          advanced-security: true
+      - name: Retain SARIF report
+        if: ${{ !cancelled() && steps.zizmor.outputs.output-file != '' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: zizmor-sarif
+          path: ${{ steps.zizmor.outputs.output-file }}
           if-no-files-found: error

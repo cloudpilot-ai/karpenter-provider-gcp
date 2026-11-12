@@ -50,6 +50,7 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'anchore/scan-action@v7.4.2'
         - 'github/codeql-action@v4.39.3'
+        - 'zizmorcore/zizmor-action@v0.8.1'
     '.github/workflows/update-pricing.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
@@ -59,10 +60,6 @@ workflows:
         - 'actions/checkout@v7.0.1'
         - 'peter-evans/create-pull-request@v8.1.1'
         - 'updatecli/updatecli-action@v3.10.0'
-    '.github/workflows/zizmor.yaml':
-        - 'actions/checkout@v7.0.1'
-        - 'actions/upload-artifact@v7.0.2'
-        - 'zizmorcore/zizmor-action@v0.8.1'
 dependencies:
     'actions/attest-build-provenance@v4.2.2':
         ref: 'v4.2.2'
