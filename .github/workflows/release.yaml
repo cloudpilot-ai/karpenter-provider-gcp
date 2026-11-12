@@ -27,10 +27,21 @@ jobs:
           submodules: true
           persist-credentials: false
 
-      - uses: actions/setup-go@v7.0.0
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+
+      # Reuse the development-image main cache without publishing tag-specific entries.
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: image-publish
+          cache-dependency-path: '**/go.*'
+          save: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.3.0

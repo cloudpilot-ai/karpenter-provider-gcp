@@ -16,10 +16,20 @@ jobs:
           submodules: true
           persist-credentials: false
 
-      - uses: actions/setup-go@v7.0.0
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: image-publish
+          cache-dependency-path: '**/go.*'
+          save: ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Config env
         run: |

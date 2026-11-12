@@ -6,7 +6,6 @@ on:
     branches: [ "main" ]
   schedule:
     - cron: '45 6 * * *'
-    - cron: '30 6 * * 1' # Preserve CodeQL's weekly schedule.
   workflow_dispatch: {}
 
 permissions:
@@ -30,7 +29,6 @@ jobs:
 
   actions-lock:
     name: Actions lockfile
-    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -46,11 +44,11 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language == 'go' && 'Go' || 'GitHub Actions' }})
-    # Match origin/main's standalone CodeQL triggers, not Security's broader ones.
+    # Keep the upstream PR/push scope and use Security's shared daily schedule.
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' && github.base_ref == 'main') ||
-      (github.event_name == 'schedule' && github.event.schedule == '30 6 * * 1')
+      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -94,7 +92,6 @@ jobs:
 
   zizmor:
     name: zizmor (GitHub Actions)
-    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -124,7 +121,6 @@ jobs:
 
   govulncheck:
     name: govulncheck (Go)
-    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -134,10 +130,22 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: govulncheck
+          cache-dependency-path: '**/go.*'
+          save: >-
+            ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+                github.ref == 'refs/heads/main' &&
+                (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
       - name: Report Go vulnerabilities
         id: report
         run: make vulncheck VULNCHECK_FLAGS='-format sarif' > govulncheck.sarif
@@ -155,7 +163,6 @@ jobs:
 
   container-image:
     name: Grype (linux/${{ matrix.arch }})
-    if: github.event_name != 'schedule' || github.event.schedule == '45 6 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -169,10 +176,22 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: image-scan-${{ matrix.arch }}
+          cache-dependency-path: '**/go.*'
+          save: >-
+            ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+                github.ref == 'refs/heads/main' &&
+                (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
       - name: Install image builder
         run: cd hack/tools && go install github.com/google/ko
       - name: Build local controller image
@@ -227,8 +246,7 @@ jobs:
     needs: [zizmor, govulncheck, container-image]
     if: >-
       !cancelled() && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
-      github.ref == 'refs/heads/main' &&
-      (github.event_name != 'schedule' || github.event.schedule == '45 6 * * *')
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

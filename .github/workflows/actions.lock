@@ -3,9 +3,10 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
-    '.github/workflows/cloudpilot-latest-build.yaml':
+    '.github/workflows/development-image.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
+        - 'cloudx-io/setup-go@main'
         - 'ko-build/setup-ko@v0.10'
         - 'unfor19/install-aws-cli-action@1.0.8'
     '.github/workflows/maintenance.yaml':
@@ -14,7 +15,7 @@ workflows:
         - 'google-github-actions/auth@v3.0.0'
         - 'peter-evans/create-pull-request@v8.1.1'
         - 'updatecli/updatecli-action@v3.10.0'
-    '.github/workflows/pr-size.yaml':
+    '.github/workflows/pr-metadata.yaml':
         - 'actions/github-script@v9.0.0'
         - 'step-security/action-add-labels@v1.1.1'
         - 'step-security/action-remove-labels@v1.3.1'
@@ -25,7 +26,7 @@ workflows:
         - 'actions/setup-go@v7.0.0'
         - 'cloudx-io/setup-go@main'
         - 'golangci/golangci-lint-action@v9.3.0'
-    '.github/workflows/release-build.yaml':
+    '.github/workflows/release.yaml':
         - 'actions/attest-build-provenance@v4.2.2'
         - 'actions/checkout@v7.0.1'
         - 'actions/configure-pages@v6.0.0'
@@ -36,6 +37,7 @@ workflows:
         - 'aws-actions/amazon-ecr-login@v2.1.7'
         - 'aws-actions/configure-aws-credentials@v6.3.0'
         - 'azure/setup-helm@v5.0.1'
+        - 'cloudx-io/setup-go@main'
         - 'crazy-max/ghaction-import-gpg@v7.0.0'
         - 'ko-build/setup-ko@v0.10'
         - 'sigstore/cosign-installer@v4.1.2'
@@ -47,6 +49,7 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
         - 'anchore/scan-action@v7.4.2'
         - 'astral-sh/setup-uv@v10.3.3'
+        - 'cloudx-io/setup-go@main'
         - 'github/codeql-action@v4.39.3'
 dependencies:
     'actions/attest-build-provenance@v4.2.2':

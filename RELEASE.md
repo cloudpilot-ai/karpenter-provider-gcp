@@ -66,7 +66,7 @@ git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.0
 
 ### 4. Wait for builds and verify published artefacts
 
-The tag push starts the [release build workflow](.github/workflows/release-build.yaml), which publishes the controller image and Helm charts independently of the GitHub release. Before creating or publishing the GitHub release:
+The tag push starts the [release workflow](.github/workflows/release.yaml), which publishes the controller image and Helm charts independently of the GitHub release. When resuming a previously tagged release, use the workflow path in that tag: older releases, including `v0.8.0`, used `release-build.yaml`, which remains part of their signing identity. Before creating or publishing the GitHub release:
 
 - Confirm the workflow run is for the exact signed tag and release commit.
 - Wait for both `image-publish` and `package-chart` to complete successfully. Stop on failure; do not overwrite the tag or automatically rerun publication.
