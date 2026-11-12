@@ -1,4 +1,4 @@
-name: Update Go, controller base image and CI tool pins
+name: Update Go, controller base image and zizmor pin
 
 sources:
   zizmor:
@@ -15,18 +15,6 @@ sources:
         pattern: '>=1.0.0'
     transformers:
       - trimprefix: 'v'
-  zizmorUv:
-    kind: githubrelease
-    spec:
-      owner: astral-sh
-      repository: uv
-      typefilter:
-        release: true
-        draft: false
-        prerelease: false
-      versionfilter:
-        kind: semver
-        pattern: '>=0.1.0'
   currentGo:
     kind: golang/gomod
     spec:
@@ -53,13 +41,7 @@ conditions:
     disablesourceinput: true
     spec:
       file: .github/workflows/security.yaml
-      matchpattern: '(?m)^      ZIZMOR_VERSION: "?[0-9]+\.[0-9]+\.[0-9]+"?$'
-  uvVersion:
-    kind: file
-    disablesourceinput: true
-    spec:
-      file: .github/workflows/security.yaml
-      matchpattern: '(?m)^      UV_VERSION: "?[0-9]+\.[0-9]+\.[0-9]+"?$'
+      matchpattern: '(?m)^  ZIZMOR_VERSION: "?[0-9]+\.[0-9]+\.[0-9]+"?$'
   toolsGo:
     kind: golang/gomod
     sourceid: currentGo
@@ -152,10 +134,4 @@ targets:
     sourceid: zizmor
     spec:
       file: .github/workflows/security.yaml
-      key: $.jobs.zizmor.env.ZIZMOR_VERSION
-  uv:
-    kind: yaml
-    sourceid: zizmorUv
-    spec:
-      file: .github/workflows/security.yaml
-      key: $.jobs.zizmor.env.UV_VERSION
+      key: $.env.ZIZMOR_VERSION
