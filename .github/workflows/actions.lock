@@ -3,6 +3,12 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
+    '.github/workflows/ci.yaml':
+        - 'actions/cache@v4.3.0'
+        - 'actions/checkout@v7.0.1'
+        - 'actions/setup-go@v7.0.0'
+        - 'cloudx-io/setup-go@main'
+        - 'golangci/golangci-lint-action@v9.3.0'
     '.github/workflows/development-image.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
@@ -21,12 +27,6 @@ workflows:
         - 'step-security/action-add-labels@v1.1.1'
         - 'step-security/action-remove-labels@v1.3.1'
         - 'step-security/action-size@v2.2.0'
-    '.github/workflows/presubmit.yaml':
-        - 'actions/cache@v4.3.0'
-        - 'actions/checkout@v7.0.1'
-        - 'actions/setup-go@v7.0.0'
-        - 'cloudx-io/setup-go@main'
-        - 'golangci/golangci-lint-action@v9.3.0'
     '.github/workflows/release.yaml':
         - 'actions/attest-build-provenance@v4.2.2'
         - 'actions/checkout@v7.0.1'
