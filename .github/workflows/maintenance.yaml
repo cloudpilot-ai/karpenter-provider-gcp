@@ -6,11 +6,6 @@ on:
     - cron: '0 6 * * 1'
   workflow_dispatch:
     inputs:
-      target:
-        description: Update target
-        type: choice
-        options: [all, pricing, runtime]
-        default: all
       dry_run:
         description: Preview updates without opening pull requests
         type: boolean
@@ -22,9 +17,7 @@ permissions:
 jobs:
   pricing:
     name: Pricing data
-    if: >-
-      github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
-      (github.event_name == 'schedule' || inputs.target == 'all' || inputs.target == 'pricing')
+    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     concurrency:
       group: update-pricing
@@ -91,11 +84,9 @@ jobs:
           delete-branch: true
           labels: pricing,automated
 
-  runtime:
-    name: Go and base image
-    if: >-
-      github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
-      (github.event_name == 'schedule' || inputs.target == 'all' || inputs.target == 'runtime')
+  security-pins:
+    name: Security pins (Go, base image)
+    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
