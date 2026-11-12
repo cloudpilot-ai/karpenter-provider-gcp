@@ -6,21 +6,17 @@
   </p>
 </div>
 
-![GitHub stars](https://img.shields.io/github/stars/cloudpilot-ai/karpenter-provider-gcp)
-![GitHub forks](https://img.shields.io/github/forks/cloudpilot-ai/karpenter-provider-gcp)
-[![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/LICENSE)
-[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
+![GitHub stars](https://img.shields.io/github/stars/cloudpilot-ai/karpenter-provider-gcp) ![GitHub forks](https://img.shields.io/github/forks/cloudpilot-ai/karpenter-provider-gcp) [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/LICENSE) [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
 
 > [!NOTE]
+>
 > A live version is now available.
 >
 > **Feedback welcome!** Join our [Slack](https://kubernetes.slack.com/archives/C0B20K4KWP8) to share your ideas, ask questions, and discuss with the community.
 
 ## Introduction
 
-Karpenter is an open-source node provisioning project built for Kubernetes.
-Karpenter improves the efficiency and cost of running workloads on Kubernetes clusters by:
+Karpenter is an open-source node provisioning project built for Kubernetes. Karpenter improves the efficiency and cost of running workloads on Kubernetes clusters by:
 
 * **Watching** for pods that the Kubernetes scheduler has marked as unschedulable
 * **Evaluating** scheduling constraints (resource requests, nodeselectors, affinities, tolerations, and topology spread constraints) requested by the pods
@@ -48,7 +44,6 @@ Choose Karpenter when extensibility and infrastructure control matter:
 * **Direct, workload-aware provisioning** — Karpenter evaluates native pod requests and scheduling constraints, bin-packs pending workloads, and directly creates the best-fitting GCE VM for each decision. This removes the managed node pool as a provisioning layer and avoids maintaining a node pool for every capacity shape.
 
 GKE ComputeClasses are a good fit when fully managed GKE integration, especially Autopilot, is the primary goal. For platform teams that expect to customize autoscaling, operate across clouds, or retain deeper control over infrastructure decisions, Karpenter provides the more adaptable foundation. Karpenter Provider for GCP currently targets GKE Standard clusters.
-
 
 ## Managed optimization for production Kubernetes
 
@@ -80,8 +75,7 @@ We want your contributions and suggestions! One of the easiest ways to contribut
 
 ## Sponsors
 
-End-to-end testing infrastructure for this project is generously provided by [PlanetScale](https://planetscale.com), the fastest Postgres and MySQL.&nbsp;
-<a href="https://planetscale.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://planetscale.com/brand/planetscale-logo-mark-white.svg"><img src="https://planetscale.com/brand/planetscale-logo-mark-black.svg" height="20" alt="PlanetScale"></picture></a>
+End-to-end testing infrastructure for this project is generously provided by [PlanetScale](https://planetscale.com), the fastest Postgres and MySQL.&nbsp; <a href="https://planetscale.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://planetscale.com/brand/planetscale-logo-mark-white.svg"><img src="https://planetscale.com/brand/planetscale-logo-mark-black.svg" height="20" alt="PlanetScale"></picture></a>
 
 ## Attribution Notice
 

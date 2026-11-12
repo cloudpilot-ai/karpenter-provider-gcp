@@ -80,9 +80,9 @@ verify: ## Verify code. Includes linting, formatting, etc
 verify-deadcode: ## Check for dead code using whole-program analysis
 	@output=$$(deadcode -test ./... 2>&1); if [ -n "$$output" ]; then echo "$$output"; exit 1; fi
 
-DOCS_FILES = $(shell find docs proposals -name "*.md" ! -path "docs/reference/*" 2>/dev/null)
+DOCS_FILES = $(shell find . -maxdepth 1 -type f -name "*.md") $(shell find docs proposals -name "*.md" ! -path "docs/reference/*" 2>/dev/null)
 
-docs-lint: ## Check docs markdown formatting (excludes generated reference docs)
+docs-lint: ## Check root and docs markdown formatting (excludes generated reference docs)
 	mdox fmt --check $(DOCS_FILES)
 
 docs-fix: ## Auto-fix docs markdown formatting
