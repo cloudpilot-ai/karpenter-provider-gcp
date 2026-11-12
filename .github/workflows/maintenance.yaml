@@ -153,3 +153,67 @@ jobs:
 
             #### Special notes for your reviewer:
             Created with `github.token`: a maintainer may need to approve the generated PR's workflow runs. Verify checks before merging. Rebuilding is required to deliver fixes in published images.
+
+  ci-tools:
+    name: CI tool versions
+    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: update-ci-tools
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: updatecli/updatecli-action@v3.10.0
+      - name: Validate updater manifest
+        run: updatecli manifest validate --strict --config .github/updatecli-ci-tools.yaml
+      - name: Refresh CI tool pins
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [[ "$DRY_RUN" == true ]]; then
+            updatecli pipeline diff --config .github/updatecli-ci-tools.yaml --disable-udash-report --disable-changelog
+          else
+            updatecli pipeline apply --config .github/updatecli-ci-tools.yaml --disable-udash-report --disable-changelog
+          fi
+          git diff --check
+      - name: Open draft update PR
+        if: github.event_name == 'schedule' || !inputs.dry_run
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          token: ${{ github.token }}
+          branch: automated/ci-tooling
+          base: main
+          draft: true
+          signoff: true
+          sign-commits: true
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          commit-message: 'chore(ci): update zizmor and uv'
+          title: 'chore(ci): update zizmor and uv'
+          add-paths: .github/workflows/security.yaml
+          body: |
+            #### What type of PR is this?
+            /kind cleanup
+
+            #### What this PR does / why we need it:
+            Refresh the pinned `zizmor` and `uv` versions in the security workflow. Both pin CI gate behaviour, so they are updated deliberately rather than left floating.
+
+            #### Related proposal (if applicable):
+            N/A
+
+            #### Which issue(s) this PR fixes:
+            N/A
+
+            #### Docs and examples
+            - [x] `docs/` and `examples/` updated (or this PR does not affect user-facing behaviour, configuration, or APIs)
+            - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
+
+            #### Special notes for your reviewer:
+            The new zizmor version runs against this repository in the PR checks. If a new high-severity audit fires, fix it here rather than lowering the pin.

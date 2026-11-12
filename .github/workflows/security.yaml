@@ -96,13 +96,14 @@ jobs:
     timeout-minutes: 10
     env:
       ZIZMOR_VERSION: "1.32.0"
+      UV_VERSION: "0.13.8"
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.3
         with:
-          version: "0.13.8"
+          version: ${{ env.UV_VERSION }}
           enable-cache: false
       - name: Generate zizmor SARIF
         id: report
