@@ -14,6 +14,16 @@ One week before a minor release:
 
 ---
 
+## Release notes (all releases)
+
+Use [.github/RELEASE_NOTES_TEMPLATE.md](.github/RELEASE_NOTES_TEMPLATE.md) for every release. Keep **Highlights**, **Upgrade considerations**, the audited PR changelog, and contributor credits in the reviewed notes.
+
+- The maintainer supplies and selects Highlights and upgrade wording. An LLM may propose wording grounded in the released code, PRs, and migration guide, but the maintainer must approve it. Do not have Git-history tooling choose highlights, infer user benefits, or generate unsupported claims.
+- History tooling provides a PR inventory and changelog seed only. Reconcile it against every commit in the immutable previous-tag-to-release-tag range, resolve associated merged PRs with complete API pagination, and account for direct commits. Do not rely on date searches or a truncated display.
+- Review category and exclusion rules in `.github/release.yml`: an uncategorized PR or broad dependency label must not silently hide an important change. Record intentional exclusions and keep substantive upgrades visible.
+- Preserve original contributor credit when a maintainer finishes or replaces another person's PR. Verify attribution from the original PR and commit authorship; credit integration separately. Reviewers and discussion participants are not automatically authors.
+- Before publication, verify PR links, migration claims, contributor credits, and removal of all template placeholders. Maintainer approval covers the narrative as well as the inventory; generated notes alone are not release-ready.
+
 ## Minor Release
 
 ### 1. Verify readiness
@@ -94,25 +104,32 @@ Also confirm the new version appears on [ArtifactHub](https://artifacthub.io/pac
 
 ### 5. Create GitHub release
 
+Prepare a notes file from the template and an optional generated changelog seed:
+
 ```bash
-# Create a draft with auto-generated changelog and migration note prepended.
-# --notes and --generate-notes are mutually exclusive, so generate the body
-# via the API in a subshell and pass the combined text directly.
+NOTES_FILE=$(mktemp /tmp/karpenter-release-notes.XXXXXX)
+CHANGELOG_FILE=$(mktemp /tmp/karpenter-release-changelog.XXXXXX)
+cp .github/RELEASE_NOTES_TEMPLATE.md "$NOTES_FILE"
+gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/generate-notes \
+  --method POST \
+  --field tag_name="vX.Y.0" \
+  --field previous_tag_name="vA.B.C" \
+  --field target_commitish="main" \
+  --jq '.body' > "$CHANGELOG_FILE"
+```
+
+Complete `NOTES_FILE` following [Release notes](#release-notes-all-releases). Use `CHANGELOG_FILE` only to seed the audited changelog, not to write Highlights or upgrade guidance. Replace `VERSION`/`PREVIOUS_VERSION` placeholders with the exact tags, remove all remaining placeholders, and get maintainer approval of the assembled wording before creating the draft:
+
+```bash
 gh release create vX.Y.0 \
   --repo cloudpilot-ai/karpenter-provider-gcp \
+  --verify-tag \
   --title "vX.Y.0" \
-  --notes "For the full migration guide see [MIGRATION.md](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/vX.Y.0/MIGRATION.md).
-
-$(gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/generate-notes \
-    --method POST \
-    --field tag_name="vX.Y.0" \
-    --field previous_tag_name="vA.B.C" \
-    --field target_commitish="main" \
-    --jq '.body')" \
+  --notes-file "$NOTES_FILE" \
   --draft
 ```
 
-> `.github/release.yml` controls changelog categories and excludes `release-prep`-labelled PRs automatically.
+> `.github/release.yml` controls only the generated changelog seed, including category and exclusion rules. It does not select Highlights, guarantee a complete PR list, or preserve original attribution for replacement PRs; review those explicitly.
 
 Review the draft at `https://github.com/cloudpilot-ai/karpenter-provider-gcp/releases`, then publish:
 
@@ -183,20 +200,14 @@ Post a release announcement to **#karpenter-gcp** on [Kubernetes Slack](https://
    git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.Z
    ```
 
-4. Follow step 4 of the minor release process to wait for the tag-triggered builds and verify published artifacts, signatures, and provenance, substituting `X.Y.Z` for the version. Only after verification succeeds, create the GitHub release draft. Note: `target_commitish` must point to `release-X.Y`, not `main`:
+4. Follow step 4 of the minor release process to wait for the tag-triggered builds and verify published artifacts, signatures, and provenance, substituting `X.Y.Z` for the version. Only after verification succeeds, prepare a maintainer-reviewed `NOTES_FILE` using [Release notes](#release-notes-all-releases) and the template. If generating a changelog seed as in minor step 5, use the previous patch tag and set `target_commitish` to `release-X.Y`, not `main`. Create the GitHub release draft from that completed file:
 
    ```bash
    gh release create vX.Y.Z \
      --repo cloudpilot-ai/karpenter-provider-gcp \
+     --verify-tag \
      --title "vX.Y.Z" \
-     --notes "For the full migration guide see [MIGRATION.md](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/vX.Y.Z/MIGRATION.md).
-
-   $(gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/generate-notes \
-       --method POST \
-       --field tag_name="vX.Y.Z" \
-       --field previous_tag_name="vX.Y.prev" \
-       --field target_commitish="release-X.Y" \
-       --jq '.body')" \
+     --notes-file "$NOTES_FILE" \
      --draft
    ```
 
