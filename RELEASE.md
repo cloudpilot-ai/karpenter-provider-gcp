@@ -112,6 +112,8 @@ curl -s "https://cloudpilot-ai.github.io/karpenter-provider-gcp/index.yaml" \
 
 Also confirm the new version appears on [ArtifactHub](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter).
 
+> **Check signatures:** Run the commands in [Verify release artifacts](docs/getting-started/installation.md#verify-release-artifacts-optional) with `VERSION=vX.Y.0` (note the leading `v`). This confirms that users can verify the published image signature, chart signatures, and build provenance. Fix any failure before announcing the release.
+
 ### 6. Validate on the e2e cluster
 
 Install the published chart and run e2e from the release branch (tests must match the released code):

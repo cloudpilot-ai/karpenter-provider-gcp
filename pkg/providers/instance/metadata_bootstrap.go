@@ -163,6 +163,38 @@ func patchGCFSDCacheSizeKubeEnv(target *metadata.InstanceMetadata, memoryMiB int
 	}
 }
 
+// swapKubeEnvEntries are the kube-env entries that the GKE node bootstrap
+// (setup-swap in configure-helper.sh) reads to create swap. The node class
+// owns all of them, zswap included, so a node never inherits the swap of the
+// source node pool.
+var swapKubeEnvEntries = []string{
+	"NODE_SWAP_SIZE",
+	"NODE_SWAP_PROFILE",
+	"NODE_SWAP_ENCRYPTION",
+	"NODE_SWAP_DEDICATED_LOCAL_SSD_COUNT",
+	"NODE_ZSWAP_ENABLED",
+	"NODE_ZSWAP_COMPRESSOR",
+	"NODE_ZSWAP_MAX_POOL_PERCENT",
+}
+
+// patchSwapKubeEnv writes the boot-disk swap entries that the node bootstrap
+// consumes. swapGiB is the size the provider resolved for the machine being
+// launched: the bootstrap creates exactly the size it is given and never derives
+// one itself, so the provider has to pass the resolved size.
+func patchSwapKubeEnv(target *metadata.InstanceMetadata, nodeClass *v1alpha1.GCENodeClass, swapGiB int64) {
+	for _, key := range swapKubeEnvEntries {
+		target.UnsetKubeEnvEntry(key)
+	}
+	if nodeClass.BootDiskSwapConfig() == nil {
+		return
+	}
+	// The bootstrap passes NODE_SWAP_SIZE to fallocate -l and wraps the file
+	// in dm-crypt (/dev/mapper/encswap) when NODE_SWAP_ENCRYPTION is "true".
+	target.SetKubeEnvEntry("NODE_SWAP_PROFILE", "BOOT_DISK")
+	target.SetKubeEnvEntry("NODE_SWAP_SIZE", fmt.Sprintf("%dGiB", swapGiB))
+	target.SetKubeEnvEntry("NODE_SWAP_ENCRYPTION", fmt.Sprintf(`"%t"`, nodeClass.BootDiskSwapEncrypted()))
+}
+
 // gpuSharingKubeEnvEntries are the kube-env entries GKE writes on shared-GPU node pools;
 // the GPU device plugin reads them to advertise MaxSharedClientsPerGPU replicas per GPU.
 var gpuSharingKubeEnvEntries = []string{

@@ -5,11 +5,9 @@
 
 ## Unreleased
 
-### Nodes no longer inherit swap from the GKE node pool
+### Source-pool swap and zswap settings are no longer inherited
 
-Previously, when the GKE node pool that Karpenter uses as its bootstrap template had swap or zswap enabled (`linux_node_config.swap_config`), every node that Karpenter launched inherited it. A pool with Local SSD swap also reserved Local SSDs on each node. Karpenter now drops these settings, so a node has swap only when its GCENodeClass sets `spec.linuxNodeConfig.swap`.
-
-**Action required** if your Karpenter nodes rely on swap from that node pool: when you upgrade, set `spec.linuxNodeConfig.swap` with a `bootDiskProfile`, and set `kubeletConfiguration.failSwapOn: false`. Otherwise, new nodes boot without swap. GCENodeClass supports only the boot disk swap profile; Local SSD swap and zswap aren't available. See [Swap](docs/examples/advanced.md#swap).
+New nodes no longer inherit swap or zswap settings from the GKE bootstrap source pool, even when `linuxNodeConfig.swapConfig` is omitted. A source pool with Local SSD swap also no longer reserves Local SSDs on each node. Existing nodes are unchanged. If you relied on inherited boot-disk swap, configure `spec.linuxNodeConfig.swapConfig.enabled: true` before provisioning replacement nodes. Other swap profiles and zswap are not supported by this field. See [Swap](docs/examples/advanced.md#swap).
 
 ### On-demand shutdown settings no longer depend on the source pool
 
