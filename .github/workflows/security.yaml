@@ -11,7 +11,366 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pinned scanner versions; database snapshots are resolved once per run.
+  # See hack/security/README.md for the paired-scan policy.
+  ZIZMOR_VERSION: "1.32.0"
+  GOVULNCHECK_VERSION: "v1.9.0"
+  GRYPE_VERSION: "v0.118.0"
+  KO_VERSION: "v0.19.1"
+  # Resolve the latest database once, then scan both revisions against the same
+  # immutable module contents. Do not pin advisories to an aging historical date.
+  GOVULNDB_MODULE: "golang.org/x/vulndb@latest"
+
 jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/dependency-review-action@v5.0.0
+        with:
+          fail-on-severity: high
+          license-check: false
+          comment-summary-in-pr: never
+
+  actions-lock:
+    name: Verify action dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify action dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh extension install github/gh-actions-lock --pin v0.4.1
+          gh actions-lock --verify
+
+  codeql:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: matrix.language == 'go'
+        name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - if: matrix.build-mode == 'autobuild'
+        name: Autobuild
+        uses: github/codeql-action/autobuild@v4.39.3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+
+  zizmor-regression:
+    name: Workflow security regression
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the proposed merge commit
+        uses: actions/checkout@v7.0.1
+        with:
+          path: candidate
+          persist-credentials: false
+
+      - name: Check out the pull request base
+        uses: actions/checkout@v7.0.1
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Install pinned zizmor
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zizmor"
+          "$RUNNER_TEMP/zizmor/bin/pip" install --disable-pip-version-check \
+            --no-cache-dir "zizmor==${ZIZMOR_VERSION}"
+          echo "$RUNNER_TEMP/zizmor/bin" >> "$GITHUB_PATH"
+
+      - name: Scan the pull request base
+        working-directory: base
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/reports"
+          zizmor --format json --no-progress --offline --strict-collection --no-exit-codes . \
+            > "$GITHUB_WORKSPACE/reports/zizmor-base.json"
+
+      - name: Scan the proposed merge commit
+        working-directory: candidate
+        run: |
+          zizmor --format json --no-progress --offline --strict-collection --no-exit-codes . \
+            > "$GITHUB_WORKSPACE/reports/zizmor-candidate.json"
+
+      - name: Compare workflow security findings
+        run: |
+          python3 candidate/hack/security/regression_gate.py \
+            --scanner zizmor \
+            --baseline reports/zizmor-base.json \
+            --candidate reports/zizmor-candidate.json \
+            --summary-out reports/zizmor-summary.md \
+            --json-out reports/zizmor-summary.json
+
+      - name: Retain workflow security reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: zizmor-regression
+          path: reports/
+          if-no-files-found: warn
+
+  go-vulnerability-regression:
+    name: Go vulnerability regression
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOOS: linux
+      GOARCH: amd64
+    steps:
+      - name: Check out the proposed merge commit
+        uses: actions/checkout@v7.0.1
+        with:
+          path: candidate
+          persist-credentials: false
+
+      - name: Check out the pull request base
+        uses: actions/checkout@v7.0.1
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Select Go toolchain
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: candidate/go.mod
+          cache: false
+
+      - name: Install pinned govulncheck
+        run: |
+          GOBIN="$RUNNER_TEMP/tools" go install \
+            "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+
+      - name: Freeze the Go vulnerability database
+        id: vulndb
+        run: |
+          mkdir -p "$RUNNER_TEMP/vulndb-module" reports
+          snapshot="$(
+            cd "$RUNNER_TEMP/vulndb-module"
+            go mod init vulndb-snapshot >/dev/null
+            go mod download -json "$GOVULNDB_MODULE"
+          )"
+          directory=$(printf '%s\n' "$snapshot" | jq -r .Dir)
+          test -d "$directory/data/osv"
+          test "$(find "$directory/data/osv" -name '*.json' | wc -l | tr -d ' ')" -gt 1000
+          printf '%s\n' "$snapshot" \
+            | jq -r '"module \(.Path)@\(.Version) sum \(.Sum)"' > reports/govulndb.txt
+          printf 'database=file://%s/data/osv\n' "$directory" >> "$GITHUB_OUTPUT"
+
+      - name: Scan both revisions
+        env:
+          GOVULNDB: ${{ steps.vulndb.outputs.database }}
+        run: |
+          set -euo pipefail
+          toolchain_version() {
+            local gomod="$1" version
+            version=$(sed -n 's/^toolchain //p' "$gomod" | head -n 1)
+            if [ -n "$version" ]; then
+              printf '%s\n' "$version"
+              return 0
+            fi
+            version=$(sed -n 's/^go //p' "$gomod" | head -n 1)
+            case "$version" in
+              [0-9]*.[0-9]*.[0-9]*) printf 'go%s\n' "$version" ;;
+              *)
+                echo "error: $gomod has no patch-level go directive ('$version')" >&2
+                return 1
+                ;;
+            esac
+          }
+          for revision in base candidate; do
+            toolchain=$(toolchain_version "$revision/go.mod")
+            # Standard-library vulnerability results depend on the analyzed
+            # toolchain, so each revision is scanned with its own intended Go version.
+            ( cd "$revision" && GOTOOLCHAIN="$toolchain" go env GOVERSION \
+                > "$GITHUB_WORKSPACE/reports/go-version-$revision.txt" )
+            ( cd "$revision" && GOTOOLCHAIN="$toolchain" govulncheck -db "$GOVULNDB" \
+                -format json -test ./cmd/controller/... ./pkg/... \
+                > "$GITHUB_WORKSPACE/reports/govulncheck-$revision.json" )
+          done
+
+      - name: Compare Go vulnerability findings
+        run: |
+          python3 candidate/hack/security/regression_gate.py \
+            --scanner govulncheck \
+            --baseline reports/govulncheck-base.json \
+            --candidate reports/govulncheck-candidate.json \
+            --summary-out reports/govulncheck-summary.md \
+            --json-out reports/govulncheck-summary.json
+
+      - name: Retain Go vulnerability reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: go-vulnerability-regression
+          path: reports/
+          if-no-files-found: warn
+
+  image-security-regression:
+    name: Image security regression
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      # ko requires a repository even when it only writes a local tarball.
+      KO_DOCKER_REPO: example.invalid/karpenter
+    steps:
+      - name: Check out the proposed merge commit
+        uses: actions/checkout@v7.0.1
+        with:
+          path: candidate
+          persist-credentials: false
+
+      - name: Check out the pull request base
+        uses: actions/checkout@v7.0.1
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Select Go toolchain
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: candidate/go.mod
+          cache: false
+
+      - name: Install pinned image builder
+        run: |
+          GOBIN="$RUNNER_TEMP/tools" go install "github.com/google/ko@${KO_VERSION}"
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+
+      - name: Install pinned image scanner
+        id: grype
+        uses: anchore/scan-action/download-grype@v7.4.2
+        with:
+          grype-version: ${{ env.GRYPE_VERSION }}
+          cache-db: false
+
+      - name: Freeze the image vulnerability database
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+          # One frozen database directory serves every paired scan.
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
+          GRYPE_DB_AUTO_UPDATE: "false"
+          GRYPE_DB_VALIDATE_AGE: "false"
+        run: |
+          mkdir -p reports
+          "$GRYPE" db update
+          "$GRYPE" db status > reports/grype-db.txt
+
+      - name: Build and scan both revisions
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+          # Reuse the frozen database above; never update it between paired scans.
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
+          GRYPE_DB_AUTO_UPDATE: "false"
+          GRYPE_DB_VALIDATE_AGE: "false"
+        run: |
+          set -euo pipefail
+          toolchain_version() {
+            local gomod="$1" version
+            version=$(sed -n 's/^toolchain //p' "$gomod" | head -n 1)
+            if [ -n "$version" ]; then
+              printf '%s\n' "$version"
+              return 0
+            fi
+            version=$(sed -n 's/^go //p' "$gomod" | head -n 1)
+            case "$version" in
+              [0-9]*.[0-9]*.[0-9]*) printf 'go%s\n' "$version" ;;
+              *)
+                echo "error: $gomod has no patch-level go directive ('$version')" >&2
+                return 1
+                ;;
+            esac
+          }
+          # Stable relative archive names keep report paths reproducible.
+          cd "$RUNNER_TEMP"
+          for revision in base candidate; do
+            toolchain=$(toolchain_version "$GITHUB_WORKSPACE/$revision/go.mod")
+            for platform in linux/amd64 linux/arm64; do
+              arch=${platform#linux/}
+              ( cd "$GITHUB_WORKSPACE/$revision" && GOTOOLCHAIN="$toolchain" ko build \
+                  --bare --push=false --platform "$platform" \
+                  --tarball "$RUNNER_TEMP/image-$revision-$arch.tar" ./cmd/controller \
+                  > "$GITHUB_WORKSPACE/reports/image-$revision-$arch.txt" 2>&1 )
+              "$GRYPE" "docker-archive:image-$revision-$arch.tar" \
+                --output "json=$GITHUB_WORKSPACE/reports/grype-$revision-$arch.json"
+            done
+          done
+
+      - name: Compare image findings
+        run: |
+          set -euo pipefail
+          status=0
+          for arch in amd64 arm64; do
+            rc=0
+            python3 candidate/hack/security/regression_gate.py \
+              --scanner grype \
+              --baseline "reports/grype-base-$arch.json" \
+              --candidate "reports/grype-candidate-$arch.json" \
+              --context "linux/$arch" \
+              --summary-out "reports/grype-summary-$arch.md" \
+              --json-out "reports/grype-summary-$arch.json" || rc=$?
+            case "$rc" in
+              0) ;;
+              1) [ "$status" -ne 0 ] || status=1 ;;
+              *) status=2 ;;
+            esac
+          done
+          exit "$status"
+
+      - name: Retain image security reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: image-security-regression
+          path: reports/
+          if-no-files-found: warn
+
   govulncheck:
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -128,23 +487,6 @@ jobs:
           path: reports/
           if-no-files-found: error
 
-  zizmor-check:
-    name: Check workflow security
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - name: Fail on high-severity findings
-        uses: zizmorcore/zizmor-action@v0.8.1
-        with:
-          version: v1.32.0
-          online-audits: false
-          advanced-security: false
-          min-severity: high
-
   zizmor-report:
     name: Report workflow security
     if: github.event_name != 'pull_request' && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main'
@@ -161,7 +503,7 @@ jobs:
         id: zizmor
         uses: zizmorcore/zizmor-action@v0.8.1
         with:
-          version: v1.32.0
+          version: v${{ env.ZIZMOR_VERSION }}
           online-audits: false
           advanced-security: true
       - name: Retain SARIF report

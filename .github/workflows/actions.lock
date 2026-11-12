@@ -8,10 +8,6 @@ workflows:
         - 'actions/setup-go@v7.0.0'
         - 'ko-build/setup-ko@v0.10'
         - 'unfor19/install-aws-cli-action@1.0.8'
-    '.github/workflows/codeql.yaml':
-        - 'actions/checkout@v7.0.1'
-        - 'actions/setup-go@v7.0.0'
-        - 'github/codeql-action@v4.39.3'
     '.github/workflows/docs.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
@@ -26,7 +22,6 @@ workflows:
     '.github/workflows/presubmit.yaml':
         - 'actions/cache@v4.3.0'
         - 'actions/checkout@v7.0.1'
-        - 'actions/dependency-review-action@v5.0.0'
         - 'actions/setup-go@v7.0.0'
         - 'cloudx-io/setup-go@main'
         - 'golangci/golangci-lint-action@v9.3.0'
@@ -46,6 +41,7 @@ workflows:
         - 'sigstore/cosign-installer@v4.1.2'
     '.github/workflows/security.yaml':
         - 'actions/checkout@v7.0.1'
+        - 'actions/dependency-review-action@v5.0.0'
         - 'actions/setup-go@v7.0.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'anchore/scan-action@v7.4.2'

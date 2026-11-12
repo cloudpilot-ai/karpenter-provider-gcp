@@ -63,3 +63,5 @@ charts/karpenter/charts/
 
 e2e-report.md
 e2e-report.karpenter.log
+# Python bytecode from hack/security tooling
+__pycache__/

@@ -1,0 +1,304 @@
+[
+  {
+    "ident": "artipacked",
+    "desc": "credential persistence through GitHub Actions artifacts",
+    "url": "https://docs.zizmor.sh/audits/#artipacked",
+    "determinations": {
+      "confidence": "Low",
+      "severity": "Low",
+      "persona": "Regular"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": "./.github/workflows/ci.yaml"
+            }
+          },
+          "annotation": "does not set persist-credentials: false",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "build"
+              },
+              {
+                "Key": "steps"
+              },
+              {
+                "Index": 0
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 9,
+              "column": 8
+            },
+            "end_point": {
+              "row": 9,
+              "column": 37
+            },
+            "offset_span": {
+              "start": 123,
+              "end": 152
+            }
+          },
+          "feature": "uses: actions/checkout@v7.0.1",
+          "comments": []
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": [
+      {
+        "title": "set persist-credentials: false",
+        "key": {
+          "Local": {
+            "verbatim_path": "./.github/workflows/ci.yaml"
+          }
+        },
+        "disposition": "unsafe"
+      }
+    ]
+  },
+  {
+    "ident": "unpinned-uses",
+    "desc": "unpinned action reference",
+    "url": "https://docs.zizmor.sh/audits/#unpinned-uses",
+    "determinations": {
+      "confidence": "High",
+      "severity": "High",
+      "persona": "Regular"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": "./.github/workflows/ci.yaml"
+            }
+          },
+          "annotation": "this step",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "build"
+              },
+              {
+                "Key": "steps"
+              },
+              {
+                "Index": 0
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 9,
+              "column": 8
+            },
+            "end_point": {
+              "row": 9,
+              "column": 37
+            },
+            "offset_span": {
+              "start": 123,
+              "end": 152
+            }
+          },
+          "feature": "uses: actions/checkout@v7.0.1",
+          "comments": []
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": "./.github/workflows/ci.yaml"
+            }
+          },
+          "annotation": "action is not pinned to a hash (required by blanket policy)",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "build"
+              },
+              {
+                "Key": "steps"
+              },
+              {
+                "Index": 0
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "actions/checkout@v7.0.1"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 9,
+              "column": 14
+            },
+            "end_point": {
+              "row": 9,
+              "column": 37
+            },
+            "offset_span": {
+              "start": 129,
+              "end": 152
+            }
+          },
+          "feature": "actions/checkout@v7.0.1",
+          "comments": []
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  },
+  {
+    "ident": "unpinned-uses",
+    "desc": "unpinned action reference",
+    "url": "https://docs.zizmor.sh/audits/#unpinned-uses",
+    "determinations": {
+      "confidence": "High",
+      "severity": "High",
+      "persona": "Regular"
+    },
+    "locations": [
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": "./.github/workflows/ci.yaml"
+            }
+          },
+          "annotation": "this step",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "build"
+              },
+              {
+                "Key": "steps"
+              },
+              {
+                "Index": 2
+              }
+            ]
+          },
+          "feature_kind": "Normal",
+          "kind": "Hidden"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 11,
+              "column": 8
+            },
+            "end_point": {
+              "row": 12,
+              "column": 0
+            },
+            "offset_span": {
+              "start": 185,
+              "end": 215
+            }
+          },
+          "feature": "uses: actions/setup-go@v7.0.0\n",
+          "comments": []
+        }
+      },
+      {
+        "symbolic": {
+          "key": {
+            "Local": {
+              "verbatim_path": "./.github/workflows/ci.yaml"
+            }
+          },
+          "annotation": "action is not pinned to a hash (required by blanket policy)",
+          "route": {
+            "route": [
+              {
+                "Key": "jobs"
+              },
+              {
+                "Key": "build"
+              },
+              {
+                "Key": "steps"
+              },
+              {
+                "Index": 2
+              },
+              {
+                "Key": "uses"
+              }
+            ]
+          },
+          "feature_kind": {
+            "Subfeature": {
+              "after": 0,
+              "fragment": {
+                "Raw": "actions/setup-go@v7.0.0"
+              }
+            }
+          },
+          "kind": "Primary"
+        },
+        "concrete": {
+          "location": {
+            "start_point": {
+              "row": 11,
+              "column": 14
+            },
+            "end_point": {
+              "row": 11,
+              "column": 37
+            },
+            "offset_span": {
+              "start": 191,
+              "end": 214
+            }
+          },
+          "feature": "actions/setup-go@v7.0.0",
+          "comments": []
+        }
+      }
+    ],
+    "ignored": false,
+    "fixes": []
+  }
+]
