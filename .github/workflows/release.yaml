@@ -63,10 +63,21 @@ jobs:
 
       - name: Build and publish image
         id: image
-        uses: $/.github/actions/build-controller-image
-        with:
-          tag: ${{ env.tag }}
-          sbom-artifact-name: release-image-sboms
+        env:
+          IMAGE_TAG: ${{ env.tag }}
+        run: |
+          export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
+          IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
+            --tags "$IMAGE_TAG" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms")
+          # ko includes the release tag before the digest; retain the immutable reference.
+          IMAGE=${IMAGE/":$IMAGE_TAG@"/@}
+          [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]] || {
+            echo 'Expected exactly one digest-qualified controller image from ko build' >&2
+            exit 1
+          }
+          echo "reference=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "digest=${IMAGE##*@}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$IMAGE" > "$RUNNER_TEMP/sboms/image-reference.txt"
 
       - name: Sign image
         env:
@@ -90,6 +101,13 @@ jobs:
           subject-name: public.ecr.aws/cloudpilotai/gcp/karpenter
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: false
+
+      - name: Retain SPDX SBOMs
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-image-sboms
+          path: ${{ runner.temp }}/sboms/
+          if-no-files-found: error
 
   package-chart:
     name: Publish chart

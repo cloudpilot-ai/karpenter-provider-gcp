@@ -47,8 +47,14 @@ jobs:
       - uses: ko-build/setup-ko@v0.10
 
       - name: Build and publish image
-        id: image
-        uses: $/.github/actions/build-controller-image
+        run: |
+          export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
+          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
+            --tags latest --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms"
+
+      - name: Retain SPDX SBOMs
+        uses: actions/upload-artifact@v7.0.2
         with:
-          tag: latest
-          sbom-artifact-name: development-image-sboms
+          name: development-image-sboms
+          path: ${{ runner.temp }}/sboms/
+          if-no-files-found: error
