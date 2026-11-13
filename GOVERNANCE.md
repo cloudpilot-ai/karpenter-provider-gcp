@@ -12,7 +12,7 @@ Technical and governance discussions take place in public issues and pull reques
 
 ## Roles and ownership
 
-The [contributor ladder](CONTRIBUTOR_LADDER.md) describes contributor, reviewer, maintainer, and emeritus roles. The [maintainer roster](MAINTAINERS.md) identifies project-wide responsibilities; [OWNERS](OWNERS) records reviewers and approvers. Maintainers collectively steward technical direction, reviews, releases, documentation, community health, and project resources.
+The [contributor ladder](CONTRIBUTOR_LADDER.md) describes contributor, reviewer, maintainer, and emeritus roles. The [maintainer roster](MAINTAINERS.md) lists project-wide maintainers; [OWNERS](OWNERS) records reviewers and approvers. Maintainers collectively steward technical direction, reviews, releases, documentation, community health, and project resources.
 
 A recorded role is not proof of administrative access. Administrators grant only the access needed for an accepted role and review permissions on role changes. A delegated team requires a recorded purpose, named willing members, scope, appointment decision, and removal process. Delegates use the same nomination and removal votes as maintainers, but do not receive maintainer votes merely by joining a team. Appointments, onboarding, offboarding, and permissions are recorded publicly except for sensitive details.
 
@@ -37,7 +37,7 @@ Any contributor may propose project direction or resource requests. Maintainers 
 
 Contributors can express interest in reviewing through a public issue or pull request. An existing maintainer nominates a reviewer or maintainer, with examples of sustained contributions, useful reviews, collaboration, and familiarity with the relevant code, documentation, and project practices. There is no employment, sponsorship, fixed contribution count, or company-membership prerequisite. Candidates must accept the responsibilities before a vote.
 
-After approval, a maintainer coordinates onboarding: explain review/release practices and the Code of Conduct, update `OWNERS` and the roster/role scope, and have an administrator grant and verify necessary access. Confirm private response duties and access separately; a public role does not automatically grant mailbox access.
+After approval, a maintainer coordinates onboarding: explain review/release practices and the Code of Conduct, update `OWNERS` and the roster/role scope, and have an administrator grant and verify necessary access. Confirm private response duties and access separately; a public role does not automatically grant access to private reports or the fallback mailbox.
 
 Anyone may resign or request emeritus status. Maintainers can propose removal for sustained inability to perform the role, misconduct, or loss of trust. Before a removal vote, offer the person an opportunity to respond privately where needed for safety. Inactivity prompts a conversation about availability, not automatic removal after an invented fixed period. Voluntary departures do not require a removal vote.
 
