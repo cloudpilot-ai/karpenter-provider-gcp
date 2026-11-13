@@ -82,6 +82,32 @@ func TestLabelsForZ4D(t *testing.T) {
 	}, labels)
 }
 
+func TestLabelsForZ4M(t *testing.T) {
+	t.Parallel()
+
+	for _, shape := range []string{"z4m-highmem-16", "z4m-highmem-32", "z4m-highmem-48", "z4m-highmem-192"} {
+		t.Run(shape, func(t *testing.T) {
+			t.Parallel()
+			want := map[string]string{
+				"disk-type.gke.io/hyperdisk-balanced":                   "true",
+				"disk-type.gke.io/hyperdisk-balanced-high-availability": "true",
+				"disk-type.gke.io/hyperdisk-throughput":                 "true",
+				"disk-type.gke.io/hyperdisk-ml":                         "true",
+			}
+			if shape == "z4m-highmem-48" || shape == "z4m-highmem-192" {
+				want["disk-type.gke.io/hyperdisk-extreme"] = "true"
+			}
+			labels, ok := LabelsForInstanceType(shape)
+			require.True(t, ok)
+			require.Equal(t, want, labels)
+			for label := range want {
+				require.True(t, SupportsDiskType(shape, label[len(labelPrefix):]))
+			}
+			require.False(t, SupportsDiskType(shape, "pd-balanced"))
+		})
+	}
+}
+
 func TestAllLabels(t *testing.T) {
 	t.Parallel()
 

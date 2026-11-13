@@ -1575,12 +1575,14 @@ func (p *DefaultProvider) configureInstanceCapacityProvision(instance *compute.I
 	}
 }
 
-// GCE requires z3 and z4d instances above their bundled SSD limits to terminate on maintenance.
+// GCE requires storage-optimized instances above their bundled SSD limits to terminate on maintenance.
 // MachineType does not report these thresholds, so the provider uses the documented limits below.
 // https://cloud.google.com/compute/docs/storage-optimized-machines#maintenance_experience_for_z4d_instances
 const (
 	z3HighSsdGiBThreshold  = 18 * 1024
 	z4dHighSsdGiBThreshold = 42000
+	// https://cloud.google.com/compute/docs/storage-optimized-machines#maintenance_experience_for_z4m_instances
+	z4mHighSsdGiBThreshold = 42000
 )
 
 // onHostMaintenancePolicy returns TERMINATE for shapes that GCE cannot live-migrate.
@@ -1604,6 +1606,8 @@ func onHostMaintenancePolicy(instanceType *cloudprovider.InstanceType, capacityT
 		threshold = z3HighSsdGiBThreshold
 	case strings.HasPrefix(instanceType.Name, "z4d-"):
 		threshold = z4dHighSsdGiBThreshold
+	case strings.HasPrefix(instanceType.Name, "z4m-"):
+		threshold = z4mHighSsdGiBThreshold
 	default:
 		return ""
 	}

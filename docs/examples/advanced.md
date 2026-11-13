@@ -434,15 +434,19 @@ If the requirements allow more than one count, Karpenter does not launch the nod
 
 In `Ephemeral` mode, Karpenter checks a Pod's `ephemeral-storage` request against the capacity of the selected disks. Most machine types provide 375 GiB per disk. Z3 virtual machines provide 3,000 GiB, the Z3 bare-metal type `z3-highmem-192-highlssd-metal` provides 6,000 GiB, and Z4D provides 3,500 GiB. The request does not choose the count. In `RawBlock` mode, `ephemeral-storage` reflects only the boot disk.
 
-Z4D supports only Hyperdisk. If you set a boot disk `category`, choose a Hyperdisk type such as `hyperdisk-balanced`.
+Z4D and Z4M support only Hyperdisk. If you specify a boot disk `category`, choose a supported Hyperdisk boot type, such as `hyperdisk-balanced`. Leave `gvnic` unset for GCE's default, or set `gvnic.enabled` to `true`. Do not set it to `false`.
 
 Karpenter sets `scheduling.onHostMaintenance` to `MIGRATE` for on-demand Z3 and Z4D virtual machine (non-bare-metal) nodes, so they live-migrate during host maintenance. Compute Engine cannot live-migrate Z3 shapes with more than 18 TiB of bundled local SSD or Z4D shapes with more than 42,000 GiB. Karpenter sets `TERMINATE` for those shapes and for Spot nodes.
+
+[Z4M](https://cloud.google.com/compute/docs/storage-optimized-machines#z4m_machine_types) includes 14,000 GiB per bundled SSD. The `z4m-highmem-16`, `z4m-highmem-32`, and `z4m-highmem-48` shapes have one, two, and three SSDs. The `z4m-highmem-192` shape has twelve. Karpenter uses `MIGRATE` for on-demand Z4M nodes with up to 42,000 GiB and `TERMINATE` above that limit or for Spot nodes. The 16- and 32-vCPU shapes do not support Hyperdisk Extreme.
+
+Z4M requires GKE `1.36.3-gke.1767000` or later; see the [GKE release notes](https://cloud.google.com/kubernetes-engine/docs/release-notes#October_19_2026). GKE does not support Z4M bare metal. Cloud RDMA is outside this provider's Z4M support. Z4M also requires regional entries in the provider's pricing data before Karpenter can offer these machines.
 
 If you are upgrading from a version that accepted `spec.disks[].category: local-ssd`, see [`MIGRATION.md`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/MIGRATION.md).
 
 ## Disk type scheduling
 
-Karpenter applies `disk-type.gke.io/*` labels to provisioned nodes based on the instance type's machine family. These labels indicate which persistent disk types the instance supports, enabling two capabilities:
+Karpenter applies `disk-type.gke.io/*` labels to provisioned nodes based on the instance type's disk compatibility. These labels indicate which persistent disk types the instance supports, enabling two capabilities:
 
 1. **NodePool requirements** — constrain scheduling to instance types that support specific disk types
 2. **PD CSI topology scheduling** — enable StorageClasses with `allowedTopologies` based on disk-type labels
@@ -522,7 +526,7 @@ The supported labels correspond to GCP disk types:
 | `disk-type.gke.io/hyperdisk-ml`                         | Hyperdisk ML                         |
 | `disk-type.gke.io/hyperdisk-balanced-high-availability` | Hyperdisk Balanced High Availability |
 
-Disk compatibility is determined at the machine family level (`n2`, `c3`, `e2`), not the specific instance size. See the [GCP machine family disk support matrix](https://cloud.google.com/compute/docs/disks#disk-types) for which families support which disk types.
+Disk compatibility generally comes from machine-family data (`n2`, `c3`, `e2`). Z4M also has a size restriction: its 16- and 32-vCPU shapes do not support Hyperdisk Extreme. See the [GCP machine family disk support matrix](https://cloud.google.com/compute/docs/disks#disk-types) for which families support which disk types.
 
 ### PD CSI topology scheduling
 
