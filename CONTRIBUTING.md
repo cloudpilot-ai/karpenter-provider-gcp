@@ -2,23 +2,11 @@
 
 ## Getting involved
 
-Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use
-[GitHub Issues](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
-for questions, reproducible bugs, and feature requests; choose the appropriate
-issue template. Report vulnerabilities privately using [SECURITY.md](SECURITY.md),
-not in an issue.
+Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues) for questions, reproducible bugs, and feature requests; choose the appropriate issue template. Report vulnerabilities privately using [SECURITY.md](SECURITY.md), not in an issue.
 
-For changes, fork the repository, create a branch, and open a pull request using
-the PR template. Describe the motivation, relevant testing, and documentation or
-migration impact. Keep changes focused and run the applicable checks in the
-Makefile before requesting review. Significant changes use the proposal process
-below.
+For changes, fork the repository, create a branch, and open a pull request using the PR template. Describe the motivation, relevant testing, and documentation or migration impact. Keep changes focused and run the applicable checks in the Makefile before requesting review. Significant changes use the proposal process below.
 
-See the [maintainer roster](MAINTAINERS.md), [proposed governance](GOVERNANCE.md),
-and [contributor ladder](CONTRIBUTOR_LADDER.md) for responsibilities and the
-proposed path from contributor to reviewer and maintainer. Project channels and
-outstanding community-policy gaps are listed in the
-[CNCF policy alignment notes](docs/community/cncf-policy-alignment.md).
+See the [maintainer roster](MAINTAINERS.md), [proposed governance](GOVERNANCE.md), and [contributor ladder](CONTRIBUTOR_LADDER.md) for responsibilities and the proposed path from contributor to reviewer and maintainer. Project channels and outstanding community-policy gaps are listed in the [CNCF policy alignment notes](docs/community/cncf-policy-alignment.md).
 
 ## Design Proposals
 

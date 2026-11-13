@@ -6,11 +6,7 @@
   </p>
 </div>
 
-![GitHub stars](https://img.shields.io/github/stars/cloudpilot-ai/karpenter-provider-gcp)
-![GitHub forks](https://img.shields.io/github/forks/cloudpilot-ai/karpenter-provider-gcp)
-[![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](LICENSE.txt)
-[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
+![GitHub stars](https://img.shields.io/github/stars/cloudpilot-ai/karpenter-provider-gcp) ![GitHub forks](https://img.shields.io/github/forks/cloudpilot-ai/karpenter-provider-gcp) [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](LICENSE.txt) [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
 
 > [!NOTE]
 >
