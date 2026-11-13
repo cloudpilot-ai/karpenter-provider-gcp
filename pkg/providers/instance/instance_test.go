@@ -253,9 +253,9 @@ func TestInsufficientCapacityBackoffTTL(t *testing.T) {
 	}
 }
 
-func requireStoredTTL(t *testing.T, c *cache.Cache, instanceType, zone, capacityType string, want time.Duration) {
+func requireStoredTTL(t *testing.T, c *cache.Cache, zone, capacityType string, want time.Duration) {
 	t.Helper()
-	_, expiration, found := c.GetWithExpiration(fmt.Sprintf("%s:%s:%s", capacityType, instanceType, zone))
+	_, expiration, found := c.GetWithExpiration(fmt.Sprintf("%s:n2-standard-4:%s", capacityType, zone))
 	require.True(t, found, "offering must be marked unavailable")
 	require.WithinDuration(t, time.Now().Add(want), expiration, 5*time.Second)
 }
@@ -283,7 +283,7 @@ func TestHandleZoneOperationErrorUnsupportedConfiguration(t *testing.T) {
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.ErrorContains(t, err, "n2-standard-4 on-demand/us-east4-a unsupported configuration 1h0m0s")
 	require.ErrorContains(t, err, "reason=configuration_availability")
-	requireStoredTTL(t, c, "n2-standard-4", "us-east4-a", karpv1.CapacityTypeOnDemand, options.DefaultUnsupportedConfigurationTTL)
+	requireStoredTTL(t, c, "us-east4-a", karpv1.CapacityTypeOnDemand, options.DefaultUnsupportedConfigurationTTL)
 }
 
 // A capacity error returned synchronously by Insert is classified by code:
@@ -324,7 +324,7 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 
 			require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 			require.Equal(t, tt.wantRetryable, retryable)
-			requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeOnDemand, tt.wantTTL)
+			requireStoredTTL(t, c, "us-central1-a", karpv1.CapacityTypeOnDemand, tt.wantTTL)
 		})
 	}
 }
@@ -433,8 +433,8 @@ func TestMarkQuotaExceededMarksAllZonesForCapacityType(t *testing.T) {
 
 	require.True(t, cloudprovider.IsInsufficientCapacityError(err))
 	require.ErrorContains(t, err, "n2-standard-4 on-demand/us-central1-a quota exceeded 2h0m0s")
-	requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeOnDemand, ttl)
-	requireStoredTTL(t, c, "n2-standard-4", "us-central1-b", karpv1.CapacityTypeOnDemand, ttl)
+	requireStoredTTL(t, c, "us-central1-a", karpv1.CapacityTypeOnDemand, ttl)
+	requireStoredTTL(t, c, "us-central1-b", karpv1.CapacityTypeOnDemand, ttl)
 	_, found := c.Get(fmt.Sprintf("%s:%s:%s", karpv1.CapacityTypeSpot, "n2-standard-4", "us-central1-b"))
 	require.False(t, found, "spot quota is separate from on-demand quota")
 }
@@ -1890,7 +1890,7 @@ func TestCreate_FallsBackToOnDemandAfterSpotStockout(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, karpv1.CapacityTypeOnDemand, instance.CapacityType)
 	require.Equal(t, []string{"n2-standard-4/spot", "n2-standard-4/on-demand"}, inserts())
-	requireStoredTTL(t, c, "n2-standard-4", "us-central1-a", karpv1.CapacityTypeSpot, options.DefaultStockoutTTL)
+	requireStoredTTL(t, c, "us-central1-a", karpv1.CapacityTypeSpot, options.DefaultStockoutTTL)
 }
 
 func TestCreate_FallbackOrdersInstanceTypesByOnDemandPrice(t *testing.T) {
@@ -2060,6 +2060,46 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 	got := kubeLabelsFrom(t, instance)
 	require.NotContains(t, got, "gke-gpu-driver-version", "non-GPU instance must not get GPU driver version label")
 	require.NotContains(t, got, "gke-accelerator", "non-GPU instance must not get accelerator label")
+}
+
+func TestShieldedInstanceConfigSerialization(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name   string
+		config *v1alpha1.ShieldedInstanceConfig
+		want   string
+	}{
+		{name: "omitted", want: `{}`},
+		{name: "empty", config: &v1alpha1.ShieldedInstanceConfig{}, want: `{"shieldedInstanceConfig":{}}`},
+		{
+			name: "enabled",
+			config: &v1alpha1.ShieldedInstanceConfig{
+				EnableSecureBoot: lo.ToPtr(true), EnableVtpm: lo.ToPtr(true), EnableIntegrityMonitoring: lo.ToPtr(true),
+			},
+			want: `{"shieldedInstanceConfig":{"enableSecureBoot":true,"enableVtpm":true,"enableIntegrityMonitoring":true}}`,
+		},
+		{
+			name: "explicit false",
+			config: &v1alpha1.ShieldedInstanceConfig{
+				EnableSecureBoot: lo.ToPtr(false), EnableVtpm: lo.ToPtr(false), EnableIntegrityMonitoring: lo.ToPtr(false),
+			},
+			want: `{"shieldedInstanceConfig":{"enableSecureBoot":false,"enableVtpm":false,"enableIntegrityMonitoring":false}}`,
+		},
+		{
+			name:   "unspecified fields remain omitted",
+			config: &v1alpha1.ShieldedInstanceConfig{EnableSecureBoot: lo.ToPtr(false)},
+			want:   `{"shieldedInstanceConfig":{"enableSecureBoot":false}}`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			instance := &compute.Instance{ShieldedInstanceConfig: setupShieldedInstanceConfig(tt.config)}
+			got, err := json.Marshal(instance)
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(got))
+		})
+	}
 }
 
 func TestInstanceTypeHasGPU(t *testing.T) {

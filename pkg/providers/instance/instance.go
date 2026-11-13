@@ -485,15 +485,10 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 		return existingInstance, nil
 	}
 
-	launchInstanceTypes, err := validateLaunchInstanceTypes(launchInstanceTypes, rejectedConfigurable)
+	// Earlier VMs must be adopted before current image availability can reject a new launch.
+	instanceTypes, err := resolveLaunchInstanceTypes(nodeClass, launchInstanceTypes, rejectedConfigurable)
 	if err != nil {
 		return nil, err
-	}
-	// Earlier VMs must be adopted before current image availability can reject a new launch.
-	instanceTypes = imagefamily.FilterInstanceTypes(nodeClass, launchInstanceTypes)
-	if len(instanceTypes) == 0 {
-		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf(
-			"no instance type is compatible with any image resolved for node class %s", nodeClass.Name))
 	}
 
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, requirements)
@@ -518,6 +513,19 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	joined := errors.Join(errs...)
 	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
+}
+
+func resolveLaunchInstanceTypes(nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType, rejectedConfigurable bool) ([]*cloudprovider.InstanceType, error) {
+	instanceTypes, err := validateLaunchInstanceTypes(instanceTypes, rejectedConfigurable)
+	if err != nil {
+		return nil, err
+	}
+	instanceTypes = imagefamily.FilterInstanceTypes(nodeClass, instanceTypes)
+	if len(instanceTypes) == 0 {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf(
+			"no instance type is compatible with any image resolved for node class %s", nodeClass.Name))
+	}
+	return instanceTypes, nil
 }
 
 // fallBackToOnDemand retries with on-demand when every spot attempt failed for lack of capacity and
@@ -651,30 +659,14 @@ func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeC
 			return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 		}
 
-		var details insufficientCapacityDetails
-		var insufficient, rejected bool
-		failureMessage := "failed to create instance"
-		op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
-		if err != nil {
-			details, insufficient = extractInsertInsufficientCapacityDetails(err)
-			rejected = isRejectedPodRange(err, rangeName)
-		} else {
-			err = p.waitOperationDone(ctx, zone, op.Name)
-			failureMessage = "failed to wait for operation to be done"
-			if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
-				details, insufficient = capacityErr.details, true
-			}
-		}
+		result, err := p.insertInstance(ctx, zone, rangeName, instance)
 		if err == nil {
 			return instance, zone, false, nil
 		}
-		if insufficient && isQuotaExceeded(details) && quotaExceededTTL(ctx) == 0 {
-			insufficient = false
-		}
 
-		exhausted := isIPSpaceExhausted(details)
-		if exhausted || rejected {
-			p.invalidatePodRangeCaches(instance, discoveredRanges, rejected)
+		exhausted := isIPSpaceExhausted(result.details)
+		if exhausted || result.rejectedPodRange {
+			p.invalidatePodRangeCaches(instance, discoveredRanges, result.rejectedPodRange)
 		}
 		if exhausted && i < len(rangeNames)-1 {
 			log.FromContext(ctx).Info("pod range IP space exhausted, trying next range",
@@ -684,19 +676,45 @@ func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeC
 
 		retryable := true
 		switch {
-		case insufficient && isQuotaExceeded(details):
-			err = p.markQuotaExceeded(ctx, instanceType, zone, capacityType, details)
-		case insufficient:
-			err = p.markInsufficientCapacity(ctx, instanceType.Name, zone, capacityType, details)
+		case result.insufficientCapacity && isQuotaExceeded(result.details):
+			err = p.markQuotaExceeded(ctx, instanceType, zone, capacityType, result.details)
+		case result.insufficientCapacity:
+			err = p.markInsufficientCapacity(ctx, instanceType.Name, zone, capacityType, result.details)
 			// Other instance types share the subnet, so stop once all ranges are exhausted.
 			retryable = !exhausted
 		}
-		log.FromContext(ctx).Error(err, failureMessage, "instanceType", instanceType.Name, "zone", zone)
+		log.FromContext(ctx).Error(err, result.failureMessage, "instanceType", instanceType.Name, "zone", zone)
 		retryable, err = handleResourceNotReadyError(err, retryable)
 		return nil, "", retryable, err
 	}
 
 	return nil, "", true, fmt.Errorf("no pod secondary ranges available")
+}
+
+type instanceInsertResult struct {
+	details              insufficientCapacityDetails
+	insufficientCapacity bool
+	rejectedPodRange     bool
+	failureMessage       string
+}
+
+func (p *DefaultProvider) insertInstance(ctx context.Context, zone, rangeName string, instance *compute.Instance) (instanceInsertResult, error) {
+	result := instanceInsertResult{failureMessage: "failed to create instance"}
+	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
+	if err != nil {
+		result.details, result.insufficientCapacity = extractInsertInsufficientCapacityDetails(err)
+		result.rejectedPodRange = isRejectedPodRange(err, rangeName)
+	} else {
+		err = p.waitOperationDone(ctx, zone, op.Name)
+		result.failureMessage = "failed to wait for operation to be done"
+		if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
+			result.details, result.insufficientCapacity = capacityErr.details, true
+		}
+	}
+	if result.insufficientCapacity && isQuotaExceeded(result.details) && quotaExceededTTL(ctx) == 0 {
+		result.insufficientCapacity = false
+	}
+	return result, err
 }
 
 func handleResourceNotReadyError(err error, retryable bool) (bool, error) {
@@ -1099,23 +1117,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 		}
 	}
 
-	// Configure Shielded VM options
-	if nodeClass.Spec.ShieldedInstanceConfig != nil {
-		sic := nodeClass.Spec.ShieldedInstanceConfig
-		instance.ShieldedInstanceConfig = &compute.ShieldedInstanceConfig{}
-		if sic.EnableSecureBoot != nil {
-			instance.ShieldedInstanceConfig.EnableSecureBoot = *sic.EnableSecureBoot
-			instance.ShieldedInstanceConfig.ForceSendFields = append(instance.ShieldedInstanceConfig.ForceSendFields, "EnableSecureBoot")
-		}
-		if sic.EnableVtpm != nil {
-			instance.ShieldedInstanceConfig.EnableVtpm = *sic.EnableVtpm
-			instance.ShieldedInstanceConfig.ForceSendFields = append(instance.ShieldedInstanceConfig.ForceSendFields, "EnableVtpm")
-		}
-		if sic.EnableIntegrityMonitoring != nil {
-			instance.ShieldedInstanceConfig.EnableIntegrityMonitoring = *sic.EnableIntegrityMonitoring
-			instance.ShieldedInstanceConfig.ForceSendFields = append(instance.ShieldedInstanceConfig.ForceSendFields, "EnableIntegrityMonitoring")
-		}
-	}
+	instance.ShieldedInstanceConfig = setupShieldedInstanceConfig(nodeClass.Spec.ShieldedInstanceConfig)
 
 	// Configure capacity provision
 	p.configureInstanceCapacityProvision(instance, capacityType)
@@ -1132,6 +1134,26 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	p.setupInstanceLabels(instance, nodeClaim, nodeClass, clusterConfig.Id, ssdCount)
 
 	return instance, nil
+}
+
+func setupShieldedInstanceConfig(config *v1alpha1.ShieldedInstanceConfig) *compute.ShieldedInstanceConfig {
+	if config == nil {
+		return nil
+	}
+	shielded := &compute.ShieldedInstanceConfig{}
+	if config.EnableSecureBoot != nil {
+		shielded.EnableSecureBoot = *config.EnableSecureBoot
+		shielded.ForceSendFields = append(shielded.ForceSendFields, "EnableSecureBoot")
+	}
+	if config.EnableVtpm != nil {
+		shielded.EnableVtpm = *config.EnableVtpm
+		shielded.ForceSendFields = append(shielded.ForceSendFields, "EnableVtpm")
+	}
+	if config.EnableIntegrityMonitoring != nil {
+		shielded.EnableIntegrityMonitoring = *config.EnableIntegrityMonitoring
+		shielded.ForceSendFields = append(shielded.ForceSendFields, "EnableIntegrityMonitoring")
+	}
+	return shielded
 }
 
 func (p *DefaultProvider) setupNetworkInterfaces(cluster *container.Cluster, nodeClass *v1alpha1.GCENodeClass) []*compute.NetworkInterface {
