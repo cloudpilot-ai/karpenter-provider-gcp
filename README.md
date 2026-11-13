@@ -75,7 +75,6 @@ We want your contributions and suggestions! One of the easiest ways to contribut
 * [Contributing](CONTRIBUTING.md) and [maintainers](MAINTAINERS.md)
 * [Proposed governance](GOVERNANCE.md) and [contributor ladder](CONTRIBUTOR_LADDER.md)
 * [Security reporting](SECURITY.md)
-* [CNCF policy alignment](docs/community/cncf-policy-alignment.md) — early preparation and proposed community policies
 
 ## Sponsors
 

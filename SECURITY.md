@@ -18,4 +18,4 @@ The proposed team's responsibilities are to:
 4. Agree a disclosure plan with the reporter and affected parties, publish fixes and an advisory with affected/fixed versions and mitigations, and credit the reporter with their consent.
 5. Review response ownership and access at least annually and on role changes.
 
-No response-time, fix-time, support-window, or embargo guarantee is introduced. Private reporting channels alone do not demonstrate that this response process is operational. Until response ownership and escalation are confirmed, those remain [unresolved policy decisions](docs/community/cncf-policy-alignment.md). Do not use public issue escalation for an undisclosed vulnerability.
+No response-time, fix-time, support-window, or embargo guarantee is introduced. Private reporting channels alone do not demonstrate that this response process is operational. Response ownership and escalation remain unresolved until confirmed by the maintainers. Do not use public issue escalation for an undisclosed vulnerability.

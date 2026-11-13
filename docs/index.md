@@ -68,7 +68,6 @@ Key capabilities:
 
 - [Contributing](../CONTRIBUTING.md), [maintainers](../MAINTAINERS.md), and [Code of Conduct](../CODE_OF_CONDUCT.md)
 - [Proposed governance](../GOVERNANCE.md) and [contributor ladder](../CONTRIBUTOR_LADDER.md)
-- [CNCF policy alignment](community/cncf-policy-alignment.md) — early preparation and proposed community policies
 
 - [Slack](https://cloudpilotaicommunity.slack.com/archives/C093V65481H)
 - [Discord](https://discord.gg/WxFWc87QWr)
