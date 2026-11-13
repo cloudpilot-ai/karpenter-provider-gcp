@@ -52,7 +52,7 @@ jobs:
 
       - name: Create PR if pricing changed
         if: github.event_name == 'schedule' || !inputs.dry_run
-        uses: peter-evans/create-pull-request@v8.1.1
+        uses: peter-evans/create-pull-request@v8.1.2
         with:
           token: ${{ github.token }}
           draft: true
@@ -117,7 +117,7 @@ jobs:
       # Actions PR creation must be permitted; bot-created workflow runs need maintainer approval.
       - name: Open draft update PR
         if: github.event_name == 'schedule' || !inputs.dry_run
-        uses: peter-evans/create-pull-request@v8.1.1
+        uses: peter-evans/create-pull-request@v8.1.2
         with:
           token: ${{ github.token }}
           branch: automated/security-pins

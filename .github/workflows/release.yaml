@@ -57,7 +57,7 @@ jobs:
 
       - uses: ko-build/setup-ko@v0.10
 
-      - uses: sigstore/cosign-installer@v4.1.2
+      - uses: sigstore/cosign-installer@v4.1.3
         with:
           cosign-release: v3.1.3
 

@@ -40,7 +40,7 @@ jobs:
 
       - name: Restore lint analysis cache
         id: lint-cache
-        uses: actions/cache/restore@v4.3.0
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ runner.temp }}/golangci-lint
           key: lint-v2.15.0-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-toolchain.outputs.go-version }}-${{ hashFiles('**/go.*', '**/vendor/modules.txt') }}-${{ hashFiles('.golangci*') }}-${{ github.sha }}
@@ -60,7 +60,7 @@ jobs:
 
       - name: Save lint analysis cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.lint-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4.3.0
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ runner.temp }}/golangci-lint
           key: ${{ steps.lint-cache.outputs.cache-primary-key }}
