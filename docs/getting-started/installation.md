@@ -171,8 +171,10 @@ Replace `vX.Y.Z` with a signed release tag, including its leading `v`:
 export VERSION="vX.Y.Z"
 export CHART_VERSION="${VERSION#v}"
 export REPOSITORY="cloudpilot-ai/karpenter-provider-gcp"
-export RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release-build.yaml"
+export RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release.yaml"
 ```
+
+Use the exact workflow path that built the selected release. Releases from before the workflow rename, including `v0.8.0`, require `RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release-build.yaml"` instead. Confirm the expected path from the workflow in that release tag before verification; do not broaden the trusted identity or try arbitrary workflow paths after a verification failure.
 
 ### Verify the controller image
 

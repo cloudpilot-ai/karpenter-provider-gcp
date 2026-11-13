@@ -1,6 +1,7 @@
-name: Security checks
+name: Security
 
 on:
+  pull_request: {}
   push:
     branches: [ "main" ]
   schedule:
@@ -11,13 +12,135 @@ permissions:
   contents: read
 
 jobs:
-  govulncheck:
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main'
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/dependency-review-action@v5.0.0
+        with:
+          fail-on-severity: high
+          license-check: false
+          comment-summary-in-pr: never
+
+  actions-lock:
+    name: Actions lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify action dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh extension install github/gh-actions-lock --pin v0.4.1
+          gh actions-lock --verify
+
+  codeql:
+    name: CodeQL (${{ matrix.language == 'go' && 'Go' || 'GitHub Actions' }})
+    # Keep the upstream PR/push scope and use Security's shared daily schedule.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: matrix.language == 'go'
+        name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - if: matrix.build-mode == 'autobuild'
+        name: Autobuild
+        uses: github/codeql-action/autobuild@v4.39.3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+
+  zizmor:
+    name: zizmor (GitHub Actions)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      # Annotations need no code-scanning permission, so fork PRs work.
+      - uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          online-audits: false
+          advanced-security: false
+          annotations: true
+          min-severity: high
+
+  zizmor-sarif:
+    name: zizmor SARIF (GitHub Actions)
+    # The action only emits SARIF while uploading, so keep the write scope on
+    # trusted refs instead of handing it to pull requests.
+    if: >-
+      github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan workflows
+        id: zizmor
+        uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          online-audits: false
+      - name: Retain zizmor findings
+        if: ${{ !cancelled() && steps.zizmor.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: zizmor-sarif
+          path: ${{ steps.zizmor.outputs.output-file }}
+          if-no-files-found: error
+
+  govulncheck:
+    name: govulncheck (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       GOOS: linux
       GOARCH: amd64
@@ -25,9 +148,22 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: govulncheck
+          cache-dependency-path: '**/go.*'
+          save: >-
+            ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+                github.ref == 'refs/heads/main' &&
+                (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
       - name: Report Go vulnerabilities
         id: report
         run: make vulncheck VULNCHECK_FLAGS='-format sarif' > govulncheck.sarif
@@ -35,12 +171,6 @@ jobs:
       - name: Fail on reachable Go vulnerabilities
         if: steps.report.outcome == 'success'
         run: make vulncheck
-      - name: Upload Go findings to code scanning
-        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
-        uses: github/codeql-action/upload-sarif@v4.39.3
-        with:
-          sarif_file: govulncheck.sarif
-          category: govulncheck/controller-linux-amd64
       - name: Retain Go findings
         if: ${{ !cancelled() && steps.report.outcome == 'success' }}
         uses: actions/upload-artifact@v7.0.2
@@ -50,12 +180,9 @@ jobs:
           if-no-files-found: error
 
   container-image:
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.ref == 'refs/heads/main'
+    name: Grype (linux/${{ matrix.arch }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: read
-      security-events: write
     strategy:
       fail-fast: false
       matrix:
@@ -67,12 +194,22 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            hack/tools/go.sum
+          cache: false
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: image-scan-${{ matrix.arch }}
+          cache-dependency-path: '**/go.*'
+          save: >-
+            ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+                github.ref == 'refs/heads/main' &&
+                (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
       - name: Install image builder
         run: cd hack/tools && go install github.com/google/ko
       - name: Build local controller image
@@ -91,13 +228,15 @@ jobs:
         uses: anchore/scan-action/download-grype@v7.4.2
         with:
           grype-version: v0.118.0
-          cache-db: true
+          cache-db: false
       - name: Scan OS and Go dependencies
         id: scan
         # A stable input path keeps SARIF locations consistent across runs.
         working-directory: ${{ runner.temp }}
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
         run: |
-          "${{ steps.grype.outputs.cmd }}" docker-archive:controller.tar \
+          "$GRYPE" docker-archive:controller.tar \
             --output "json=$GITHUB_WORKSPACE/reports/grype.json" \
             --output "sarif=$GITHUB_WORKSPACE/reports/grype.sarif"
       # govulncheck gates reachable Go vulnerabilities; retain all image findings above.
@@ -111,16 +250,49 @@ jobs:
             select(any(.vulnerability.fix.versions[]?; type == "string" and length > 0))]' \
             reports/grype.json > reports/blocking-vulnerabilities.json
           jq -e 'length == 0' reports/blocking-vulnerabilities.json
-      - name: Upload image findings to code scanning
-        if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
-        uses: github/codeql-action/upload-sarif@v4.39.3
-        with:
-          sarif_file: reports/grype.sarif
-          category: grype/main-controller-linux-${{ matrix.arch }}
       - name: Retain image inventory and findings
         if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: main-image-security-linux-${{ matrix.arch }}
+          name: image-security-linux-${{ matrix.arch }}
           path: reports/
           if-no-files-found: error
+
+  # Publish native reports without granting scanners code-scanning write access.
+  sarif-report:
+    name: Publish SARIF
+    needs: [govulncheck, container-image]
+    if: >-
+      !cancelled() && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download scanner reports
+        uses: actions/download-artifact@v8.0.2
+        with:
+          path: reports
+      - name: Upload govulncheck findings
+        if: ${{ !cancelled() && hashFiles('reports/govulncheck-sarif/govulncheck.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4.39.3
+        with:
+          sarif_file: reports/govulncheck-sarif/govulncheck.sarif
+          category: govulncheck/controller-linux-amd64
+      - name: Upload Grype findings (amd64)
+        if: ${{ !cancelled() && hashFiles('reports/image-security-linux-amd64/grype.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4.39.3
+        with:
+          sarif_file: reports/image-security-linux-amd64/grype.sarif
+          category: grype/main-controller-linux-amd64
+      - name: Upload Grype findings (arm64)
+        if: ${{ !cancelled() && hashFiles('reports/image-security-linux-arm64/grype.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4.39.3
+        with:
+          sarif_file: reports/image-security-linux-arm64/grype.sarif
+          category: grype/main-controller-linux-arm64

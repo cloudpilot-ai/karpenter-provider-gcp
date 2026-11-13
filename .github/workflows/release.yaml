@@ -1,4 +1,4 @@
-name: Release image build
+name: Release
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
 jobs:
   image-publish:
+    name: Publish image
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     permissions:
@@ -24,11 +25,23 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           submodules: true
+          persist-credentials: false
 
-      - uses: actions/setup-go@v7.0.0
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+
+      # Reuse the development-image main cache without publishing tag-specific entries.
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: image-publish
+          cache-dependency-path: '**/go.*'
+          save: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.3.0
@@ -97,6 +110,7 @@ jobs:
           if-no-files-found: error
 
   package-chart:
+    name: Publish chart
     if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     concurrency:
@@ -121,14 +135,17 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: azure/setup-helm@v5.0.1
         with:
           version: v4.3.0
 
       - name: Fetch existing Pages index
+        env:
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
-          PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           # Fail on any error except 404 (first-ever deployment has no index yet)
           HTTP_CODE=$(curl -sSL -o /tmp/merge-index.yaml -w "%{http_code}" "${PAGES_URL}/index.yaml")
           if [ "${HTTP_CODE}" = "404" ]; then
@@ -140,8 +157,9 @@ jobs:
           fi
 
       - name: Check signed chart version is unpublished
+        env:
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
-          PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           PREVIOUS="$RUNNER_TEMP/previous-signed-charts.txt"
           HTTP_CODE=$(curl -sSL -o "$PREVIOUS" -w '%{http_code}' "$PAGES_URL/signed-charts.txt")
           case "$HTTP_CODE" in
@@ -245,9 +263,9 @@ jobs:
       - name: Restore previously published chart versions
         env:
           CHARTS_DIR: ${{ steps.signing.outputs.charts }}
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
           set -euo pipefail
-          PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           if [ -f /tmp/merge-index.yaml ]; then
             helm repo add karpenter-gcp "${PAGES_URL}" --force-update
 

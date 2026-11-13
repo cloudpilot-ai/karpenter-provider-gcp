@@ -1,4 +1,4 @@
-name: Pre-submit check
+name: CI
 
 on:
   push:
@@ -7,33 +7,17 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  dependency-review:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/dependency-review-action@v5.0.0
-        with:
-          fail-on-severity: high
-          license-check: false
-          comment-summary-in-pr: never
-
   presubmit:
+    name: Lint and tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           submodules: true
           fetch-depth: 0
-
-      - name: Verify action dependencies
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh extension install github/gh-actions-lock --pin v0.4.1
-          gh actions-lock --verify
+          persist-credentials: false
 
       - name: Select Go toolchain
         id: go-toolchain
@@ -73,9 +57,6 @@ jobs:
 
       - name: Verify
         run: make ci
-
-      - name: Check reachable Go vulnerabilities
-        run: make vulncheck
 
       - name: Save lint analysis cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.lint-cache.outputs.cache-hit != 'true'
