@@ -72,6 +72,8 @@ type internalAdviceClient interface {
 // Methods, except Close, may be called concurrently. However, fields must not be modified concurrently with method calls.
 //
 // The Advice API.
+//
+// This client uses Advice version 2026-09-01.
 type AdviceClient struct {
 	// The internal transport-dependent client.
 	internalClient internalAdviceClient
@@ -185,6 +187,37 @@ func NewAdviceRESTClient(ctx context.Context, opts ...option.ClientOption) (*Adv
 		callOpts.Capacity = append(callOpts.Capacity, gax.WithClientMetrics(metrics))
 		callOpts.CapacityHistory = append(callOpts.CapacityHistory, gax.WithClientMetrics(metrics))
 	}
+	if gax.IsFeatureEnabled("TRACING") {
+		tracing := gax.NewClientTracing(
+			gax.WithTracingAttributes(map[string]string{
+				gax.ClientService:  "compute",
+				gax.ClientVersion:  getVersionClient(),
+				gax.ClientArtifact: "cloud.google.com/go/compute/apiv1",
+				gax.RPCSystem:      "http",
+				gax.URLDomain:      "compute.googleapis.com",
+			}),
+		)
+
+		callOpts.CalendarMode = append(callOpts.CalendarMode, gax.WithClientTracing(tracing))
+		callOpts.Capacity = append(callOpts.Capacity, gax.WithClientTracing(tracing))
+		callOpts.CapacityHistory = append(callOpts.CapacityHistory, gax.WithClientTracing(tracing))
+	}
+	if gax.IsFeatureEnabled("LOGGING") {
+		logging := gax.NewClientLogging(
+			gax.WithLoggerProvider(c.logger),
+			gax.WithLoggingAttributes(map[string]string{
+				gax.ClientService:  "compute",
+				gax.ClientVersion:  getVersionClient(),
+				gax.ClientArtifact: "cloud.google.com/go/compute/apiv1",
+				gax.RPCSystem:      "http",
+				gax.URLDomain:      "compute.googleapis.com",
+			}),
+		)
+
+		callOpts.CalendarMode = append(callOpts.CalendarMode, gax.WithClientLogging(logging))
+		callOpts.Capacity = append(callOpts.Capacity, gax.WithClientLogging(logging))
+		callOpts.CapacityHistory = append(callOpts.CapacityHistory, gax.WithClientLogging(logging))
+	}
 
 	return &AdviceClient{internalClient: c, CallOptions: callOpts}, nil
 }
@@ -209,6 +242,7 @@ func (c *adviceRESTClient) setGoogleClientInfo(keyval ...string) {
 	kv = append(kv, "gapic", getVersionClient(), "gax", gax.Version, "rest", "UNKNOWN", "pb", protoVersion)
 	c.xGoogHeaders = []string{
 		"x-goog-api-client", gax.XGoogHeader(kv...),
+		"x-goog-api-version", "2026-09-01",
 	}
 }
 
@@ -243,6 +277,12 @@ func (c *adviceRESTClient) CalendarMode(ctx context.Context, req *computepb.Cale
 	if err != nil {
 		return nil, err
 	}
+	if err = gax.ValidatePathExpressions(
+		req.GetProject(),
+		req.GetRegion(),
+	); err != nil {
+		return nil, err
+	}
 	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/regions/%v/advice/calendarMode", req.GetProject(), req.GetRegion())
 
 	// Build HTTP headers from client and context metadata.
@@ -251,9 +291,6 @@ func (c *adviceRESTClient) CalendarMode(ctx context.Context, req *computepb.Cale
 	hds = append(c.xGoogHeaders, hds...)
 	hds = append(hds, "Content-Type", "application/json")
 	headers := gax.BuildHeaders(ctx, hds...)
-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/projects/%v/regions/%v", req.GetProject(), req.GetRegion()))
-	}
 	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.Advice/CalendarMode")
 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/projects/{project}/regions/{region}/advice/calendarMode")
@@ -304,6 +341,12 @@ func (c *adviceRESTClient) Capacity(ctx context.Context, req *computepb.Capacity
 	if err != nil {
 		return nil, err
 	}
+	if err = gax.ValidatePathExpressions(
+		req.GetProject(),
+		req.GetRegion(),
+	); err != nil {
+		return nil, err
+	}
 	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/regions/%v/advice/capacity", req.GetProject(), req.GetRegion())
 
 	// Build HTTP headers from client and context metadata.
@@ -312,9 +355,6 @@ func (c *adviceRESTClient) Capacity(ctx context.Context, req *computepb.Capacity
 	hds = append(c.xGoogHeaders, hds...)
 	hds = append(hds, "Content-Type", "application/json")
 	headers := gax.BuildHeaders(ctx, hds...)
-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/projects/%v/regions/%v", req.GetProject(), req.GetRegion()))
-	}
 	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.Advice/Capacity")
 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/projects/{project}/regions/{region}/advice/capacity")
@@ -363,6 +403,12 @@ func (c *adviceRESTClient) CapacityHistory(ctx context.Context, req *computepb.C
 	if err != nil {
 		return nil, err
 	}
+	if err = gax.ValidatePathExpressions(
+		req.GetProject(),
+		req.GetRegion(),
+	); err != nil {
+		return nil, err
+	}
 	baseUrl.Path += fmt.Sprintf("/compute/v1/projects/%v/regions/%v/advice/capacityHistory", req.GetProject(), req.GetRegion())
 
 	// Build HTTP headers from client and context metadata.
@@ -371,9 +417,6 @@ func (c *adviceRESTClient) CapacityHistory(ctx context.Context, req *computepb.C
 	hds = append(c.xGoogHeaders, hds...)
 	hds = append(hds, "Content-Type", "application/json")
 	headers := gax.BuildHeaders(ctx, hds...)
-	if gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
-		ctx = callctx.WithTelemetryContext(ctx, "resource_name", fmt.Sprintf("//compute.googleapis.com/projects/%v/regions/%v", req.GetProject(), req.GetRegion()))
-	}
 	if gax.IsFeatureEnabled("METRICS") || gax.IsFeatureEnabled("TRACING") || gax.IsFeatureEnabled("LOGGING") {
 		ctx = callctx.WithTelemetryContext(ctx, "rpc_method", "google.cloud.compute.v1.Advice/CapacityHistory")
 		ctx = callctx.WithTelemetryContext(ctx, "url_template", "/compute/v1/projects/{project}/regions/{region}/advice/capacityHistory")
