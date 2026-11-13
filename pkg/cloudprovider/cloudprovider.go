@@ -92,56 +92,24 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
 	}
 
-	nodeClassReady := nodeClass.StatusConditions().Get(status.ConditionReady)
-	var readinessErr error
-	if nodeClassReady.IsFalse() {
-		readinessErr = cloudprovider.NewNodeClassNotReadyError(stderrors.New(nodeClassReady.Message))
-	} else if nodeClassReady.IsUnknown() {
-		readinessErr = cloudprovider.NewCreateError(fmt.Errorf("resolving NodeClass readiness, NodeClass is in Ready=Unknown, %s", nodeClassReady.Message), "NodeClassReadinessUnknown", "NodeClass is in Ready=Unknown")
-	}
+	readinessErr := nodeClassReadinessError(nodeClass)
 	if readinessErr != nil && nodeClass.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady) {
 		return nil, readinessErr
 	}
 
-	var inst *instance.Instance
-	var instanceTypes []*cloudprovider.InstanceType
-	if readinessErr != nil {
-		// Adopt cannot launch or depend on current image/offerings availability.
-		inst, err = c.instanceProvider.Adopt(ctx, nodeClaim)
-		if err != nil {
-			return nil, fmt.Errorf("adopting instance, %w", err)
-		}
-		if inst == nil {
-			return nil, readinessErr
-		}
-		instanceTypes, err = c.instanceTypeProvider.List(ctx, nodeClass)
-		if err != nil {
-			return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving adopted instance type, %w", err), "InstanceTypeResolutionFailed", "Error resolving adopted instance type")
-		}
-	} else {
-		instanceTypes, err = c.resolveInstanceTypes(ctx, nodeClaim, nodeClass)
-		if err != nil {
-			return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving instance types, %w", err), "InstanceTypeResolutionFailed", "Error resolving instance types")
-		}
-		if len(instanceTypes) == 0 {
-			return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all requested instance types were unavailable during launch"))
-		}
-		inst, err = c.instanceProvider.Create(ctx, nodeClass, nodeClaim, instanceTypes)
-		if err != nil {
-			return nil, fmt.Errorf("creating instance, %w", err)
-		}
+	inst, instanceTypes, err := c.createOrAdoptInstance(ctx, nodeClaim, nodeClass, readinessErr)
+	if err != nil {
+		return nil, err
 	}
 
 	instanceType, err := c.resolveCreatedInstanceType(ctx, nodeClass, instanceTypes, inst)
 	if err != nil {
 		return nil, err
 	}
-	if readinessErr != nil && instanceType != nil && karpoptions.FromContext(ctx).FeatureGates.NodeOverlay {
-		if nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]; ok {
-			instanceType, err = c.instanceTypeStore.Apply(nodePoolName, instanceType)
-			if err != nil {
-				return nil, fmt.Errorf("applying nodeoverlays, %w", err)
-			}
+	if readinessErr != nil {
+		instanceType, err = c.applyAdoptedNodeOverlay(ctx, nodeClaim, instanceType)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -151,6 +119,63 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
 	})
 	return nc, nil
+}
+
+func (c *CloudProvider) applyAdoptedNodeOverlay(ctx context.Context, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
+	if instanceType == nil || !karpoptions.FromContext(ctx).FeatureGates.NodeOverlay {
+		return instanceType, nil
+	}
+	nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]
+	if !ok {
+		return instanceType, nil
+	}
+	instanceType, err := c.instanceTypeStore.Apply(nodePoolName, instanceType)
+	if err != nil {
+		return nil, fmt.Errorf("applying nodeoverlays, %w", err)
+	}
+	return instanceType, nil
+}
+
+func nodeClassReadinessError(nodeClass *v1alpha1.GCENodeClass) error {
+	nodeClassReady := nodeClass.StatusConditions().Get(status.ConditionReady)
+	if nodeClassReady.IsFalse() {
+		return cloudprovider.NewNodeClassNotReadyError(stderrors.New(nodeClassReady.Message))
+	}
+	if nodeClassReady.IsUnknown() {
+		return cloudprovider.NewCreateError(fmt.Errorf("resolving NodeClass readiness, NodeClass is in Ready=Unknown, %s", nodeClassReady.Message), "NodeClassReadinessUnknown", "NodeClass is in Ready=Unknown")
+	}
+	return nil
+}
+
+func (c *CloudProvider) createOrAdoptInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, readinessErr error) (*instance.Instance, []*cloudprovider.InstanceType, error) {
+	if readinessErr != nil {
+		// Adopt cannot launch or depend on current image/offerings availability.
+		inst, err := c.instanceProvider.Adopt(ctx, nodeClaim)
+		if err != nil {
+			return nil, nil, fmt.Errorf("adopting instance, %w", err)
+		}
+		if inst == nil {
+			return nil, nil, readinessErr
+		}
+		instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+		if err != nil {
+			return nil, nil, cloudprovider.NewCreateError(fmt.Errorf("resolving adopted instance type, %w", err), "InstanceTypeResolutionFailed", "Error resolving adopted instance type")
+		}
+		return inst, instanceTypes, nil
+	}
+
+	instanceTypes, err := c.resolveInstanceTypes(ctx, nodeClaim, nodeClass)
+	if err != nil {
+		return nil, nil, cloudprovider.NewCreateError(fmt.Errorf("resolving instance types, %w", err), "InstanceTypeResolutionFailed", "Error resolving instance types")
+	}
+	if len(instanceTypes) == 0 {
+		return nil, nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all requested instance types were unavailable during launch"))
+	}
+	inst, err := c.instanceProvider.Create(ctx, nodeClass, nodeClaim, instanceTypes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating instance, %w", err)
+	}
+	return inst, instanceTypes, nil
 }
 
 func (c *CloudProvider) resolveCreatedInstanceType(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType, inst *instance.Instance) (*cloudprovider.InstanceType, error) {
