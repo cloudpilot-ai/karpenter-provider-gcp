@@ -1,6 +1,6 @@
 # Project governance
 
-> **Proposed policy for maintainer review.** This document is not a description of previously adopted governance. Maintainers must explicitly approve adoption in a public pull request before these new rules take effect. Approval must also resolve the response-ownership and reporting gaps in [security](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+> **Proposed policy for maintainer review.** This document is not a description of previously adopted governance. Maintainers must explicitly approve adoption in a public pull request before these new rules take effect. Approval must also resolve the response-ownership and reporting gaps in [security](SECURITY.md) and the conduct-reporting arrangements described below.
 
 ## Purpose and values
 
@@ -47,7 +47,7 @@ Offboarding includes updating role records and having administrators revoke unne
 
 The proposed security response team consists of the maintainers collectively; duties, outstanding access confirmation, and disclosure handling are in [SECURITY.md](SECURITY.md). Any future delegation follows the appointment and removal process above, with responsibility and access reviewed at least annually.
 
-The project already adopts the CNCF Code of Conduct. Confidential project reporting contacts and an independent alternative remain unresolved in this draft; see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Do not treat a GitHub mention as a confidential reporting mechanism or assume CNCF committee jurisdiction.
+The project already adopts the CNCF Code of Conduct. Confidential project reporting contacts and an independent alternative remain unresolved in this draft. Do not treat a GitHub mention as a confidential reporting mechanism or assume CNCF committee jurisdiction.
 
 ## Communication and project structure
 

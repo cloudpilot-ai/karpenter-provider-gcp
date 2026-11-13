@@ -86,7 +86,7 @@ This project includes code derived from karpenter-provider-aws, used under the A
 
 ## Code Of Conduct
 
-Karpenter GCP Cloud Provider adopts the [CNCF Code of Conduct](CODE_OF_CONDUCT.md). The linked policy also identifies the unresolved confidential project reporting route in this draft.
+Karpenter GCP Cloud Provider adopts the [CNCF Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
