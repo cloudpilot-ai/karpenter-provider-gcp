@@ -110,6 +110,7 @@ type entry struct {
 var table = map[string]entry{
 	"z3":  {perPartGiB: 3000},
 	"z4d": {perPartGiB: 3500},
+	"z4m": {perPartGiB: 14000},
 
 	// Bare-metal variants use 3000 GiB per partition (not 375 GiB)
 	"c4-highmem-288-lssd-metal":     {totalGiB: 18000}, // 6 × 3000 GiB
