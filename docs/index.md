@@ -67,7 +67,7 @@ Key capabilities:
 ## Community
 
 - [Contributing](../CONTRIBUTING.md), [maintainers](../MAINTAINERS.md), and [Code of Conduct](../CODE_OF_CONDUCT.md)
-- [Proposed governance](../GOVERNANCE.md) and [contributor ladder](../CONTRIBUTOR_LADDER.md)
+- [Proposed governance](../GOVERNANCE.md)
 
 - [Slack](https://cloudpilotaicommunity.slack.com/archives/C093V65481H)
 - [Discord](https://discord.gg/WxFWc87QWr)

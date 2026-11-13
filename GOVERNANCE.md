@@ -12,7 +12,9 @@ Technical and governance discussions take place in public issues and pull reques
 
 ## Roles and ownership
 
-The [contributor ladder](CONTRIBUTOR_LADDER.md) describes contributor, reviewer, maintainer, and emeritus roles. The [maintainer roster](MAINTAINERS.md) lists project-wide maintainers; [OWNERS](OWNERS) records reviewers and approvers. Maintainers collectively steward technical direction, reviews, releases, documentation, community health, and project resources.
+Anyone can contribute code, documentation, tests, reviews, or community support. Reviewers review changes in their areas of expertise. Maintainers (approvers) approve changes and collectively steward technical direction, reviews, releases, documentation, community health, and project resources. Emeritus maintainers are recognized for past contributions but have no voting rights or access entitlement.
+
+The [maintainer roster](MAINTAINERS.md) lists project-wide maintainers; [OWNERS](OWNERS) records reviewers and approvers. Appointment and departure procedures are described [below](#joining-and-leaving-roles).
 
 A recorded role is not proof of administrative access. Administrators grant only the access needed for an accepted role and review permissions on role changes. A delegated team requires a recorded purpose, named willing members, scope, appointment decision, and removal process. Delegates use the same nomination and removal votes as maintainers, but do not receive maintainer votes merely by joining a team. Appointments, onboarding, offboarding, and permissions are recorded publicly except for sensitive details.
 
