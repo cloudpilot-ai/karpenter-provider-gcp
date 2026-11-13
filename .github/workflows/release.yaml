@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: write
       id-token: write
       attestations: write
     steps:
@@ -43,18 +44,7 @@ jobs:
           cache-dependency-path: '**/go.*'
           save: false
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          aws-access-key-id: ${{ secrets.AWS_AK }}
-          aws-secret-access-key: ${{ secrets.AWS_SK }}
-          aws-region: us-east-1
-
-      - name: Log in to Amazon ECR Public
-        uses: aws-actions/amazon-ecr-login@v2.1.7
-        with:
-          registry-type: public
-
+      # setup-ko authenticates to GHCR using GITHUB_TOKEN.
       - uses: ko-build/setup-ko@v0.10
 
       - uses: sigstore/cosign-installer@v4.1.3
@@ -66,12 +56,13 @@ jobs:
         env:
           IMAGE_TAG: ${{ env.tag }}
         run: |
-          export KO_DOCKER_REPO=public.ecr.aws/cloudpilotai/gcp/karpenter
+          export KO_DOCKER_REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
           IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
             --tags "$IMAGE_TAG" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms")
           # ko includes the release tag before the digest; retain the immutable reference.
           IMAGE=${IMAGE/":$IMAGE_TAG@"/@}
-          [[ "$IMAGE" =~ ^public\.ecr\.aws/cloudpilotai/gcp/karpenter@sha256:[a-f0-9]{64}$ ]] || {
+          DIGEST=${IMAGE#"$KO_DOCKER_REPO@"}
+          [[ "$IMAGE" == "$KO_DOCKER_REPO@$DIGEST" && "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] || {
             echo 'Expected exactly one digest-qualified controller image from ko build' >&2
             exit 1
           }
@@ -83,7 +74,7 @@ jobs:
         env:
           IMAGE: ${{ steps.image.outputs.reference }}
         run: |
-          # Public ECR: retain digest-derived .sig tags rather than OCI 1.1 referrers.
+          # Retain the existing digest-derived .sig tags and verification format.
           cosign sign --yes --new-bundle-format=false --use-signing-config=false \
             --registry-referrers-mode=legacy "$IMAGE"
 
@@ -98,7 +89,7 @@ jobs:
       - name: Attest image build provenance
         uses: actions/attest-build-provenance@v4.2.2
         with:
-          subject-name: public.ecr.aws/cloudpilotai/gcp/karpenter
+          subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: false
 
@@ -119,12 +110,11 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      pages: write
+      packages: write
       id-token: write
       attestations: write
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Set tag
         run: |
@@ -142,38 +132,10 @@ jobs:
         with:
           version: v4.3.0
 
-      - name: Fetch existing Pages index
+      - name: Log in to GHCR
         env:
-          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-        run: |
-          # Fail on any error except 404 (first-ever deployment has no index yet)
-          HTTP_CODE=$(curl -sSL -o /tmp/merge-index.yaml -w "%{http_code}" "${PAGES_URL}/index.yaml")
-          if [ "${HTTP_CODE}" = "404" ]; then
-            rm -f /tmp/merge-index.yaml
-            echo "No existing index (first deployment)."
-          elif [ "${HTTP_CODE}" != "200" ]; then
-            echo "ERROR: Failed to fetch Pages index — HTTP ${HTTP_CODE}. Aborting to avoid losing old chart versions."
-            exit 1
-          fi
-
-      - name: Check signed chart version is unpublished
-        env:
-          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-        run: |
-          PREVIOUS="$RUNNER_TEMP/previous-signed-charts.txt"
-          HTTP_CODE=$(curl -sSL -o "$PREVIOUS" -w '%{http_code}' "$PAGES_URL/signed-charts.txt")
-          case "$HTTP_CODE" in
-            200) ;;
-            404) : > "$PREVIOUS" ;;
-            *) echo "Failed to fetch signed chart history: HTTP $HTTP_CODE" >&2; exit 1 ;;
-          esac
-          while read -r ARCHIVE _ || [[ -n "$ARCHIVE" ]]; do
-            case "$ARCHIVE" in
-              "karpenter-$tag_semver.tgz"|"karpenter-crd-$tag_semver.tgz")
-                echo "Refusing to overwrite published signed chart: $ARCHIVE" >&2
-                exit 1 ;;
-            esac
-          done < "$PREVIOUS"
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
       - name: Build chart dependencies
         run: |
@@ -235,10 +197,7 @@ jobs:
           FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}
         run: |
           mkdir -p "$CHARTS_DIR/keys"
-          cp charts/artifacthub-repo.yml "$CHARTS_DIR/"
           gpg --batch --armor --export "$FINGERPRINT" > "$CHARTS_DIR/keys/$FINGERPRINT.asc"
-          printf '%s %s\n' "karpenter-$tag_semver.tgz" "$FINGERPRINT" > "$CHARTS_DIR/signed-charts.txt"
-          printf '%s %s\n' "karpenter-crd-$tag_semver.tgz" "$FINGERPRINT" >> "$CHARTS_DIR/signed-charts.txt"
 
       - name: Attest chart build provenance
         uses: actions/attest-build-provenance@v4.2.2
@@ -247,89 +206,19 @@ jobs:
             ${{ steps.signing.outputs.charts }}/karpenter-${{ env.tag_semver }}.tgz
             ${{ steps.signing.outputs.charts }}/karpenter-crd-${{ env.tag_semver }}.tgz
 
-      - name: Update Helm repo index
-        env:
-          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
-        run: |
-          # Old .tgz files are intentionally absent here: --merge only preserves 'created'
-          # timestamps for versions NOT found on disk. Running index before restoring old
-          # archives ensures historical timestamps are copied from the Pages index as-is.
-          if [ -f /tmp/merge-index.yaml ]; then
-            helm repo index "$CHARTS_DIR" --merge /tmp/merge-index.yaml
-          else
-            helm repo index "$CHARTS_DIR"
-          fi
-
-      - name: Restore previously published chart versions
-        env:
-          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
-          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-        run: |
-          set -euo pipefail
-          if [ -f /tmp/merge-index.yaml ]; then
-            helm repo add karpenter-gcp "${PAGES_URL}" --force-update
-
-            for CHART in karpenter karpenter-crd; do
-              VERSIONS=$(helm search repo "karpenter-gcp/${CHART}" --versions --devel -o json | jq -r '.[].version')
-              [ -z "${VERSIONS}" ] && continue
-
-              echo "${VERSIONS}" | while read VERSION; do
-                if [ ! -f "$CHARTS_DIR/${CHART}-${VERSION}.tgz" ]; then
-                  echo "Pulling ${CHART} ${VERSION}..."
-                  helm pull "karpenter-gcp/${CHART}" --version "${VERSION}" --devel --destination "$CHARTS_DIR" || \
-                    echo "WARNING: could not pull ${CHART} ${VERSION}, skipping"
-                fi
-              done
-
-              # Fail rather than deploy an incomplete repo
-              ACTUAL=0
-              for V in ${VERSIONS}; do
-                [ -f "$CHARTS_DIR/${CHART}-${V}.tgz" ] && ACTUAL=$((ACTUAL + 1))
-              done
-              EXPECTED=$(echo "${VERSIONS}" | grep -c .)
-              if [ "${ACTUAL}" -lt "${EXPECTED}" ]; then
-                echo "ERROR: Expected ${EXPECTED} ${CHART} archives but only have ${ACTUAL}. Aborting."
-                exit 1
-              fi
-            done
-          fi
-
-          PREVIOUS="$RUNNER_TEMP/previous-signed-charts.txt"
-          while read -r ARCHIVE FINGERPRINT || [[ -n "$ARCHIVE" ]]; do
-            [[ "$ARCHIVE" =~ ^karpenter(-crd)?-[0-9][A-Za-z0-9.+-]*\.tgz$ ]]
-            [[ "$FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]
-            # A known-signed version must never silently become unsigned.
-            test -f "$CHARTS_DIR/$ARCHIVE"
-            if [ ! -f "$CHARTS_DIR/$ARCHIVE.prov" ]; then
-              curl --fail -sSL "$PAGES_URL/$ARCHIVE.prov" -o "$CHARTS_DIR/$ARCHIVE.prov"
-            fi
-            if [ ! -f "$CHARTS_DIR/keys/$FINGERPRINT.asc" ]; then
-              curl --fail -sSL "$PAGES_URL/keys/$FINGERPRINT.asc" -o "$CHARTS_DIR/keys/$FINGERPRINT.asc"
-            fi
-          done < "$PREVIOUS"
-          for ARCHIVE in "$CHARTS_DIR"/*.tgz; do
-            [ -f "$ARCHIVE.prov" ] && continue
-            HTTP_CODE=$(curl -sSL -o "$ARCHIVE.prov" -w '%{http_code}' "$PAGES_URL/$(basename "$ARCHIVE").prov")
-            case "$HTTP_CODE" in
-              200) ;;
-              404) rm "$ARCHIVE.prov" ;; # Old unsigned chart, absent from the signed history.
-              *) echo "Failed to restore $ARCHIVE.prov: HTTP $HTTP_CODE" >&2; exit 1 ;;
-            esac
-          done
-          sort -u "$PREVIOUS" "$CHARTS_DIR/signed-charts.txt" > "$RUNNER_TEMP/signed-charts.txt"
-          mv "$RUNNER_TEMP/signed-charts.txt" "$CHARTS_DIR/signed-charts.txt"
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v6.0.0
-
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5.0.0
+        uses: actions/upload-artifact@v7.0.2
         with:
+          name: release-charts
           path: ${{ steps.signing.outputs.charts }}
+          if-no-files-found: error
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5.0.1
+      - name: Publish charts to GHCR
+        env:
+          CHARTS_DIR: ${{ steps.signing.outputs.charts }}
+        run: |
+          helm push "$CHARTS_DIR/karpenter-$tag_semver.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY,,}/charts"
+          helm push "$CHARTS_DIR/karpenter-crd-$tag_semver.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY,,}/charts"
 
       - name: Remove exported chart signing keyring
         if: always() && steps.signing.outputs.keyring != ''

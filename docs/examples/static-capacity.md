@@ -9,7 +9,7 @@ This feature is disabled by default and requires the `staticCapacity` feature ga
 ## Enabling the feature gate
 
 ```sh
-helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
+helm upgrade karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter --install \
   --namespace karpenter-system \
   --set "controller.featureGates.staticCapacity=true" \
   ...

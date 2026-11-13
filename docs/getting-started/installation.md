@@ -7,7 +7,7 @@ This guide walks you through deploying Karpenter GCP on a GKE cluster using Helm
 - A running GKE cluster (Standard mode, Kubernetes 1.28+)
 - `gcloud` CLI configured with project access
 - `kubectl` pointing at your cluster
-- `helm` v3.x
+- Helm 3.8+ or Helm 4 (OCI chart support)
 
 Enable the required APIs:
 
@@ -86,14 +86,15 @@ export REGION=<your-region-or-zone>   # e.g. us-central1 or us-central1-f
 To verify signatures and build provenance first, follow [Verify release artifacts](#verify-release-artifacts-optional) instead of the quick installation commands below.
 
 ```sh
-helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
-helm repo update
+# Select a release published to GHCR (Helm 3.8+ or Helm 4).
+export CHART_VERSION=X.Y.Z
+export CHARTS_REPOSITORY=oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts
 
 # Install CRDs first (separate chart ensures CRDs are upgraded on helm upgrade)
-helm upgrade --install karpenter-crd karpenter-provider-gcp/karpenter-crd
+helm upgrade --install karpenter-crd "${CHARTS_REPOSITORY}/karpenter-crd" --version "$CHART_VERSION"
 
 # Install the controller
-helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
+helm upgrade karpenter "${CHARTS_REPOSITORY}/karpenter" --install --version "$CHART_VERSION" \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \
@@ -102,6 +103,8 @@ helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
   --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=$GSA_NAME@${PROJECT_ID}.iam.gserviceaccount.com" \
   --wait
 ```
+
+Public GHCR packages support anonymous pulls; no registry login or `helm repo add` is needed. Chart versions omit the leading `v` used in controller image tags. Use the same explicit chart version for both releases; select `X.Y.Z-rc.N` explicitly to test a release candidate. For older versions, see [Historical releases](#historical-releases).
 
 ## Step 3 — Bind Workload Identity
 
@@ -149,7 +152,7 @@ kubectl create secret generic karpenter-gcp-credentials \
 Install without `credentials.enabled=false` (the default enables key-based auth):
 
 ```sh
-helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
+helm upgrade karpenter "${CHARTS_REPOSITORY}/karpenter" --install --version "$CHART_VERSION" \
   --namespace karpenter-system --create-namespace \
   --set "controller.settings.projectID=${PROJECT_ID}" \
   --set "controller.settings.clusterLocation=${REGION}" \
@@ -174,14 +177,14 @@ export REPOSITORY="cloudpilot-ai/karpenter-provider-gcp"
 export RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release.yaml"
 ```
 
-Use the exact workflow path that built the selected release. Releases from before the workflow rename, including `v0.8.0`, require `RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release-build.yaml"` instead. Confirm the expected path from the workflow in that release tag before verification; do not broaden the trusted identity or try arbitrary workflow paths after a verification failure.
+Use the exact workflow path that built the selected release. Releases from before the workflow rename, including `v0.8.0`, require `RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release-build.yaml"` instead. Confirm the expected path from the workflow in that release tag before verification; do not broaden the trusted identity or try arbitrary workflow paths after a verification failure. For releases predating the GHCR migration (including `v0.8.0`), use the ECR/Pages locations in [Historical releases](#historical-releases); their presence in GHCR is not assumed.
 
 ### Verify the controller image
 
 Resolve the tag once and verify that immutable image digest against the release workflow and tag:
 
 ```sh
-export IMAGE_REPOSITORY="public.ecr.aws/cloudpilotai/gcp/karpenter"
+export IMAGE_REPOSITORY="ghcr.io/cloudpilot-ai/karpenter-provider-gcp"
 IMAGE_DIGEST=$(crane digest "${IMAGE_REPOSITORY}:${VERSION}")
 IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
 cosign verify "${IMAGE}" \
@@ -195,6 +198,8 @@ cosign verify "${IMAGE}" \
 The project's signing-key fingerprint is `7D575660AC2C6650E263439577A23E34D5FE007A`. Trust this reviewed fingerprint, not a fingerprint supplied by an unverified chart repository. Import the downloaded public material into a temporary GnuPG home, then export **only** that trusted key for Helm:
 
 ```sh
+export CHARTS_REPOSITORY="oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts"
+# The frozen Pages site remains the trusted public-key location.
 export CHARTS_URL="https://cloudpilot-ai.github.io/karpenter-provider-gcp"
 export FINGERPRINT="7D575660AC2C6650E263439577A23E34D5FE007A"
 curl --fail --location "${CHARTS_URL}/keys/${FINGERPRINT}.asc" --output karpenter-signing-key.asc
@@ -203,10 +208,8 @@ gpg --homedir "${KEY_HOME}" --batch --import karpenter-signing-key.asc
 gpg --homedir "${KEY_HOME}" --batch --export "${FINGERPRINT}" > karpenter-signing-keyring.gpg
 rm -rf "${KEY_HOME}"
 
-helm repo add karpenter-provider-gcp "${CHARTS_URL}"
-helm repo update karpenter-provider-gcp
-helm pull karpenter-provider-gcp/karpenter-crd --version "${CHART_VERSION}" --verify --keyring karpenter-signing-keyring.gpg
-helm pull karpenter-provider-gcp/karpenter --version "${CHART_VERSION}" --verify --keyring karpenter-signing-keyring.gpg
+helm pull "${CHARTS_REPOSITORY}/karpenter-crd" --version "${CHART_VERSION}" --verify --keyring karpenter-signing-keyring.gpg
+helm pull "${CHARTS_REPOSITORY}/karpenter" --version "${CHART_VERSION}" --verify --keyring karpenter-signing-keyring.gpg
 ```
 
 Stop if either verification fails. For a release signed by another key, obtain its trusted fingerprint from the maintainers before changing the keyring; do not automatically trust keys listed in `signed-charts.txt`.
@@ -247,6 +250,25 @@ helm upgrade --install karpenter "./karpenter-${CHART_VERSION}.tgz" \
 ```
 
 Keep any additional values from Step 2, including the dedicated node service account setting when configured. The image reference includes both the release tag and digest (`repository:tag@sha256:...`); the digest determines which image is pulled. Continue with [Step 3 — Bind Workload Identity](#step-3--bind-workload-identity).
+
+## Development builds
+
+Main builds use the same image repository as releases: `ghcr.io/cloudpilot-ai/karpenter-provider-gcp:sha-<full-commit-sha>`, with a mutable `main` alias. They are not supported production releases. Set `controller.image.tag` explicitly; prefer `sha-<full-sha>@sha256:...` to a mutable tag. Released versions retain their `vX.Y.Z` tags; development builds do not publish a `latest` alias.
+
+Development builds publish SBOMs but do not publish the release signatures or build attestations described above.
+
+## Historical releases
+
+The Pages chart repository is frozen for historical releases, including `v0.8.0`; new releases are OCI-only. Historical charts, signatures, public keys and ECR images remain available, but their presence in GHCR is not assumed:
+
+```sh
+helm repo add karpenter-history https://cloudpilot-ai.github.io/karpenter-provider-gcp
+helm repo update karpenter-history
+helm pull karpenter-history/karpenter-crd --version 0.8.0
+helm pull karpenter-history/karpenter --version 0.8.0
+```
+
+Historical controller images use `public.ecr.aws/cloudpilotai/gcp/karpenter:vX.Y.Z`. For signature/provenance verification, retain the exact workflow identity from the selected release tag; copying an artifact to another registry does not change its historical signing identity. A copied chart also retains its embedded ECR image default; override the image repository instead of modifying the signed archive.
 
 ## Upgrading
 
