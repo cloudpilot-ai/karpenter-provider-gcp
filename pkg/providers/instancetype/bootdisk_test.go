@@ -40,6 +40,7 @@ func TestResolveBootDiskSwapCreatesDefaultBootDisk(t *testing.T) {
 		"pd-standard where supported":                    {instanceType: "n2-standard-4", wantType: "pd-standard"},
 		"pd-balanced when pd-standard is not":            {instanceType: "c3-standard-4", wantType: "pd-balanced"},
 		"hyperdisk-balanced for hyperdisk-only families": {instanceType: "n4-standard-4", wantType: "hyperdisk-balanced"},
+		"hyperdisk-balanced for z4m":                     {instanceType: "z4m-highmem-16", wantType: "hyperdisk-balanced"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := ResolveBootDiskSwap(swapEnabledNodeClass(), tc.instanceType, 16384)

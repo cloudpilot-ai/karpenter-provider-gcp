@@ -86,6 +86,18 @@ func mustLoadCompatibility() map[string][]string {
 		}
 	}
 
+	// PDCSI does not yet include Z4M. Prefer its entry when available.
+	// https://cloud.google.com/compute/docs/storage-optimized-machines#supported_disk_types_for_z4m
+	if _, ok := raw["z4m"]; !ok {
+		raw["z4m"] = map[string]bool{
+			"hyperdisk-balanced":                   true,
+			"hyperdisk-balanced-high-availability": true,
+			"hyperdisk-extreme":                    true,
+			"hyperdisk-throughput":                 true,
+			"hyperdisk-ml":                         true,
+		}
+	}
+
 	out := make(map[string][]string, len(raw))
 	for family, diskTypes := range raw {
 		labels := make([]string, 0, len(diskTypes))
@@ -109,14 +121,21 @@ func Family(instanceType string) string {
 	return family
 }
 
-// LabelsForInstanceType returns disk-type.gke.io labels for the instance type's family.
+// LabelsForInstanceType returns disk-type.gke.io labels with instance-size restrictions applied.
 func LabelsForInstanceType(instanceType string) (map[string]string, bool) {
-	return LabelsForFamily(Family(instanceType))
+	labels, ok := LabelsForFamily(Family(instanceType))
+	// Family-level PDCSI data cannot express Z4M minimum sizes for Hyperdisk Extreme.
+	// https://cloud.google.com/compute/docs/storage-optimized-machines#supported_disk_types_for_z4m
+	switch instanceType {
+	case "z4m-highmem-16", "z4m-highmem-32":
+		delete(labels, labelPrefix+"hyperdisk-extreme")
+	}
+	return labels, ok
 }
 
-// SupportsDiskType reports whether the machine family of instanceType can use
-// the disk type, using the same compatibility data the provider labels nodes
-// with. It is false for a machine family with no compatibility data.
+// SupportsDiskType reports whether instanceType can use the disk type,
+// using the same compatibility data and size restrictions as the node labels.
+// It is false for a machine family with no compatibility data.
 func SupportsDiskType(instanceType, diskType string) bool {
 	labels, ok := LabelsForInstanceType(instanceType)
 	if !ok {
