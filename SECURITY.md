@@ -1,8 +1,10 @@
 # Reporting Security Issues
 
-If you discover a potential security issue in this project, use [GitHub Private Vulnerability Reporting](https://github.com/cloudpilot-ai/karpenter-provider-gcp/security/advisories/new) (Security → Advisories → Report a vulnerability). Reports are private, not public issues.
+If you discover a potential security issue in this project, the preferred reporting channel is [GitHub Private Vulnerability Reporting](https://github.com/cloudpilot-ai/karpenter-provider-gcp/security/advisories/new) (Security → Advisories → Report a vulnerability). Reports are private, not public issues.
 
-If you cannot use GitHub reporting, email [CloudPilot AI Security](mailto:security@cloudpilot.ai). Please do not report undisclosed vulnerabilities in public issues, pull requests, or discussions, or include credentials, kubeconfigs, service-account keys, or unrelated personal data.
+If you cannot use GitHub reporting, email [security@cloudpilot.ai](mailto:security@cloudpilot.ai) or contact a [maintainer](MAINTAINERS.md) privately using an email address published on their linked GitHub profile, if available.
+
+Please do not report undisclosed vulnerabilities in public issues, pull requests, discussions, or GitHub mentions, or include credentials, kubeconfigs, service-account keys, or unrelated personal data.
 
 Include affected versions, impact, and reproduction steps or a minimal proof of concept, with sensitive infrastructure identifiers redacted.
 
