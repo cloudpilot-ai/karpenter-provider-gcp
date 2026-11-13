@@ -147,6 +147,8 @@ e2e-clean-env: require-e2e-vars ## Remove leftover e2e Kubernetes resources (pre
 	E2E_PROJECT_ID=$(E2E_PROJECT_ID) E2E_LOCATION=$(E2E_LOCATION) E2E_PREFIX=$(E2E_PREFIX) ./hack/e2e-clean-env.sh
 
 RELEASE_VERSION ?=
+RELEASE_CHART_SOURCE ?= oci
+RELEASE_OCI_REPOSITORY ?= oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts
 e2e-deploy: require-e2e-vars ## Clean e2e resources, then deploy karpenter; set RELEASE_VERSION=X.Y.Z to install the published chart instead
 	$(E2E_GAC_ENV) \
 	E2E_PROJECT_ID=$(E2E_PROJECT_ID) \
@@ -155,6 +157,8 @@ e2e-deploy: require-e2e-vars ## Clean e2e resources, then deploy karpenter; set 
 	E2E_LOCATION=$(E2E_LOCATION) \
 	E2E_NODE_SERVICE_ACCOUNT=$(E2E_NODE_SERVICE_ACCOUNT) \
 	RELEASE_VERSION=$(RELEASE_VERSION) \
+	RELEASE_CHART_SOURCE=$(RELEASE_CHART_SOURCE) \
+	RELEASE_OCI_REPOSITORY=$(RELEASE_OCI_REPOSITORY) \
 	./hack/e2e-deploy.sh
 
 require-e2e-vars: ## Fail fast if required e2e variables are not set
