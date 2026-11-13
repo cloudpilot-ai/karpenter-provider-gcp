@@ -15,6 +15,6 @@ The following people are recorded as project-wide approvers and reviewers in [OW
 
 ## Keeping the roster current
 
-**Proposed policy, pending maintainer approval:** maintainers must update their affiliation in this file within 30 days of an employment change. Role changes must update this roster and `OWNERS` together, and administrators must separately review actual permissions.
+Maintainers must update their affiliation in this file within 30 days of an employment change. Role changes must update this roster and `OWNERS` together, and administrators must separately review actual permissions.
 
 If admitted to CNCF, maintainers must also keep the project's entry in the [CNCF maintainer records](https://github.com/cncf/foundation/blob/main/project-maintainers.csv) in sync.

@@ -73,7 +73,7 @@ We want your contributions and suggestions! One of the easiest ways to contribut
 
 * [Slack channel](https://kubernetes.slack.com/archives/C0B20K4KWP8)
 * [Contributing](CONTRIBUTING.md) and [maintainers](MAINTAINERS.md)
-* [Proposed governance](GOVERNANCE.md)
+* [Governance](GOVERNANCE.md)
 * [Security reporting](SECURITY.md)
 
 ## Sponsors
