@@ -85,7 +85,7 @@ controller:
     rollingUpdate:
       maxUnavailable: 1
   image:
-    repository: "public.ecr.aws/cloudpilotai/gcp/karpenter"
+    repository: "ghcr.io/cloudpilot-ai/karpenter-provider-gcp"
     # Overrides the chart's appVersion if set (defaults to `.Chart.AppVersion`)
     tag: ""
     pullPolicy: IfNotPresent

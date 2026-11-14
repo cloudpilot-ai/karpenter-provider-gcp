@@ -20,7 +20,7 @@ Without the detector, nothing reads the metadata key and setting `preemptionNoti
 Turn on the detector:
 
 ```sh
-helm upgrade karpenter karpenter-provider-gcp/karpenter --install \
+helm upgrade karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter --install \
   --namespace karpenter-system \
   --set "node-problem-detector.enabled=true" \
   ...
