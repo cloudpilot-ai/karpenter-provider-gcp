@@ -12,7 +12,7 @@ Karpenter GCP is an open-source node provisioning provider for GKE clusters. It 
 
 ## Installation
 
-Use Helm 3.8+ or Helm 4 and select the same release version for both charts. New releases are distributed through public GHCR OCI packages; no `helm repo add` is required. Historical releases remain in the frozen [Pages repository](https://cloudpilot-ai.github.io/karpenter-provider-gcp).
+Use Helm 3.8+ or Helm 4 and select the same release version for both charts. All release versions are distributed through public GHCR OCI packages; no `helm repo add` is required.
 
 Install the chart:
 
@@ -20,6 +20,7 @@ Install the chart:
 helm install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
   --namespace karpenter \
   --create-namespace \
+  --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp \
   --set controller.settings.projectID=<your-gcp-project> \
   --set controller.settings.clusterName=<your-cluster-name> \
   --set controller.settings.clusterLocation=<your-region-or-zone>

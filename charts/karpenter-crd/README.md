@@ -26,6 +26,7 @@ Then install the controller:
 ```bash
 helm upgrade --install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
   --namespace karpenter-system --create-namespace \
+  --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp \
   --set "controller.settings.projectID=<project>" \
   --set "controller.settings.clusterName=<cluster>" \
   --set "controller.settings.clusterLocation=<region-or-zone>"

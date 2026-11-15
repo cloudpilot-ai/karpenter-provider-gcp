@@ -15,20 +15,12 @@
 #   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
 #                                   (not needed if `gcloud auth login` is already active)
 #   RELEASE_VERSION   published chart version to install (e.g. 0.9.0)
-#   RELEASE_CHART_SOURCE  oci (default) or pages (historical releases only)
-#   RELEASE_OCI_REPOSITORY  OCI chart prefix (default: project GHCR charts)
 #   E2E_PREFIX        resource name prefix (default: karpenter-e2e)
 #   E2E_REGION        GCP region (default: us-central1)
 #   E2E_NODE_SERVICE_ACCOUNT  node SA email (unset keeps the chart default)
 set -euo pipefail
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-RELEASE_CHART_SOURCE="${RELEASE_CHART_SOURCE:-oci}"
-RELEASE_OCI_REPOSITORY="${RELEASE_OCI_REPOSITORY:-oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts}"
-if [[ -n "${RELEASE_VERSION:-}" && "$RELEASE_CHART_SOURCE" != oci && "$RELEASE_CHART_SOURCE" != pages ]]; then
-  echo "RELEASE_CHART_SOURCE must be oci or pages" >&2
-  exit 1
-fi
 # A clean checkout has no vendored Helm subcharts. Check the pinned dependency
 # before cleanup, image publishing, or any GCP access (release charts do not use it).
 if [[ -z "${RELEASE_VERSION:-}" ]]; then
@@ -101,25 +93,18 @@ fi
 
 if [[ -n "${RELEASE_VERSION}" ]]; then
   # --- Published release mode ---
-  log "Installing published release ${RELEASE_VERSION} from ${RELEASE_CHART_SOURCE}..."
-  if [[ "$RELEASE_CHART_SOURCE" == pages ]]; then
-    # Explicit historical selection: never fall back after an OCI/network failure.
-    helm repo add karpenter-gcp "https://cloudpilot-ai.github.io/karpenter-provider-gcp" --force-update
-    helm repo update karpenter-gcp
-    CHART_PREFIX=karpenter-gcp
-  else
-    CHART_PREFIX="$RELEASE_OCI_REPOSITORY"
-  fi
+  log "Installing published release ${RELEASE_VERSION} from GHCR..."
 
-  helm upgrade --install karpenter-crd "$CHART_PREFIX/karpenter-crd" \
+  helm upgrade --install karpenter-crd oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd \
     --version "${RELEASE_VERSION}" \
     --namespace karpenter-system \
     --create-namespace \
     --wait \
     --timeout 2m
 
-  helm upgrade --install karpenter "$CHART_PREFIX/karpenter" \
+  helm upgrade --install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
     --version "${RELEASE_VERSION}" \
+    --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp \
     "${HELM_COMMON_ARGS[@]}"
 
   log "Deploy complete. karpenter ${RELEASE_VERSION} installed from published chart."

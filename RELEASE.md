@@ -66,7 +66,7 @@ git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.0
 
 ### 4. Wait for builds and verify published artefacts
 
-The tag push starts the [release workflow](.github/workflows/release.yaml), which publishes the controller image and Helm charts independently of the GitHub release. When resuming a previously tagged release, use the workflow path in that tag: older releases, including `v0.8.0`, used `release-build.yaml`, which remains part of their signing identity. Before creating or publishing the GitHub release:
+The tag push starts the [release workflow](.github/workflows/release.yaml), which publishes the controller image and Helm charts independently of the GitHub release. For signature verification, use the workflow path in the release tag: copying an artifact to GHCR does not change its original signing identity. Before creating or publishing the GitHub release:
 
 - Confirm the workflow run is for the exact signed tag and release commit.
 - Wait for both `image-publish` and `package-chart` to complete successfully. Stop on failure; do not overwrite the tag or automatically rerun publication.
@@ -145,7 +145,7 @@ make e2e-tests \
   E2E_REGION=<REGION>
 ```
 
-`RELEASE_VERSION` switches `make e2e-deploy` into published-chart mode — it installs from GHCR OCI at the given version with no local image build. For a historical release still on Pages, explicitly set `RELEASE_CHART_SOURCE=pages`; there is no fallback after an OCI failure. `RELEASE_OCI_REPOSITORY` overrides the OCI chart prefix when validating an approved mirror. All specs must pass before announcing.
+`RELEASE_VERSION` switches `make e2e-deploy` into published-chart mode — it installs the selected version from GHCR OCI and selects the GHCR controller image repository, with no local image build. The same source is used for all release versions. All specs must pass before announcing.
 
 ### 7. Announce
 
