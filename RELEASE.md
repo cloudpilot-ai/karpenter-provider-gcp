@@ -70,6 +70,7 @@ The tag push starts the [release workflow](.github/workflows/release.yaml), whic
 
 - Confirm the workflow run is for the exact signed tag and release commit.
 - Wait for both `image-publish` and `package-chart` to complete successfully. Stop on failure; do not overwrite the tag or automatically rerun publication.
+- The chart job stops if either chart version is already published or either package cannot be listed. After partial publication, recover only the missing chart from the original attempt's retained `release-charts` artifact for the exact tag and commit. Verify the original archive/provenance and byte-for-byte agreement of its counterpart with the already-published chart before recovery. If that artifact has expired or is unavailable, stop rather than rebuild, re-sign or overwrite a published version.
 - Verify that the published image and both charts are available, then verify their signatures and build provenance using the commands below. Workflow success alone is not sufficient evidence of artifact availability or successful client-side verification.
 
 ```bash

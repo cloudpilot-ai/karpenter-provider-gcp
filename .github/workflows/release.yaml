@@ -132,10 +132,27 @@ jobs:
         with:
           version: v4.3.0
 
+      - uses: imjasonh/setup-crane@v0.7
+        with:
+          version: v0.21.5
+
       - name: Log in to GHCR
         env:
           GH_TOKEN: ${{ github.token }}
-        run: printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        run: |
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" \
+            --password-stdin --registry-config "${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+
+      - name: Check chart versions are unpublished
+        shell: bash
+        run: |
+          for chart in karpenter karpenter-crd; do
+            tags=$(crane ls "ghcr.io/${GITHUB_REPOSITORY,,}/charts/$chart") || exit 1
+            if grep -Fxq -- "${tag_semver//+/_}" <<< "$tags"; then
+              echo "Chart version already exists: $chart:$tag_semver" >&2
+              exit 1
+            fi
+          done
 
       - name: Build chart dependencies
         run: |
