@@ -1,35 +1,48 @@
 name: PR metadata
 
 on:
-  # Label metadata only; never check out or execute pull-request code.
+  # Metadata only; never check out or execute pull-request code.
   pull_request_target: # zizmor: ignore[dangerous-triggers]
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: [.github/prow.yaml, .github/workflows/pr-metadata.yaml]
 
 permissions:
   contents: read
 
 jobs:
-  areas:
-    name: Area labels
+  prow:
+    name: Prow commands and labels
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       issues: write
       pull-requests: write
+      statuses: write
     concurrency:
-      group: pr-areas-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
+      # Keep every comment; newer commands must not replace pending older commands.
+      group: prow-${{ github.event_name }}-${{ github.event.action }}-${{ github.event.comment.id || github.event.pull_request.number || github.event.issue.number || github.run_id }}
+      cancel-in-progress: false
     steps:
-      - name: Label changed paths
-        uses: actions/labeler@v7.0.0
+      - uses: cncf/prow-github-actions@v3.5.0
         with:
-          configuration-path: .github/labeler.yaml
-          # Preserve labels applied explicitly with /area or through GitHub.
-          sync-labels: false
+          github-token: ${{ github.token }}
+          prow-commands: /approve /lgtm /kind /area /label-sync
+          # Push/manual runs sync labels; PR updates invalidate the old LGTM.
+          jobs: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'label-sync' || 'lgtm' }}
 
   label:
     name: Size labels
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      contains(fromJSON('["opened", "reopened", "synchronize"]'), github.event.action)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -89,3 +102,10 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           labels: ${{ steps.size.outputs.new_label }}
+
+      - name: Label changed paths
+        uses: actions/labeler@v7.0.0
+        with:
+          configuration-path: .github/labeler.yaml
+          # Preserve areas applied explicitly with /area or through GitHub.
+          sync-labels: false

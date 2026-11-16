@@ -1,5 +1,5 @@
 labels:
-  # Keep these in sync with the issue/PR templates and release-note categories.
+  # Match the existing issue/PR templates.
   kind:
     - api-change
     - bug
@@ -26,14 +26,6 @@ approve:
   require_self_approval: true
   github_review: true
 
-lgtm:
-  bind_to_commit: true
-
 tide:
-  labels: [lgtm, approved]
   # Authors with merge permission merge manually after the required checks pass.
   merge_on_events: false
-
-blunderbuss:
-  request_count: 1
-  ignore_drafts: true

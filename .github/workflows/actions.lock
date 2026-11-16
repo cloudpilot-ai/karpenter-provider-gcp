@@ -24,11 +24,10 @@ workflows:
     '.github/workflows/pr-metadata.yaml':
         - 'actions/github-script@v9.0.0'
         - 'actions/labeler@v7.0.0'
+        - 'cncf/prow-github-actions@v3.5.0'
         - 'step-security/action-add-labels@v1.1.1'
         - 'step-security/action-remove-labels@v1.3.1'
         - 'step-security/action-size@v2.2.0'
-    '.github/workflows/prow.yaml':
-        - 'cncf/prow-github-actions@v3.5.0'
     '.github/workflows/release.yaml':
         - 'actions/attest-build-provenance@v4.2.2'
         - 'actions/checkout@v7.0.1'

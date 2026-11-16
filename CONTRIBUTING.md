@@ -6,46 +6,6 @@ Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://gith
 
 Submit changes through a pull request using the PR template, and run the applicable checks in the Makefile before requesting review.
 
-## PR commands and labels
-
-[Prow GitHub Actions](https://github.com/cncf/prow-github-actions) runs the PR commands in GitHub Actions, using this repository's [OWNERS](OWNERS). It does not run a merge service: automatic merging is disabled, there is no scheduled merger, and the workflow has read-only contents permission. An author with merge permission can merge after the repository's required reviews and checks pass.
-
-Post commands on separate lines in a **new comment** on an issue or PR. Editing an existing comment or putting commands in the description does not execute them.
-
-| Command                                       | Effect                                                                                                                                             |
-|-----------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `/kind bug`                                   | Add `kind/bug`; available kinds match the issue/PR templates.                                                                                      |
-| `/area controller`                            | Add `area/controller`; the configured areas are in [.github/prow.yaml](.github/prow.yaml).                                                         |
-| `/approve`                                    | An OWNERS approver approves the files they own; `approved` is added when every changed file is covered. The PR author cannot approve their own PR. |
-| `/approve cancel`                             | Withdraw that approver's approval and recompute `approved`.                                                                                        |
-| `/lgtm`                                       | An OWNERS reviewer or approver, other than the author, approves the current head for merging and records the `prow/lgtm` status.                   |
-| `/lgtm cancel`                                | Remove LGTM and make `prow/lgtm` pending again.                                                                                                    |
-| `/remove-kind bug`, `/remove-area controller` | Remove the corresponding labels.                                                                                                                   |
-| `/label-sync`                                 | A collaborator creates or updates the configured label catalogue.                                                                                  |
-
-For example, a maintainer who is both reviewer and approver can post:
-
-```text
-/approve
-/lgtm
-```
-
-New commits require a fresh `/lgtm`: the old label is removed and the new head has no successful `prow/lgtm` status. OWNERS approval is sticky across pushes, so the bot may submit a new approving review without a fresh `/approve`. The required `prow/lgtm` check is what ensures the new commits are reviewed. On fork PRs, use the comment commands; GitHub supplies read-only tokens for `pull_request_review` events from forks.
-
-PRs also receive `area/*` labels from the changed-file rules in [.github/labeler.yaml](.github/labeler.yaml). The labeler preserves existing labels, including manually selected areas. Existing size labels and issue-template kind labels remain in use. Classification uses file rules and explicit commands, without an AI service. When adding an area rule, also add its label to the Prow catalogue.
-
-### Maintainer setup
-
-The workflows and configuration must be on the default branch before comment commands work. The initial PR therefore uses the existing review process.
-
-1. After merging the workflow, run **Actions → Prow → Run workflow** to initialize labels. Changes to `.github/prow.yaml` also synchronize the catalogue automatically.
-2. On a test PR, have another OWNERS reviewer post `/lgtm`, then add **`prow/lgtm`** to the default branch's required status checks. Retain all existing CI, DCO, review, and code-owner requirements. Labels alone do not restrict manual merging.
-3. Only after that check is required, enable **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**, if organization policy permits it. With `approve.github_review: true`, `/approve` mirrors the OWNERS decision as an approving GitHub review. This is the same approval represented by the command, not an additional human review. The setting is repository-wide; a dedicated GitHub App token is an alternative if that setting must remain off, but requires a separately reviewed workflow change.
-4. Verify `/approve`, `/approve cancel`, `/lgtm`, and `/lgtm cancel`, then push a new commit and confirm merging waits for a fresh `/lgtm`. Exercise a fork PR and confirm area and size labels still appear. A bot review cannot replace a required CODEOWNERS review, and GitHub rulesets remain authoritative.
-5. Disable overlapping approval and label handlers in any existing bot during the cutover so two bots do not manage the same state.
-
-The PR adding these workflows does not change repository settings, rulesets, permissions granted to contributors, or installed GitHub Apps. If Actions approvals are disabled, `/approve` still computes the OWNERS label but cannot supply the mirrored approving review; a human review is still needed to meet GitHub's review requirement.
-
 ## Design Proposals
 
 For significant changes — architectural redesigns, new API fields, operator-visible behaviour changes, or multi-phase work — opening a proposal before writing code helps align on the approach early and produces a useful design record.
