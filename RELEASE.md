@@ -1,5 +1,9 @@
 # Release Process
 
+## Signing environment
+
+The chart release job uses the `helm-release` environment. It requires the `HELM_SIGNING_KEY_BASE64` and `HELM_SIGNING_KEY_PASSPHRASE` environment secrets and the `HELM_SIGNING_KEY_FINGERPRINT` environment variable. Restrict deployments to the `main` branch and version tags matching `v[0-9]*.[0-9]*.[0-9]*`. Configure this environment before publishing a release; GitHub cannot recover secret values from the retired `github-pages` environment.
+
 ## Cadence
 
 - **Minor versions** (`vX.Y.0`): released monthly, targeting the first week, when there are changes to ship.
@@ -94,7 +98,7 @@ VERIFY_DIR=$(mktemp -d)
 rm -rf "$VERIFY_DIR"
 ```
 
-Also confirm the new version appears on [ArtifactHub](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter).
+Also confirm the new version appears on Artifact Hub for both the [controller](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter) and [CRDs](https://artifacthub.io/packages/helm/karpenter-provider-gcp-crd/karpenter-crd), under the [karpenter-gcp organization](https://artifacthub.io/packages/search?org=karpenter-gcp).
 
 > **Check signatures:** Run the commands in [Verify release artifacts](docs/getting-started/installation.md#verify-release-artifacts-optional) with `VERSION=vX.Y.0` (note the leading `v`). This confirms that users can verify the published image signature, chart signatures, and build provenance. Fix any availability, signature, or provenance failure before proceeding to the GitHub release draft or publication. Confirm both the `karpenter` and `karpenter-crd` OCI charts, including anonymous access with supported Helm 3/4 clients.
 
