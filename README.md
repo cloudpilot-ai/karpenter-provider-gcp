@@ -10,7 +10,7 @@
 
 > [!NOTE]
 >
-> A live version is now available.
+> See [who's using Karpenter Provider for GCP in production](ADOPTERS.md).
 >
 > **Feedback welcome!** Join our [Slack](https://kubernetes.slack.com/archives/C0B20K4KWP8) to share your ideas, ask questions, and discuss with the community.
 
