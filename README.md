@@ -6,11 +6,11 @@
   </p>
 </div>
 
-![GitHub stars](https://img.shields.io/github/stars/cloudpilot-ai/karpenter-provider-gcp) ![GitHub forks](https://img.shields.io/github/forks/cloudpilot-ai/karpenter-provider-gcp) [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/LICENSE) [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues) [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/search?repo=karpenter-provider-gcp)
+![GitHub stars](https://img.shields.io/github/stars/karpenter-gcp/karpenter-provider-gcp) ![GitHub forks](https://img.shields.io/github/forks/karpenter-gcp/karpenter-provider-gcp) [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](LICENSE.txt) [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues) [![Artifact Hub: controller](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter) [![Artifact Hub: CRDs](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp-crd)](https://artifacthub.io/packages/helm/karpenter-provider-gcp-crd/karpenter-crd)
 
 > [!NOTE]
 >
-> A live version is now available.
+> See [who's using Karpenter Provider for GCP in production](ADOPTERS.md).
 >
 > **Feedback welcome!** Join our [Slack](https://kubernetes.slack.com/archives/C0B20K4KWP8) to share your ideas, ask questions, and discuss with the community.
 
@@ -65,13 +65,16 @@ See [`docs/`](docs/) for installation, configuration, networking, troubleshootin
 
 ## Release notes / upgrades
 
-See [GitHub Releases](https://github.com/cloudpilot-ai/karpenter-provider-gcp/releases) for the full changelog. See [`MIGRATION.md`](MIGRATION.md) for breaking changes and upgrade steps.
+See [GitHub Releases](https://github.com/karpenter-gcp/karpenter-provider-gcp/releases) for the full changelog. See [`MIGRATION.md`](MIGRATION.md) for breaking changes and upgrade steps.
 
 ## Community
 
 We want your contributions and suggestions! One of the easiest ways to contribute is to participate in discussions on the Github Issues/Discussion or chat on Slack.
 
 * [Slack channel](https://kubernetes.slack.com/archives/C0B20K4KWP8)
+* [Contributing](CONTRIBUTING.md) and [maintainers](MAINTAINERS.md)
+* [Governance](GOVERNANCE.md)
+* [Security reporting](SECURITY.md)
 
 ## Sponsors
 
@@ -83,8 +86,8 @@ This project includes code derived from karpenter-provider-aws, used under the A
 
 ## Code Of Conduct
 
-Karpenter GCP Cloud Provider adopts [CNCF code of conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
+Karpenter GCP Cloud Provider adopts the [CNCF Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Karpenter GCP Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
+Karpenter GCP Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE.txt) file for details.

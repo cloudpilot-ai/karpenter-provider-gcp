@@ -19,7 +19,7 @@ package subnet
 import (
 	containerv1 "google.golang.org/api/container/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 // PrimaryNetwork resolves the primary-interface network and subnetwork used for

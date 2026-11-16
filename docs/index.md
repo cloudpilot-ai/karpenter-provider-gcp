@@ -37,7 +37,7 @@ Key capabilities:
 
 - [Installation](getting-started/installation.md) — deploy Karpenter on a GKE cluster using Helm
 - [Quick start](getting-started/quick-start.md) — create your first NodePool and GCENodeClass, and trigger node provisioning
-- [Terraform](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/deploy/terraform) — provision the full GCP infrastructure (VPC, GKE cluster, system node pool, service accounts) with Terraform
+- [Terraform](https://github.com/karpenter-gcp/karpenter-provider-gcp/tree/main/deploy/terraform) — provision the full GCP infrastructure (VPC, GKE cluster, system node pool, service accounts) with Terraform
 
 ## Features
 
@@ -66,7 +66,10 @@ Key capabilities:
 
 ## Community
 
+- [Contributing](../CONTRIBUTING.md), [maintainers](../MAINTAINERS.md), and [Code of Conduct](../CODE_OF_CONDUCT.md)
+- [Governance](../GOVERNANCE.md)
+
 - [Slack](https://cloudpilotaicommunity.slack.com/archives/C093V65481H)
 - [Discord](https://discord.gg/WxFWc87QWr)
-- [GitHub Issues](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
+- [GitHub Issues](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues)
 - [Design proposals](../proposals/) — accepted and in-progress architectural proposals

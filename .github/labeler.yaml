@@ -1,0 +1,27 @@
+area/api:
+  - changed-files:
+      - any-glob-to-any-file: 'pkg/apis/**'
+
+area/charts:
+  - changed-files:
+      - any-glob-to-any-file: 'charts/**'
+
+area/ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+area/controller:
+  - changed-files:
+      - any-glob-to-any-file: ['cmd/controller/**', 'pkg/controllers/**']
+
+area/docs:
+  - changed-files:
+      - any-glob-to-any-file: ['docs/**', '*.md']
+
+area/examples:
+  - changed-files:
+      - any-glob-to-any-file: 'examples/**'
+
+area/pricing:
+  - changed-files:
+      - any-glob-to-any-file: 'pkg/providers/pricing/**'

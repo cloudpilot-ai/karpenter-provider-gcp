@@ -28,7 +28,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 )
 
 //go:embed initial-prices.json

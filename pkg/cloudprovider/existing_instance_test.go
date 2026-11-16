@@ -32,10 +32,10 @@ import (
 	corecloud "sigs.k8s.io/karpenter/pkg/cloudprovider"
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/nodeclaim/garbagecollection"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/controllers/nodeclaim/garbagecollection"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 type lifecycleInstances struct {

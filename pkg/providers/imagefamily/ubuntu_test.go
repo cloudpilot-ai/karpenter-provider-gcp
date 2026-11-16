@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 func TestSelectImage_Ubuntu_SkipsPending(t *testing.T) {

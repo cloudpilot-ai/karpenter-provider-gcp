@@ -23,8 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 )
 
 func TestSecondaryBootDisksFiltersOnlyConfiguredSecondaryDisks(t *testing.T) {

@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/disktype"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 // DefaultBootDiskGiB is the boot disk the provider creates for a swap-enabled

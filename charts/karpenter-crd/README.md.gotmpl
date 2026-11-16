@@ -17,17 +17,16 @@ The standard workaround is a dedicated CRD chart whose resources live in `templa
 Install CRDs first:
 
 ```bash
-helm repo add karpenter-provider-gcp https://cloudpilot-ai.github.io/karpenter-provider-gcp
-helm repo update
-
-helm upgrade --install karpenter-crd karpenter-provider-gcp/karpenter-crd
+# Requires Helm 3.8+ or Helm 4; set the same --version X.Y.Z on both charts.
+helm upgrade --install karpenter-crd oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter-crd
 ```
 
 Then install the controller:
 
 ```bash
-helm upgrade --install karpenter karpenter-provider-gcp/karpenter \
+helm upgrade --install karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
   --namespace karpenter-system --create-namespace \
+  --set controller.image.repository=ghcr.io/karpenter-gcp/karpenter-provider-gcp \
   --set "controller.settings.projectID=<project>" \
   --set "controller.settings.clusterName=<cluster>" \
   --set "controller.settings.clusterLocation=<region-or-zone>"

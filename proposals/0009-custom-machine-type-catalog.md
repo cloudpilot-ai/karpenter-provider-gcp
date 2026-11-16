@@ -3,8 +3,8 @@
 - **Status**: Draft
 - **Authors**: @geekette86
 - **Created**: 2026-09-26
-- **Related Issues**: [#144](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/144)
-- **Related PRs**: [#601](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/601)
+- **Related Issues**: [#144](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/144)
+- **Related PRs**: [#601](https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/601)
 
 <!-- Supersedes the request-time resolution mechanism in PR #601 per maintainer review; see Alternatives Considered. -->
 
@@ -14,7 +14,7 @@
 
 GCE custom machine types (e.g. `n2-custom-8-24576`) are never returned by the `machineTypes.aggregatedList` API that populates Karpenter's instance type catalog, because GCP does not enumerate the space of valid custom shapes. This proposal adds a cluster-scoped CRD, `GCECustomMachineType`, that lets an operator explicitly register a custom shape so it joins the instance type catalog as a first-class member: selectable by `node.kubernetes.io/instance-type` exactly as today, but also by ordinary CPU/memory-style requirements, and with an explicit, operator-supplied price rather than one inferred from predefined shapes.
 
-The provider resolves a registered shape's vCPU/memory and per-zone availability from `machineTypes.get` (which does support custom shapes, unlike the aggregated list) via a dedicated reconciler, not on every scheduling pass. Phase 1 requires the operator to supply on-demand and Spot prices on the CRD, since GCP's real custom-shape pricing includes a premium and a separate extended-memory (`-ext`) rate that a linear fit over predefined shapes cannot reproduce exactly, and this price drives scheduling and consolidation decisions, not just cost reporting. Phase 2, gated on [#218](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/218), teaches the pricing provider GCP's actual custom-rate formula so supplying a price becomes an optional override instead of a requirement.
+The provider resolves a registered shape's vCPU/memory and per-zone availability from `machineTypes.get` (which does support custom shapes, unlike the aggregated list) via a dedicated reconciler, not on every scheduling pass. Phase 1 requires the operator to supply on-demand and Spot prices on the CRD, since GCP's real custom-shape pricing includes a premium and a separate extended-memory (`-ext`) rate that a linear fit over predefined shapes cannot reproduce exactly, and this price drives scheduling and consolidation decisions, not just cost reporting. Phase 2, gated on [#218](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/218), teaches the pricing provider GCP's actual custom-rate formula so supplying a price becomes an optional override instead of a requirement.
 
 ---
 

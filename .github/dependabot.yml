@@ -1,6 +1,8 @@
 version: 2
 updates:
   - package-ecosystem: "gomod"
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: "cron"
@@ -28,6 +30,8 @@ updates:
           - "k8s.io/*"
 
   - package-ecosystem: "github-actions"
+    cooldown:
+      default-days: 7
     directory: "/"
     schedule:
       interval: "cron"
@@ -39,6 +43,8 @@ updates:
           - "*"
 
   - package-ecosystem: "gomod"
+    cooldown:
+      default-days: 7
     directory: "/hack/tools"
     schedule:
       interval: "cron"
@@ -63,6 +69,8 @@ updates:
           - "*"
 
   - package-ecosystem: "gomod"
+    cooldown:
+      default-days: 7
     directory: "/hack/crd-tools"
     schedule:
       interval: "cron"
@@ -87,6 +95,8 @@ updates:
           - "*"
 
   - package-ecosystem: "gomod"
+    cooldown:
+      default-days: 7
     directory: "/hack/pdcsi-data"
     schedule:
       interval: "cron"

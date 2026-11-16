@@ -1,0 +1,50 @@
+name: Development image
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  latest-image-build-publish:
+    name: Publish image
+    if: github.repository == 'karpenter-gcp/karpenter-provider-gcp'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Select Go toolchain
+        id: go-toolchain
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Restore Go cache
+        uses: cloudx-io/setup-go@main
+        with:
+          go-version: ${{ steps.go-toolchain.outputs.go-version }}
+          cache-key-prefix: image-publish
+          cache-dependency-path: '**/go.*'
+          save: ${{ github.repository == 'karpenter-gcp/karpenter-provider-gcp' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      # setup-ko authenticates to GHCR using GITHUB_TOKEN.
+      - uses: ko-build/setup-ko@v0.10
+
+      - name: Build and publish image
+        run: |
+          export KO_DOCKER_REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
+          ko build --bare github.com/karpenter-gcp/karpenter-provider-gcp/cmd/controller \
+            --tags "main,sha-$GITHUB_SHA" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms"
+
+      - name: Retain SPDX SBOMs
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: development-image-sboms
+          path: ${{ runner.temp }}/sboms/
+          if-no-files-found: error

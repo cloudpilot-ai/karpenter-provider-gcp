@@ -1,5 +1,21 @@
 # Contributing
 
+## Getting involved
+
+Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues) for questions, reproducible bugs, and feature requests; choose the appropriate issue template. Report vulnerabilities privately using [SECURITY.md](SECURITY.md), not in an issue.
+
+Submit changes through a pull request using the PR template, and run the applicable checks in the Makefile before requesting review.
+
+## Pull request commands
+
+[Prow GitHub Actions](https://github.com/cncf/prow-github-actions) handles commands in **new PR comments**, one per line. Commands in the PR description or edits to existing comments do not run.
+
+- Use `/kind bug` or `/kind cleanup` to classify a PR, and `/area docs` or `/area controller` to label its area. Available values are in [`.github/prow.yaml`](.github/prow.yaml); changed paths also add area labels automatically.
+- An eligible reviewer in `OWNERS` uses `/lgtm`; an approver other than the PR author uses `/approve`. They can be posted together on separate lines. Withdraw them with `/lgtm cancel` or `/approve cancel`.
+- New commits need a fresh `/lgtm`. Approval persists, so `prow/lgtm` must be required alongside the existing checks and CODEOWNERS reviews. Merging remains manual.
+
+The organization automation App publishes Maintenance PRs and mirrors OWNERS approval as GitHub reviews. It cannot approve its own PRs; maintainers approve Maintenance PRs through GitHub Review. For fork PRs, use comment commands to update Prow approval because fork review events cannot access App credentials.
+
 ## Design Proposals
 
 For significant changes — architectural redesigns, new API fields, operator-visible behaviour changes, or multi-phase work — opening a proposal before writing code helps align on the approach early and produces a useful design record.
@@ -24,7 +40,7 @@ A proposal is **not required** for bug fixes, small flag additions, doc-only cha
 4. Iterate in review. When the approach is agreed by maintainers, update `Status` to `Implementable`.
 5. Implementation PRs reference the proposal via the "Related proposal" field in the PR template.
 
-Proposals are reviewed by project maintainers via GitHub PR review. Assign the PR for review or mention `@cloudpilot-ai/karpenter-gcp` when the proposal is ready for feedback.
+Proposals are reviewed by project maintainers via GitHub PR review. Assign the PR to a project maintainer for review when the proposal is ready for feedback.
 
 ### Status values
 
@@ -202,10 +218,6 @@ Inputs for `make e2e-tests` (in addition to the prerequisites above):
 The runner verifies the deployed controller matches the test checkout, acquires a Kubernetes Lease (overlapping test runs fail fast), and writes the ignored report and controller log. It releases the Lease on normal exit or interruption; after a forced kill, the Lease expires within ten minutes. Setup, deploy, and cleanup are **not** covered by this test Lease. Inspect the report and log even when tests fail; a startup failure may leave no report.
 
 For one-spec debugging, `make e2e-test SUITE=provisioning FOCUS="amd64 on-demand"` remains available, but it bypasses the Lease and report: do not use it on a shared cluster. Run a focused Ginkgo spec through `hack/e2e-runner` instead if locking is required.
-
-#### On-demand PR e2e
-
-The `/e2e` pull-request comment workflow is currently a placeholder; run local e2e using the commands above.
 
 #### Retire e2e infrastructure
 

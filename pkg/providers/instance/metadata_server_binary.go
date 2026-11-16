@@ -28,7 +28,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 )
 
 var (

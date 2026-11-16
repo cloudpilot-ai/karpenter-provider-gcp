@@ -1,9 +1,9 @@
 # Proposal: Multiple pod CIDR ranges on GCENodeClass
 
-- **Status**: In Review (implemented by [#573](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/573))
+- **Status**: In Review (implemented by [#573](https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/573))
 - **Authors**: @guyeisenbach
 - **Created**: 2026-08-20
-- **Related Issues**: [#572](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/572)
+- **Related Issues**: [#572](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/572)
 
 ---
 

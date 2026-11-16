@@ -28,7 +28,7 @@ import (
 	"google.golang.org/api/option"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 // fakeVersionProvider implements versionprovider.Provider for tests.

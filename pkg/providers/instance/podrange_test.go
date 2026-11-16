@@ -23,7 +23,7 @@ import (
 	containerv1 "google.golang.org/api/container/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 func TestResolvedPodRangeNames(t *testing.T) {
