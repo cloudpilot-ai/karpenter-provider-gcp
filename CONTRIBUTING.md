@@ -26,7 +26,8 @@ These checks are not a complete legal audit. Unused module requirements, auxilia
 - Use `/label security` for security-related work in addition to its kind and area. Remove it with `/remove-label security`.
 - An eligible reviewer in `OWNERS` uses `/lgtm`; an OWNERS approver uses `/approve`, including on their own PR for files they own. With `require_self_approval: false`, authors also implicitly approve files covered by their OWNERS entries. Authors cannot `/lgtm` their own PRs. Withdraw with `/lgtm cancel` or `/approve cancel`.
 - Prow approval does not bypass GitHub's code-owner or last-push review requirements, required checks, or merge permissions.
-- New commits need a fresh `/lgtm`. Approval persists, so `prow/lgtm` must be required alongside the existing checks and CODEOWNERS reviews. Merging remains manual.
+- New commits need a fresh `/lgtm`. Approval persists, so `prow/lgtm` must be required alongside the existing checks and CODEOWNERS reviews.
+- Prow merges automatically once the PR has `approved`, an `lgtm` bound to the current commit, and GitHub reports all merge requirements satisfied. Commands, labels, reviews, and check/status events trigger evaluation; a job also retries every 15 minutes when GitHub delivers the schedule. Use `/hold` to pause merging and `/hold cancel` to resume.
 
 The organization automation App publishes Maintenance PRs and mirrors OWNERS approval as GitHub reviews. It cannot approve its own PRs; maintainers approve Maintenance PRs through GitHub Review. For fork PRs, use comment commands to update Prow approval because fork review events cannot access App credentials.
 
