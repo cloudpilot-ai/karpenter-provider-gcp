@@ -50,10 +50,11 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language == 'go' && 'Go' || 'GitHub Actions' }})
-    # Keep the upstream PR/push scope and use Security's shared daily schedule.
+    # Release backports must emit the same required CodeQL checks as main PRs.
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || startsWith(github.base_ref, 'release-'))) ||
       github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
