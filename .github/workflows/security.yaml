@@ -24,7 +24,13 @@ jobs:
       - uses: actions/dependency-review-action@v5.0.0
         with:
           fail-on-severity: high
-          license-check: false
+          fail-on-scopes: runtime, development, unknown
+          license-check: true
+          # Keep in sync with CNCF_ALLOWED_LICENSES in Makefile.
+          allow-licenses: >-
+            Apache-2.0, 0BSD, BSD-2-Clause, BSD-2-Clause-FreeBSD, BSD-3-Clause,
+            MIT, MIT-0, ISC, OpenSSL, OpenSSL-standalone, PSF-2.0, Python-2.0,
+            Python-2.0.1, PostgreSQL, SSLeay-standalone, UPL-1.0, X11, Zlib
           comment-summary-in-pr: never
 
   actions-lock:

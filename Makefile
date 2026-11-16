@@ -29,7 +29,7 @@ help: ## Display help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 presubmit: toolchain verify ci vulncheck ## Run all steps in the developer loop
-ci: verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
+ci: license-check verify-codegen verify-deadcode chart-lint verify-crds ut-test docs-lint ## Steps run in CI (toolchain and lint handled by dedicated workflow steps)
 
 toolchain: ## Install developer toolchain
 	cd hack/tools && go install tool
@@ -111,6 +111,21 @@ GOVULNCHECK = $(shell cd hack/tools && GOOS= GOARCH= go tool -n govulncheck)
 VULNCHECK_FLAGS ?=
 vulncheck: ## Check reachable controller and unit-test vulnerabilities
 	@$(GOVULNCHECK) -test $(VULNCHECK_FLAGS) ./cmd/controller/... ./pkg/...
+
+# CNCF license names; keep in sync with allow-licenses in .github/workflows/security.yaml.
+# Other conditions still require review: https://github.com/cncf/foundation/blob/main/policies-guidance/allowed-third-party-license-policy.md
+CNCF_ALLOWED_LICENSES := Apache-2.0,0BSD,BSD-2-Clause,BSD-2-Clause-FreeBSD,BSD-3-Clause,MIT,MIT-0,ISC,OpenSSL,OpenSSL-standalone,PSF-2.0,Python-2.0,Python-2.0.1,PostgreSQL,SSLeay-standalone,UPL-1.0,X11,Zlib
+
+license-check: ## Check root-module Go dependency licenses using upstream module sources
+	@set -eu; \
+	tmpdir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	GOBIN="$$tmpdir" GOOS= GOARCH= GOFLAGS= go install github.com/google/go-licenses/v2@v2.0.1; \
+	for arch in amd64 arm64; do \
+		echo "Checking Go dependency licenses (linux/$$arch)"; \
+		GOOS=linux GOARCH=$$arch CGO_ENABLED=0 GOFLAGS=-mod=readonly "$$tmpdir/go-licenses" check \
+			--include_tests --allowed_licenses=$(CNCF_ALLOWED_LICENSES) ./...; \
+	done
 
 ut-test: ## Run unit tests
 	go test -race ./pkg/... \
@@ -240,7 +255,7 @@ codegen: ## Auto generate files based on GCP APIs
 crds: ## Apply CRDs
 	kubectl apply -f charts/karpenter/crds/
 
-.PHONY: help presubmit ci run vulncheck ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
+.PHONY: help presubmit ci run vulncheck license-check ut-test require-project-id e2e-setup e2e-tests e2e-test e2e-teardown e2e-check-clean e2e-deploy e2e-clean-env coverage update update-pdcsi-compatibility update-pricing verify-codegen verify verify-crds verify-deadcode image apply delete toolchain tidy download docs-lint docs-fix
 
 define newline
 

@@ -6,6 +6,18 @@ Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://gith
 
 Submit changes through a pull request using the PR template, and run the applicable checks in the Makefile before requesting review.
 
+## Go dependency licenses
+
+Only add dependencies that satisfy the [CNCF third-party license policy](https://github.com/cncf/foundation/blob/main/policies-guidance/allowed-third-party-license-policy.md) or have an applicable [existing blanket license exception](https://github.com/cncf/foundation/tree/main/license-exceptions). Review all policy conditions, including separation/unmodified use and upstream maturity, and preserve required notices; an allowed license name alone is not sufficient.
+
+The required **Dependency review** check uses GitHub's official action to reject dependency changes with detected non-allowlisted licenses across runtime, development and unknown scopes. It warns rather than fails when a license cannot be detected, so review those warnings before merging. It does not audit the unchanged dependency baseline.
+
+Run `make license-check` to check that baseline. This runs the pinned, unmodified `google/go-licenses` CLI against all root-module Go packages and their transitive imports, including tests, for Linux amd64 and arm64. It runs in `make ci` / the required **Lint and tests** check and rejects missing, unknown or non-allowlisted licenses. It scans downloaded module sources (`-mod=readonly`), not local vendored modifications, to avoid the scanner's [vendored-license attribution bug](https://github.com/google/go-licenses/issues/143).
+
+Do not globally allow MPL/GPL or suppress unknown licenses to make CI pass. For a blanket exception, verify the component, license and usage scope against the CNCF decision, then propose a narrowly documented check change. No license exceptions are currently configured. Keep the license lists in `Makefile` and `.github/workflows/security.yaml` synchronized when CNCF policy changes.
+
+These checks are not a complete legal audit. Unused module requirements, auxiliary tooling/data modules, other build tags/platforms, vendored modifications, non-Go dependencies and dependencies hidden inside assembly/C code require separate review.
+
 ## Pull request commands
 
 [Prow GitHub Actions](https://github.com/cncf/prow-github-actions) handles commands in **new PR comments**, one per line. Commands in the PR description or edits to existing comments do not run.
