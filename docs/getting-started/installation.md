@@ -182,6 +182,8 @@ export RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release.yaml"
 
 Use the exact workflow path that originally built the selected release. Some signatures name `${REPOSITORY}/.github/workflows/release-build.yaml` rather than `release.yaml`; copying an artifact to GHCR does not change that identity. Confirm the expected path from the workflow in the release tag before verification; do not broaden the trusted identity or try arbitrary workflow paths after a verification failure.
 
+> **Historical releases before v0.9.0:** Mirrored releases that were signed or had build provenance retain their original `cloudpilot-ai/karpenter-provider-gcp` source and signing identities, even when pulled from the `karpenter-gcp` GHCR packages. Verification that expects the new repository as their builder or signer will fail. Use the original repository, workflow, tag and source commit; for v0.8.0, the workflow is `.github/workflows/release-build.yaml`. Copying unchanged artifacts does not invalidate their original signatures. Versions released without signing remain unsigned.
+
 ### Verify the controller image
 
 Resolve the tag once and verify that immutable image digest against the release workflow and tag:
