@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### Release distribution moves to GHCR OCI
+
+Controller images use `ghcr.io/cloudpilot-ai/karpenter-provider-gcp:vX.Y.Z`. Helm charts use `oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter` and `/karpenter-crd` with version `X.Y.Z`. Use Helm 3.8+ or Helm 4; replace indexed chart references in Helm automation and allow GHCR image pulls in registry policies. Keep existing release names, namespaces and configured values; upgrade CRDs before the controller. A pinned `controller.image.repository` still overrides the new default and must be updated explicitly.
+
+Use GHCR for all release versions, including backfilled historical releases; replace Pages chart-repository URLs in existing automation with the OCI references above. See the [installation guide](docs/getting-started/installation.md) for installation and verification, and the [upgrade guide](docs/getting-started/upgrading.md) for version selection.
+
+Development images use `ghcr.io/cloudpilot-ai/karpenter-provider-gcp`, tagged `sha-<full-commit-sha>` and mutable `main`, alongside the `vX.Y.Z` release tags. Development builds do not publish `latest`. They are not supported production releases; prefer a verified digest rather than a mutable tag.
+
 ## v0.8.0
 
 ### Source-pool swap and zswap settings are no longer inherited

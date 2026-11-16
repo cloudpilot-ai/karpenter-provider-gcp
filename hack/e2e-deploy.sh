@@ -14,7 +14,7 @@
 # Optional env vars:
 #   GOOGLE_APPLICATION_CREDENTIALS  path to service-account key JSON
 #                                   (not needed if `gcloud auth login` is already active)
-#   RELEASE_VERSION   published chart version to install (e.g. 0.3.2)
+#   RELEASE_VERSION   published chart version to install (e.g. 0.9.0)
 #   E2E_PREFIX        resource name prefix (default: karpenter-e2e)
 #   E2E_REGION        GCP region (default: us-central1)
 #   E2E_NODE_SERVICE_ACCOUNT  node SA email (unset keeps the chart default)
@@ -93,19 +93,18 @@ fi
 
 if [[ -n "${RELEASE_VERSION}" ]]; then
   # --- Published release mode ---
-  log "Installing published release ${RELEASE_VERSION} from Helm repo..."
-  helm repo add karpenter-gcp "https://cloudpilot-ai.github.io/karpenter-provider-gcp" --force-update
-  helm repo update karpenter-gcp
+  log "Installing published release ${RELEASE_VERSION} from GHCR..."
 
-  helm upgrade --install karpenter-crd karpenter-gcp/karpenter-crd \
+  helm upgrade --install karpenter-crd oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd \
     --version "${RELEASE_VERSION}" \
     --namespace karpenter-system \
     --create-namespace \
     --wait \
     --timeout 2m
 
-  helm upgrade --install karpenter karpenter-gcp/karpenter \
+  helm upgrade --install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
     --version "${RELEASE_VERSION}" \
+    --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp \
     "${HELM_COMMON_ARGS[@]}"
 
   log "Deploy complete. karpenter ${RELEASE_VERSION} installed from published chart."

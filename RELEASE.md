@@ -66,31 +66,37 @@ git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.0
 
 ### 4. Wait for builds and verify published artefacts
 
-The tag push starts the [release workflow](.github/workflows/release.yaml), which publishes the controller image and Helm charts independently of the GitHub release. When resuming a previously tagged release, use the workflow path in that tag: older releases, including `v0.8.0`, used `release-build.yaml`, which remains part of their signing identity. Before creating or publishing the GitHub release:
+The tag push starts the [release workflow](.github/workflows/release.yaml), which publishes the controller image and Helm charts independently of the GitHub release. For signature verification, use the workflow path in the release tag: copying an artifact to GHCR does not change its original signing identity. Before creating or publishing the GitHub release:
 
 - Confirm the workflow run is for the exact signed tag and release commit.
 - Wait for both `image-publish` and `package-chart` to complete successfully. Stop on failure; do not overwrite the tag or automatically rerun publication.
+- The chart job stops if either chart version is already published or either package cannot be listed. After partial publication, recover only the missing chart from the original attempt's retained `release-charts` artifact for the exact tag and commit. Verify the original archive/provenance and byte-for-byte agreement of its counterpart with the already-published chart before recovery. If that artifact has expired or is unavailable, stop rather than rebuild, re-sign or overwrite a published version.
 - Verify that the published image and both charts are available, then verify their signatures and build provenance using the commands below. Workflow success alone is not sufficient evidence of artifact availability or successful client-side verification.
 
 ```bash
 RELEASE_VERSION=X.Y.0
 
-# Docker image (ECR Public)
-TOKEN=$(curl -s "https://public.ecr.aws/token/?scope=repository:cloudpilotai/gcp/karpenter:pull" | jq -r '.token')
-curl -fsS \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Accept: application/vnd.oci.image.index.v1+json" \
-  "https://public.ecr.aws/v2/cloudpilotai/gcp/karpenter/manifests/v${RELEASE_VERSION}" \
-  | jq -r '.mediaType'
-
-# Helm charts (GitHub Pages)
-curl -s "https://cloudpilot-ai.github.io/karpenter-provider-gcp/index.yaml" \
-  | grep -A3 "version: ${RELEASE_VERSION}"
+# Test anonymous access with empty registry credentials (no deployment).
+VERIFY_DIR=$(mktemp -d)
+(
+  export DOCKER_CONFIG="$VERIFY_DIR/docker"
+  export HELM_REGISTRY_CONFIG="$VERIFY_DIR/helm-registry.json"
+  mkdir -p "$DOCKER_CONFIG"
+  # Explicit empty entries prevent Podman fallback and native-helper auto-detection.
+  printf '%s\n' '{"auths":{"ghcr.io":{}}}' > "$DOCKER_CONFIG/config.json"
+  cp "$DOCKER_CONFIG/config.json" "$HELM_REGISTRY_CONFIG"
+  crane manifest "ghcr.io/cloudpilot-ai/karpenter-provider-gcp:v${RELEASE_VERSION}" | jq -r '.mediaType'
+  helm pull oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+    --version "$RELEASE_VERSION" --destination "$VERIFY_DIR"
+  helm pull oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd \
+    --version "$RELEASE_VERSION" --destination "$VERIFY_DIR"
+)
+rm -rf "$VERIFY_DIR"
 ```
 
 Also confirm the new version appears on [ArtifactHub](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter).
 
-> **Check signatures:** Run the commands in [Verify release artifacts](docs/getting-started/installation.md#verify-release-artifacts-optional) with `VERSION=vX.Y.0` (note the leading `v`). This confirms that users can verify the published image signature, chart signatures, and build provenance. Fix any availability, signature, or provenance failure before proceeding to the GitHub release draft or publication. Confirm both the `karpenter` and `karpenter-crd` charts, not just one entry in the Helm index.
+> **Check signatures:** Run the commands in [Verify release artifacts](docs/getting-started/installation.md#verify-release-artifacts-optional) with `VERSION=vX.Y.0` (note the leading `v`). This confirms that users can verify the published image signature, chart signatures, and build provenance. Fix any availability, signature, or provenance failure before proceeding to the GitHub release draft or publication. Confirm both the `karpenter` and `karpenter-crd` OCI charts, including anonymous access with supported Helm 3/4 clients.
 
 ### 5. Create GitHub release
 
@@ -140,7 +146,7 @@ make e2e-tests \
   E2E_REGION=<REGION>
 ```
 
-`RELEASE_VERSION` switches `make e2e-deploy` into published-chart mode — it installs from the Helm repo at the given version with no local image build. All specs must pass before announcing.
+`RELEASE_VERSION` switches `make e2e-deploy` into published-chart mode — it installs the selected version from GHCR OCI and selects the GHCR controller image repository, with no local image build. The same source is used for all release versions. All specs must pass before announcing.
 
 ### 7. Announce
 
