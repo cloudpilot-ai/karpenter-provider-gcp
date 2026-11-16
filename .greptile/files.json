@@ -1,6 +1,21 @@
 {
   "files": [
     {
+      "path": "docs/security/csr-approval.md",
+      "description": "CSR authorization contract, lifecycle distinctions, validation scope and shared-bootstrap limitation",
+      "scope": ["pkg/controllers/csr/**", "charts/**", "hack/security/**", ".github/workflows/**"]
+    },
+    {
+      "path": "pkg/controllers/csr/csr.go",
+      "description": "Requester and NodeClaim checks preceding the certificate approval side effect",
+      "scope": ["charts/**", "hack/security/**"]
+    },
+    {
+      "path": "charts/karpenter/templates/clusterrole-core.yaml",
+      "description": "Declared controller CSR read and approval permissions",
+      "scope": ["pkg/controllers/csr/**", "hack/security/**"]
+    },
+    {
       "path": "pkg/providers/instance/doc.go",
       "description": "GCE VM lifecycle provider ownership",
       "scope": ["pkg/providers/**"]

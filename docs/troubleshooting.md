@@ -154,13 +154,27 @@ Karpenter discovers an existing RUNNING node pool for bootstrap metadata rather 
 
 ## CSR (Certificate Signing Request) not approved
 
-Karpenter runs a CSR approver controller that automatically approves node bootstrap CSRs. If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
+Karpenter runs a CSR approver controller that approves kubelet client CSRs (signer `kubernetes.io/kube-apiserver-client-kubelet`) for nodes it launched. It approves a CSR when all of these are true:
+
+- The request subject is `CN=system:node:<name>` with `O=system:nodes`, and the request has no subject alternative names. The only other organizations allowed are at most one `gke:nodepool:name:<pool>` and at most one `gke:instance:<project-number>:<zone>:<id>`. GKE adds both. When they are present:
+  - The requester must already be in the `gke:nodepool:name:<pool>` group.
+  - On renewal, the node must already be in the `gke:instance:*` group. On bootstrap, the zone in `gke:instance:*` must match the NodeClaim's zone. The instance ID is not checked.
+- The usages include `client auth` and are limited to `digital signature`, `key encipherment`, and `client auth`.
+- One of these is true:
+  - The requester is the GKE bootstrap identity `kubelet-nodepool-bootstrap`, and `<name>` is the instance of a non-deleting GCE NodeClaim with `Launched=True` that has not registered yet.
+  - The requester is `system:node:<name>` in the authenticated `system:nodes` group, renewing its own certificate. A GCE NodeClaim has `Registered=True`, with both its node name and GCE instance name matching `<name>`. Self-renewal remains allowed during drain/deletion.
+
+Eligible NodeClaims must reference this provider's `GCENodeClass` and have a complete GCE ProviderID. See the [CSR approval security contract](security/csr-approval.md) for the authorization boundary, regression checks and remaining limitations.
+
+Every GKE node pool has a bootstrap credential, and every credential authenticates as `kubelet-nodepool-bootstrap`. A node that has any of these credentials can request the name of a new Karpenter node until that node registers.
+
+The controller leaves every other CSR pending for GKE or a cluster administrator. If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
 
 ```sh
 kubectl get csr
 ```
 
-Pending CSRs for Karpenter nodes should be approved automatically. If they are stuck in `Pending`, check the Karpenter controller logs for CSR-related errors and verify that the controller has the `certificates.k8s.io` RBAC permission to approve CSRs.
+Pending CSRs for Karpenter nodes should be approved automatically. If they are stuck in `Pending`, check the Karpenter controller logs for CSR-related errors (the reason a CSR was not approved is logged at debug level) and verify that the controller has the `certificates.k8s.io` RBAC permission to approve CSRs.
 
 ---
 

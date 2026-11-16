@@ -53,6 +53,9 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["certificatesigningrequests"]
+    verbs: ["get", "list", "watch"]
   # Write
   - apiGroups: [""]
     resources: ["events"]
@@ -77,15 +80,10 @@ rules:
     verbs: ["update", "patch"]
     resourceNames:
       - "karpenter-leader-election"
-  # Cannot specify resourceNames on create
-  # https://kubernetes.io/docs/reference/access-authn-authz/rbac/#referring-to-resources
-  - apiGroups: ["certificates.k8s.io"]
-    resources: ["certificatesigningrequests", "certificatesigningrequests/status"]
-    verbs: ["create", "update", "patch", "delete", "get", "list", "watch"]
   - apiGroups: ["certificates.k8s.io"]
     resources: ["certificatesigningrequests/approval"]
-    verbs: ["update", "patch"]
+    verbs: ["update"]
   - apiGroups: ["certificates.k8s.io"]
     resources: ["signers"]
-    resourceNames: ["kubernetes.io/kube-apiserver-client-kubelet", "kubernetes.io/kubelet-serving"]
+    resourceNames: ["kubernetes.io/kube-apiserver-client-kubelet"]
     verbs: ["approve"]
