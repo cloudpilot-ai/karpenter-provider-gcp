@@ -12,13 +12,13 @@ All release versions use public GHCR OCI charts and require Helm 3.8+ or Helm 4.
 export CHART_VERSION=X.Y.Z
 
 # 1. Upgrade CRDs
-helm upgrade karpenter-crd oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd \
+helm upgrade karpenter-crd oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter-crd \
   --version "$CHART_VERSION"
 
 # 2. Upgrade the controller
-helm upgrade karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+helm upgrade karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
   --version "$CHART_VERSION" --namespace karpenter-system -f your-values.yaml \
-  --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp
+  --set controller.image.repository=ghcr.io/karpenter-gcp/karpenter-provider-gcp
 ```
 
 Helm OCI versions support SemVer constraints, for example `--version '>=0.9.0 <0.10.0'` for stable `0.9.x` charts. A range without a prerelease comparator excludes release candidates; select an exact `X.Y.Z-rc.N` or use a prerelease-aware range such as `>=0.9.0-0 <0.10.0` when testing.
@@ -41,7 +41,7 @@ done
 Then install the CRD chart:
 
 ```sh
-helm upgrade --install karpenter-crd oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd \
+helm upgrade --install karpenter-crd oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter-crd \
   --version "$CHART_VERSION"
 ```
 

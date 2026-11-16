@@ -17,7 +17,7 @@ permissions:
 jobs:
   pricing:
     name: Pricing data
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    if: github.repository == 'karpenter-gcp/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     concurrency:
       group: update-pricing
@@ -86,7 +86,7 @@ jobs:
 
   security-pins:
     name: Security pins (Go, base image)
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    if: github.repository == 'karpenter-gcp/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:

@@ -1,4 +1,4 @@
-module github.com/cloudpilot-ai/karpenter-provider-gcp
+module github.com/karpenter-gcp/karpenter-provider-gcp
 
 go 1.27.4
 

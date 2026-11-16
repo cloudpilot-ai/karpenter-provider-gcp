@@ -46,4 +46,4 @@ spec:
 
 GPU workload:
 
-See [`examples/workload/gpu-workload.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/workload/gpu-workload.yaml).
+See [`examples/workload/gpu-workload.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/workload/gpu-workload.yaml).

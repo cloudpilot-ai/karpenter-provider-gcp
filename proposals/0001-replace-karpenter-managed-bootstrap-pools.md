@@ -3,7 +3,7 @@
 - **Status**: Implemented
 - **Authors**: @dm3ch
 - **Created**: 2026-04-17
-- **Related Issues**: [#255](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/255)
+- **Related Issues**: [#255](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/255)
 
 ---
 
@@ -343,7 +343,7 @@ The feature is considered complete when:
 
 ## Implementation Phases
 
-> **Note:** All phases below were implemented together in PR [#263](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/263). The phased breakdown is preserved as a record of the original plan.
+> **Note:** All phases below were implemented together in PR [#263](https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/263). The phased breakdown is preserved as a record of the original plan.
 
 ### Phase 0 — Research: credential viability and pool discovery PoC
 

@@ -3,7 +3,7 @@
 - **Status**: Implemented
 - **Authors**: @dm3ch
 - **Created**: 2026-05-12
-- **Related Issues**: [#330](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/330)
+- **Related Issues**: [#330](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/330)
 
 ---
 

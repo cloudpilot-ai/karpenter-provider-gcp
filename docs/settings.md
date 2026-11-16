@@ -9,7 +9,7 @@ Feature gates control opt-in or experimental behaviors. They are passed as a com
 | Feature Gate                | Helm value                                          | Default | Status | Description                                                                                                                                                                                    |
 |-----------------------------|-----------------------------------------------------|---------|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `NodeRepair`                | `controller.featureGates.nodeRepair`                | `false` | Alpha  | Replaces unhealthy nodes through budgeted repair; see [Node repair](node-repair.md).                                                                                                           |
-| `ReservedCapacity`          | `controller.featureGates.reservedCapacity`          | `false` | Beta   | Enables scheduling to reserved/committed GCP capacity. Disabled until GCE reservation support is implemented (see [#239](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/239)). |
+| `ReservedCapacity`          | `controller.featureGates.reservedCapacity`          | `false` | Beta   | Enables scheduling to reserved/committed GCP capacity. Disabled until GCE reservation support is implemented (see [#239](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/239)). |
 | `SpotToSpotConsolidation`   | `controller.featureGates.spotToSpotConsolidation`   | `true`  | Beta   | Allows consolidation to replace a Spot node with a cheaper Spot node (both single- and multi-node).                                                                                            |
 | `NodeOverlay`               | `controller.featureGates.nodeOverlay`               | `false` | Alpha  | Applies `NodeOverlay` resources to instance type scheduling decisions.                                                                                                                         |
 | `StaticCapacity`            | `controller.featureGates.staticCapacity`            | `false` | Alpha  | Enables NodePools with `spec.replicas` set to maintain a fixed number of nodes regardless of pod demand.                                                                                       |
@@ -28,7 +28,7 @@ controller:
 
 ### Terminate-first disruption (Alpha)
 
-`terminateFirstDrift` and `terminateFirstRepair` permit a static NodePool at its node limit to delete the affected node before refilling capacity. This can temporarily reduce available capacity. Dynamic NodePools require reserved-capacity support for terminate-first fallback; GCP does not yet implement it ([#239](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/239)). These gates do not bypass disruption budgets or provide a general on-demand/Spot quota workaround. `terminateFirstRepair` is ignored when NodeRepair is disabled or legacy repair is enabled.
+`terminateFirstDrift` and `terminateFirstRepair` permit a static NodePool at its node limit to delete the affected node before refilling capacity. This can temporarily reduce available capacity. Dynamic NodePools require reserved-capacity support for terminate-first fallback; GCP does not yet implement it ([#239](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/239)). These gates do not bypass disruption budgets or provide a general on-demand/Spot quota workaround. `terminateFirstRepair` is ignored when NodeRepair is disabled or legacy repair is enabled.
 
 ### Pod deletion-cost management (Alpha)
 
@@ -63,7 +63,7 @@ These options configure the controller's runtime behavior.
 
 Modern repair respects NodePool budgets and the Node's `karpenter.sh/do-not-repair` veto, and stages replacements before deletion. `legacyNodeRepair: true` restores forceful repair without those admission controls. Conditions and tolerations are unchanged. See [Node repair](node-repair.md) and the [migration guide](../MIGRATION.md).
 
-Native in-place reboot is not supported; current GCP repair policies always replace nodes. Reboot support is tracked in [#681](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/681).
+Native in-place reboot is not supported; current GCP repair policies always replace nodes. Reboot support is tracked in [#681](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/681).
 
 ### Scheduler configuration
 
@@ -82,7 +82,7 @@ controller:
 
 ### CSI attachment-limit predictions
 
-The GCP provider does not yet predict CSI volume attachment limits for new instance types ([#682](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/682)). Limits reported by registered nodes' `CSINode` objects still apply. The core upgrade does not add provider predictions.
+The GCP provider does not yet predict CSI volume attachment limits for new instance types ([#682](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/682)). Limits reported by registered nodes' `CSINode` objects still apply. The core upgrade does not add provider predictions.
 
 ### Preference policy
 
@@ -102,7 +102,7 @@ Dynamic Resource Allocation (DRA) is a Kubernetes API for requesting and sharing
 
 Karpenter ignores DRA requests during scheduling simulations by default (`controller.settings.ignoreDRARequests: true`). This preserves scheduling behavior for clusters without DRA drivers, the common case on GKE.
 
-Set `ignoreDRARequests` to `false` only when the cluster has DRA drivers installed and runs workloads that schedule against `ResourceClaim`s. When disabled, Karpenter registers the upstream device-allocation controller and accounts for already-published in-cluster DRA device availability. The GCP provider does not yet publish instance-type DRA device templates for provisioning new accelerator nodes ([#524](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/524)).
+Set `ignoreDRARequests` to `false` only when the cluster has DRA drivers installed and runs workloads that schedule against `ResourceClaim`s. When disabled, Karpenter registers the upstream device-allocation controller and accounts for already-published in-cluster DRA device availability. The GCP provider does not yet publish instance-type DRA device templates for provisioning new accelerator nodes ([#524](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/524)).
 
 ```yaml
 controller:

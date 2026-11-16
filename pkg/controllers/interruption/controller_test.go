@@ -33,8 +33,8 @@ import (
 	karpevents "sigs.k8s.io/karpenter/pkg/events"
 	karpmetrics "sigs.k8s.io/karpenter/pkg/metrics"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 // fakeKubeClient embeds client.Client and overrides only the methods used by the controller.

@@ -49,17 +49,17 @@ import (
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
-	gcpoptions "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
+	gcpoptions "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instancetype"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/version"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 type reproEvents struct{}

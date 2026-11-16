@@ -34,9 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
-	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
+	versionprovider "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/version"
 )
 
 // imageResolutionError covers configuration failures and Ubuntu catalog misses.

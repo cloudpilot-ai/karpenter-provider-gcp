@@ -28,4 +28,4 @@ hack/mutation/crd_annotations.sh
 deepcopy-gen \
   --go-header-file hack/boilerplate.go.txt \
   --output-file zz_generated.deepcopy.go \
-  github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1
+  github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1

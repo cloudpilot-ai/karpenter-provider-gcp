@@ -1,4 +1,4 @@
-module github.com/cloudpilot-ai/karpenter-provider-gcp/hack/pdcsi-data
+module github.com/karpenter-gcp/karpenter-provider-gcp/hack/pdcsi-data
 
 go 1.27.4
 

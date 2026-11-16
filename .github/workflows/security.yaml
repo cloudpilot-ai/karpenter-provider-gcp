@@ -112,7 +112,7 @@ jobs:
     # The action only emits SARIF while uploading, so keep the write scope on
     # trusted refs instead of handing it to pull requests.
     if: >-
-      github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+      github.repository == 'karpenter-gcp/karpenter-provider-gcp' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -161,7 +161,7 @@ jobs:
           cache-key-prefix: govulncheck
           cache-dependency-path: '**/go.*'
           save: >-
-            ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+            ${{ github.repository == 'karpenter-gcp/karpenter-provider-gcp' &&
                 github.ref == 'refs/heads/main' &&
                 (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
       - name: Report Go vulnerabilities
@@ -207,7 +207,7 @@ jobs:
           cache-key-prefix: image-scan-${{ matrix.arch }}
           cache-dependency-path: '**/go.*'
           save: >-
-            ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+            ${{ github.repository == 'karpenter-gcp/karpenter-provider-gcp' &&
                 github.ref == 'refs/heads/main' &&
                 (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
       - name: Install image builder
@@ -263,7 +263,7 @@ jobs:
     name: Publish SARIF
     needs: [govulncheck, container-image]
     if: >-
-      !cancelled() && github.repository == 'cloudpilot-ai/karpenter-provider-gcp' &&
+      !cancelled() && github.repository == 'karpenter-gcp/karpenter-provider-gcp' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10

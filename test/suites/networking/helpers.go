@@ -23,7 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/test/pkg/environment"
 )
 
 // runPrivateNodeTest provisions a node via a GCENodeClass with

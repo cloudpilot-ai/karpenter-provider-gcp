@@ -4,7 +4,7 @@
 
 Provision nodes without a public IP address. Requires [Cloud NAT](https://cloud.google.com/nat/docs/gke-example) for outbound internet access.
 
-See [`examples/nodeclass/private-nodes-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/private-nodes-gcenodeclass.yaml).
+See [`examples/nodeclass/private-nodes-gcenodeclass.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodeclass/private-nodes-gcenodeclass.yaml).
 
 See [Private Nodes](../networking/private-nodes.md) for prerequisites and caveats.
 
@@ -12,7 +12,7 @@ See [Private Nodes](../networking/private-nodes.md) for prerequisites and caveat
 
 Place Karpenter nodes in a specific subnetwork, rather than the cluster's default subnet.
 
-See [`examples/nodeclass/subnetwork-override-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnetwork-override-gcenodeclass.yaml).
+See [`examples/nodeclass/subnetwork-override-gcenodeclass.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodeclass/subnetwork-override-gcenodeclass.yaml).
 
 Combine with `enablePrivateNodes: true` to put nodes in a private subnet:
 
@@ -40,7 +40,7 @@ spec:
     - gke-example-additional
 ```
 
-See [`examples/nodeclass/subnet-ranges-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/subnet-ranges-gcenodeclass.yaml).
+See [`examples/nodeclass/subnet-ranges-gcenodeclass.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodeclass/subnet-ranges-gcenodeclass.yaml).
 
 The deprecated `subnetRangeName` and `subnetRangeNames` are mutually exclusive. Either field completely replaces the discovered range list; it is not merged with cluster ranges. Resolved names and optional integer `totalFreeIP` counts appear on `status.subnetRanges`. Zero means a reported zero; an omitted count means unknown capacity.
 

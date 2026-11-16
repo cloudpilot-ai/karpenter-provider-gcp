@@ -22,8 +22,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/pricing"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 )
 
 const (

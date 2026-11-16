@@ -377,7 +377,7 @@ func TestGetSourceTemplateMetadata(t *testing.T) {
 		require.Equal(t, "gke-current", templateName(p), "expected the label-scan fallback, not the readable stale candidate")
 	})
 
-	// Regression for cloudpilot-ai/karpenter-provider-gcp#577: GKE leaves every superseded
+	// Regression for karpenter-gcp/karpenter-provider-gcp#577: GKE leaves every superseded
 	// template in place carrying the pool's label, and the list API does not order its results.
 	// Taking the first match handed out a pre-CA-rotation template and the nodes never joined.
 	for _, listOrder := range []struct {

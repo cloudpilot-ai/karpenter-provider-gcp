@@ -28,8 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	versionprovider "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/version"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	versionprovider "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/version"
 )
 
 // cosImageProject is the GCP project that owns all Container-Optimized OS GKE images.

@@ -3,13 +3,13 @@
 - **Status**: Draft
 - **Authors**: @dm3ch
 - **Created**: 2026-06-21
-- **Related Issues**: [#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296), [#556](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/556)
+- **Related Issues**: [#296](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/296), [#556](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/556)
 
 ---
 
 ## Summary
 
-PlanetScale now provides the GCP project for this repository's e2e infrastructure. This proposal defines an e2e roadmap for on-demand real GKE CI ([#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296)): first ship useful local tooling, then provision the shared environment with Terraform for manual runs, add WIF with a manual CI pipeline, and finally add PR-comment commands as a thin wrapper.
+PlanetScale now provides the GCP project for this repository's e2e infrastructure. This proposal defines an e2e roadmap for on-demand real GKE CI ([#296](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/296)): first ship useful local tooling, then provision the shared environment with Terraform for manual runs, add WIF with a manual CI pipeline, and finally add PR-comment commands as a thin wrapper.
 
 The local runner tests the current checkout against a controller built from the same commit on a persistent GKE e2e cluster. Later CI captures an immutable PR head SHA, deploys that revision, and publishes a PR comment plus a GitHub check. ChatOps accepts `/e2e`, `/e2e gpu`, or `/e2e full` only after that pipeline exists.
 
@@ -21,7 +21,7 @@ The real GKE cluster is not torn down after each run. Reusing the cluster should
 
 E2E validation is currently a maintainer-local process. That makes results harder to audit, harder to reproduce, and unavailable to contributors without maintainer credentials.
 
-Issue [#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296) asks for a maintainer-approved e2e flow in GitHub Actions: secrets remain in the base repo, untrusted contributor code runs only after maintainer approval, and the tested revision is pinned by SHA.
+Issue [#296](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/296) asks for a maintainer-approved e2e flow in GitHub Actions: secrets remain in the base repo, untrusted contributor code runs only after maintainer approval, and the tested revision is pinned by SHA.
 
 ### Goals
 
@@ -31,14 +31,14 @@ Issue [#296](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/296)
 - Local `standard`, `gpu`, and `all` selections; `/e2e full` maps to `all` in later CI.
 - Persistent GKE infrastructure; no normal per-run teardown.
 - A reusable local runner before CI integration.
-- Terraform-managed shared infrastructure that resolves [#556](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/556).
+- Terraform-managed shared infrastructure that resolves [#556](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/556).
 - PR-visible results and GitHub checks.
 
 ### Non-Goals
 
 - Auto-running e2e on every PR push.
 - Replacing local maintainer debugging workflows.
-- Expanding coverage or adding a KWOK lane; those remain follow-up work under [#250](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/250).
+- Expanding coverage or adding a KWOK lane; those remain follow-up work under [#250](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/250).
 - Treating KWOK as a substitute for real GKE e2e.
 
 ---
@@ -58,7 +58,7 @@ Locally, `make e2e-tests E2E_SELECTION=...` accepts `standard` (the default), `g
 
 ### Initial Infrastructure Model
 
-Terraform provisions and owns the persistent GKE environment in the PlanetScale-provided project for approved manual runs. CI runtime identity and WIF are added with the manual pipeline in Phase 3. The stage that implements [#556](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/556) chooses the target location only after maintainer approval of quotas, capacity, budget and ownership. GPU mode is enabled only after its required capacity is validated.
+Terraform provisions and owns the persistent GKE environment in the PlanetScale-provided project for approved manual runs. CI runtime identity and WIF are added with the manual pipeline in Phase 3. The stage that implements [#556](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/556) chooses the target location only after maintainer approval of quotas, capacity, budget and ownership. GPU mode is enabled only after its required capacity is validated.
 
 Keep the mode-to-cluster abstraction even while all modes target one cluster. If future quota or parallelism requires it, GPU or standard runs can move to separate clusters by changing configuration, not runner logic.
 
@@ -192,7 +192,7 @@ We should not copy ephemeral cluster teardown from AWS/Azure because this propos
 
 KWOK is useful for cheap, fast validation of provider-agnostic Karpenter behavior: scheduling logic, NodePool/NodeClaim controller interactions, disruption flows, and report/runner plumbing. It is not a replacement for this proposal's GKE e2e CI because it cannot validate GCP Compute API calls, GKE bootstrap metadata, IAM, images, networking, disks, GPUs, quota, or actual node registration.
 
-KWOK may be considered later under [#250](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/250), not as a prerequisite for the first real GKE CI PR. A useful future split is:
+KWOK may be considered later under [#250](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/250), not as a prerequisite for the first real GKE CI PR. A useful future split is:
 
 - **GKE lane**: maintainer-triggered, real GCP/GKE behavior, required for merge confidence.
 - **KWOK lane**: a possible future cheap fast e2e for ready PRs or every trusted push.
@@ -215,7 +215,7 @@ The KWOK lane can eventually support issue #250 by covering portable scheduling/
 
 ## Coverage Follow-up
 
-Coverage expansion and a possible KWOK lane remain tracked separately in [#250](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/250). They are not prerequisites for this delivery sequence and do not replace real GKE validation.
+Coverage expansion and a possible KWOK lane remain tracked separately in [#250](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/250). They are not prerequisites for this delivery sequence and do not replace real GKE validation.
 
 ---
 

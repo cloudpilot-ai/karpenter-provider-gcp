@@ -22,7 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/test/pkg/environment"
 )
 
 var env *environment.Environment

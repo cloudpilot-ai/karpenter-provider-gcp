@@ -15,7 +15,7 @@ Flag changes that duplicate GKE API reads across providers, let bootstrap metada
 
 For new or materially changed GCENodeClass settings with a GKE equivalent, prefer the names, nesting, and semantics operators already know from [GKE NodeConfig](https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/NodeConfig) and [Terraform `google_container_node_pool.node_config`](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/container_node_pool#node_config). Translate Terraform snake_case to Kubernetes camelCase; do not copy HCL syntax or add a `spec.nodeConfig` wrapper, since `spec` already holds node configuration.
 
-Examples motivated by review of [#718](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/718#discussion_r4432047492) and [#727](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/727):
+Examples motivated by review of [#718](https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/718#discussion_r4432047492) and [#727](https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/727):
 
 - Prefer `spec.advancedMachineFeatures.threadsPerCore` (Terraform `node_config.advanced_machine_features.threads_per_core`), not a flat `spec.threadsPerCore`.
 - Prefer `spec.gvnic.enabled` (Terraform `node_config.gvnic.enabled`), not a raw GCE `spec.networkConfig.nicType` enum.

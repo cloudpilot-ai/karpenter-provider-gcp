@@ -3,7 +3,7 @@
 - **Status**: Draft
 - **Authors**: @hakman
 - **Created**: 2026-07-07
-- **Related Issues**: [#297](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/297)
+- **Related Issues**: [#297](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/297)
 
 ---
 

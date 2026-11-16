@@ -49,7 +49,7 @@ git fetch origin && git checkout main && git reset --hard origin/main
 
 # Create and push the release branch (pattern: release-X.Y, never release-X.Y.Z)
 git checkout -b release-X.Y
-git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git release-X.Y
+git push https://github.com/karpenter-gcp/karpenter-provider-gcp.git release-X.Y
 
 # Capture the exact commit SHA — never rely on HEAD when tagging
 COMMIT=$(git rev-parse origin/release-X.Y)
@@ -61,7 +61,7 @@ git tag -s vX.Y.0 "$COMMIT" -m "Release vX.Y.0"
 # Verify the tag object points to the right commit before pushing
 git cat-file -p vX.Y.0 | head -3
 
-git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.0
+git push https://github.com/karpenter-gcp/karpenter-provider-gcp.git vX.Y.0
 ```
 
 ### 4. Wait for builds and verify published artefacts
@@ -85,10 +85,10 @@ VERIFY_DIR=$(mktemp -d)
   # Explicit empty entries prevent Podman fallback and native-helper auto-detection.
   printf '%s\n' '{"auths":{"ghcr.io":{}}}' > "$DOCKER_CONFIG/config.json"
   cp "$DOCKER_CONFIG/config.json" "$HELM_REGISTRY_CONFIG"
-  crane manifest "ghcr.io/cloudpilot-ai/karpenter-provider-gcp:v${RELEASE_VERSION}" | jq -r '.mediaType'
-  helm pull oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+  crane manifest "ghcr.io/karpenter-gcp/karpenter-provider-gcp:v${RELEASE_VERSION}" | jq -r '.mediaType'
+  helm pull oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
     --version "$RELEASE_VERSION" --destination "$VERIFY_DIR"
-  helm pull oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd \
+  helm pull oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter-crd \
     --version "$RELEASE_VERSION" --destination "$VERIFY_DIR"
 )
 rm -rf "$VERIFY_DIR"
@@ -105,11 +105,11 @@ Also confirm the new version appears on [ArtifactHub](https://artifacthub.io/pac
 # --notes and --generate-notes are mutually exclusive, so generate the body
 # via the API in a subshell and pass the combined text directly.
 gh release create vX.Y.0 \
-  --repo cloudpilot-ai/karpenter-provider-gcp \
+  --repo karpenter-gcp/karpenter-provider-gcp \
   --title "vX.Y.0" \
-  --notes "For the full migration guide see [MIGRATION.md](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/vX.Y.0/MIGRATION.md).
+  --notes "For the full migration guide see [MIGRATION.md](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/vX.Y.0/MIGRATION.md).
 
-$(gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/generate-notes \
+$(gh api repos/karpenter-gcp/karpenter-provider-gcp/releases/generate-notes \
     --method POST \
     --field tag_name="vX.Y.0" \
     --field previous_tag_name="vA.B.C" \
@@ -120,10 +120,10 @@ $(gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/generate-notes \
 
 > `.github/release.yml` controls changelog categories and excludes `release-prep`-labelled PRs automatically.
 
-Review the draft at `https://github.com/cloudpilot-ai/karpenter-provider-gcp/releases`, then publish:
+Review the draft at `https://github.com/karpenter-gcp/karpenter-provider-gcp/releases`, then publish:
 
 ```bash
-gh release edit vX.Y.0 --repo cloudpilot-ai/karpenter-provider-gcp --draft=false
+gh release edit vX.Y.0 --repo karpenter-gcp/karpenter-provider-gcp --draft=false
 ```
 
 ### 6. Validate on the e2e cluster
@@ -163,10 +163,10 @@ Post a release announcement to **#karpenter-gcp** on [Kubernetes Slack](https://
    git checkout -b fix/<short-description> origin/release-X.Y
 
    # Always cherry-pick the squash/merge commit from main (not individual PR commits)
-   MERGE_SHA=$(gh pr view <N> --repo cloudpilot-ai/karpenter-provider-gcp --json mergeCommit --jq '.mergeCommit.oid')
+   MERGE_SHA=$(gh pr view <N> --repo karpenter-gcp/karpenter-provider-gcp --json mergeCommit --jq '.mergeCommit.oid')
    git cherry-pick -m 1 "$MERGE_SHA"
 
-   git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git fix/<short-description>
+   git push https://github.com/karpenter-gcp/karpenter-provider-gcp.git fix/<short-description>
    ```
 
 2. Open a PR targeting `release-X.Y` (not `main`), get it reviewed and merged.
@@ -186,18 +186,18 @@ Post a release announcement to **#karpenter-gcp** on [Kubernetes Slack](https://
    # Verify the tag object points to the right commit before pushing
    git cat-file -p vX.Y.Z | head -3
 
-   git push https://github.com/cloudpilot-ai/karpenter-provider-gcp.git vX.Y.Z
+   git push https://github.com/karpenter-gcp/karpenter-provider-gcp.git vX.Y.Z
    ```
 
 4. Follow step 4 of the minor release process to wait for the tag-triggered builds and verify published artifacts, signatures, and provenance, substituting `X.Y.Z` for the version. Only after verification succeeds, create the GitHub release draft. Note: `target_commitish` must point to `release-X.Y`, not `main`:
 
    ```bash
    gh release create vX.Y.Z \
-     --repo cloudpilot-ai/karpenter-provider-gcp \
+     --repo karpenter-gcp/karpenter-provider-gcp \
      --title "vX.Y.Z" \
-     --notes "For the full migration guide see [MIGRATION.md](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/vX.Y.Z/MIGRATION.md).
+     --notes "For the full migration guide see [MIGRATION.md](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/vX.Y.Z/MIGRATION.md).
 
-   $(gh api repos/cloudpilot-ai/karpenter-provider-gcp/releases/generate-notes \
+   $(gh api repos/karpenter-gcp/karpenter-provider-gcp/releases/generate-notes \
        --method POST \
        --field tag_name="vX.Y.Z" \
        --field previous_tag_name="vX.Y.prev" \

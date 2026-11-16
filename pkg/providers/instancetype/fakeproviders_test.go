@@ -27,8 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/auth"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 )
 
 // fakeGKEProvider returns a fixed zone list without making GCP API calls.

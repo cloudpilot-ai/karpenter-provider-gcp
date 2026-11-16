@@ -17,10 +17,10 @@ Use Helm 3.8+ or Helm 4 and select the same release version for both charts. All
 Install the chart:
 
 ```bash
-helm install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+helm install karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
   --namespace karpenter \
   --create-namespace \
-  --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp \
+  --set controller.image.repository=ghcr.io/karpenter-gcp/karpenter-provider-gcp \
   --set controller.settings.projectID=<your-gcp-project> \
   --set controller.settings.clusterName=<your-cluster-name> \
   --set controller.settings.clusterLocation=<your-region-or-zone>
@@ -42,7 +42,7 @@ gcloud iam service-accounts add-iam-policy-binding \
 Then annotate the service account and disable the credentials secret:
 
 ```bash
-helm install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+helm install karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
   --set serviceAccount.annotations."iam\.gke\.io/gcp-service-account"=karpenter@<PROJECT_ID>.iam.gserviceaccount.com \
   --set credentials.enabled=false \
   ...
@@ -59,7 +59,7 @@ kubectl create secret generic karpenter-gcp-credentials \
 ```
 
 ```bash
-helm install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+helm install karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
   --set credentials.secretName=karpenter-gcp-credentials \
   ...
 ```
@@ -69,7 +69,7 @@ helm install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts
 Enable automatic metric scraping with a ServiceMonitor when using the [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator):
 
 ```bash
-helm install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+helm install karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
   --set serviceMonitor.enabled=true \
   ...
 ```
@@ -106,7 +106,7 @@ serviceMonitor:
 | controller.featureGates.terminateFirstRepair | bool | `false` | terminateFirstRepair is ALPHA and is disabled by default. Allows repair to terminate an unhealthy node before launching its replacement on a capacity-constrained NodePool. Only takes effect with nodeRepair enabled and legacyNodeRepair disabled. |
 | controller.healthProbe.port | int | `8081` |  |
 | controller.image.pullPolicy | string | `"IfNotPresent"` |  |
-| controller.image.repository | string | `"ghcr.io/cloudpilot-ai/karpenter-provider-gcp"` |  |
+| controller.image.repository | string | `"ghcr.io/karpenter-gcp/karpenter-provider-gcp"` |  |
 | controller.image.tag | string | `""` |  |
 | controller.metrics.port | int | `8080` |  |
 | controller.priorityClassName | string | `"gmp-critical"` |  |
