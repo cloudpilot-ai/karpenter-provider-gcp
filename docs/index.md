@@ -66,6 +66,9 @@ Key capabilities:
 
 ## Community
 
+- [Contributing](../CONTRIBUTING.md), [maintainers](../MAINTAINERS.md), and [Code of Conduct](../CODE_OF_CONDUCT.md)
+- [Governance](../GOVERNANCE.md)
+
 - [Slack](https://cloudpilotaicommunity.slack.com/archives/C093V65481H)
 - [Discord](https://discord.gg/WxFWc87QWr)
 - [GitHub Issues](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues)
