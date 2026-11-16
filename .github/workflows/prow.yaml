@@ -1,0 +1,60 @@
+name: Prow
+
+on:
+  issue_comment:
+    types: [created]
+  # Metadata only: never check out or execute code from the pull request.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - .github/prow.yaml
+      - .github/workflows/prow.yaml
+
+permissions:
+  contents: read
+
+# Keep every comment: a newer command must not replace a pending older command.
+concurrency:
+  group: prow-${{ github.event_name }}-${{ github.event.action }}-${{ github.event.comment.id || github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  commands:
+    name: Commands and OWNERS
+    if: github.event_name != 'workflow_dispatch' && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Approval and labels need writes; contents stays read-only for manual merging.
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Apply Prow commands and OWNERS policy
+        uses: cncf/prow-github-actions@v3.5.0
+        with:
+          github-token: ${{ github.token }}
+          prow-commands: /approve /lgtm /kind /area /label-sync
+          # On synchronize, discard LGTM for the previous head. No scheduled merger.
+          jobs: lgtm
+
+  label-sync:
+    name: Sync label catalogue
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Create and update configured labels
+        uses: cncf/prow-github-actions@v3.5.0
+        with:
+          github-token: ${{ github.token }}
+          jobs: label-sync

@@ -8,26 +8,35 @@ changelog:
   categories:
     - title: Breaking Changes
       labels:
+        - kind/api-change
         - kind api-change
+        - kind/deprecation
         - kind deprecation
     - title: New Features
       labels:
+        - kind/feature
         - kind feature
         - enhancement
     - title: Bug Fixes
       labels:
         - bug
+        - kind/bug
         - kind bug
+        - kind/failing-test
         - kind failing-test
+        - kind/regression
         - kind regression
     - title: Documentation
       labels:
         - documentation
+        - kind/documentation
         - kind documentation
     - title: Maintenance
       labels:
         - chore
         - cleanup
+        - kind/cleanup
         - kind cleanup
         - test
+        - kind/flake
         - kind flake

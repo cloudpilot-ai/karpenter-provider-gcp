@@ -7,13 +7,34 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
+  areas:
+    name: Area labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: pr-areas-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Label changed paths
+        uses: actions/labeler@v7.0.0
+        with:
+          configuration-path: .github/labeler.yaml
+          # Preserve labels applied explicitly with /area or through GitHub.
+          sync-labels: false
+
   label:
     name: Size labels
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     concurrency:
       group: pr-size-${{ github.event.pull_request.number }}
       cancel-in-progress: true

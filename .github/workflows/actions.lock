@@ -23,9 +23,12 @@ workflows:
         - 'updatecli/updatecli-action@v3.10.0'
     '.github/workflows/pr-metadata.yaml':
         - 'actions/github-script@v9.0.0'
+        - 'actions/labeler@v7.0.0'
         - 'step-security/action-add-labels@v1.1.1'
         - 'step-security/action-remove-labels@v1.3.1'
         - 'step-security/action-size@v2.2.0'
+    '.github/workflows/prow.yaml':
+        - 'cncf/prow-github-actions@v3.5.0'
     '.github/workflows/release.yaml':
         - 'actions/attest-build-provenance@v4.2.2'
         - 'actions/checkout@v7.0.1'
@@ -90,6 +93,11 @@ dependencies:
         commit: 'sha1-3a2844b7e9c422d3c10d287c895573f7108da1b3'
         owner_id: 44036562
         repo_id: 205262760
+    'actions/labeler@v7.0.0':
+        ref: 'v7.0.0'
+        commit: 'sha1-bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13'
+        owner_id: 44036562
+        repo_id: 177139928
     'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e':
         ref: 'v7.0.0'
         commit: 'sha1-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
@@ -123,6 +131,11 @@ dependencies:
         uses:
             - 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
             - 'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
+    'cncf/prow-github-actions@v3.5.0':
+        ref: 'v3.5.0'
+        commit: 'sha1-a192ee15687d4ede4d553ff0929b2b296666afd7'
+        owner_id: 13455738
+        repo_id: 254954414
     'crazy-max/ghaction-import-gpg@v7.0.0':
         ref: 'v7.0.0'
         commit: 'sha1-2dc316deee8e90f13e1a351ab510b4d5bc0c82cd'
