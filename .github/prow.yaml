@@ -31,5 +31,6 @@ approve:
   github_review: true
 
 tide:
-  # Authors with merge permission merge manually after the required checks pass.
-  merge_on_events: false
+  # Require OWNERS approval and LGTM on the current head before merging.
+  labels: [lgtm, approved]
+  merge_on_events: true
