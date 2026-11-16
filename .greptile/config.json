@@ -3,6 +3,12 @@
   "instructions": "Use package comments as the source of truth for package ownership boundaries. Flag changes that move GCE VM lifecycle, GKE cluster API reads, source node-pool selection, or provider policy into the wrong package. For pkg/metadata specifically, enforce that it remains a pure typed bootstrap metadata model and render boundary with no provider policy or API calls. For new user-visible behavior, consider whether an end-to-end test would cover meaningful GKE, GCP, or Kubernetes integration risk that unit tests cannot.",
   "rules": [
     {
+      "id": "csr-security",
+      "rule": "Review changed CSR approval and bootstrap behavior against docs/security/csr-approval.md. Check authenticated requester-to-node/NodeClaim authorization, signer/usages/subject validation, bootstrap versus renewal lifecycle, fail-closed approval writes, least-privilege certificate RBAC and credential handling. Require focused tests for concrete bypasses and valid bootstrap/renewal, including drain-time renewal. Trace helpers before reporting gaps; distinguish local test/chart evidence from real GKE validation and VM attestation. Report actionable regressions without treating the documented shared-bootstrap limitation as a new defect or claiming it is solved.",
+      "scope": ["pkg/controllers/csr/**", "pkg/providers/**", "charts/**", "deploy/**", "test/**"],
+      "severity": "high"
+    },
+    {
       "id": "provider-boundaries",
       "rule": "Provider changes should respect package ownership: instance owns GCE VM lifecycle, instance labels/tags, scheduling, capacity errors, zone operations, and provider-owned bootstrap policy; nodepooltemplate owns bootstrap source pool/template discovery; gke owns shared GKE cluster facts; pkg/metadata owns pure GKE bootstrap metadata modeling, parsing, typed mutation helpers, and Compute API rendering.",
       "scope": ["pkg/providers/**", "pkg/metadata/**"],
