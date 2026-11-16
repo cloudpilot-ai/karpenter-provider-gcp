@@ -11,7 +11,7 @@ Graduate `GCENodeClass/v1beta1` next; track subsequent stable readiness separate
 
 ## Motivation
 
-Production adoption, provider `v1.0`, CRD `v1` and CNCF affiliation are different claims. Beta should establish compatibility and safe upgrades before a stable declaration. The project organization, [GHCR/OCI publishing](../RELEASE.md) and [artifact signing/provenance](../docs/getting-started/installation.md#verify-release-artifacts-optional) already exist; verify candidate releases rather than reopen those migrations.
+Production adoption, provider `v1.x`, CRD `v1` and CNCF affiliation are different claims. Beta should establish compatibility and safe upgrades before a stable declaration. The project organization, [GHCR/OCI publishing](../RELEASE.md) and [artifact signing/provenance](../docs/getting-started/installation.md#verify-release-artifacts-optional) already exist; verify candidate releases rather than reopen those migrations.
 
 ## Proposal
 
@@ -42,7 +42,7 @@ Full GKE/Terraform parity is not required. Missing knobs are individually review
 - **Coexistence:** bidirectional conversion and read-modify-write through either endpoint must preserve information, including newer fields.
 - **Deprecation:** ship warnings, an owner/issue, migration instructions, earliest removal release/date and rollback/recovery boundary together.
 
-**N** is the provider minor introducing the usable replacement and deprecation/runbook. Patches and prereleases do not count.
+**N** is the provider minor introducing the usable replacement and deprecation/runbook. Count actual provider minor releases, not patches, prereleases or skipped version numbers.
 
 | Deprecated API     | Served through | Earliest removal | Minimum elapsed time |
 |--------------------|----------------|------------------|----------------------|
@@ -84,7 +84,9 @@ B1 and safety investigations start first; B6 precedes B7, B8/B9 precede B10. Rec
 
 ### Stable milestone
 
-**Stable v1 readiness** is a proposed tracking point, not a deadline or full-parity commitment. Decide explicitly whether provider `v1.0` and CRD `v1` graduate together.
+**Stable v1 readiness** is a proposed tracking point, not a deadline or full-parity commitment. Decide whether the first stable provider release and CRD `v1` graduate together.
+
+Consider aligning stable provider **major/minor** numbers with the tested `karpenter-core` line, keeping provider patches independent ([AWS](https://github.com/aws/karpenter-provider-aws/blob/v1.15.2/go.mod)/[Azure](https://github.com/Azure/karpenter-provider-azure/blob/v1.15.2/go.mod) examples). The first stable tag need not be `v1.0.0`. Agree GCP-only feature cadence, upgrade lag and backports; publish the exact core dependency and tested compatibility matrix. Matching numbers imply neither feature parity nor CRD stability.
 
 | Proposed task                | Completion requirement                                                                                                                                                            |
 |------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -92,7 +94,7 @@ B1 and safety investigations start first; B6 precedes B7, B8/B9 precede B10. Rec
 | **S2 — Stable contract**     | Resolve accepted API/design debt, confirm deferred features' compatibility, and approve stable support/compatibility guarantees.                                                  |
 | **S3 — Migration**           | Retire eligible alpha adapters; prove beta→v1 conversion/storage/recovery while retaining beta endpoints for their required overlap. Stable need not await that overlap's expiry. |
 | **S4 — Production envelope** | Validate supported versions, source-pool changes, WIF/bootstrap/renewal, advertised streaming/hardware and scale/soak; disposition security risks/limitations.                    |
-| **S5 — Release decision**    | Approve maintenance/support policy, operational runbooks, artifact verification and evidence-backed maturity claims. CNCF affiliation is independent.                             |
+| **S5 — Release decision**    | Approve release numbering/cadence/backports, support/maintenance policy, runbooks, artifact verification and evidence-backed maturity claims. CNCF affiliation is independent.    |
 
 Separate follow-ups: **C1** unused exports (optional before beta); **R1** alpha retirement (assigned before beta, verified in S3); **R2** remaining ownership cleanup after prerequisites. Alpha retirement need not block beta launch. Promote additive features only by explicit scope decision.
 
