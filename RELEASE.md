@@ -100,27 +100,6 @@ rm -rf "$VERIFY_DIR"
 
 Also confirm the new version appears on Artifact Hub for both the [controller](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter) and [CRDs](https://artifacthub.io/packages/helm/karpenter-provider-gcp-crd/karpenter-crd), under the [karpenter-gcp organization](https://artifacthub.io/packages/search?org=karpenter-gcp).
 
-#### Artifact Hub repository metadata
-
-After publishing both charts, the chart job publishes each file in `charts/artifacthub/<chart>/artifacthub-repo.yml` to that chart's `artifacthub.io` OCI tag. Each file must contain the ID of its corresponding Artifact Hub repository; they are not interchangeable. Artifact Hub uses these artifacts to verify the publisher when it processes the repositories.
-
-If chart publication succeeded but metadata publication failed, do **not** rerun the release workflow: the immutable chart-version checks will reject it. After confirming both original charts and their signatures/provenance are available, obtain approval for metadata-only recovery. From the exact release checkout, with ORAS installed and authenticated to GHCR, push only the missing or incorrect metadata artifacts:
-
-```bash
-# Run only for the affected chart(s), after authorization.
-for chart in karpenter karpenter-crd; do
-  (
-    cd "charts/artifacthub/$chart"
-    oras push "ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/$chart:artifacthub.io" \
-      --registry-config "${DOCKER_CONFIG:-$HOME/.docker}/config.json" \
-      --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
-      artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
-  )
-done
-```
-
-Check both repositories' processing status and verified-publisher badges in Artifact Hub after ingestion. Metadata-only recovery does not rebuild, re-sign, or overwrite chart versions.
-
 > **Check signatures:** Run the commands in [Verify release artifacts](docs/getting-started/installation.md#verify-release-artifacts-optional) with `VERSION=vX.Y.0` (note the leading `v`). This confirms that users can verify the published image signature, chart signatures, and build provenance. Fix any availability, signature, or provenance failure before proceeding to the GitHub release draft or publication. Confirm both the `karpenter` and `karpenter-crd` OCI charts, including anonymous access with supported Helm 3/4 clients.
 
 ### 5. Create GitHub release
