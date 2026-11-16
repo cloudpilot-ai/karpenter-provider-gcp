@@ -46,12 +46,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/auth"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/gke"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/auth"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/pricing"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 const (

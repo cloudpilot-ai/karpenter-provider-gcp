@@ -34,8 +34,8 @@ import (
 	kubeletconfig "k8s.io/kubelet/config/v1beta1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
-	gcpv1alpha1 "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
+	gcpv1alpha1 "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/test/pkg/environment"
 )
 
 // kubeletConfigCase describes one e2e scenario: provision a node with

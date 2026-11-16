@@ -3,7 +3,7 @@
 - **Status**: In Review
 - **Authors**: @joemiller
 - **Created**: 2026-06-14
-- **Related Issues**: [#387](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/387), [#385](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/385)
+- **Related Issues**: [#387](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/387), [#385](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/385)
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Getting involved
 
-Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues) for questions, reproducible bugs, and feature requests; choose the appropriate issue template. Report vulnerabilities privately using [SECURITY.md](SECURITY.md), not in an issue.
+Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues) for questions, reproducible bugs, and feature requests; choose the appropriate issue template. Report vulnerabilities privately using [SECURITY.md](SECURITY.md), not in an issue.
 
 Submit changes through a pull request using the PR template, and run the applicable checks in the Makefile before requesting review.
 
@@ -30,7 +30,7 @@ A proposal is **not required** for bug fixes, small flag additions, doc-only cha
 4. Iterate in review. When the approach is agreed by maintainers, update `Status` to `Implementable`.
 5. Implementation PRs reference the proposal via the "Related proposal" field in the PR template.
 
-Proposals are reviewed by project maintainers via GitHub PR review. Assign the PR for review or mention `@cloudpilot-ai/karpenter-gcp` when the proposal is ready for feedback.
+Proposals are reviewed by project maintainers via GitHub PR review. Assign the PR to a project maintainer for review when the proposal is ready for feedback.
 
 ### Status values
 

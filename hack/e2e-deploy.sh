@@ -95,16 +95,16 @@ if [[ -n "${RELEASE_VERSION}" ]]; then
   # --- Published release mode ---
   log "Installing published release ${RELEASE_VERSION} from GHCR..."
 
-  helm upgrade --install karpenter-crd oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd \
+  helm upgrade --install karpenter-crd oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter-crd \
     --version "${RELEASE_VERSION}" \
     --namespace karpenter-system \
     --create-namespace \
     --wait \
     --timeout 2m
 
-  helm upgrade --install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+  helm upgrade --install karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
     --version "${RELEASE_VERSION}" \
-    --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp \
+    --set controller.image.repository=ghcr.io/karpenter-gcp/karpenter-provider-gcp \
     "${HELM_COMMON_ARGS[@]}"
 
   log "Deploy complete. karpenter ${RELEASE_VERSION} installed from published chart."
@@ -124,7 +124,7 @@ else
       ko build --bare \
       --platform linux/amd64 \
       --tags "${KO_IMAGE_TAG}" \
-      github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller
+      github.com/karpenter-gcp/karpenter-provider-gcp/cmd/controller
   )"
   log "Image: ${IMAGE_REF}"
 

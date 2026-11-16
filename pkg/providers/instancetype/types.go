@@ -30,11 +30,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/disktype"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 // staticKubeProxyCPUMilliCore matches the CPU request on GKE's node-owned

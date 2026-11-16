@@ -25,7 +25,7 @@ import (
 	coreoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 const (

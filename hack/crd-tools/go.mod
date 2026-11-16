@@ -1,4 +1,4 @@
-module github.com/cloudpilot-ai/karpenter-provider-gcp/hack/crd-tools
+module github.com/karpenter-gcp/karpenter-provider-gcp/hack/crd-tools
 
 go 1.27.4
 

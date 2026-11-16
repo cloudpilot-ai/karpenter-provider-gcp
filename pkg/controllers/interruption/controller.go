@@ -34,9 +34,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 
-	interruptionevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption/events"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	interruptionevents "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/controllers/interruption/events"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 const (

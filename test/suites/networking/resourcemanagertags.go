@@ -26,7 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/test/pkg/environment"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/test/pkg/environment"
 )
 
 var _ = Describe("Resource manager tags", Label("suite:networking"), func() {

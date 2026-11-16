@@ -43,9 +43,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers/interruption"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/cloudprovider"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/controllers/interruption"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 const (

@@ -1,10 +1,10 @@
 # Proposal: Typed bootstrap metadata model
 
-- **Status**: Implemented by [#430](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/430)
+- **Status**: Implemented by [#430](https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/430)
 - **Authors**: @dm3ch
 - **Created**: 2026-06-09
-- **Related Issues**: [#399](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/399), [#408](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/408)
-- **Related PRs**: [#430](https://github.com/cloudpilot-ai/karpenter-provider-gcp/pull/430)
+- **Related Issues**: [#399](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/399), [#408](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/408)
+- **Related PRs**: [#430](https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/430)
 
 ---
 

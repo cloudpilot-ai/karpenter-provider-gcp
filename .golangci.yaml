@@ -79,7 +79,7 @@ formatters:
         - localmodule
     goimports:
       local-prefixes:
-        - github.com/cloudpilot-ai/karpenter-provider-gcp
+        - github.com/karpenter-gcp/karpenter-provider-gcp
   exclusions:
     generated: lax
     paths:

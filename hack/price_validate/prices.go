@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 )
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}

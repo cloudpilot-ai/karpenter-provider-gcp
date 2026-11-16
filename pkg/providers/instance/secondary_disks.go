@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
 
 func secondaryBootDiskImageDeviceName(image string) string {

@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis"
 )
 
 func init() {

@@ -4,7 +4,7 @@
 
 Set GCE instance metadata key-value pairs for advanced configuration. Values in `spec.metadata` override matching keys from the base instance template; new keys are added.
 
-See [`examples/nodeclass/gcenodeclass-metadata.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/gcenodeclass-metadata.yaml).
+See [`examples/nodeclass/gcenodeclass-metadata.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodeclass/gcenodeclass-metadata.yaml).
 
 For example, if the base GKE node-pool template sets `serial-port-logging-enable=true`, specifying `serial-port-logging-enable: "false"` in `spec.metadata` results in the provisioned instance having `serial-port-logging-enable=false`.
 
@@ -46,7 +46,7 @@ Using any of these keys causes a CRD validation error at admission time. Custom 
 
 Pre-load container images onto a secondary boot disk to reduce node startup latency. See [GKE container image pre-loading](https://cloud.google.com/kubernetes-engine/docs/how-to/data-container-image-preloading) for how to build the pre-loaded image.
 
-See [`examples/nodeclass/secondary-disk-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/secondary-disk-gcenodeclass.yaml).
+See [`examples/nodeclass/secondary-disk-gcenodeclass.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodeclass/secondary-disk-gcenodeclass.yaml).
 
 ## Data disks
 
@@ -281,7 +281,7 @@ resources:
     hugepages-2Mi: 1Gi
 ```
 
-See [`examples/nodeclass/hugepages-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/hugepages-gcenodeclass.yaml) for a complete GCENodeClass and NodeOverlay, and [Manage HugePages](https://kubernetes.io/docs/tasks/manage-hugepages/scheduling-hugepages/) for how pods consume hugepages.
+See [`examples/nodeclass/hugepages-gcenodeclass.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodeclass/hugepages-gcenodeclass.yaml) for a complete GCENodeClass and NodeOverlay, and [Manage HugePages](https://kubernetes.io/docs/tasks/manage-hugepages/scheduling-hugepages/) for how pods consume hugepages.
 
 ## Shielded VM
 
@@ -438,7 +438,7 @@ Z4D supports only Hyperdisk. If you set a boot disk `category`, choose a Hyperdi
 
 Karpenter sets `scheduling.onHostMaintenance` to `MIGRATE` for on-demand Z3 and Z4D virtual machine (non-bare-metal) nodes, so they live-migrate during host maintenance. Compute Engine cannot live-migrate Z3 shapes with more than 18 TiB of bundled local SSD or Z4D shapes with more than 42,000 GiB. Karpenter sets `TERMINATE` for those shapes and for Spot nodes.
 
-If you are upgrading from a version that accepted `spec.disks[].category: local-ssd`, see [`MIGRATION.md`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/MIGRATION.md).
+If you are upgrading from a version that accepted `spec.disks[].category: local-ssd`, see [`MIGRATION.md`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/MIGRATION.md).
 
 ## Disk type scheduling
 

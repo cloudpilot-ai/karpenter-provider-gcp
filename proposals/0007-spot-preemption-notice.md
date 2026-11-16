@@ -3,7 +3,7 @@
 - **Status**: In Review
 - **Authors**: @ryan-macdonald-nb
 - **Created**: 2026-08-13
-- **Related Issues**: [#295](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/295)
+- **Related Issues**: [#295](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/295)
 
 ---
 

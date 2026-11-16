@@ -18,15 +18,15 @@ Install CRDs first:
 
 ```bash
 # Requires Helm 3.8+ or Helm 4; set the same --version X.Y.Z on both charts.
-helm upgrade --install karpenter-crd oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter-crd
+helm upgrade --install karpenter-crd oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter-crd
 ```
 
 Then install the controller:
 
 ```bash
-helm upgrade --install karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter \
+helm upgrade --install karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter \
   --namespace karpenter-system --create-namespace \
-  --set controller.image.repository=ghcr.io/cloudpilot-ai/karpenter-provider-gcp \
+  --set controller.image.repository=ghcr.io/karpenter-gcp/karpenter-provider-gcp \
   --set "controller.settings.projectID=<project>" \
   --set "controller.settings.clusterName=<cluster>" \
   --set "controller.settings.clusterLocation=<region-or-zone>"

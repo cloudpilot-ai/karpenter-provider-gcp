@@ -31,7 +31,7 @@ import (
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/subnet"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
 const testNetwork = "projects/test-project/global/networks/default"

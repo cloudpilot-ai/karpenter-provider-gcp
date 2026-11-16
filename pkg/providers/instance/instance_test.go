@@ -48,13 +48,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instancetype"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 func TestIsInsufficientCapacityErrorMatchesCode(t *testing.T) {

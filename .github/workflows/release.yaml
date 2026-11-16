@@ -8,7 +8,7 @@ on:
 jobs:
   image-publish:
     name: Publish image
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    if: github.repository == 'karpenter-gcp/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -57,7 +57,7 @@ jobs:
           IMAGE_TAG: ${{ env.tag }}
         run: |
           export KO_DOCKER_REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
-          IMAGE=$(ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
+          IMAGE=$(ko build --bare github.com/karpenter-gcp/karpenter-provider-gcp/cmd/controller \
             --tags "$IMAGE_TAG" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms")
           # ko includes the release tag before the digest; retain the immutable reference.
           IMAGE=${IMAGE/":$IMAGE_TAG@"/@}
@@ -102,7 +102,7 @@ jobs:
 
   package-chart:
     name: Publish chart
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    if: github.repository == 'karpenter-gcp/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     concurrency:
       group: chart-pages-publish

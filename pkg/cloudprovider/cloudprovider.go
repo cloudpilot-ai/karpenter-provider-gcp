@@ -39,14 +39,14 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis/v1alpha1"
-	cloudproviderevents "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider/events"
-	gcperrors "github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/errors"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/imagefamily"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instance"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/instancetype"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/utils/localssd"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	cloudproviderevents "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/cloudprovider/events"
+	gcperrors "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/errors"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/imagefamily"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instancetype"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils/localssd"
 )
 
 const CloudProviderName = "gcp"

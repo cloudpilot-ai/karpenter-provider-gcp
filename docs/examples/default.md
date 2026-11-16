@@ -1,12 +1,12 @@
 # Default NodePool examples
 
-Standalone YAML files for the examples below are in [`examples/`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/tree/main/examples) and can be applied directly.
+Standalone YAML files for the examples below are in [`examples/`](https://github.com/karpenter-gcp/karpenter-provider-gcp/tree/main/examples) and can be applied directly.
 
 ## Spot and on-demand, multi-zone
 
 A general-purpose pool that selects spot instances when available and falls back to on-demand.
 
-See [`examples/nodeclass/default-gcenodeclass.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodeclass/default-gcenodeclass.yaml) and [`examples/nodepool/default-nodepool.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodepool/default-nodepool.yaml).
+See [`examples/nodeclass/default-gcenodeclass.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodeclass/default-gcenodeclass.yaml) and [`examples/nodepool/default-nodepool.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodepool/default-nodepool.yaml).
 
 ## On-demand only
 

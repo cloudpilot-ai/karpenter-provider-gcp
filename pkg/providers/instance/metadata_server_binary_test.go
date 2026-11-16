@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/metadata"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 )
 
 func TestPatchKubeEnvServerBinaryForArch(t *testing.T) {

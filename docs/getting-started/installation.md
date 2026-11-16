@@ -17,7 +17,7 @@ gcloud services enable compute.googleapis.com container.googleapis.com
 
 ## Step 1 — Create a GCP service account
 
-Karpenter needs a minimal set of GCP permissions to manage Compute Engine instances and read GKE cluster configuration. The canonical permission list is in [`deploy/iam/karpenter-controller-role.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/deploy/iam/karpenter-controller-role.yaml) in the repository — that file is the source of truth for all IAM references.
+Karpenter needs a minimal set of GCP permissions to manage Compute Engine instances and read GKE cluster configuration. The canonical permission list is in [`deploy/iam/karpenter-controller-role.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/deploy/iam/karpenter-controller-role.yaml) in the repository — that file is the source of truth for all IAM references.
 
 ```sh
 export PROJECT_ID=<your-project-id>
@@ -27,7 +27,7 @@ gcloud iam service-accounts create $GSA_NAME --project=$PROJECT_ID
 
 # Create the minimal custom role from the canonical permission list.
 # If upgrading and the role already exists, use `gcloud iam roles update` with the same flags.
-curl -fsSL https://raw.githubusercontent.com/cloudpilot-ai/karpenter-provider-gcp/main/deploy/iam/karpenter-controller-role.yaml \
+curl -fsSL https://raw.githubusercontent.com/karpenter-gcp/karpenter-provider-gcp/main/deploy/iam/karpenter-controller-role.yaml \
     -o karpenter-controller-role.yaml
 gcloud iam roles create karpenter_controller \
     --project=$PROJECT_ID \
@@ -88,8 +88,8 @@ To verify signatures and build provenance first, follow [Verify release artifact
 ```sh
 # Select a release published to GHCR (Helm 3.8+ or Helm 4).
 export CHART_VERSION=X.Y.Z
-export CHARTS_REPOSITORY=oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts
-export IMAGE_REPOSITORY=ghcr.io/cloudpilot-ai/karpenter-provider-gcp
+export CHARTS_REPOSITORY=oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts
+export IMAGE_REPOSITORY=ghcr.io/karpenter-gcp/karpenter-provider-gcp
 
 # Install CRDs first (separate chart ensures CRDs are upgraded on helm upgrade)
 helm upgrade --install karpenter-crd "${CHARTS_REPOSITORY}/karpenter-crd" --version "$CHART_VERSION"
@@ -176,7 +176,7 @@ Replace `vX.Y.Z` with a signed release tag, including its leading `v`:
 ```sh
 export VERSION="vX.Y.Z"
 export CHART_VERSION="${VERSION#v}"
-export REPOSITORY="cloudpilot-ai/karpenter-provider-gcp"
+export REPOSITORY="karpenter-gcp/karpenter-provider-gcp"
 export RELEASE_WORKFLOW="${REPOSITORY}/.github/workflows/release.yaml"
 ```
 
@@ -189,7 +189,7 @@ Use the exact workflow path that originally built the selected release. Some sig
 Resolve the tag once and verify that immutable image digest against the release workflow and tag:
 
 ```sh
-export IMAGE_REPOSITORY="ghcr.io/cloudpilot-ai/karpenter-provider-gcp"
+export IMAGE_REPOSITORY="ghcr.io/karpenter-gcp/karpenter-provider-gcp"
 IMAGE_DIGEST=$(crane digest "${IMAGE_REPOSITORY}:${VERSION}")
 IMAGE="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
 cosign verify "${IMAGE}" \
@@ -203,7 +203,7 @@ cosign verify "${IMAGE}" \
 The project's signing-key fingerprint is `7D575660AC2C6650E263439577A23E34D5FE007A`. Trust this reviewed fingerprint, not a fingerprint supplied by an unverified chart repository. Import the downloaded public material into a temporary GnuPG home, then export **only** that trusted key for Helm:
 
 ```sh
-export CHARTS_REPOSITORY="oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts"
+export CHARTS_REPOSITORY="oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts"
 # Public signing-key location (separate from the chart registry).
 export CHARTS_URL="https://cloudpilot-ai.github.io/karpenter-provider-gcp"
 export FINGERPRINT="7D575660AC2C6650E263439577A23E34D5FE007A"
@@ -258,7 +258,7 @@ Keep any additional values from Step 2, including the dedicated node service acc
 
 ## Development builds
 
-Main builds use the same image repository as releases: `ghcr.io/cloudpilot-ai/karpenter-provider-gcp:sha-<full-commit-sha>`, with a mutable `main` alias. They are not supported production releases. Set `controller.image.tag` explicitly; prefer `sha-<full-sha>@sha256:...` to a mutable tag. Released versions retain their `vX.Y.Z` tags; development builds do not publish a `latest` alias.
+Main builds use the same image repository as releases: `ghcr.io/karpenter-gcp/karpenter-provider-gcp:sha-<full-commit-sha>`, with a mutable `main` alias. They are not supported production releases. Set `controller.image.tag` explicitly; prefer `sha-<full-sha>@sha256:...` to a mutable tag. Released versions retain their `vX.Y.Z` tags; development builds do not publish a `latest` alias.
 
 Development builds publish SBOMs but do not publish the release signatures or build attestations described above.
 

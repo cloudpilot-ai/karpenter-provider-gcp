@@ -7,7 +7,7 @@ on:
 jobs:
   latest-image-build-publish:
     name: Publish image
-    if: github.repository == 'cloudpilot-ai/karpenter-provider-gcp'
+    if: github.repository == 'karpenter-gcp/karpenter-provider-gcp'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,7 +31,7 @@ jobs:
           go-version: ${{ steps.go-toolchain.outputs.go-version }}
           cache-key-prefix: image-publish
           cache-dependency-path: '**/go.*'
-          save: ${{ github.repository == 'cloudpilot-ai/karpenter-provider-gcp' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save: ${{ github.repository == 'karpenter-gcp/karpenter-provider-gcp' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       # setup-ko authenticates to GHCR using GITHUB_TOKEN.
       - uses: ko-build/setup-ko@v0.10
@@ -39,7 +39,7 @@ jobs:
       - name: Build and publish image
         run: |
           export KO_DOCKER_REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
-          ko build --bare github.com/cloudpilot-ai/karpenter-provider-gcp/cmd/controller \
+          ko build --bare github.com/karpenter-gcp/karpenter-provider-gcp/cmd/controller \
             --tags "main,sha-$GITHUB_SHA" --sbom=spdx --sbom-dir "$RUNNER_TEMP/sboms"
 
       - name: Retain SPDX SBOMs

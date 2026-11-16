@@ -25,9 +25,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/cloudprovider"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/controllers"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/cloudprovider"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/controllers"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator"
 )
 
 func main() {

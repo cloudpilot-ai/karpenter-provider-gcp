@@ -1,6 +1,6 @@
 # Adopters
 
-This page contains a non-comprehensive list of organizations that use the [Karpenter GCP Cloud Provider](https://github.com/cloudpilot-ai/karpenter-provider-gcp), either as end users or to build higher-level products and services, that we know of.
+This page contains a non-comprehensive list of organizations that use the [Karpenter GCP Cloud Provider](https://github.com/karpenter-gcp/karpenter-provider-gcp), either as end users or to build higher-level products and services, that we know of.
 
 ## Adding your organization to this list
 

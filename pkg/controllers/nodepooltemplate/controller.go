@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 )
 
 type Controller struct {

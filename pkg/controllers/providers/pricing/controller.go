@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/pricing"
 )
 
 // GCP spot prices change at most daily; on-demand roughly yearly.

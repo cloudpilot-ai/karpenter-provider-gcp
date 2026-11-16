@@ -3,7 +3,7 @@
 - **Status**: Draft
 - **Authors**: @username
 - **Created**: YYYY-MM-DD
-- **Related Issues**: [#NNN](https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/NNN)
+- **Related Issues**: [#NNN](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/NNN)
 
 <!-- Usage: copy this file to proposals/NNNN-short-title.md (NNNN = next available four-digit number).
      Required sections: Summary, Motivation, Proposal.

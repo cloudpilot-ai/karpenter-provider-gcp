@@ -30,7 +30,7 @@ import (
 	containerv1 "google.golang.org/api/container/v1"
 	googleapioption "google.golang.org/api/option"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
 )
 
 func TestIsMultiNetworkingEnabled(t *testing.T) {

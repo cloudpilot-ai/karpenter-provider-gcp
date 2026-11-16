@@ -25,8 +25,8 @@ import (
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/apis"
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/disktype"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/disktype"
 )
 
 func init() {
@@ -106,7 +106,7 @@ var (
 	// the provider: GKE supplies a node-owned mirror pod on Karpenter nodes, and
 	// treating the DaemonSet selector as compatible would double-count or run a
 	// second kube-proxy pod.
-	// See https://github.com/cloudpilot-ai/karpenter-provider-gcp/issues/202
+	// See https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/202
 	LabelGKEReadinessCalicoReady           = "projectcalico.org/ds-ready"
 	LabelGKEReadinessKubeProxyReady        = "node.kubernetes.io/kube-proxy-ds-ready"
 	LabelGKEReadinessMetadataServerEnabled = "iam.gke.io/gke-metadata-server-enabled"

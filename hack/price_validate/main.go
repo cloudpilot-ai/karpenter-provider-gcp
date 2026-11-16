@@ -33,7 +33,7 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
 
-	"github.com/cloudpilot-ai/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/pricing/instanceprice"
 )
 
 var knownExtras = map[string]bool{

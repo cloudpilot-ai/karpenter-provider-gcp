@@ -9,7 +9,7 @@ This feature is disabled by default and requires the `staticCapacity` feature ga
 ## Enabling the feature gate
 
 ```sh
-helm upgrade karpenter oci://ghcr.io/cloudpilot-ai/karpenter-provider-gcp/charts/karpenter --install \
+helm upgrade karpenter oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter --install \
   --namespace karpenter-system \
   --set "controller.featureGates.staticCapacity=true" \
   ...
@@ -27,7 +27,7 @@ controller:
 
 Keep three on-demand nodes running at all times to absorb burst traffic without cold-start latency.
 
-See [`examples/nodepool/static-capacity-nodepool.yaml`](https://github.com/cloudpilot-ai/karpenter-provider-gcp/blob/main/examples/nodepool/static-capacity-nodepool.yaml).
+See [`examples/nodepool/static-capacity-nodepool.yaml`](https://github.com/karpenter-gcp/karpenter-provider-gcp/blob/main/examples/nodepool/static-capacity-nodepool.yaml).
 
 ## Combining static and dynamic pools
 
