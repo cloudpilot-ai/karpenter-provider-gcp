@@ -339,6 +339,17 @@ func TestCalculateDiskConfiguration(t *testing.T) {
 			expectedSSDCount: 1,
 		},
 		{
+			name:      "z4m bundled partition is 14000 GiB",
+			nodeClass: &v1alpha1.GCENodeClass{},
+			mt: &computepb.MachineType{
+				Name:             lo.ToPtr("z4m-highmem-16"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
+			},
+			expectedBootGiB:  100,
+			expectedSSDGiB:   14000,
+			expectedSSDCount: 1,
+		},
+		{
 			name:      "BundledLocalSsds PartitionCount=0 treated as no SSDs",
 			nodeClass: &v1alpha1.GCENodeClass{},
 			mt: &computepb.MachineType{
@@ -594,6 +605,28 @@ func TestNewInstanceTypeModeAware(t *testing.T) {
 			wantReservedGiB: 50,
 		},
 		{
+			name: "z4m RawBlock excludes bundled SSD from ephemeral capacity",
+			mt: &computepb.MachineType{
+				Name: lo.ToPtr("z4m-highmem-16"), GuestCpus: lo.ToPtr[int32](16), MemoryMb: lo.ToPtr[int32](124928),
+				BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
+			},
+			mode:            v1alpha1.LocalSSDModeRawBlock,
+			count:           1,
+			wantCapGiB:      bootModeCapGiB,
+			wantReservedGiB: bootModeReservedGiB,
+		},
+		{
+			name: "z4m Ephemeral uses 14000 GiB SSD capacity",
+			mt: &computepb.MachineType{
+				Name: lo.ToPtr("z4m-highmem-16"), GuestCpus: lo.ToPtr[int32](16), MemoryMb: lo.ToPtr[int32](124928),
+				BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr[int32](1)},
+			},
+			mode:            v1alpha1.LocalSSDModeEphemeral,
+			count:           1,
+			wantCapGiB:      14000,
+			wantReservedGiB: 50,
+		},
+		{
 			name: "z3-highmem-88 legacy SKU Ephemeral (12 partitions × 3000 GiB)",
 			mt: &computepb.MachineType{
 				Name: lo.ToPtr("z3-highmem-88"), GuestCpus: lo.ToPtr[int32](88), MemoryMb: lo.ToPtr[int32](720896),
@@ -700,6 +733,59 @@ func TestZ4DDiskTypeRequirements(t *testing.T) {
 			scheduling.NewRequirement("disk-type.gke.io/"+diskType, corev1.NodeSelectorOpIn, "true"),
 		)
 		require.Error(t, requirements.Intersects(volumeRequirement), diskType)
+	}
+}
+
+func TestZ4MRequirements(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		shape      string
+		size       string
+		cpus       int32
+		memoryMiB  int32
+		partitions int32
+	}{
+		{"z4m-highmem-16", "16", 16, 124928, 1},
+		{"z4m-highmem-32", "32", 32, 249856, 2},
+		{"z4m-highmem-48", "48", 48, 374784, 3},
+		{"z4m-highmem-192", "192", 192, 1523712, 12},
+	} {
+		t.Run(tc.shape, func(t *testing.T) {
+			t.Parallel()
+			requirements := computeRequirements(&computepb.MachineType{
+				Name: lo.ToPtr(tc.shape), GuestCpus: lo.ToPtr(tc.cpus), MemoryMb: lo.ToPtr(tc.memoryMiB),
+				Architecture:     lo.ToPtr("X86_64"),
+				BundledLocalSsds: &computepb.BundledLocalSsds{PartitionCount: lo.ToPtr(tc.partitions)},
+			}, nil, "us-central1", int(tc.partitions), nil)
+
+			require.Equal(t, []string{"amd64"}, requirements.Get(corev1.LabelArchStable).Values())
+			require.Equal(t, []string{"z4m"}, requirements.Get(v1alpha1.LabelInstanceFamily).Values())
+			require.Equal(t, []string{"4"}, requirements.Get(v1alpha1.LabelInstanceGeneration).Values())
+			require.Equal(t, []string{"highmem"}, requirements.Get(v1alpha1.LabelInstanceShape).Values())
+			require.Equal(t, []string{tc.size}, requirements.Get(v1alpha1.LabelInstanceSize).Values())
+			require.Equal(t, []string{fmt.Sprint(tc.partitions)}, requirements.Get(v1alpha1.LabelInstanceLocalSsdCount).Values())
+			for _, diskType := range []string{"hyperdisk-balanced", "hyperdisk-balanced-high-availability", "hyperdisk-throughput", "hyperdisk-ml"} {
+				volumeRequirement := scheduling.NewRequirements(
+					scheduling.NewRequirement("disk-type.gke.io/"+diskType, corev1.NodeSelectorOpIn, "true"),
+				)
+				require.NoError(t, requirements.Intersects(volumeRequirement), diskType)
+			}
+			for _, diskType := range []string{"pd-balanced", "pd-ssd", "pd-standard", "pd-extreme"} {
+				volumeRequirement := scheduling.NewRequirements(
+					scheduling.NewRequirement("disk-type.gke.io/"+diskType, corev1.NodeSelectorOpIn, "true"),
+				)
+				require.Error(t, requirements.Intersects(volumeRequirement), diskType)
+			}
+			extremeRequirement := scheduling.NewRequirements(
+				scheduling.NewRequirement("disk-type.gke.io/hyperdisk-extreme", corev1.NodeSelectorOpIn, "true"),
+			)
+			if tc.cpus < 48 {
+				require.Error(t, requirements.Intersects(extremeRequirement))
+			} else {
+				require.NoError(t, requirements.Intersects(extremeRequirement))
+			}
+		})
 	}
 }
 
