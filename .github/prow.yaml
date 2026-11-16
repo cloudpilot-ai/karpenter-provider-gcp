@@ -26,8 +26,8 @@ labels:
     - pricing
 
 approve:
-  # An approver other than the PR author must cover every changed file.
-  require_self_approval: true
+  # Count the author's approval for files covered by their OWNERS entries.
+  require_self_approval: false
   github_review: true
 
 tide:
