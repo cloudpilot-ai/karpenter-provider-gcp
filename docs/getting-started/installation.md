@@ -205,7 +205,7 @@ The project's signing-key fingerprint is `7D575660AC2C6650E263439577A23E34D5FE00
 ```sh
 export CHARTS_REPOSITORY="oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts"
 # Public signing-key location (separate from the chart registry).
-export CHARTS_URL="https://cloudpilot-ai.github.io/karpenter-provider-gcp"
+export CHARTS_URL="https://raw.githubusercontent.com/karpenter-gcp/karpenter-provider-gcp/main/charts"
 export FINGERPRINT="7D575660AC2C6650E263439577A23E34D5FE007A"
 curl --fail --location "${CHARTS_URL}/keys/${FINGERPRINT}.asc" --output karpenter-signing-key.asc
 KEY_HOME=$(mktemp -d)
