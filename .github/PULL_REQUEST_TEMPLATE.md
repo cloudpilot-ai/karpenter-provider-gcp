@@ -6,18 +6,12 @@
 #### What type of PR is this?
 
 <!--
-Add one of the following kinds:
-/kind bug
-/kind cleanup
-/kind documentation
-/kind feature
+Describe the kind here: bug, cleanup, documentation, or feature.
+Optional kinds: api-change, deprecation, failing-test, flake, regression.
 
-Optionally add one or more of the following kinds if applicable:
-/kind api-change
-/kind deprecation
-/kind failing-test
-/kind flake
-/kind regression
+After opening the PR, post a NEW comment such as `/kind bug` to apply the label.
+Commands in this description or edits to an existing comment do not run.
+See CONTRIBUTING.md for Prow commands.
 
 Additional labels (applied directly, not via /kind):
   dependencies  — dependency update PRs
@@ -38,6 +32,7 @@ Leave blank if this PR does not correspond to a design proposal.
 Usage: `Fixes #<issue number>`, or `Fixes (paste link of issue)`.
 _If PR is about `failing-tests or flakes`, please post the related issues/tests in a comment and do not use `Fixes`_*
 -->
+
 Fixes #
 
 #### Docs and examples
