@@ -11,6 +11,7 @@ Submit changes through a pull request using the PR template, and run the applica
 [Prow GitHub Actions](https://github.com/cncf/prow-github-actions) handles commands in **new PR comments**, one per line. Commands in the PR description or edits to existing comments do not run.
 
 - Use `/kind bug` or `/kind cleanup` to classify a PR, and `/area docs` or `/area controller` to label its area. Available values are in [`.github/prow.yaml`](.github/prow.yaml); changed paths also add area labels automatically.
+- Use `/label security` for security-related work in addition to its kind and area. Remove it with `/remove-label security`.
 - An eligible reviewer in `OWNERS` uses `/lgtm`; an approver other than the PR author uses `/approve`. They can be posted together on separate lines. Withdraw them with `/lgtm cancel` or `/approve cancel`.
 - New commits need a fresh `/lgtm`. Approval persists, so `prow/lgtm` must be required alongside the existing checks and CODEOWNERS reviews. Merging remains manual.
 

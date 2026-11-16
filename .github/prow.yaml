@@ -1,4 +1,8 @@
 labels:
+  labels:
+    - name: security
+      color: d73a4a
+      description: Security-related changes
   # Match the existing issue/PR templates.
   kind:
     - api-change
