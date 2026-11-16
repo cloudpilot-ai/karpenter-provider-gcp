@@ -11,7 +11,9 @@ Submit changes through a pull request using the PR template, and run the applica
 [Prow GitHub Actions](https://github.com/cncf/prow-github-actions) handles commands in **new PR comments**, one per line. Commands in the PR description or edits to existing comments do not run.
 
 - Use `/kind bug` or `/kind cleanup` to classify a PR, and `/area docs` or `/area controller` to label its area. Available values are in [`.github/prow.yaml`](.github/prow.yaml); changed paths also add area labels automatically.
-- An eligible reviewer in `OWNERS` uses `/lgtm`; an approver other than the PR author uses `/approve`. They can be posted together on separate lines. Withdraw them with `/lgtm cancel` or `/approve cancel`.
+- Use `/label security` for security-related work in addition to its kind and area. Remove it with `/remove-label security`.
+- An eligible reviewer in `OWNERS` uses `/lgtm`; an OWNERS approver uses `/approve`, including on their own PR for files they own. With `require_self_approval: false`, authors also implicitly approve files covered by their OWNERS entries. Authors cannot `/lgtm` their own PRs. Withdraw with `/lgtm cancel` or `/approve cancel`.
+- Prow approval does not bypass GitHub's code-owner or last-push review requirements, required checks, or merge permissions.
 - New commits need a fresh `/lgtm`. Approval persists, so `prow/lgtm` must be required alongside the existing checks and CODEOWNERS reviews. Merging remains manual.
 
 The organization automation App publishes Maintenance PRs and mirrors OWNERS approval as GitHub reviews. It cannot approve its own PRs; maintainers approve Maintenance PRs through GitHub Review. For fork PRs, use comment commands to update Prow approval because fork review events cannot access App credentials.
