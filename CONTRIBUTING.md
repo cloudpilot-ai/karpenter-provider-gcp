@@ -6,6 +6,16 @@ Read the [Code of Conduct](CODE_OF_CONDUCT.md). Use [GitHub Issues](https://gith
 
 Submit changes through a pull request using the PR template, and run the applicable checks in the Makefile before requesting review.
 
+## Pull request commands
+
+[Prow GitHub Actions](https://github.com/cncf/prow-github-actions) handles commands in **new PR comments**, one per line. Commands in the PR description or edits to existing comments do not run.
+
+- Use `/kind bug` or `/kind cleanup` to classify a PR, and `/area docs` or `/area controller` to label its area. Available values are in [`.github/prow.yaml`](.github/prow.yaml); changed paths also add area labels automatically.
+- An eligible reviewer in `OWNERS` uses `/lgtm`; an approver other than the PR author uses `/approve`. They can be posted together on separate lines. Withdraw them with `/lgtm cancel` or `/approve cancel`.
+- New commits need a fresh `/lgtm`. Approval persists, so `prow/lgtm` must be required alongside the existing checks and CODEOWNERS reviews. Merging remains manual.
+
+The organization automation App publishes Maintenance PRs and mirrors OWNERS approval as GitHub reviews. It cannot approve its own PRs; maintainers approve Maintenance PRs through GitHub Review. For fork PRs, use comment commands to update Prow approval because fork review events cannot access App credentials.
+
 ## Design Proposals
 
 For significant changes — architectural redesigns, new API fields, operator-visible behaviour changes, or multi-phase work — opening a proposal before writing code helps align on the approach early and produces a useful design record.

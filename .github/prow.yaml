@@ -1,0 +1,31 @@
+labels:
+  # Match the existing issue/PR templates.
+  kind:
+    - api-change
+    - bug
+    - cleanup
+    - deprecation
+    - documentation
+    - failing-test
+    - feature
+    - flake
+    - regression
+    - support
+  # File-based rules live in .github/labeler.yaml.
+  area:
+    - api
+    - charts
+    - ci
+    - controller
+    - docs
+    - examples
+    - pricing
+
+approve:
+  # An approver other than the PR author must cover every changed file.
+  require_self_approval: true
+  github_review: true
+
+tide:
+  # Authors with merge permission merge manually after the required checks pass.
+  merge_on_events: false

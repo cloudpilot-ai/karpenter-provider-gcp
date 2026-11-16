@@ -22,9 +22,6 @@ jobs:
     concurrency:
       group: update-pricing
       cancel-in-progress: false
-    permissions:
-      contents: write
-      pull-requests: write
     # Pricing alone receives GCP credentials; retain the existing updater steps.
     steps:
       - uses: actions/checkout@v7.0.1
@@ -50,18 +47,28 @@ jobs:
       - name: Update initial-prices.json
         run: make update-pricing
 
+      - name: Create publication token
+        if: github.event_name == 'schedule' || !inputs.dry_run
+        id: app-token
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Create PR if pricing changed
         if: github.event_name == 'schedule' || !inputs.dry_run
         uses: peter-evans/create-pull-request@v8.1.2
         with:
-          token: ${{ github.token }}
+          token: ${{ steps.app-token.outputs.token }}
           draft: true
           add-paths: pkg/providers/pricing/initial-prices.json
           commit-message: "chore(pricing): update initial-prices.json"
           title: "chore(pricing): scheduled pricing data refresh"
           body: |
             #### What type of PR is this?
-            /kind cleanup
+            Cleanup
 
             #### What this PR does / why we need it:
             Refresh generated GCP pricing data in `pkg/providers/pricing/initial-prices.json`.
@@ -77,12 +84,12 @@ jobs:
             - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
 
             #### Special notes for your reviewer:
-            Automated pricing refresh; review the generated data before merging.
+            Automated pricing refresh; review the generated data before merging. A maintainer must approve through GitHub Review because the automation App cannot approve its own PR.
           branch: automated/update-pricing
           signoff: true
           sign-commits: true
           delete-branch: true
-          labels: pricing,automated
+          labels: pricing,automated,kind/cleanup
 
   security-pins:
     name: Security pins (Go, base image)
@@ -92,9 +99,6 @@ jobs:
     concurrency:
       group: update-security-pins
       cancel-in-progress: false
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -114,17 +118,27 @@ jobs:
           fi
           git diff --check
       # Keep publication separate: Updatecli's native PR cleanup posts comments.
-      # Actions PR creation must be permitted; bot-created workflow runs need maintainer approval.
+      - name: Create publication token
+        if: github.event_name == 'schedule' || !inputs.dry_run
+        id: app-token
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Open draft update PR
         if: github.event_name == 'schedule' || !inputs.dry_run
         uses: peter-evans/create-pull-request@v8.1.2
         with:
-          token: ${{ github.token }}
+          token: ${{ steps.app-token.outputs.token }}
           branch: automated/security-pins
           base: main
           draft: true
           signoff: true
           sign-commits: true
+          labels: automated,kind/cleanup
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           commit-message: 'chore(security): refresh Go patch and controller base'
           title: 'chore(security): refresh Go patch and controller base'
@@ -136,7 +150,7 @@ jobs:
             .ko.yaml
           body: |
             #### What type of PR is this?
-            /kind cleanup
+            Cleanup
 
             #### What this PR does / why we need it:
             Refresh Go within the current minor release and the controller base-image digest to pick up upstream security fixes. No module dependency upgrades or automatic merge.
@@ -152,4 +166,4 @@ jobs:
             - [x] `MIGRATION.md` updated (or this PR does not require any migration steps)
 
             #### Special notes for your reviewer:
-            Created with `github.token`: a maintainer may need to approve the generated PR's workflow runs. Verify checks before merging. Rebuilding is required to deliver fixes in published images.
+            Published by the automation App so pull-request checks can run. A maintainer must approve this PR through GitHub Review because the App cannot approve its own PR. Rebuilding is required to deliver fixes in published images.

@@ -17,12 +17,16 @@ workflows:
         - 'ko-build/setup-ko@v0.10'
     '.github/workflows/maintenance.yaml':
         - 'actions/checkout@v7.0.1'
+        - 'actions/create-github-app-token@v3.3.0'
         - 'actions/setup-go@v7.0.0'
         - 'google-github-actions/auth@v3.0.0'
         - 'peter-evans/create-pull-request@v8.1.2'
         - 'updatecli/updatecli-action@v3.10.0'
     '.github/workflows/pr-metadata.yaml':
+        - 'actions/create-github-app-token@v3.3.0'
         - 'actions/github-script@v9.0.0'
+        - 'actions/labeler@v7.0.0'
+        - 'cncf/prow-github-actions@v3.5.0'
         - 'step-security/action-add-labels@v1.1.1'
         - 'step-security/action-remove-labels@v1.3.1'
         - 'step-security/action-size@v2.2.0'
@@ -75,6 +79,11 @@ dependencies:
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
         owner_id: 44036562
         repo_id: 197814629
+    'actions/create-github-app-token@v3.3.0':
+        ref: 'v3.3.0'
+        commit: 'sha1-64ab729a6294000f5aa4a4bc0b73d1f32bc45510'
+        owner_id: 44036562
+        repo_id: 642580244
     'actions/dependency-review-action@v5.0.0':
         ref: 'v5.0.0'
         commit: 'sha1-a1d282b36b6f3519aa1f3fc636f609c47dddb294'
@@ -90,6 +99,11 @@ dependencies:
         commit: 'sha1-3a2844b7e9c422d3c10d287c895573f7108da1b3'
         owner_id: 44036562
         repo_id: 205262760
+    'actions/labeler@v7.0.0':
+        ref: 'v7.0.0'
+        commit: 'sha1-bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13'
+        owner_id: 44036562
+        repo_id: 177139928
     'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e':
         ref: 'v7.0.0'
         commit: 'sha1-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
@@ -123,6 +137,11 @@ dependencies:
         uses:
             - 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
             - 'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
+    'cncf/prow-github-actions@v3.5.0':
+        ref: 'v3.5.0'
+        commit: 'sha1-a192ee15687d4ede4d553ff0929b2b296666afd7'
+        owner_id: 13455738
+        repo_id: 254954414
     'crazy-max/ghaction-import-gpg@v7.0.0':
         ref: 'v7.0.0'
         commit: 'sha1-2dc316deee8e90f13e1a351ab510b4d5bc0c82cd'
