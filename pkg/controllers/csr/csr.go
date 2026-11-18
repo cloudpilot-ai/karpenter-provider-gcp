@@ -41,11 +41,12 @@ import (
 )
 
 const (
-	nodeUserPrefix    = "system:node:"
-	nodesGroup        = "system:nodes"
-	bootstrapUsername = "kubelet-nodepool-bootstrap"
-	nodePoolOrgPrefix = "gke:nodepool:name:"
-	instanceOrgPrefix = "gke:instance:"
+	nodeUserPrefix            = "system:node:"
+	nodesGroup                = "system:nodes"
+	nodePoolBootstrapUsername = "kubelet-nodepool-bootstrap"
+	tpmBootstrapUsername      = "kubelet-bootstrap"
+	nodePoolOrgPrefix         = "gke:nodepool:name:"
+	instanceOrgPrefix         = "gke:instance:"
 )
 
 var (
@@ -134,7 +135,7 @@ func validateKubeletClientCSR(csr *certv1.CertificateSigningRequest, nodeClaims 
 	switch csr.Spec.Username {
 	case nodeUserPrefix + subject.nodeName:
 		return validateRenewal(subject, groups, nodeClaims)
-	case bootstrapUsername:
+	case nodePoolBootstrapUsername, tpmBootstrapUsername:
 		return validateBootstrap(subject, nodeClaims)
 	default:
 		return fmt.Errorf("requester %q cannot request a certificate for node %q", csr.Spec.Username, subject.nodeName)

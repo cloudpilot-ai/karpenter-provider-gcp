@@ -18,6 +18,8 @@ package csr
 
 import (
 	"context"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,21 +105,28 @@ func TestValidateNodeClaimAuthorization(t *testing.T) {
 			approve: true,
 		},
 	} {
-		t.Run(tt.name, func(t *testing.T) {
-			nc := launchedNodeClaim("target", nodeName)
-			request := bootstrapCSR(nodeRequest(t, nodeName))
-			if tt.renewal {
-				nc = registeredNodeClaim("target", nodeName)
-				request = nodeCSR(nodeRequest(t, nodeName), nodeName)
-			}
-			tt.mutate(&nc)
-			err := validateKubeletClientCSR(request, []karpv1.NodeClaim{nc})
-			if tt.approve {
-				require.NoError(t, err)
-			} else {
-				require.Error(t, err)
-			}
-		})
+		usernames := []string{"kubelet-nodepool-bootstrap", "kubelet-bootstrap"}
+		if tt.renewal {
+			usernames = []string{"system:node:" + nodeName}
+		}
+		for _, username := range usernames {
+			t.Run(tt.name+"/"+username, func(t *testing.T) {
+				nc := launchedNodeClaim("target", nodeName)
+				request := bootstrapCSR(nodeRequest(t, nodeName))
+				if tt.renewal {
+					nc = registeredNodeClaim("target", nodeName)
+					request = nodeCSR(nodeRequest(t, nodeName), nodeName)
+				}
+				request.Spec.Username = username
+				tt.mutate(&nc)
+				err := validateKubeletClientCSR(request, []karpv1.NodeClaim{nc})
+				if tt.approve {
+					require.NoError(t, err)
+				} else {
+					require.Error(t, err)
+				}
+			})
+		}
 	}
 }
 
@@ -134,6 +143,21 @@ func TestReconcileCSRApproval(t *testing.T) {
 				return bootstrapCSR(nodeRequest(t, "karpenter-pending"))
 			},
 			approve: true,
+		},
+		{
+			name: "GKE TPM bootstrap requester with only the authenticated group",
+			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
+				return kubeletCSR(requestPEM(t, &x509.CertificateRequest{
+					Subject: pkix.Name{CommonName: "system:node:karpenter-pending", Organization: []string{"system:nodes"}},
+				}), "kubelet-bootstrap", "system:authenticated")
+			},
+			approve: true,
+		},
+		{
+			name: "GKE TPM bootstrap requester cannot claim a registered node",
+			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
+				return kubeletCSR(nodeRequest(t, nodeName), "kubelet-bootstrap", nodePoolOrg, "system:authenticated")
+			},
 		},
 		{
 			name: "valid self renewal",
@@ -177,6 +201,8 @@ func TestReconcileCSRApproval(t *testing.T) {
 				got := <-approvals
 				require.Len(t, got.Status.Conditions, 1)
 				require.Equal(t, certv1.CertificateApproved, got.Status.Conditions[0].Type)
+				require.Equal(t, "True", string(got.Status.Conditions[0].Status))
+				require.Equal(t, "KarpenterAutoApprover", got.Status.Conditions[0].Reason)
 			} else {
 				require.Empty(t, approvals)
 			}
