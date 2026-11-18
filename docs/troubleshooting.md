@@ -161,12 +161,12 @@ Karpenter runs a CSR approver controller that approves kubelet client CSRs (sign
   - On renewal, the node must already be in the `gke:instance:*` group. On bootstrap, the zone in `gke:instance:*` must match the NodeClaim's zone. The instance ID is not checked.
 - The usages include `client auth` and are limited to `digital signature`, `key encipherment`, and `client auth`.
 - One of these is true:
-  - The requester is the GKE bootstrap identity `kubelet-nodepool-bootstrap`, and `<name>` is the instance of a non-deleting GCE NodeClaim with `Launched=True` that has not registered yet.
+  - The requester is a GKE bootstrap identity, `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`, and `<name>` is the instance of a non-deleting GCE NodeClaim with `Launched=True` that has not registered yet.
   - The requester is `system:node:<name>` in the authenticated `system:nodes` group, renewing its own certificate. A GCE NodeClaim has `Registered=True`, with both its node name and GCE instance name matching `<name>`. Self-renewal remains allowed during drain/deletion.
 
 Eligible NodeClaims must reference this provider's `GCENodeClass` and have a complete GCE ProviderID. See the [CSR approval security contract](security/csr-approval.md) for the authorization boundary, regression checks and remaining limitations.
 
-Every GKE node pool has a bootstrap credential, and every credential authenticates as `kubelet-nodepool-bootstrap`. A node that has any of these credentials can request the name of a new Karpenter node until that node registers.
+Every GKE node pool has a bootstrap credential, and every credential authenticates as `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`. A node that has any of these credentials can request the name of a new Karpenter node until that node registers.
 
 The controller leaves every other CSR pending for GKE or a cluster administrator. If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
 
