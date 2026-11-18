@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v0.8.2
+
 ### Release distribution moves to GHCR OCI
 
 Controller images use `ghcr.io/karpenter-gcp/karpenter-provider-gcp:vX.Y.Z`. Helm charts use `oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter` and `/karpenter-crd` with version `X.Y.Z`. Use Helm 3.8+ or Helm 4; replace indexed chart references in Helm automation and allow GHCR image pulls in registry policies. Keep existing release names, namespaces and configured values; upgrade CRDs before the controller. A pinned `controller.image.repository` still overrides the new default and must be updated explicitly.

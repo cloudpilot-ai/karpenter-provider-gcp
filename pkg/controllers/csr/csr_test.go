@@ -137,11 +137,24 @@ func TestValidateKubeletClientCSR(t *testing.T) {
 		{
 			name: "bootstrap with only the system:nodes organization",
 			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
+				return kubeletCSR(requestPEM(t, &x509.CertificateRequest{
 					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:nodes"}},
-				}))
+				}), "kubelet-nodepool-bootstrap", "system:authenticated")
 			},
 			approve: true,
+		},
+		{
+			name: "GKE TPM bootstrap requester with node pool organizations",
+			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
+				return kubeletCSR(nodeRequest(t, "karpenter-default-abc"), "kubelet-bootstrap", nodePoolOrg, "system:authenticated")
+			},
+			approve: true,
+		},
+		{
+			name: "GKE TPM bootstrap requester missing the requested node pool group",
+			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
+				return kubeletCSR(nodeRequest(t, "karpenter-default-abc"), "kubelet-bootstrap", "system:authenticated")
+			},
 		},
 		{
 			name: "requester that is not the bootstrap identity",
