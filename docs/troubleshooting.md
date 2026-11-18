@@ -156,25 +156,31 @@ Karpenter discovers an existing RUNNING node pool for bootstrap metadata rather 
 
 Karpenter runs a CSR approver controller that approves kubelet client CSRs (signer `kubernetes.io/kube-apiserver-client-kubelet`) for nodes it launched. It approves a CSR when all of these are true:
 
-- The request subject is `CN=system:node:<name>` with `O=system:nodes`, and the request has no subject alternative names. The only other organizations allowed are at most one `gke:nodepool:name:<pool>` and at most one `gke:instance:<project-number>:<zone>:<id>`. GKE adds both. When they are present:
-  - The requester must already be in the `gke:nodepool:name:<pool>` group.
-  - On renewal, the node must already be in the `gke:instance:*` group. On bootstrap, the zone in `gke:instance:*` must match the NodeClaim's zone. The instance ID is not checked.
+- The request subject is `CN=system:node:<name>` with `O=system:nodes`, and the request has no subject alternative names. The only other organizations allowed are at most one `gke:nodepool:name:<pool>` and at most one `gke:instance:<project-number>:<zone>:<id>`. GKE adds both. The requester must already be in the `gke:nodepool:name:<pool>` group. On a bootstrap request the whole `gke:instance:*` organization must match the verified project number, zone and instance ID; an incomplete or partial one is rejected. On renewal the node must already be authenticated into its own `gke:instance:*` group.
 - The usages include `client auth` and are limited to `digital signature`, `key encipherment`, and `client auth`.
+- The original requester is allowed to create the matching CSR subresource, checked with a `SubjectAccessReview`.
 - One of these is true:
-  - The requester is a GKE bootstrap identity, `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`, and `<name>` is the instance of a non-deleting GCE NodeClaim with `Launched=True` that has not registered yet.
+  - The requester is a GKE bootstrap identity, `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`, the request carries a valid native GKE TPM attestation envelope, and the NodeClaim either has not registered yet (`Launched=True`, not deleting) or is the same live registered claim being re-issued. The proof's project, zone, VM name and numeric instance ID must match the NodeClaim's recorded launch instance and the live Compute instance.
   - The requester is `system:node:<name>` in the authenticated `system:nodes` group, renewing its own certificate. A GCE NodeClaim has `Registered=True`, with both its node name and GCE instance name matching `<name>`. Self-renewal remains allowed during drain/deletion.
 
-Eligible NodeClaims must reference this provider's `GCENodeClass` and have a complete GCE ProviderID. See the [CSR approval security contract](security/csr-approval.md) for the authorization boundary, regression checks and remaining limitations.
+Eligible NodeClaims must reference this provider's `GCENodeClass` and have a complete GCE ProviderID. See the [CSR approval security contract](security/csr-approval.md) for the authorization boundary, trust limits, regression checks and the supported matrix.
 
-Every GKE node pool has a bootstrap credential, and every credential authenticates as `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`. A node that has any of these credentials can request the name of a new Karpenter node until that node registers.
+Every GKE node pool has a bootstrap credential, and every credential authenticates as `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`. Both bootstrap identities now require a valid TPM proof; a bootstrap-authenticated request picked up by another approver is outside this controller's decisions.
 
-The controller leaves every other CSR pending for GKE or a cluster administrator. If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
+If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
 
 ```sh
 kubectl get csr
 ```
 
-Pending CSRs for Karpenter nodes should be approved automatically. If they are stuck in `Pending`, check the Karpenter controller logs for CSR-related errors (the reason a CSR was not approved is logged at debug level) and verify that the controller has the `certificates.k8s.io` RBAC permission to approve CSRs.
+Pending CSRs for Karpenter nodes should be approved automatically. If they are stuck in `Pending`, check the Karpenter controller logs for CSR-related errors (the reason a CSR was not approved is logged at debug level) and verify:
+
+- the controller has the `certificates.k8s.io` RBAC permission to approve CSRs and the `authorization.k8s.io` permission to create `subjectaccessreviews`;
+- the controller's GCP service account can read the VM attestation key (`compute.instances.getShieldedInstanceIdentity`) and the project (`compute.projects.get`);
+- the NodeClaim has the `karpenter.k8s.gcp/instance-numeric-id` annotation. Claims created before this release have none, so they cannot use attested enrollment; replace them (see [MIGRATION.md](../MIGRATION.md)). A VM created before this release is also no longer adopted by a new NodeClaim: its create reports `InstanceIncarnationUnknown` until the stale VM is deleted;
+- the node's vTPM is enabled and its Compute instance was not replaced after the claim was launched.
+
+[Proposal 0012](../proposals/0012-gce-instance-bound-csr-approval.md) records the supported image/GKE matrix and the pending real-GKE reissuance and drain validation.
 
 ---
 

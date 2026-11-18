@@ -51,6 +51,8 @@ func (f *fakeGKEProvider) GetClusterConfig(_ context.Context) (*containerv1.Clus
 	return &containerv1.Cluster{}, nil
 }
 
+func (f *fakeGKEProvider) ProjectNumber(_ context.Context) (uint64, error) { return 1, nil }
+
 func (f *fakeGKEProvider) GetServerConfig(_ context.Context) (*containerv1.ServerConfig, error) {
 	return &containerv1.ServerConfig{}, nil
 }

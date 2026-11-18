@@ -161,6 +161,10 @@ var (
 	AnnotationClusterNameTaggedCompatability = apis.CompatibilityGroup + "/cluster-name-tagged"
 	AnnotationGCENodeClassHashVersion        = apis.Group + "/gcenodeclass-hash-version"
 	AnnotationInstanceTagged                 = apis.Group + "/tagged"
+	// AnnotationInstanceNumericID records the numeric Compute Engine instance ID of the
+	// VM launched for a NodeClaim. Attested kubelet CSR approval requires it to match
+	// the live VM so a same-named replacement cannot inherit the claim's identity.
+	AnnotationInstanceNumericID = apis.Group + "/instance-numeric-id"
 
 	TagNodeClaim = coreapis.Group + "/nodeclaim"
 	TagName      = "Name"

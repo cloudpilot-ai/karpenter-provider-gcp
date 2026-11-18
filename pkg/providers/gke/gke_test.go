@@ -215,3 +215,45 @@ func TestGetClusterConfig_CacheHit(t *testing.T) {
 	require.Equal(t, c1, c2)
 	require.Equal(t, int32(1), calls.Load(), "expected no additional API calls on cache hit")
 }
+
+func TestProjectNumber(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	numericID := uint64(123456789)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/projects/p" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&computev1.Project{Name: "p", Id: numericID})
+	}))
+	defer srv.Close()
+
+	svc, err := computev1.NewService(context.Background(),
+		googleapioption.WithoutAuthentication(),
+		googleapioption.WithEndpoint(srv.URL+"/"),
+	)
+	require.NoError(t, err)
+
+	p := &DefaultProvider{
+		computeService:  svc,
+		projectID:       "p",
+		projectNumCache: cache.New(0, 0),
+	}
+
+	number, err := p.ProjectNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, numericID, number)
+	number, err = p.ProjectNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, numericID, number)
+	require.Equal(t, int32(1), calls.Load(), "the immutable project number must be read once")
+
+	numericID = 0
+	p.projectNumCache = cache.New(0, 0)
+	_, err = p.ProjectNumber(context.Background())
+	require.Error(t, err, "a project without a numeric ID must not be treated as authoritative")
+}

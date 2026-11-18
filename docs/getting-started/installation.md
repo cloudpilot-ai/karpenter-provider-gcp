@@ -8,6 +8,7 @@ This guide walks you through deploying Karpenter GCP on a GKE cluster using Helm
 - `gcloud` CLI configured with project access
 - `kubectl` pointing at your cluster
 - Helm 3.8+ or Helm 4 (OCI chart support)
+- A [Shielded GKE cluster](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/shielded-gke-nodes) so nodes have a vTPM. Karpenter approves a kubelet CSR only when the native TPM attestation proof matches the launched VM, so a NodeClass with `enableVtpm: false` cannot enroll.
 
 Enable the required APIs:
 

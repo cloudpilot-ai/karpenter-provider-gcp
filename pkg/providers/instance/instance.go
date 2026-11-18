@@ -99,6 +99,7 @@ type Provider interface {
 	List(context.Context) ([]*Instance, error)
 	Delete(context.Context, string) error
 	CreateTags(context.Context, string, map[string]string) error
+	GetIdentity(context.Context, string, string) (*InstanceIdentity, error)
 }
 
 type DefaultProvider struct {
@@ -148,7 +149,10 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 	}
 }
 
-func (p *DefaultProvider) waitOperationDone(ctx context.Context, zone, operationName string) error {
+// waitOperationDone polls a zone operation to completion and returns the terminal
+// operation, which is the only source of the created resource's numeric ID when
+// the insert response omits it.
+func (p *DefaultProvider) waitOperationDone(ctx context.Context, zone, operationName string) (*compute.Operation, error) {
 	waitCtx := ctx
 	cancel := func() {}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -163,28 +167,28 @@ func (p *DefaultProvider) waitOperationDone(ctx context.Context, zone, operation
 		op, err := p.computeService.ZoneOperations.Get(p.projectID, zone, operationName).Context(waitCtx).Do()
 		if err != nil {
 			if waitCtx.Err() != nil {
-				return fmt.Errorf("waiting for operation %s: %w", operationName, waitCtx.Err())
+				return nil, fmt.Errorf("waiting for operation %s: %w", operationName, waitCtx.Err())
 			}
 			if isTransientError(err) {
 				log.FromContext(ctx).V(1).Info("transient error polling operation, retrying",
 					"operation", operationName, "zone", zone, "error", err)
 				if tickErr := waitForNextTick(waitCtx, ticker); tickErr != nil {
-					return fmt.Errorf("waiting for operation %s: %w", operationName, tickErr)
+					return nil, fmt.Errorf("waiting for operation %s: %w", operationName, tickErr)
 				}
 				continue
 			}
-			return fmt.Errorf("getting operation: %w", err)
+			return nil, fmt.Errorf("getting operation: %w", err)
 		}
 
 		if op.Status == "DONE" {
 			if op.Error != nil {
-				return handleZoneOperationError(op)
+				return nil, handleZoneOperationError(op)
 			}
-			return nil
+			return op, nil
 		}
 
 		if err := waitForNextTick(waitCtx, ticker); err != nil {
-			return fmt.Errorf("waiting for operation %s: %w", operationName, err)
+			return nil, fmt.Errorf("waiting for operation %s: %w", operationName, err)
 		}
 	}
 }
@@ -439,7 +443,7 @@ func lastPathSegment(value string) string {
 	return value
 }
 
-func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance, capacityType string) *Instance {
+func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingInstance *compute.Instance, nodeClaim *karpv1.NodeClaim, capacityType string) *Instance {
 	zone := lastPathSegment(existingInstance.Zone)
 	machineType := lastPathSegment(existingInstance.MachineType)
 
@@ -447,6 +451,7 @@ func (p *DefaultProvider) adoptExistingInstance(ctx context.Context, existingIns
 	return &Instance{
 		InstanceID:   existingInstance.Name,
 		Name:         existingInstance.Name,
+		NumericID:    launchedNumericID(existingInstance, nodeClaim),
 		Type:         machineType,
 		Location:     zone,
 		ProjectID:    p.projectID,
@@ -466,7 +471,36 @@ func (p *DefaultProvider) Adopt(ctx context.Context, nodeClaim *karpv1.NodeClaim
 	if err != nil || existing == nil {
 		return nil, err
 	}
-	return p.adoptExistingInstance(ctx, existing, resolveCapacityType(existing.Scheduling)), nil
+	if err := checkInstanceOwnership(existing, nodeClaim); err != nil {
+		return nil, err
+	}
+	return p.adoptExistingInstance(ctx, existing, nodeClaim, resolveCapacityType(existing.Scheduling)), nil
+}
+
+// ErrInstanceOwnershipConflict reports a same-named VM that belongs to another
+// NodeClaim. Launching a second VM for the name would create a duplicate.
+var ErrInstanceOwnershipConflict = errors.New("instance is owned by another NodeClaim")
+
+// checkInstanceOwnership rejects a same-named VM that was launched for a
+// different NodeClaim UID. VMs launched before the ownership label existed carry
+// no UID, so they remain adoptable by name as before.
+func checkInstanceOwnership(instance *compute.Instance, nodeClaim *karpv1.NodeClaim) error {
+	uid := instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodeClaimUIDKey)]
+	if uid == "" || uid == string(nodeClaim.UID) {
+		return nil
+	}
+	return fmt.Errorf("%w: instance %q belongs to NodeClaim UID %q, not %q", ErrInstanceOwnershipConflict, instance.Name, uid, nodeClaim.UID)
+}
+
+// launchedNumericID returns the VM's numeric instance ID only when the VM
+// carries this NodeClaim's ownership label. A name-only association is not
+// enough to record an incarnation that attested enrollment can rely on.
+func launchedNumericID(instance *compute.Instance, nodeClaim *karpv1.NodeClaim) uint64 {
+	uid := string(nodeClaim.UID)
+	if uid == "" || instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodeClaimUIDKey)] != uid {
+		return 0
+	}
+	return instance.Id
 }
 
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
@@ -479,14 +513,16 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 	launchInstanceTypes, rejectedConfigurable := instanceTypesForLaunch(nodeClaim, instanceTypes)
 
 	// Check for an instance in any zone before validating launch candidates so earlier attempts are adopted.
-	if existingInstance, err := p.Adopt(ctx, nodeClaim); err != nil {
-		log.FromContext(ctx).Error(err, "failed to check if instance exists in region", "nodeClaim", nodeClaim.Name)
-	} else if existingInstance != nil {
+	existingInstance, err := p.adoptEarlierInstance(ctx, nodeClaim)
+	if err != nil {
+		return nil, err
+	}
+	if existingInstance != nil {
 		return existingInstance, nil
 	}
 
 	// Earlier VMs must be adopted before current image availability can reject a new launch.
-	instanceTypes, err := resolveLaunchInstanceTypes(nodeClass, launchInstanceTypes, rejectedConfigurable)
+	instanceTypes, err = resolveLaunchInstanceTypes(nodeClass, launchInstanceTypes, rejectedConfigurable)
 	if err != nil {
 		return nil, err
 	}
@@ -513,6 +549,22 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.GCENod
 
 	joined := errors.Join(errs...)
 	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", joined)
+}
+
+// adoptEarlierInstance returns a VM an earlier attempt launched for this claim.
+// A transient discovery failure is logged and treated as unknown, but an
+// ownership conflict fails the create: continuing could launch a duplicate VM in
+// a zone the region-wide lookup did not cover.
+func (p *DefaultProvider) adoptEarlierInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*Instance, error) {
+	instance, err := p.Adopt(ctx, nodeClaim)
+	if err != nil {
+		if errors.Is(err, ErrInstanceOwnershipConflict) {
+			return nil, err
+		}
+		log.FromContext(ctx).Error(err, "failed to check if instance exists in region", "nodeClaim", nodeClaim.Name)
+		return nil, nil
+	}
+	return instance, nil
 }
 
 func resolveLaunchInstanceTypes(nodeClass *v1alpha1.GCENodeClass, instanceTypes []*cloudprovider.InstanceType, rejectedConfigurable bool) ([]*cloudprovider.InstanceType, error) {
@@ -568,6 +620,7 @@ func (p *DefaultProvider) createWithCapacityType(ctx context.Context, nodeClass 
 		return &Instance{
 			InstanceID: instance.Name,
 			Name:       instance.Name,
+			NumericID:  launchedNumericID(instance, nodeClaim),
 			// Refer to https://github.com/karpenter-gcp/karpenter-provider-gcp/pull/45#discussion_r2115586327
 			// In this develop period, we are using a static instance type to avoid high cost of creating a new instance type for each node claim.
 			// Type:         instanceType.Name,
@@ -639,6 +692,9 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 			return nil, "", false, fmt.Errorf("failed to check if instance exists: %w", err)
 		}
 		if exists {
+			if err := checkInstanceOwnership(existing, nodeClaim); err != nil {
+				return nil, "", false, err
+			}
 			if candidate != zone {
 				log.FromContext(ctx).Info("adopting instance from an earlier attempt instead of creating a duplicate in another zone",
 					"instanceName", instanceName, "existingZone", candidate, "selectedZone", zone)
@@ -663,8 +719,11 @@ func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeC
 			return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 		}
 
-		result, err := p.insertInstance(ctx, zone, rangeName, instance)
+		result, err := p.insertInstance(ctx, nodeClaim, zone, rangeName, instance)
 		if err == nil {
+			// insertInstance only succeeds with the created VM's numeric instance ID,
+			// so a launched claim can always be bound to its incarnation.
+			instance.Id = result.targetID
 			return instance, zone, false, nil
 		}
 
@@ -700,25 +759,60 @@ type instanceInsertResult struct {
 	insufficientCapacity bool
 	rejectedPodRange     bool
 	failureMessage       string
+	// targetID is the numeric instance ID reported by the completed insert.
+	targetID uint64
 }
 
-func (p *DefaultProvider) insertInstance(ctx context.Context, zone, rangeName string, instance *compute.Instance) (instanceInsertResult, error) {
+func (p *DefaultProvider) insertInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, zone, rangeName string, instance *compute.Instance) (instanceInsertResult, error) {
 	result := instanceInsertResult{failureMessage: "failed to create instance"}
 	op, err := p.computeService.Instances.Insert(p.projectID, zone, instance).Context(ctx).Do()
 	if err != nil {
 		result.details, result.insufficientCapacity = extractInsertInsufficientCapacityDetails(err)
 		result.rejectedPodRange = isRejectedPodRange(err, rangeName)
 	} else {
-		err = p.waitOperationDone(ctx, zone, op.Name)
 		result.failureMessage = "failed to wait for operation to be done"
+		terminal, waitErr := p.waitOperationDone(ctx, zone, op.Name)
+		err = waitErr
 		if capacityErr, ok := errors.AsType[*insufficientCapacityError](err); ok {
 			result.details, result.insufficientCapacity = capacityErr.details, true
+		}
+		if err == nil {
+			// The completed operation is the authoritative insert result; the initial
+			// response is a fallback because both are server-reported IDs. A
+			// name-based read is the last resort and must prove ownership.
+			result.targetID = terminal.TargetId
+			if result.targetID == 0 {
+				result.targetID = op.TargetId
+			}
+			if result.targetID == 0 {
+				err = p.readCreatedInstanceID(ctx, nodeClaim, zone, instance.Name, &result)
+				result.failureMessage = "failed to read the created instance: the VM incarnation is unknown"
+			}
 		}
 	}
 	if result.insufficientCapacity && isQuotaExceeded(result.details) && quotaExceededTTL(ctx) == 0 {
 		result.insufficientCapacity = false
 	}
 	return result, err
+}
+
+// readCreatedInstanceID reads the numeric instance ID of a VM whose insert
+// operations did not report one. The fetched VM must carry this NodeClaim's
+// ownership label, because a same-named replacement must never supply the
+// incarnation that attested enrollment relies on.
+func (p *DefaultProvider) readCreatedInstanceID(ctx context.Context, nodeClaim *karpv1.NodeClaim, zone, name string, result *instanceInsertResult) error {
+	created, err := p.computeService.Instances.Get(p.projectID, zone, name).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("reading the created instance: %w", err)
+	}
+	if err := checkInstanceOwnership(created, nodeClaim); err != nil {
+		return fmt.Errorf("reading the created instance: %w", err)
+	}
+	if created.Id == 0 || launchedNumericID(created, nodeClaim) == 0 {
+		return fmt.Errorf("created instance %q has no numeric instance ID owned by NodeClaim %q", name, nodeClaim.Name)
+	}
+	result.targetID = created.Id
+	return nil
 }
 
 func handleResourceNotReadyError(err error, retryable bool) (bool, error) {
@@ -1650,6 +1744,11 @@ func (p *DefaultProvider) setupInstanceLabels(instance *compute.Instance, nodeCl
 	// Do not set goog-k8s-node-pool-name. That is GKE-managed node pool identity;
 	// Karpenter ownership is tracked with karpenter.sh/nodepool instead.
 	instance.Labels[utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount)] = strconv.Itoa(ssdCount)
+	// Records which NodeClaim this VM was launched for. It is an ownership
+	// association under trusted provisioning IAM, not attestation evidence.
+	if uid := string(nodeClaim.UID); uid != "" {
+		instance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodeClaimUIDKey)] = uid
+	}
 }
 
 // karpenterGCEIdentityLabels returns the Karpenter ownership and cluster labels shared by
@@ -1915,6 +2014,7 @@ func (p *DefaultProvider) syncInstances(ctx context.Context) error {
 				instance := &Instance{
 					InstanceID:   inst.Name,
 					Name:         inst.Name,
+					NumericID:    inst.Id,
 					Type:         inst.MachineType[strings.LastIndex(inst.MachineType, "/")+1:], // just for matching "e2-standard-2"
 					Location:     zone,
 					ProjectID:    p.projectID,

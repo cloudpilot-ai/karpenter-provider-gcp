@@ -31,6 +31,9 @@ import (
 const (
 	LabelNodePoolKey     string = "karpenter.sh/nodepool"
 	LabelGCENodeClassKey string = "karpenter.k8s.gcp/gcenodeclass"
+	// LabelNodeClaimUIDKey is the GCE label recording the NodeClaim UID a VM was
+	// launched for, so an existing VM is only associated with its own NodeClaim.
+	LabelNodeClaimUIDKey string = "karpenter.k8s.gcp/nodeclaim-uid"
 	LabelClusterNameKey  string = "goog-k8s-cluster-name"
 	// LabelClusterLocationKey is a well-known GCE label key used by GKE. The value is the
 	// cluster's location (region or zone, e.g. "us-central1" or "us-central1-f").

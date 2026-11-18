@@ -7,6 +7,7 @@ includedPermissions:
   - compute.instances.createTagBinding  # required by Instances.Insert when spec.resourceManagerTags is set
   - compute.instances.delete
   - compute.instances.get
+  - compute.instances.getShieldedInstanceIdentity  # verify attested kubelet CSRs against the VM attestation key
   - compute.instances.list
   - compute.instances.setLabels
   - compute.instances.setMetadata

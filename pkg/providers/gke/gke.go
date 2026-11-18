@@ -39,9 +39,10 @@ const (
 	clusterCacheTTL      = 30 * time.Minute
 	serverConfigCacheTTL = 30 * time.Minute
 
-	zoneCacheKey         = "zone-cache"
-	clusterCacheKey      = "cluster"
-	serverConfigCacheKey = "server-config"
+	zoneCacheKey          = "zone-cache"
+	clusterCacheKey       = "cluster"
+	serverConfigCacheKey  = "server-config"
+	projectNumberCacheKey = "project-number"
 )
 
 // IsMultiNetworkingEnabled interprets the networking capability in the fetched cluster config.
@@ -54,6 +55,7 @@ type Provider interface {
 	GetClusterConfig(ctx context.Context) (*containerv1.Cluster, error)
 	InvalidateClusterConfig()
 	GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error)
+	ProjectNumber(ctx context.Context) (uint64, error)
 }
 
 type DefaultProvider struct {
@@ -69,6 +71,7 @@ type DefaultProvider struct {
 	zoneCache         *cache.Cache
 	clusterCache      *cache.Cache
 	serverConfigCache *cache.Cache
+	projectNumCache   *cache.Cache
 }
 
 func NewDefaultProvider(computeService *compute.Service, containerService *containerv1.Service, projectID, nodeLocation, clusterName string) Provider {
@@ -81,6 +84,8 @@ func NewDefaultProvider(computeService *compute.Service, containerService *conta
 		zoneCache:         cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
 		clusterCache:      cache.New(clusterCacheTTL, clusterCacheTTL),
 		serverConfigCache: cache.New(serverConfigCacheTTL, serverConfigCacheTTL),
+		// A numeric project ID never changes for a configured project name.
+		projectNumCache: cache.New(0, 0),
 	}
 }
 
@@ -161,6 +166,25 @@ func (p *DefaultProvider) InvalidateClusterConfig() {
 	defer p.clusterMu.Unlock()
 	p.clusterCache.Delete(clusterCacheKey)
 	p.clusterGeneration++
+}
+
+// ProjectNumber returns the authoritative numeric ID of the configured project.
+// It is immutable for the life of a project and is required to compare attested
+// VM identity evidence with the configured project. Reading it requires
+// compute.projects.get.
+func (p *DefaultProvider) ProjectNumber(ctx context.Context) (uint64, error) {
+	if v, ok := p.projectNumCache.Get(projectNumberCacheKey); ok {
+		return v.(uint64), nil
+	}
+	project, err := p.computeService.Projects.Get(p.projectID).Context(ctx).Do()
+	if err != nil {
+		return 0, fmt.Errorf("fetching project %q: %w", p.projectID, err)
+	}
+	if project.Id == 0 {
+		return 0, fmt.Errorf("project %q has no numeric ID", p.projectID)
+	}
+	p.projectNumCache.SetDefault(projectNumberCacheKey, project.Id)
+	return project.Id, nil
 }
 
 func (p *DefaultProvider) GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error) {

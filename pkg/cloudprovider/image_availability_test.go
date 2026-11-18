@@ -48,6 +48,7 @@ import (
 	gcpoptions "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
@@ -252,7 +253,7 @@ func TestAdoptionWithUnreadyImagesPreservesNodeOverlay(t *testing.T) {
 			it := launchableInstanceType("t2a-standard-2", "arm64", "")
 			it.Offerings[0].Available = false
 			provider := New(kubeClient, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{it}}, adoptOnlyInstanceProvider{vm: &instance.Instance{
-				Name: "karpenter-claim", Type: it.Name, ProjectID: "test", Location: "us-central1-a",
+				Name: "karpenter-claim", Type: it.Name, ProjectID: "test", Location: "us-central1-a", NumericID: 4321,
 			}}, store)
 			ctx := karpopts.ToContext(context.Background(), &karpopts.Options{FeatureGates: karpopts.FeatureGates{NodeOverlay: true}})
 			ctx = gcpoptions.ToContext(ctx, &gcpoptions.Options{VMMemoryOverheadPercent: 0.07})
@@ -283,7 +284,7 @@ func TestCreateWithPartialImages(t *testing.T) {
 		ServiceAccount: "node@test",
 	}
 	claim := &karpv1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "claim", Labels: map[string]string{karpv1.NodePoolLabelKey: "pool"}},
+		ObjectMeta: metav1.ObjectMeta{Name: "claim", UID: "claim-uid", Labels: map[string]string{karpv1.NodePoolLabelKey: "pool"}},
 		Spec: karpv1.NodeClaimSpec{
 			NodeClassRef: &karpv1.NodeClassReference{Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default"},
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{{
@@ -314,11 +315,15 @@ func TestCreateWithPartialImages(t *testing.T) {
 				if existingVM {
 					items["zones/us-central1-a"] = compute.InstancesScopedList{Instances: []*compute.Instance{{
 						Name:              "karpenter-claim",
+						Id:                4321,
 						Zone:              "zones/us-central1-a",
 						MachineType:       "zones/us-central1-a/machineTypes/t2a-standard-2",
 						CreationTimestamp: "2025-04-01T00:00:00Z",
 						Status:            "RUNNING",
 						Scheduling:        &compute.Scheduling{ProvisioningModel: "SPOT"},
+						Labels: map[string]string{
+							utils.SanitizeGCELabelValue(utils.LabelNodeClaimUIDKey): string(claim.UID),
+						},
 					}}}
 				}
 				_ = json.NewEncoder(w).Encode(&compute.InstanceAggregatedList{Items: items})
@@ -326,7 +331,7 @@ func TestCreateWithPartialImages(t *testing.T) {
 				mu.Lock()
 				result.insertions++
 				mu.Unlock()
-				_ = json.NewEncoder(w).Encode(&compute.Operation{Name: "op", Status: "DONE"})
+				_ = json.NewEncoder(w).Encode(&compute.Operation{Name: "op", Status: "DONE", TargetId: 1001})
 			default:
 				http.Error(w, r.Method+" "+r.URL.Path, http.StatusNotFound)
 			}
