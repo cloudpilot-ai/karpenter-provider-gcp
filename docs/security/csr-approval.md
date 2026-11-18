@@ -8,10 +8,14 @@ The controller validates the CSR signature, kubelet-client signer, allowed usage
 
 Eligible NodeClaims must reference `karpenter.k8s.gcp/GCENodeClass` and have a complete `gce://<project>/<zone>/<instance>` ProviderID matching the requested node name.
 
-- **Bootstrap:** the requester is `kubelet-nodepool-bootstrap`; the NodeClaim has `Launched=True`, has not registered and is not being deleted. A supplied GKE instance organization's zone must match the claim.
+- **Bootstrap:** the requester is `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`; the NodeClaim has `Launched=True`, has not registered and is not being deleted. A supplied GKE instance organization's zone must match the claim.
 - **Renewal:** the requester is `system:node:<requested-name>` and belongs to the authenticated `system:nodes` group. The NodeClaim has `Registered=True`, and its node name and GCE instance name match the request. Self-renewal remains allowed while that registered claim is draining/deleting, so a long drain does not lose its kubelet identity.
 
 The requester username/groups are those recorded by the Kubernetes API server, not identity assertions in the requested certificate. A failed NodeClaim read prevents approval. Already approved or denied CSRs are not changed. Unrelated requests remain pending for their proper approver or an administrator.
+
+The Google-maintained [cloud-provider-gcp implementation](https://github.com/kubernetes/cloud-provider-gcp/blob/de598a6a3590934e8b352db066038015b2649600/cmd/gcp-controller-manager/node_csr_approver.go#L62-L64) identifies `kubelet-bootstrap` as a TPM bootstrap requester. This historical reference establishes the identity's provenance, not an exhaustive contract for current GKE versions. Karpenter accepts it under the same NodeClaim-based policy as `kubelet-nodepool-bootstrap`; it does not implement Google's TPM attestation and SubjectAccessReview flow. Supporting this additional identity expands the bootstrap principals eligible for approval, not the requested certificate subjects or groups.
+
+Neither bootstrap identity may re-enroll an already registered NodeClaim. This compatibility fix does not add support for plugin reissuance authenticated with bootstrap credentials after registration; authenticated node self-renewal remains a separate path.
 
 ## Remaining trust boundary
 
