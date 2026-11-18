@@ -10,6 +10,10 @@ Controller images use `ghcr.io/karpenter-gcp/karpenter-provider-gcp:vX.Y.Z`. Hel
 
 Use GHCR for all release versions, including backfilled historical releases; replace Pages chart-repository URLs in existing automation with the OCI references above. See the [installation guide](docs/getting-started/installation.md) for installation and verification, and the [upgrade guide](docs/getting-started/upgrading.md) for version selection.
 
+### Equal-weight NodePools are chosen by price
+
+When several NodePools share the highest weight that can fit a pod, Karpenter now launches from the one with the cheapest compatible offering instead of the NodePool whose name sorts last. If you relied on names to prefer one of several equal-weight NodePools, give that NodePool a higher `spec.weight`. See [Equal-weight NodePools](docs/settings.md#equal-weight-nodepools).
+
 Development images use `ghcr.io/karpenter-gcp/karpenter-provider-gcp`, tagged `sha-<full-commit-sha>` and mutable `main`, alongside the `vX.Y.Z` release tags. Development builds do not publish `latest`. They are not supported production releases; prefer a verified digest rather than a mutable tag.
 
 ## v0.8.0

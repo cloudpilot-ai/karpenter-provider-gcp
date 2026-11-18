@@ -277,6 +277,12 @@ additionalLabels:
 
 These fields are set on `NodePool` objects, not on the controller. They are part of the karpenter-core API and are available in this provider.
 
+### Equal-weight NodePools
+
+`spec.weight` still decides which NodePools Karpenter tries first: a pod only lands on a lower-weight NodePool when no higher-weight NodePool can fit it. Among NodePools that share the highest weight able to fit a pod, this provider launches from the one with the cheapest compatible offering, rather than always picking the NodePool whose name sorts last as upstream Karpenter does. Names only break ties between equal prices. If one of those NodePools has a compatible capacity reservation that is held by another NodeClaim in the same scheduling pass, the pod waits for it unless another equal-weight NodePool can launch it from a reservation.
+
+This behavior comes from a patched karpenter-core (see the `sigs.k8s.io/karpenter` replace directive in `go.mod`), pending [kubernetes-sigs/karpenter#3648](https://github.com/kubernetes-sigs/karpenter/pull/3648).
+
 ### Balanced consolidation policy (v1.14)
 
 Karpenter core v1.14 adds a third value, `Balanced`, to `spec.disruption.consolidationPolicy`, alongside `WhenEmpty` and `WhenEmptyOrUnderutilized`. `Balanced` sits between the two: it scores each consolidation action by weighing the share of NodePool cost it saves against the pod disruption it causes, and proceeds only when the savings justify the disruption. Higher-priority pods carry more disruption weight, so nodes running them are less likely to be consolidated. Reach for it when `WhenEmptyOrUnderutilized` churns too much on marginal consolidations but `WhenEmpty` leaves too much idle capacity. The default is unchanged (`WhenEmptyOrUnderutilized`).
