@@ -6,7 +6,7 @@
   </p>
 </div>
 
-![GitHub stars](https://img.shields.io/github/stars/karpenter-gcp/karpenter-provider-gcp) ![GitHub forks](https://img.shields.io/github/forks/karpenter-gcp/karpenter-provider-gcp) [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](LICENSE.txt) [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues) [![Artifact Hub: controller](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter) [![Artifact Hub: CRDs](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp-crd)](https://artifacthub.io/packages/helm/karpenter-provider-gcp-crd/karpenter-crd)
+![GitHub stars](https://img.shields.io/github/stars/karpenter-gcp/karpenter-provider-gcp) ![GitHub forks](https://img.shields.io/github/forks/karpenter-gcp/karpenter-provider-gcp) [![GitHub License](https://img.shields.io/badge/License-Apache%202.0-ff69b4.svg)](LICENSE) [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues) [![Artifact Hub: controller](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp)](https://artifacthub.io/packages/helm/karpenter-provider-gcp/karpenter) [![Artifact Hub: CRDs](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/karpenter-provider-gcp-crd)](https://artifacthub.io/packages/helm/karpenter-provider-gcp-crd/karpenter-crd)
 
 > [!NOTE]
 >
@@ -90,4 +90,4 @@ Karpenter GCP Cloud Provider adopts the [CNCF Code of Conduct](CODE_OF_CONDUCT.m
 
 ## License
 
-Karpenter GCP Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE.txt) file for details.
+Karpenter GCP Cloud Provider is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
