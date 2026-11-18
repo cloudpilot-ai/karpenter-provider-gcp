@@ -1,6 +1,6 @@
 # Proposal: GCE instance-bound kubelet CSR approval
 
-- **Status**: Implementable (implementation under review; real-GKE reissuance/drain validation pending)
+- **Status**: Implemented
 - **Authors**: @dm3ch
 - **Created**: 2026-11-18
 - **Related Issues**: [#778](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/778)
