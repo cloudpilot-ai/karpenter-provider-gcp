@@ -19,6 +19,7 @@ package channelimageselection
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -33,9 +34,10 @@ import (
 
 // familyChannelTestCase describes a channel/version-based image selection scenario.
 type familyChannelTestCase struct {
-	family  string
-	channel string // set for channel tests
-	version string // set for version tests
+	family          string
+	channel         string // set for channel tests
+	version         string // set for version tests
+	newerThanSource bool
 }
 
 var env *environment.Environment
@@ -50,6 +52,9 @@ var _ = DescribeTable("ChannelImageSelection", Label("suite:channel-image-select
 	Entry("COS / channel: stable / amd64 / on-demand",
 		familyChannelTestCase{family: gcpv1alpha1.ImageFamilyContainerOptimizedOS, channel: gcpv1alpha1.ImageChannelStable},
 		SpecTimeout(15*time.Minute)),
+	Entry("COS / newer release than source pools / amd64 / on-demand",
+		familyChannelTestCase{family: gcpv1alpha1.ImageFamilyContainerOptimizedOS, newerThanSource: true},
+		SpecTimeout(15*time.Minute)),
 	// family: Ubuntu2404, version: latest — exercises the Ubuntu image resolution path,
 	// which uses different naming conventions and a different GCP project from COS.
 	Entry("Ubuntu2404 / version: latest / amd64 / on-demand",
@@ -58,6 +63,10 @@ var _ = DescribeTable("ChannelImageSelection", Label("suite:channel-image-select
 )
 
 func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase) {
+	var sourceVersions map[string]string
+	if tc.newerThanSource {
+		tc.version, sourceVersions = env.COSReleaseNewerThanSourcePools(ctx)
+	}
 	prefix := environment.TestPrefix(karpv1.ArchitectureAmd64, karpv1.CapacityTypeOnDemand, "channel-img")
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
@@ -81,6 +90,17 @@ func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase)
 		env.CreateNodeClassWithFamilyVersion(ctx, name, tc.family, tc.version)
 	}
 	env.WaitForNodeClassReady(ctx, name)
+	nodeClass, err := env.GetNodeClass(ctx, name)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(nodeClass.Status.Images).NotTo(BeEmpty())
+	expectedRelease := nodeClass.Status.Images[0].KubernetesVersion
+	Expect(expectedRelease).NotTo(BeEmpty(), "selected images must carry their bootstrap release")
+	if tc.newerThanSource {
+		Expect(expectedRelease).To(Equal(tc.version), "the skew case must use the pinned newer release")
+	}
+	for _, image := range nodeClass.Status.Images {
+		Expect(image.KubernetesVersion).To(Equal(expectedRelease))
+	}
 
 	// Verify the resolved image version is consistent with the requested selector.
 	sourceImages := env.NodeClassSourceImages(ctx, name)
@@ -127,4 +147,9 @@ func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase)
 	Expect(node.Labels[karpv1.NodeRegisteredLabelKey]).To(Equal("true"))
 	Expect(node.Labels[karpv1.NodePoolLabelKey]).To(Equal(name))
 	Expect(node.Labels[karpv1.CapacityTypeLabelKey]).To(Equal(karpv1.CapacityTypeOnDemand))
+	Expect(strings.TrimPrefix(node.Status.NodeInfo.KubeletVersion, "v")).To(Equal(expectedRelease),
+		"running kubelet must match the selected image release, not the bootstrap source pool")
+	if tc.newerThanSource {
+		Expect(env.BootstrapSourceVersions(ctx)).To(Equal(sourceVersions), "source pools must remain at their older versions")
+	}
 }

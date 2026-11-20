@@ -128,7 +128,7 @@ license-check: ## Check root-module Go dependency licenses using upstream module
 	done
 
 ut-test: ## Run unit tests
-	go test -race ./pkg/... \
+	go test -race ./pkg/... ./test/pkg/... \
 		-cover -coverprofile=coverage.out -outputdir=.
 
 # E2E configuration — names are derived from E2E_PREFIX to stay consistent

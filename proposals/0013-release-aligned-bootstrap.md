@@ -1,6 +1,6 @@
 # Proposal: Release-aligned core node bootstrap
 
-- **Status**: Draft
+- **Status**: Implemented
 - **Authors**: @dm3ch
 - **Created**: 2026-11-20
 - **Related Issues**: [#789](https://github.com/karpenter-gcp/karpenter-provider-gcp/issues/789)
