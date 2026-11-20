@@ -406,6 +406,12 @@ type KubeletConfiguration struct {
 	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
 	// +optional
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
+	// CPUManagerPolicy is the kubelet CPU manager policy. With static, containers
+	// of Guaranteed pods that request whole CPUs get exclusive cores.
+	// Default: none
+	// +kubebuilder:validation:Enum:={none,static}
+	// +optional
+	CPUManagerPolicy string `json:"cpuManagerPolicy,omitempty"`
 	// SerializeImagePulls, when enabled, tells the kubelet to pull images one at a
 	// time. Must be explicitly set to false to set MaxParallelImagePulls above 1.
 	// Default: true

@@ -278,6 +278,9 @@ func applyNodeClassRuntimeKubeletConfig(config *kubeletconfig.KubeletConfigurati
 	if overlay.CPUCFSQuota != nil {
 		config.CPUCFSQuota = overlay.CPUCFSQuota
 	}
+	if overlay.CPUManagerPolicy != "" {
+		config.CPUManagerPolicy = overlay.CPUManagerPolicy
+	}
 	if overlay.SerializeImagePulls != nil {
 		config.SerializeImagePulls = overlay.SerializeImagePulls
 	}

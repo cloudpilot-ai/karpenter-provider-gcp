@@ -383,6 +383,15 @@ spec:
                     description: CPUCFSQuota enables CPU CFS quota enforcement for
                       containers that specify CPU limits.
                     type: boolean
+                  cpuManagerPolicy:
+                    description: |-
+                      CPUManagerPolicy is the kubelet CPU manager policy. With static, containers
+                      of Guaranteed pods that request whole CPUs get exclusive cores.
+                      Default: none
+                    enum:
+                    - none
+                    - static
+                    type: string
                   evictionHard:
                     additionalProperties:
                       description: KubeletQuantity is a bounded kubelet resource quantity

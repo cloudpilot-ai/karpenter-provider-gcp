@@ -141,12 +141,14 @@ kubeletConfiguration:
   clusterDNS:
     - 10.0.1.100
   cpuCFSQuota: false
+  cpuManagerPolicy: static
   imageGCHighThresholdPercent: 85
   imageGCLowThresholdPercent: 80
 ```
 
 - `clusterDNS` — override cluster DNS server addresses
 - `cpuCFSQuota` — enable or disable CPU CFS quota enforcement for containers with CPU limits
+- `cpuManagerPolicy` — `static` gives containers of Guaranteed pods that request whole CPUs exclusive cores; defaults to `none`. See [CPU management policies](https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/#configuring-cpu-management-policies)
 - `imageGCHighThresholdPercent` / `imageGCLowThresholdPercent` — control when kubelet garbage-collects unused container images
 
 By default, kubelet pulls container images one at a time per node. This serializes every DaemonSet image (CNI, logging, CSI, metrics) on freshly provisioned nodes and adds bootstrap latency. Setting `serializeImagePulls: false` together with `maxParallelImagePulls` parallelizes pulls to reduce that latency, mirroring GKE's [`NodeKubeletConfig.maxParallelImagePulls`](https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1/NodeKubeletConfig).
