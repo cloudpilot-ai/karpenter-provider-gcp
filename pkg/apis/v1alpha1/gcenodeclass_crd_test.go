@@ -104,6 +104,27 @@ func TestGCENodeClassCRDRestrictsParallelImagePullsAboveOne(t *testing.T) {
 	require.True(t, found, "serializeImagePulls must still be required from maxParallelImagePulls 2 upwards")
 }
 
+func TestGCENodeClassCRDRequiresReservedCPUForStaticCPUManager(t *testing.T) {
+	kubelet := func(kc map[string]any) map[string]any { return map[string]any{"kubeletConfiguration": kc} }
+	const message = "cpuManagerPolicy static requires a positive cpu in kubeReserved or systemReserved"
+
+	requireRejected(t, kubelet(map[string]any{
+		"cpuManagerPolicy": "static",
+		"kubeReserved":     map[string]any{"cpu": "0m"},
+	}), message)
+
+	requireAdmitted(t, kubelet(map[string]any{"cpuManagerPolicy": "static"}))
+	requireAdmitted(t, kubelet(map[string]any{
+		"cpuManagerPolicy": "static",
+		"kubeReserved":     map[string]any{"cpu": "0"},
+		"systemReserved":   map[string]any{"cpu": "100m"},
+	}))
+	requireAdmitted(t, kubelet(map[string]any{
+		"cpuManagerPolicy": "none",
+		"kubeReserved":     map[string]any{"cpu": "0"},
+	}))
+}
+
 func TestGCENodeClassCRDRejectsReservedMetadataKeys(t *testing.T) {
 	crd, err := os.ReadFile(crdPath())
 	require.NoError(t, err)

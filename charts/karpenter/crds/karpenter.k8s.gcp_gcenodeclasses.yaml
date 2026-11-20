@@ -593,6 +593,13 @@ spec:
                     and must not exceed it
                   rule: '!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod)
                     && duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))'
+                - message: cpuManagerPolicy static requires a positive cpu in kubeReserved
+                    or systemReserved
+                  rule: '!has(self.cpuManagerPolicy) || self.cpuManagerPolicy != ''static''
+                    || !has(self.kubeReserved) || !(''cpu'' in self.kubeReserved)
+                    || quantity(self.kubeReserved[''cpu'']).isGreaterThan(quantity(''0''))
+                    || (has(self.systemReserved) && ''cpu'' in self.systemReserved
+                    && quantity(self.systemReserved[''cpu'']).isGreaterThan(quantity(''0'')))'
               labels:
                 additionalProperties:
                   type: string
