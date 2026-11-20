@@ -7,8 +7,8 @@
     },
     {
       "path": "pkg/controllers/csr/csr.go",
-      "description": "Requester and NodeClaim checks preceding the certificate approval side effect",
-      "scope": ["charts/**", "hack/security/**"]
+      "description": "CSR authorization entrypoint, pinned Google approver reference and documented standalone-VM differences",
+      "scope": ["pkg/controllers/csr/**", "charts/**", "hack/security/**"]
     },
     {
       "path": "charts/karpenter/templates/clusterrole-core.yaml",

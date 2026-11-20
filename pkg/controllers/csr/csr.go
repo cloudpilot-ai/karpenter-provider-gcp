@@ -103,9 +103,11 @@ type ShieldedPolicyProvider interface {
 // Controller approves kubelet client CSRs for NodeClaims managed by this
 // provider.
 //
-// The attestation flow follows Google's GKE node CSR approver:
+// Reference for CSR recognition, TPM verification and SAR authorization:
 // https://github.com/kubernetes/cloud-provider-gcp/blob/de598a6a3590934e8b352db066038015b2649600/cmd/gcp-controller-manager/node_csr_approver.go
 // Copyright 2018 The Kubernetes Authors. Licensed under the Apache License, Version 2.0.
+// Check relevant changes against this pinned implementation and keep intentional
+// standalone-VM differences explicit.
 //
 // Differences from that implementation, required by standalone Karpenter VMs:
 // cluster membership is the managed NodeClaim and its recorded VM incarnation

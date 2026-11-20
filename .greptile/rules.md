@@ -11,6 +11,12 @@ For `pkg/metadata`, flag any change that adds GCP/Kubernetes API calls, source n
 
 Flag changes that duplicate GKE API reads across providers, let bootstrap metadata helpers perform API calls, mutate caller-owned Compute metadata templates in place, or mix Kubernetes object metadata with GCE instance labels/tags.
 
+## CSR approval: check the pinned Google implementation
+
+Before planning, implementing or reviewing changes to `pkg/controllers/csr/**`, consult [Google's pinned node CSR approver](https://github.com/kubernetes/cloud-provider-gcp/blob/de598a6a3590934e8b352db066038015b2649600/cmd/gcp-controller-manager/node_csr_approver.go). Compare the relevant requester recognition, TPM proof/key binding, original-identity SubjectAccessReview and approval/lifecycle behavior; document intentional deviations.
+
+Preserve the documented standalone-VM differences: NodeClaim ownership and recorded VM incarnation replace managed-instance-group membership, and fresh cluster Shielded policy controls the distinct legacy flow. Do not demand blindly copying MIG checks, serving approval or stale-node deletion. The public implementation is a design reference, not proof of every behavior inside current managed GKE.
+
 ## GCENodeClass ergonomics: follow GKE node configuration
 
 For new or materially changed GCENodeClass settings with a GKE equivalent, prefer the names, nesting, and semantics operators already know from [GKE NodeConfig](https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/NodeConfig) and [Terraform `google_container_node_pool.node_config`](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/container_node_pool#node_config). Translate Terraform snake_case to Kubernetes camelCase; do not copy HCL syntax or add a `spec.nodeConfig` wrapper, since `spec` already holds node configuration.
