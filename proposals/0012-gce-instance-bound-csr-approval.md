@@ -7,7 +7,7 @@
 
 ## Summary
 
-Karpenter approves kubelet client CSRs only when the bootstrap requester proves possession of the GCE VM it claims. The proof is the native GKE TPM attestation envelope, verified against the VM attestation key that Compute reports for the live instance, and bound to the numeric VM incarnation recorded on the NodeClaim at launch or adoption.
+Karpenter approves kubelet client CSRs from the TPM bootstrap identities only when the requester proves possession of the GCE VM it claims. A cluster with Shielded GKE Nodes disabled can instead use proof-less `kubelet` legacy enrollment, approved through a separate, explicitly weaker path (see [Legacy un-attested bootstrap](#legacy-un-attested-bootstrap)). The proof is the native GKE TPM attestation envelope, verified against the VM attestation key that Compute reports for the live instance, and bound to the numeric VM incarnation recorded on the NodeClaim at launch or adoption.
 
 This follows Google's [node CSR approver](https://github.com/kubernetes/cloud-provider-gcp/blob/de598a6a3590934e8b352db066038015b2649600/cmd/gcp-controller-manager/node_csr_approver.go) for proof parsing, signature verification, key binding, TPM structure validation and `SubjectAccessReview`, and replaces its managed-instance-group membership check with the authoritative NodeClaim/VM/cluster association available to a standalone-VM provider.
 
@@ -15,7 +15,7 @@ This follows Google's [node CSR approver](https://github.com/kubernetes/cloud-pr
 
 ### Problem statement
 
-Every GKE node pool has a bootstrap credential that authenticates as `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`. Before this change the controller approved any such request for a launched, unregistered Karpenter NodeClaim, so a holder of another pool's credential could request a pending Karpenter node's identity. Name, zone and lifecycle checks narrowed that exposure but did not establish that the requester was the VM.
+On Shielded GKE clusters, node pools use bootstrap credentials that authenticate as `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`. Before this change the controller approved any such request for a launched, unregistered Karpenter NodeClaim, so a holder of another pool's credential could request a pending Karpenter node's identity. Name, zone and lifecycle checks narrowed that exposure but did not establish that the requester was the VM.
 
 Issue #778 asks whether instance, cluster and CSR-key association can be established throughout enrollment, renewal and drain. A signature can authenticate a VM/key relationship, while configured-cluster membership and NodeClaim ownership remain authorization policy.
 
@@ -25,11 +25,13 @@ Issue #778 asks whether instance, cluster and CSR-key association can be establi
 - Bind approval to the live VM incarnation and the provider-owned NodeClaim in the configured cluster.
 - Preserve certificate reissuance for a registered node, including while it drains, on both the attested bootstrap path and ordinary `system:node` self-renewal.
 - Document prerequisites, replay limits and the evidence that remains outstanding.
+- Let the cluster's own Shielded GKE Nodes setting, not a Karpenter flag, decide whether the weaker legacy enrollment of a disabled cluster is accepted.
 
 ### Non-goals
 
 - A custom bootstrap agent, nonce protocol, metadata-token transport or managed-control-plane change.
 - Serving-certificate approval, stale-Node/Pod deletion or migration to managed instance groups.
+- A global attestation-skip option, unlabelled-VM adoption or incarnation backfill, or legacy re-enrollment of a registered node.
 - Claiming non-exportable kubelet keys, revoking existing certificates or securing other approvers.
 
 ## Proposal
@@ -49,7 +51,7 @@ Ubuntu, other GKE versions and arm64 were not evaluated, and no active kubelet c
 
 ### Implemented verification flow
 
-`pkg/controllers/csr` splits the two supported identities:
+`pkg/controllers/csr` splits the three supported identities:
 
 1. **Attested bootstrap** (`kubelet-nodepool-bootstrap`, `kubelet-bootstrap`) always requires the four proof blocks. The producer's optional `ATTESTATION CERTIFICATE` is accepted once and ignored, matching the upstream API-key verification path: it cannot select or replace the authoritative Compute attestation key. Missing or invalid proof leaves the request pending; there is no un-attested fallback.
    - The managed NodeClaim is selected by the requested node name only.
@@ -60,9 +62,23 @@ Ubuntu, other GKE versions and arm64 were not evaluated, and no active kubelet c
    - The attestation signature must verify with that key, the certification structure must decode to a TPM certify structure with no trailing or non-canonical bytes, and the certified object must match the CSR public key using the maintained `github.com/google/go-tpm` legacy TPM 2.0 parser.
    - Lifecycle: initial enrollment requires `Launched=True`, no registration and no deletion; re-enrollment requires the same live registered claim and remains allowed while it drains.
    - The original CSR username, UID, groups and extras are sent in a SAR for `create certificatesigningrequests/nodeclient`.
-2. **Authenticated self-renewal** (`system:node:<same-name>`) keeps the existing registered-claim and group checks, requires no attestation, remains allowed during drain, and adds a SAR for `create certificatesigningrequests/selfnodeclient`.
+2. **Legacy un-attested bootstrap** (`kubelet` only), described [below](#legacy-un-attested-bootstrap).
+3. **Authenticated self-renewal** (`system:node:<same-name>`) keeps the existing registered-claim and group checks, requires no attestation, remains allowed during drain, and adds a SAR for `create certificatesigningrequests/selfnodeclient`.
 
 Temporary Compute or SAR failures never approve or deny a request: they are reported for retry, and other requests in the same reconcile continue. Terminal conditions and approval conflicts are handled idempotently by re-listing on the next reconcile.
+
+### Legacy un-attested bootstrap
+
+Native evidence: on GKE **1.36.4-gke.2046003** (COS, one architecture) with Shielded GKE Nodes disabled, the node's initial client CSR came from requester `kubelet` (group `system:authenticated`), signer `kubernetes.io/kube-apiserver-client-kubelet`, usages `digital signature` and `client auth`, `CN=system:node:<name>` with the single organization `system:nodes`, ECDSA P-256, no SANs, and one plain PEM block with no proof. GKE auto-approved it and the node became Ready. The same response showed `shieldedNodes: {}`, a present message whose `enabled` is the proto3 default `false` and which the API omits (see the [`ShieldedNodes` API reference](https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters#shieldednodes)); an absent message is **unknown**. The pinned upstream approver includes TPM validation unconditionally and an optional separate legacy validator for `kubelet`, whose predicate accepts the two client usages, optionally with key encipherment. How managed GKE enables it internally is not public; the observed flow matches that historical principal.
+
+The controller adds a separate legacy branch, never a fallback and never a global switch:
+
+- **Requester and request:** exactly `kubelet`. One plain `CERTIFICATE REQUEST` block with only surrounding whitespace (leading or trailing text, malformed leading blocks, duplicate or extra blocks, including a TPM envelope, are rejected, because `pem.Decode` alone skips leading data and the shared parser discards the remainder), exactly one `system:nodes` organization and no other subject attribute, exact usages (the observed pair, or plus key encipherment; no other subset or duplicates), and the shared signer, signature and no-SAN checks. The existing shared validation and the TPM and self-renewal paths are unchanged.
+- **Lifecycle and association:** the managed NodeClaim is selected by launched ProviderID VM name; it needs `Launched=True`, `Registered` not true, no node name, no deletion and a valid non-zero recorded numeric instance ID. The live VM is read fresh from Compute (`instance.GetIncarnation`: no instance cache and no attestation key) and its configured project, zone, name, numeric ID and NodeClaim-UID ownership label must match. Unlabelled VMs are not adopted or backfilled, and registered or draining claims never use this path.
+- **Authorization:** the original username, UID, groups and extras are sent in a SAR for `create certificatesigningrequests/nodeclient`; denied or failed never approves.
+- **Policy:** `pkg/providers/gke.ShieldedNodesEnabled` reads the cluster uncached, not through the 30-minute cluster configuration cache, and treats a nil cluster, nil message or error as unknown. The controller reads it last, immediately before approval and on every attempt, so a previous `false` cannot authorize a later request after `true` or an error. Enabled is no approval; unknown stays pending and retryable. Valid TPM and self-renewal requests never read it, and one failing legacy request does not stop others. There is no cross-system transaction, so this removes the application-cache window, not every distributed race.
+
+**Security consequence.** The association to a live VM and NodeClaim UID is not a cryptographic binding to the requester. The legacy credential is shared, so a holder can request a certificate for another eligible pending NodeClaim. That weaker origin guarantee is the consequence of the operator disabling Shielded GKE Nodes and is not equivalent to TPM attestation. No new IAM is required (`container.clusters.get`).
 
 ### Durable incarnation association
 
@@ -74,11 +90,12 @@ Trusted controller configuration, privileged NodeClaim/annotation/status writers
 
 ### Lifecycle policy
 
-| Path                        | Required association                                                                         | Authorization/lifecycle                                                                                            |
-|-----------------------------|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| Initial attested enrollment | Valid VM/key proof, recorded live incarnation, matching Compute identity and attestation key | Bootstrap principal, allowed `nodeclient` SAR; launched, unregistered, non-deleting NodeClaim.                     |
-| Attested re-enrollment      | Fresh proof for the same live registered incarnation                                         | Bootstrap principal, allowed `nodeclient` SAR; allowed while the registered claim drains or is deleting.           |
-| Ordinary self-renewal       | API-authenticated `system:node:<same-name>` and registered-claim/group restrictions          | Allowed `selfnodeclient` SAR; preserved during drain. No attestation envelope is required on this continuity path. |
+| Path                        | Required association                                                                                         | Authorization/lifecycle                                                                                             |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Initial attested enrollment | Valid VM/key proof, recorded live incarnation, matching Compute identity and attestation key                 | Bootstrap principal, allowed `nodeclient` SAR; launched, unregistered, non-deleting NodeClaim.                      |
+| Attested re-enrollment      | Fresh proof for the same live registered incarnation                                                         | Bootstrap principal, allowed `nodeclient` SAR; allowed while the registered claim drains or is deleting.            |
+| Legacy initial enrollment   | Exact `kubelet`, strict plain request, launched claim with recorded incarnation, live VM and UID label match | Allowed `nodeclient` SAR; unregistered, non-deleting claim only; fresh cluster policy known disabled. No TPM proof. |
+| Ordinary self-renewal       | API-authenticated `system:node:<same-name>` and registered-claim/group restrictions                          | Allowed `selfnodeclient` SAR; preserved during drain. No attestation envelope is required on this continuity path.  |
 
 ### Replay and trust limits
 
@@ -93,6 +110,7 @@ Other approvers operate independently, and a competing terminal denial is not ov
 - IAM: `compute.instances.getShieldedInstanceIdentity` (new) and `compute.projects.get` for the controller service account, both in [`deploy/iam/karpenter-controller-role.yaml`](../deploy/iam/karpenter-controller-role.yaml).
 - Kubernetes RBAC: the chart now grants `create` on `subjectaccessreviews`, plus the existing CSR approval permissions.
 - Migration: existing NodeClaims have no recorded incarnation and cannot use attested enrollment. That includes native plugin reissuance: a registered claim launched by an earlier version cannot be re-issued through the bootstrap path, and only `system:node` continuity remains available where that path was in use. Replace these claims through normal consolidation/expiration or delete them before their certificates need renewal; do not backfill the annotation from a name lookup. See [MIGRATION.md](../MIGRATION.md).
+- Shielded GKE Nodes disabled: nodes enroll through the legacy path above, with a weaker origin guarantee. Enable it on the cluster to require proof.
 - No automatic rollback: reverting to an older controller restores un-attested bootstrap approval.
 
 ## Test plan
@@ -103,9 +121,11 @@ Other approvers operate independently, and a competing terminal denial is not ov
 
 `pkg/providers/instance` covers the identity lookup contract (fresh reads, incarnation-addressed key read, replacement rejection, missing VM, missing RSA key, temporary failures), launch incarnation recording from the terminal operation, the refusal to launch without a trusted incarnation or from an unowned same-name VM, regional ownership conflicts preventing a duplicate launch, ownership-label adoption behavior and legacy VMs. `pkg/providers/gke` covers the cached authoritative project number. `pkg/cloudprovider` covers annotation mapping and the incarnation-mismatch error.
 
+Legacy bootstrap tests cover the happy path, whole-envelope rejection (leading and trailing text, malformed leading block, duplicate and extra blocks, a TPM envelope under `kubelet`), subject and usage strictness, registered/deleting/unlaunched/missing claims, missing or zero incarnation, replacement, wrong-project, unlabelled and other-UID VMs, SAR identity propagation and deny/error, and enabled, unknown and failed policy, with the policy read last and repeated for every attempt (a `false` followed by `true` or an error does not approve). TPM requesters without a proof stay rejected without consulting the policy, and a failing legacy request does not block self-renewal. `pkg/providers/gke` covers enabled, disabled (`{}`), absent, null and failed responses and that a cached disabled configuration cannot mask a fresh `true` or error; `pkg/providers/instance` covers the fresh incarnation lookup without attestation-key or project reads.
+
 ### Added GKE integration coverage (not executed)
 
-`test/suites/provisioning/csr.go` provisions one COS/amd64 on-demand vTPM node through the existing helpers and asserts that the NodeClaim records the numeric instance ID of the live VM, that the VM has vTPM enabled, that the native kubelet client CSR contains the four required attestation blocks and at most one optional attestation certificate, and that it was approved by `KarpenterAutoApprover` with a certificate issued. It does not fabricate rotation.
+`test/suites/provisioning/csr.go` provisions one COS/amd64 on-demand vTPM node through the existing helpers and asserts that the NodeClaim records the numeric instance ID of the live VM, that the VM has vTPM enabled, that the native kubelet client CSR contains the four required attestation blocks and at most one optional attestation certificate, and that it was approved by `KarpenterAutoApprover` with a certificate issued. It does not fabricate rotation, and it assumes a Shielded GKE Nodes cluster: no spec covers native enrollment on a cluster with the setting disabled or the candidate controller's legacy approval.
 
 ### Outstanding real-GKE validation
 
@@ -123,13 +143,15 @@ The following still requires a separately approved candidate deployment and was 
 - [X] Review the support/migration contract and the concrete incarnation association.
 - [X] Validate cryptographic interoperability and authorization locally.
 - [ ] Validate against real GKE enrollment, native reissuance and drain scenarios with a candidate deployment.
+- [ ] Validate the candidate controller's legacy approval (SAR for `kubelet` and enrollment on a cluster with Shielded GKE Nodes disabled) with a candidate deployment.
 
 ## Alternatives considered
 
 - **Copy the entire Google approver:** includes MIG membership, serving certificates and stale-node cleanup with different ownership/lifecycle assumptions. Only proof verification and SAR semantics are reused.
 - **Name, label or numeric-ID lookup alone:** establishes that a VM exists, not that it sent this CSR.
 - **Compute instance identity JWT:** [Google-signed VM identity tokens](https://docs.cloud.google.com/compute/docs/instances/verifying-instance-identity) are useful identity evidence but are not bound to the CSR key by this bootstrap flow; transporting them would require a separately designed protocol.
-- **Accept both attested and non-attested shared bootstrap requests:** preserves the original impersonation boundary and cannot be advertised as mandatory origin verification.
+- **Accept un-attested shared bootstrap requests for every requester:** preserves the original impersonation boundary and cannot be advertised as mandatory origin verification. Only the distinct `kubelet` requester is accepted, and only while the cluster's policy is fresh and disabled.
+- **A Karpenter flag or Helm switch for skipping attestation:** duplicates the cluster's own control and can contradict it; the cluster setting is read instead.
 
 ## Primary references
 

@@ -73,7 +73,7 @@ func NewController(
 		nodeclasstermination.NewController(kubeClient),
 		nodeclasshash.NewController(kubeClient),
 		instancetype.NewController(instanceTypeProvider),
-		csr.NewController(kubernetesInterface, instanceProvider),
+		csr.NewController(kubernetesInterface, instanceProvider, gkeProvider),
 		controllerspricing.NewController(pricingProvider),
 		nodeclaimgc.NewController(kubeClient, cloudProvider),
 		gcecustommachinetype.NewController(kubeClient, authOptions, gkeProvider),

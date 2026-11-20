@@ -17,6 +17,7 @@ limitations under the License.
 package csr
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
@@ -50,8 +51,11 @@ const (
 	nodesGroup                = "system:nodes"
 	nodePoolBootstrapUsername = "kubelet-nodepool-bootstrap"
 	tpmBootstrapUsername      = "kubelet-bootstrap"
-	nodePoolOrgPrefix         = "gke:nodepool:name:"
-	instanceOrgPrefix         = "gke:instance:"
+	// legacyBootstrapUsername is the requester GKE uses for an un-attested kubelet
+	// bootstrap on a cluster with Shielded GKE Nodes disabled.
+	legacyBootstrapUsername = "kubelet"
+	nodePoolOrgPrefix       = "gke:nodepool:name:"
+	instanceOrgPrefix       = "gke:instance:"
 
 	// nodeClientSubresource is the authorization subresource checked for
 	// bootstrap-authenticated enrollment. GKE's TPM bootstrap credential is
@@ -63,6 +67,14 @@ const (
 var (
 	requiredUsages = sets.New(certv1.UsageClientAuth)
 	allowedUsages  = sets.New(certv1.UsageDigitalSignature, certv1.UsageKeyEncipherment, certv1.UsageClientAuth)
+
+	// legacyUsageSets are the only usage lists a legacy bootstrap request may
+	// carry: the observed native pair, and Google's accepted pair plus key
+	// encipherment.
+	legacyUsageSets = []sets.Set[certv1.KeyUsage]{
+		sets.New(certv1.UsageDigitalSignature, certv1.UsageClientAuth),
+		sets.New(certv1.UsageDigitalSignature, certv1.UsageKeyEncipherment, certv1.UsageClientAuth),
+	}
 )
 
 type kubeletClientSubject struct {
@@ -71,10 +83,21 @@ type kubeletClientSubject struct {
 	instanceOrg string
 }
 
-// IdentityProvider resolves authoritative Compute Engine identity evidence for a
-// live VM. *instance.DefaultProvider implements it.
+// IdentityProvider resolves fresh Compute Engine evidence for a live VM.
+// *instance.DefaultProvider implements it.
 type IdentityProvider interface {
+	// GetIdentity returns attestation identity evidence for TPM bootstrap.
 	GetIdentity(ctx context.Context, zone, name string) (*instance.InstanceIdentity, error)
+	// GetIncarnation returns the VM incarnation and ownership label for legacy
+	// bootstrap, which has no attestation key.
+	GetIncarnation(ctx context.Context, zone, name string) (*instance.InstanceIncarnation, error)
+}
+
+// ShieldedPolicyProvider reads the cluster's current Shielded GKE Nodes policy.
+// *gke.DefaultProvider implements it. Implementations must not serve a cached
+// answer and must return an error when the policy is unknown.
+type ShieldedPolicyProvider interface {
+	ShieldedNodesEnabled(ctx context.Context) (bool, error)
 }
 
 // Controller approves kubelet client CSRs for NodeClaims managed by this
@@ -88,17 +111,25 @@ type IdentityProvider interface {
 // cluster membership is the managed NodeClaim and its recorded VM incarnation
 // instead of a cluster-managed instance group; the stable Compute
 // getShieldedInstanceIdentity API supplies the attestation key; no serving
-// certificate, legacy un-attested bootstrap or stale-node path is implemented.
+// certificate or stale-node path is implemented. Google's legacy un-attested
+// bootstrap validator (requester "kubelet") is adapted, not copied: it is only
+// reachable while a fresh read of the cluster's Shielded GKE Nodes policy says
+// disabled, and it additionally requires a strict plain request, exactly one
+// system:nodes organization, an exact usage list, a launched and not yet
+// registered NodeClaim, and the live VM's recorded incarnation and NodeClaim UID
+// label. Managed GKE's own internal enablement of that validator is not public.
 type Controller struct {
 	client           client.Client
 	kubeClient       kubernetes.Interface
 	identityProvider IdentityProvider
+	shieldedPolicy   ShieldedPolicyProvider
 }
 
-func NewController(kubeClient kubernetes.Interface, identityProvider IdentityProvider) *Controller {
+func NewController(kubeClient kubernetes.Interface, identityProvider IdentityProvider, shieldedPolicy ShieldedPolicyProvider) *Controller {
 	return &Controller{
 		kubeClient:       kubeClient,
 		identityProvider: identityProvider,
+		shieldedPolicy:   shieldedPolicy,
 	}
 }
 
@@ -188,6 +219,13 @@ func (c *Controller) authorizeKubeletClientCSR(ctx context.Context, csr *certv1.
 		return selfNodeClientSubresource, nil
 	}
 
+	if csr.Spec.Username == legacyBootstrapUsername {
+		if err := c.authorizeLegacyBootstrap(ctx, csr, request, subject, nodeClaims); err != nil {
+			return "", err
+		}
+		return nodeClientSubresource, nil
+	}
+
 	if csr.Spec.Username != nodePoolBootstrapUsername && csr.Spec.Username != tpmBootstrapUsername {
 		return "", fmt.Errorf("requester %q cannot request a certificate for node %q", csr.Spec.Username, subject.nodeName)
 	}
@@ -211,7 +249,11 @@ func validateKubeletClientRequest(csr *certv1.CertificateSigningRequest) (kubele
 	if !usages.IsSuperset(requiredUsages) || !allowedUsages.IsSuperset(usages) {
 		return kubeletClientSubject{}, nil, nil, fmt.Errorf("usages %v are not valid for a kubelet client certificate", csr.Spec.Usages)
 	}
-	subject, request, err := parseKubeletClientRequest(csr.Spec.Request)
+	requestPEM := csr.Spec.Request
+	if csr.Spec.Username == legacyBootstrapUsername {
+		requestPEM = bytes.TrimSpace(requestPEM)
+	}
+	subject, request, err := parseKubeletClientRequest(requestPEM)
 	if err != nil {
 		return kubeletClientSubject{}, nil, nil, err
 	}
@@ -253,6 +295,119 @@ func (c *Controller) validateAttestedBootstrap(ctx context.Context, csr *certv1.
 	}
 
 	return c.verifyAttestedIdentity(ctx, nodeClaim, subject, proof, request, recordedID)
+}
+
+// authorizeLegacyBootstrap approves initial enrollment without TPM attestation
+// for the legacy "kubelet" requester. This is a distinct, weaker path: possession
+// of the shared bootstrap credential, not a TPM proof, is the only evidence that
+// the requester controls the VM, so a holder could ask for another eligible
+// pending NodeClaim. It is only reachable while the cluster's Shielded GKE Nodes
+// policy is freshly read as disabled; the read is the last check before approval
+// and is repeated for every attempt. A request for a TPM envelope, or without a
+// proof where Shielded Nodes is enabled, is never approved here.
+func (c *Controller) authorizeLegacyBootstrap(ctx context.Context, csr *certv1.CertificateSigningRequest, request *x509.CertificateRequest, subject kubeletClientSubject, nodeClaims []karpv1.NodeClaim) error {
+	if err := validateLegacyRequest(csr, request); err != nil {
+		return err
+	}
+	nodeClaim := findBootstrapNodeClaim(subject, nodeClaims)
+	if nodeClaim == nil {
+		return fmt.Errorf("no NodeClaim was launched for node %q", subject.nodeName)
+	}
+	if err := validateLegacyLifecycle(nodeClaim); err != nil {
+		return err
+	}
+	if err := c.verifyLegacyIncarnation(ctx, nodeClaim); err != nil {
+		return err
+	}
+	if err := c.authorizeCreate(ctx, csr, nodeClientSubresource); err != nil {
+		return err
+	}
+	return c.requireShieldedNodesDisabled(ctx)
+}
+
+// validateLegacyRequest applies the strict legacy request shape on top of the
+// shared checks: one plain certificate request and nothing else in the request
+// field, subject O=system:nodes only, and an exact usage list.
+func validateLegacyRequest(csr *certv1.CertificateSigningRequest, request *x509.CertificateRequest) error {
+	usages := sets.New(csr.Spec.Usages...)
+	if len(usages) != len(csr.Spec.Usages) || !slices.ContainsFunc(legacyUsageSets, usages.Equal) {
+		return fmt.Errorf("usages %v are not valid for a legacy kubelet client certificate", csr.Spec.Usages)
+	}
+	// Subject.Names holds every subject attribute: only CN and the single organization.
+	if !slices.Equal(request.Subject.Organization, []string{nodesGroup}) || len(request.Subject.Names) != 2 {
+		return fmt.Errorf("legacy kubelet subject must be exactly CN and one organization %q", nodesGroup)
+	}
+	// pem.Decode skips leading malformed data and callers discard its remainder, so
+	// the whole field is checked to hold one certificate request and nothing else.
+	block, rest, err := decodeAttestationBlock(bytes.TrimSpace(csr.Spec.Request))
+	if err != nil {
+		return fmt.Errorf("legacy kubelet request must be a single plain certificate request: %w", err)
+	}
+	if block.Type != csrRequestBlock || len(block.Headers) > 0 || len(bytes.TrimSpace(rest)) > 0 || !bytes.Equal(block.Bytes, request.Raw) {
+		return fmt.Errorf("legacy kubelet request must be a single plain certificate request")
+	}
+	return nil
+}
+
+// validateLegacyLifecycle restricts legacy enrollment to the initial credential of
+// a launched claim. Unlike attested re-enrollment it never serves a registered or
+// draining claim.
+func validateLegacyLifecycle(nodeClaim *karpv1.NodeClaim) error {
+	if !nodeClaim.DeletionTimestamp.IsZero() || !nodeClaim.StatusConditions().Get(karpv1.ConditionTypeLaunched).IsTrue() {
+		return fmt.Errorf("NodeClaim %q is deleting or has not launched", nodeClaim.Name)
+	}
+	if nodeClaim.StatusConditions().Get(karpv1.ConditionTypeRegistered).IsTrue() || nodeClaim.Status.NodeName != "" {
+		return fmt.Errorf("NodeClaim %q is already registered", nodeClaim.Name)
+	}
+	return nil
+}
+
+// verifyLegacyIncarnation requires the live VM to be the incarnation the NodeClaim
+// recorded at launch and to carry that NodeClaim's UID. Nothing is backfilled or
+// trusted by name alone.
+func (c *Controller) verifyLegacyIncarnation(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
+	recordedID, err := recordedIncarnation(nodeClaim)
+	if err != nil {
+		return err
+	}
+	project, zone, instanceName := parseProviderID(nodeClaim.Status.ProviderID)
+	if project == "" || zone == "" || instanceName == "" {
+		return fmt.Errorf("NodeClaim %q has no complete GCE identity", nodeClaim.Name)
+	}
+	live, err := c.identityProvider.GetIncarnation(ctx, zone, instanceName)
+	if err != nil {
+		return &retryableError{fmt.Errorf("reading the incarnation of instance %q: %w", instanceName, err)}
+	}
+	if live == nil {
+		return fmt.Errorf("instance %q for NodeClaim %q does not exist", instanceName, nodeClaim.Name)
+	}
+	return validateLegacyIncarnation(live, nodeClaim, project, recordedID)
+}
+
+// validateLegacyIncarnation compares the live VM with the NodeClaim's recorded
+// launch instance and ownership. The expected values come from the NodeClaim.
+func validateLegacyIncarnation(live *instance.InstanceIncarnation, nodeClaim *karpv1.NodeClaim, project string, recordedID uint64) error {
+	_, zone, instanceName := parseProviderID(nodeClaim.Status.ProviderID)
+	if live.ProjectID != project || live.Zone != zone || live.Name != instanceName || live.NumericID != recordedID {
+		return fmt.Errorf("live instance %q does not match the recorded launch instance %d of NodeClaim %q", instanceName, recordedID, nodeClaim.Name)
+	}
+	if nodeClaim.UID == "" || live.NodeClaimUID != string(nodeClaim.UID) {
+		return fmt.Errorf("live instance %q is not labeled as owned by NodeClaim %q", instanceName, nodeClaim.Name)
+	}
+	return nil
+}
+
+// requireShieldedNodesDisabled reads the cluster policy fresh. Only a known
+// disabled policy allows legacy approval; an unknown policy stays retryable.
+func (c *Controller) requireShieldedNodesDisabled(ctx context.Context) error {
+	enabled, err := c.shieldedPolicy.ShieldedNodesEnabled(ctx)
+	if err != nil {
+		return &retryableError{fmt.Errorf("reading the cluster Shielded Nodes policy: %w", err)}
+	}
+	if enabled {
+		return fmt.Errorf("cluster has Shielded GKE Nodes enabled; un-attested bootstrap is not allowed")
+	}
+	return nil
 }
 
 // verifyAttestedIdentity completes the attested checks that need the live VM:

@@ -32,6 +32,7 @@ import (
 	certv1 "k8s.io/api/certificates/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis"
@@ -116,6 +117,28 @@ type identityProviderFunc func(ctx context.Context, zone, name string) (*instanc
 
 func (f identityProviderFunc) GetIdentity(ctx context.Context, zone, name string) (*instance.InstanceIdentity, error) {
 	return f(ctx, zone, name)
+}
+
+// GetIncarnation is not faked: the TPM and self-renewal scenarios must not use it.
+func (f identityProviderFunc) GetIncarnation(context.Context, string, string) (*instance.InstanceIncarnation, error) {
+	return nil, errors.New("incarnation lookup is not faked")
+}
+
+// shieldedPolicyFunc adapts a function to the ShieldedPolicyProvider seam.
+type shieldedPolicyFunc func(ctx context.Context) (bool, error)
+
+func (f shieldedPolicyFunc) ShieldedNodesEnabled(ctx context.Context) (bool, error) {
+	return f(ctx)
+}
+
+// newTestController wires a controller for scenarios that must not depend on the
+// cluster Shielded Nodes policy: reading it fails the test and the read.
+func newTestController(t *testing.T, api kubernetes.Interface, identity IdentityProvider) *Controller {
+	t.Helper()
+	return NewController(api, identity, shieldedPolicyFunc(func(context.Context) (bool, error) {
+		t.Error("the TPM and self-renewal paths must not read the cluster Shielded Nodes policy")
+		return false, errors.New("unexpected Shielded Nodes policy read")
+	}))
 }
 
 func fixtureIdentity(t *testing.T, fixture *attestationFixture) *instance.InstanceIdentity {
@@ -682,7 +705,7 @@ func TestAuthorizeKubeletClientCSR(t *testing.T) {
 			api, double := newKubeAPIDouble(t)
 			double.sarAllowed = !tc.sarDenied
 			double.sarFailure = tc.sarError
-			controller := NewController(api, identity)
+			controller := newTestController(t, api, identity)
 			controller.client = &csrReadClient{request: tc.csr(t, fixture), claims: tc.claims(t, fixture)}
 
 			_, err := controller.Reconcile(context.Background())
@@ -724,7 +747,7 @@ func TestAuthorizeKubeletClientCSRPropagatesOriginalIdentity(t *testing.T) {
 	request.Spec.Extra = map[string]certv1.ExtraValue{
 		"authentication.kubernetes.io/credential-id": {"gke-tpm-bootstrap"},
 	}
-	controller := NewController(api, identityProviderFunc(func(context.Context, string, string) (*instance.InstanceIdentity, error) {
+	controller := newTestController(t, api, identityProviderFunc(func(context.Context, string, string) (*instance.InstanceIdentity, error) {
 		return fixtureIdentity(t, fixture), nil
 	}))
 	controller.client = &csrReadClient{request: request, claims: []karpv1.NodeClaim{claimForFixture(t, "pending")}}

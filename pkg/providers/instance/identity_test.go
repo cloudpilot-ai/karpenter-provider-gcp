@@ -20,11 +20,14 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
+
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
 
 const (
@@ -197,4 +200,85 @@ func TestGetIdentityReadsComputeNotTheInstanceCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(987654321), identity.NumericID)
 	require.Equal(t, 3, requests, "both VM reads and the identity read must hit the Compute API")
+}
+
+func TestGetIncarnation(t *testing.T) {
+	t.Parallel()
+
+	ownershipLabel := utils.SanitizeGCELabelValue(utils.LabelNodeClaimUIDKey)
+	for _, tt := range []struct {
+		name    string
+		handler http.HandlerFunc
+		// wantNil reports a missing VM, which is not an error.
+		wantNil bool
+		wantUID string
+		wantErr bool
+	}{
+		{
+			name: "live VM with the ownership label",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != identityPath {
+					http.NotFound(w, r)
+					return
+				}
+				writeJSON(w, &compute.Instance{Name: "karpenter-node", Id: 987654321, Labels: map[string]string{ownershipLabel: testClaimUID}})
+			},
+			wantUID: testClaimUID,
+		},
+		{
+			name: "VM launched without the ownership label",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				writeIdentityInstance(w, 987654321)
+			},
+		},
+		{name: "missing VM", handler: serveNoInstance, wantNil: true},
+		{
+			name: "temporary Compute failure",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				writeJSON(w, &googleapi.Error{Code: http.StatusServiceUnavailable, Message: "backend unavailable"})
+			},
+			wantErr: true,
+		},
+		{
+			name: "VM without a numeric ID",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				writeIdentityInstance(w, 0)
+			},
+			wantErr: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var requests []string
+			var mu sync.Mutex
+			provider := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				requests = append(requests, r.URL.Path)
+				mu.Unlock()
+				tt.handler(w, r)
+			}))
+			// A stale name-keyed entry must not satisfy the fresh read.
+			provider.instanceCache.Set("karpenter-node", &Instance{Name: "karpenter-node", NumericID: 1}, 0)
+
+			incarnation, err := provider.GetIncarnation(context.Background(), "us-central1-a", "karpenter-node")
+			require.Equal(t, []string{identityPath}, requests,
+				"one Compute instance read, with no attestation key or project number lookup")
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Nil(t, incarnation)
+				return
+			}
+			require.NoError(t, err)
+			if tt.wantNil {
+				require.Nil(t, incarnation)
+				return
+			}
+			require.Equal(t, "test-project", incarnation.ProjectID)
+			require.Equal(t, "us-central1-a", incarnation.Zone)
+			require.Equal(t, "karpenter-node", incarnation.Name)
+			require.Equal(t, uint64(987654321), incarnation.NumericID)
+			require.Equal(t, tt.wantUID, incarnation.NodeClaimUID)
+		})
+	}
 }

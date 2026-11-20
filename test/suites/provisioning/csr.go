@@ -45,6 +45,11 @@ var _ = Describe("Attested kubelet enrollment", Label("suite:provisioning"), fun
 	// trusted VM incarnation and the controller approves the attested CSR. It does not
 	// exercise native certificate rotation or re-enrollment during drain; those need a
 	// separately approved candidate deployment.
+	//
+	// The TPM proof assertions assume a cluster with Shielded GKE Nodes enabled. On a
+	// cluster with it disabled GKE enrolls nodes as requester "kubelet" without a
+	// proof, which the controller approves through its separate legacy path; no spec
+	// covers that yet, and unit tests or reference observations are not a substitute.
 	It("records the launched VM incarnation and approves the attested kubelet CSR", func(ctx SpecContext) {
 		prefix := "attested-enrollment"
 		name := prefix + "-" + environment.UniqueSuffix()

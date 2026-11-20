@@ -100,6 +100,7 @@ type Provider interface {
 	Delete(context.Context, string) error
 	CreateTags(context.Context, string, map[string]string) error
 	GetIdentity(context.Context, string, string) (*InstanceIdentity, error)
+	GetIncarnation(context.Context, string, string) (*InstanceIncarnation, error)
 }
 
 type DefaultProvider struct {

@@ -113,6 +113,10 @@ type reproGKE struct{}
 
 func (reproGKE) InvalidateClusterConfig() {}
 
+func (reproGKE) ShieldedNodesEnabled(context.Context) (bool, error) {
+	return false, errors.New("cluster shielded nodes policy is not faked")
+}
+
 func (reproGKE) ResolveClusterZones(context.Context) ([]string, error) {
 	return []string{"us-central1-a"}, nil
 }

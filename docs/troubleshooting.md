@@ -161,11 +161,12 @@ Karpenter runs a CSR approver controller that approves kubelet client CSRs (sign
 - The original requester is allowed to create the matching CSR subresource, checked with a `SubjectAccessReview`.
 - One of these is true:
   - The requester is a GKE bootstrap identity, `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`, the request carries a valid native GKE TPM attestation envelope, and the NodeClaim either has not registered yet (`Launched=True`, not deleting) or is the same live registered claim being re-issued. The proof's project, zone, VM name and numeric instance ID must match the NodeClaim's recorded launch instance and the live Compute instance.
+  - The requester is exactly `kubelet` (GKE's bootstrap identity when Shielded GKE Nodes is **disabled** on the cluster), the request is one plain certificate request with `O=system:nodes` only and the usages `digital signature` + `client auth` (optionally `key encipherment`), the NodeClaim is launched, not registered and not deleting, the live VM matches its recorded numeric instance ID and carries its NodeClaim UID label, and a fresh read of the cluster setting says Shielded GKE Nodes is disabled. This path has no TPM proof and is weaker than attested bootstrap: see the [legacy path contract](security/csr-approval.md#legacy-un-attested-bootstrap).
   - The requester is `system:node:<name>` in the authenticated `system:nodes` group, renewing its own certificate. A GCE NodeClaim has `Registered=True`, with both its node name and GCE instance name matching `<name>`. Self-renewal remains allowed during drain/deletion.
 
 Eligible NodeClaims must reference this provider's `GCENodeClass` and have a complete GCE ProviderID. See the [CSR approval security contract](security/csr-approval.md) for the authorization boundary, trust limits, regression checks and the supported matrix.
 
-Every GKE node pool has a bootstrap credential, and every credential authenticates as `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`. Both bootstrap identities now require a valid TPM proof; a bootstrap-authenticated request picked up by another approver is outside this controller's decisions.
+Every GKE node pool has a bootstrap credential, and every credential authenticates as `kubelet-nodepool-bootstrap` or `kubelet-bootstrap`. Both TPM bootstrap identities require a valid TPM proof, whatever the cluster's Shielded GKE Nodes setting; a bootstrap-authenticated request picked up by another approver is outside this controller's decisions.
 
 If nodes fail to join with a TLS error, check whether CSR auto-approval is working:
 
@@ -178,7 +179,8 @@ Pending CSRs for Karpenter nodes should be approved automatically. If they are s
 - the controller has the `certificates.k8s.io` RBAC permission to approve CSRs and the `authorization.k8s.io` permission to create `subjectaccessreviews`;
 - the controller's GCP service account can read the VM attestation key (`compute.instances.getShieldedInstanceIdentity`) and the project (`compute.projects.get`);
 - the NodeClaim has the `karpenter.k8s.gcp/instance-numeric-id` annotation. Claims created before this release have none, so they cannot use attested enrollment; replace them (see [MIGRATION.md](../MIGRATION.md)). A VM created before this release is also no longer adopted by a new NodeClaim: its create reports `InstanceIncarnationUnknown` until the stale VM is deleted;
-- the node's vTPM is enabled and its Compute instance was not replaced after the claim was launched.
+- for a TPM-attested node, its vTPM is enabled and its Compute instance was not replaced after the claim was launched;
+- for a `kubelet` (legacy) request, the cluster really has Shielded GKE Nodes disabled and the controller can read the cluster (`container.clusters.get`). An enabled, absent or unreadable setting leaves the request pending, and the debug log names the reason. Re-check after changing the cluster setting: the controller reads it again on every attempt.
 
 [Proposal 0012](../proposals/0012-gce-instance-bound-csr-approval.md) records the supported image/GKE matrix and the pending real-GKE reissuance and drain validation.
 

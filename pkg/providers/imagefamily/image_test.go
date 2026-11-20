@@ -19,6 +19,7 @@ package imagefamily
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -388,3 +389,7 @@ func TestDispatch_ChannelCluster_UnspecifiedCluster_ReturnsError(t *testing.T) {
 }
 
 func (*stubGKEProvider) InvalidateClusterConfig() {}
+
+func (*stubGKEProvider) ShieldedNodesEnabled(context.Context) (bool, error) {
+	return false, errors.New("cluster shielded nodes policy is not faked")
+}

@@ -56,6 +56,7 @@ type Provider interface {
 	InvalidateClusterConfig()
 	GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error)
 	ProjectNumber(ctx context.Context) (uint64, error)
+	ShieldedNodesEnabled(ctx context.Context) (bool, error)
 }
 
 type DefaultProvider struct {
@@ -185,6 +186,24 @@ func (p *DefaultProvider) ProjectNumber(ctx context.Context) (uint64, error) {
 	}
 	p.projectNumCache.SetDefault(projectNumberCacheKey, project.Id)
 	return project.Id, nil
+}
+
+// ShieldedNodesEnabled reports the cluster's current Shielded GKE Nodes policy.
+// Authorization decisions depend on it, so it always reads the cluster and
+// never uses or fills the cluster configuration cache. A cluster response
+// without a ShieldedNodes message is an error: an absent policy is unknown, not
+// disabled. A present message with Enabled=false is disabled, because the API
+// omits proto3 default values (shieldedNodes: {}).
+func (p *DefaultProvider) ShieldedNodesEnabled(ctx context.Context) (bool, error) {
+	name := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.projectID, p.nodeLocation, p.clusterName)
+	cluster, err := p.containerService.Projects.Locations.Clusters.Get(name).Context(ctx).Do()
+	if err != nil {
+		return false, fmt.Errorf("fetching cluster Shielded Nodes policy: %w", err)
+	}
+	if cluster == nil || cluster.ShieldedNodes == nil {
+		return false, fmt.Errorf("cluster %q has no Shielded Nodes policy in the API response", p.clusterName)
+	}
+	return cluster.ShieldedNodes.Enabled, nil
 }
 
 func (p *DefaultProvider) GetServerConfig(ctx context.Context) (*containerv1.ServerConfig, error) {

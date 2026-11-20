@@ -18,6 +18,7 @@ limitations under the License.
 // providers.
 //
 // It owns cluster identity, cluster configuration, server configuration, and
-// cluster zone resolution. Provider packages should depend on this package for
+// cluster zone resolution, and it reads the cluster's current Shielded GKE Nodes
+// policy uncached for authorization decisions. Provider packages should depend on this package for
 // shared GKE cluster facts instead of duplicating cluster API reads.
 package gke
