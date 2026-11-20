@@ -7,7 +7,7 @@
     },
     {
       "path": "pkg/controllers/csr/csr.go",
-      "description": "CSR authorization entrypoint, pinned Google approver reference and documented standalone-VM differences",
+      "description": "CSR authorization entrypoint, current upstream Google approver reference and documented standalone-VM differences",
       "scope": ["pkg/controllers/csr/**", "charts/**", "hack/security/**"]
     },
     {
