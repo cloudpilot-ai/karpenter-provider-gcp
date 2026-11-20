@@ -308,6 +308,72 @@ func TestStaticDriftIsReportedWhileImagesAreNotReady(t *testing.T) {
 	require.Equal(t, NodeClassDrift, cp.isNodeClassDrifted(context.Background(), claim, nil, nodeClass))
 }
 
+func TestInstanceIncarnationDrift(t *testing.T) {
+	t.Parallel()
+	const incarnationDrift karpcloudprovider.DriftReason = "InstanceIncarnationDrift"
+	tests := []struct {
+		name   string
+		mutate func(*karpv1.NodeClaim, *v1alpha1.GCENodeClass)
+		want   karpcloudprovider.DriftReason
+	}{
+		{name: "missing incarnation", want: incarnationDrift},
+		{name: "empty incarnation", mutate: func(claim *karpv1.NodeClaim, _ *v1alpha1.GCENodeClass) {
+			claim.Annotations[v1alpha1.AnnotationInstanceNumericID] = ""
+		}, want: incarnationDrift},
+		{name: "invalid incarnation", mutate: func(claim *karpv1.NodeClaim, _ *v1alpha1.GCENodeClass) {
+			claim.Annotations[v1alpha1.AnnotationInstanceNumericID] = "invalid"
+		}, want: incarnationDrift},
+		{name: "zero incarnation", mutate: func(claim *karpv1.NodeClaim, _ *v1alpha1.GCENodeClass) {
+			claim.Annotations[v1alpha1.AnnotationInstanceNumericID] = "0"
+		}, want: incarnationDrift},
+		{name: "tracked incarnation", mutate: func(claim *karpv1.NodeClaim, _ *v1alpha1.GCENodeClass) {
+			claim.Annotations[v1alpha1.AnnotationInstanceNumericID] = "18446744073709551615"
+		}},
+		{name: "not launched", mutate: func(claim *karpv1.NodeClaim, _ *v1alpha1.GCENodeClass) {
+			claim.StatusConditions().SetFalse(karpv1.ConditionTypeLaunched, "Pending", "")
+		}},
+		{name: "not registered", mutate: func(claim *karpv1.NodeClaim, _ *v1alpha1.GCENodeClass) {
+			claim.StatusConditions().SetFalse(karpv1.ConditionTypeRegistered, "Pending", "")
+		}},
+		{name: "deleting", mutate: func(claim *karpv1.NodeClaim, _ *v1alpha1.GCENodeClass) {
+			now := metav1.Now()
+			claim.DeletionTimestamp = &now
+		}},
+		{name: "incarnation reason precedes class drift", mutate: func(_ *karpv1.NodeClaim, class *v1alpha1.GCENodeClass) {
+			class.Annotations[v1alpha1.AnnotationGCENodeClassHash] = "changed"
+		}, want: incarnationDrift},
+		{name: "tracked claim retains class drift", mutate: func(claim *karpv1.NodeClaim, class *v1alpha1.GCENodeClass) {
+			claim.Annotations[v1alpha1.AnnotationInstanceNumericID] = "123"
+			class.Annotations[v1alpha1.AnnotationGCENodeClassHash] = "changed"
+		}, want: NodeClassDrift},
+		{name: "incarnation reason precedes image drift", mutate: func(_ *karpv1.NodeClaim, class *v1alpha1.GCENodeClass) {
+			class.Status.Images[0].SourceImage = "new-image"
+		}, want: incarnationDrift},
+		{name: "tracked claim retains image drift", mutate: func(claim *karpv1.NodeClaim, class *v1alpha1.GCENodeClass) {
+			claim.Annotations[v1alpha1.AnnotationInstanceNumericID] = "123"
+			class.Status.Images[0].SourceImage = "new-image"
+		}, want: ImageDrift},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			claim := nodeClaim("same")
+			claim.StatusConditions().SetTrue(karpv1.ConditionTypeLaunched)
+			claim.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+			claim.Labels = map[string]string{corev1.LabelArchStable: "amd64"}
+			claim.Status.ImageID = "old-image"
+			class := nodeClass("same")
+			class.Status.Images = []v1alpha1.Image{imageWithRequirements("old-image", cpuImageRequirements("amd64")...)}
+			class.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+			if tt.mutate != nil {
+				tt.mutate(claim, class)
+			}
+			cp := &CloudProvider{}
+			require.Equal(t, tt.want, cp.isNodeClassDrifted(context.Background(), claim, nil, class))
+		})
+	}
+}
+
 func TestGVNICDisabledDrift(t *testing.T) {
 	t.Parallel()
 

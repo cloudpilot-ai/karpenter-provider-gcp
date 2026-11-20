@@ -48,7 +48,9 @@ The behavior follows a native enrollment observed on GKE 1.36.4-gke.2046003 (COS
 
 The historical GKE exec auth plugin reissues a registered node's certificate through the same bootstrap-authenticated, attested path; that is not `system:node` self-renewal. The attested path therefore remains available for a registered claim as long as its recorded VM incarnation still exists, so a plugin-driven reissue during a drain is not blocked by the unregistered-only predicate that applies to initial enrollment. It is available only for claims this version launched or adopted with a recorded incarnation; a claim created by an earlier version has no attested re-enrollment path and needs replacement.
 
-Both paths remain available for a registered claim during drain. Ordinary self-renewal is continuity of an already-issued identity, not fresh vTPM attestation, and this change does not revoke certificates that were already issued.
+For a registered claim with a valid recorded incarnation, both attested re-enrollment and ordinary self-renewal remain available during drain. Ordinary self-renewal is continuity of an already-issued identity, not fresh vTPM attestation, and this change does not revoke certificates that were already issued.
+
+On upgrade, launched, registered, non-deleting claims without a usable recorded incarnation (missing, empty, invalid or zero) are eligible for provider drift reason `InstanceIncarnationDrift`, unless an earlier core drift reason takes precedence. Normal dynamic/static disruption replaces them; no CSR check is relaxed and no historical identity is backfilled. Budgets and blockers can delay replacement beyond certificate expiry. Static pools can use the existing terminate-first flow, and configured `terminationGracePeriod` retains its existing PDB/pod-blocker semantics. Install prerequisites and validate new-version enrollment before allowing fleet-wide replacement; see the [migration guide](../../MIGRATION.md#kubelet-csr-approval-now-requires-tpm-attestation-bound-to-the-launched-vm).
 
 ### Non-goals
 
@@ -72,7 +74,7 @@ Run the focused offline authorization tests:
 go test -race ./pkg/controllers/csr
 ```
 
-They generate TPM attestation proofs and legacy requests locally and cover approval decisions, the SAR query, the legacy request shape, lifecycle, live incarnation, per-attempt policy reads, the approval API write and request independence using local HTTP doubles. `go test ./pkg/providers/gke ./pkg/providers/instance` covers the uncached policy read and the fresh incarnation lookup. They do not exercise real API admission, CA signing or GKE joining/rotation. [Proposal 0012](../../proposals/0012-gce-instance-bound-csr-approval.md) records the supported matrix and the pending real-GKE reissuance/drain validation.
+They generate TPM attestation proofs and legacy requests locally and cover approval decisions, the SAR query, the legacy request shape, lifecycle, live incarnation, per-attempt policy reads, the approval API write and request independence using local HTTP doubles. `go test ./pkg/providers/gke ./pkg/providers/instance` covers the uncached policy read and the fresh incarnation lookup. `go test -race ./pkg/cloudprovider` also covers incarnation-upgrade drift eligibility and precedence over existing class/image drift. These tests do not exercise real API admission, CA signing, GKE joining/rotation or rolling replacement. [Proposal 0012](../../proposals/0012-gce-instance-bound-csr-approval.md) records the supported matrix and the pending real-GKE reissuance/drain validation.
 
 ## Chart certificate permissions
 

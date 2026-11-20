@@ -29,6 +29,12 @@ kubectl describe nodeclaim <name>
 
 A NodeClaim stuck in `Pending` indicates Karpenter could not create an instance. The `status.conditions` section lists the reason.
 
+### InstanceIncarnationDrift after upgrading
+
+A launched, registered NodeClaim without a valid non-zero `karpenter.k8s.gcp/instance-numeric-id` annotation is eligible for provider drift reason `InstanceIncarnationDrift`. An earlier core drift reason, such as `NodePoolDrifted`, can take precedence, and unresolved NodePool/NodeClass state can prevent the provider check. Inspect all drifted claims rather than filtering only on this reason. Old claims need replacement, not manual annotation or VM UID-label backfill. Inspect NodeClaim conditions and disruption events for budget, node-level `do-not-disrupt`, PDB, capacity or replacement-enrollment blockers.
+
+Both dynamic and static pools can roll automatically. Static pools without replacement headroom can use delete-first when `TerminateFirstDrift` is enabled; otherwise they remain blocked. Configured `terminationGracePeriod` still bounds pod disruption protection. Check enrollment prerequisites before releasing fleet-wide drift, and do not assume replacement will finish before certificate renewal is needed. See the [upgrade procedure](../MIGRATION.md#kubelet-csr-approval-now-requires-tpm-attestation-bound-to-the-launched-vm).
+
 ### Pods still Pending after a node appears
 
 The node may not have joined the cluster yet. Check:
