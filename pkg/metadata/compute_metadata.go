@@ -36,7 +36,6 @@ var retainedSourceMetadataKeys = []string{
 	"cluster-name",
 	"cluster-uid",
 	"common-psm1",
-	"configure-sh",
 	"containerd-configure-sh",
 	"disable-address-manager",
 	"disable-legacy-endpoints",
@@ -50,8 +49,6 @@ var retainedSourceMetadataKeys = []string{
 	"k8s-node-setup-psm1",
 	"kubeconfig",
 	"serial-port-logging-enable",
-	"startup-script",
-	"user-data",
 	"user-profile-psm1",
 	"windows-startup-script-ps1",
 }
@@ -78,6 +75,9 @@ func FromSourceTemplate(source *compute.Metadata) (*InstanceMetadata, error) {
 		}
 	}
 	model.kubeEnv = parseKubeEnv(values[KubeEnvKey])
+	for _, key := range releaseOwnedKubeEnvKeys {
+		delete(model.kubeEnv.entries, key)
+	}
 	if raw := values[KubeletConfigKey]; raw != "" {
 		var err error
 		model.kubeletConfig, err = parseSourceKubeletConfig(raw)
@@ -196,6 +196,10 @@ func (m *InstanceMetadata) ToComputeMetadata() (*compute.Metadata, error) {
 	values := metadataValues{}
 	maps.Copy(values, m.sourceMetadata)
 	maps.Copy(values, m.customMetadata)
+	if m.bootstrap.Version != "" {
+		values["configure-sh"] = m.bootstrap.ConfigureScript
+		values["user-data"] = m.bootstrap.UserData
+	}
 	values[KubeEnvKey] = m.kubeEnv.String()
 	values[KubeLabelsKey] = m.kubeLabels.String()
 	rawKubeletConfig, err := yaml.Marshal(m.kubeletConfig)

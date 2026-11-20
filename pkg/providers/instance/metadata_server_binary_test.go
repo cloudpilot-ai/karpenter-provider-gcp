@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +18,7 @@ package instance
 
 import (
 	"context"
-	"io"
-	"net/http"
+	"errors"
 	"strings"
 	"testing"
 
@@ -28,112 +27,69 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 )
 
-func TestPatchKubeEnvServerBinaryForArch(t *testing.T) {
-	serverBinaryHashCache.Clear()
-	oldDefaultClient := http.DefaultClient
-	t.Cleanup(func() { http.DefaultClient = oldDefaultClient })
+// Metadata/disk policy tests supply an already resolved launch; fetching and
+// selection are exercised separately rather than through every policy fixture.
+func testLaunchImage(class *v1alpha1.GCENodeClass) launchImage {
+	image := "projects/gke-node-images/global/images/gke-cos"
+	if len(class.Status.Images) > 0 {
+		image = class.Status.Images[0].SourceImage
+	}
+	const version = "1.36.4-gke.2046003"
+	const base = "https://storage.googleapis.com/gke-release/kubernetes/release/v" + version + "/"
+	return launchImage{SourceImage: image, Bootstrap: metadata.BootstrapRelease{
+		Version:          version,
+		ServerBinaryURL:  base + "kubernetes-server-linux-amd64.tar.gz",
+		ServerBinaryHash: strings.Repeat("a", 128),
+		ManifestsURL:     base + "kubernetes-manifests.tar.gz",
+		ManifestsHash:    strings.Repeat("b", 128),
+		ConfigureScript:  "target configure script",
+		UserData:         "target node entrypoint",
+	}}
+}
 
-	var requestedURL string
-	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requestedURL = req.URL.String()
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("arm64-sha512  kubernetes-server-linux-arm64.tar.gz")),
-			Header:     http.Header{},
-		}, nil
+type bootstrapFunc func(context.Context, string, string) (metadata.BootstrapRelease, error)
+
+func (f bootstrapFunc) Get(ctx context.Context, version, arch string) (metadata.BootstrapRelease, error) {
+	return f(ctx, version, arch)
+}
+
+func TestResolveLaunchImageUsesSelectedStatusReleaseAndArchitecture(t *testing.T) {
+	class := &v1alpha1.GCENodeClass{Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{
+		{SourceImage: "projects/test/global/images/amd64-pin", KubernetesVersion: "1.35.8-gke.1796000", Requirements: []corev1.NodeSelectorRequirement{{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}}}},
+		{SourceImage: "projects/test/global/images/arm64-pin", KubernetesVersion: "1.36.4-gke.2046003", Requirements: []corev1.NodeSelectorRequirement{{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"arm64"}}}},
+	}}}
+	provider := &DefaultProvider{bootstrapProvider: bootstrapFunc(func(_ context.Context, version, arch string) (metadata.BootstrapRelease, error) {
+		require.Equal(t, "1.36.4-gke.2046003", version)
+		require.Equal(t, "arm64", arch)
+		return metadata.BootstrapRelease{Version: version}, nil
 	})}
-
-	target := metadata.NewInstanceMetadata()
-	target.SetKubeEnvEntry("SERVER_BINARY_TAR_URL", "https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-amd64.tar.gz")
 	instanceType := &cloudprovider.InstanceType{Requirements: scheduling.NewRequirements(
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "arm64"),
 	)}
-
-	require.NoError(t, (&DefaultProvider{}).patchKubeEnvServerBinaryForArch(context.Background(), target, instanceType))
-
-	url, ok := target.GetKubeEnvEntry("SERVER_BINARY_TAR_URL")
-	require.True(t, ok)
-	require.Equal(t, "https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-arm64.tar.gz", url)
-	hash, ok := target.GetKubeEnvEntry("SERVER_BINARY_TAR_HASH")
-	require.True(t, ok)
-	require.Equal(t, "arm64-sha512", hash)
-	require.Equal(t, "https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-arm64.tar.gz.sha512", requestedURL)
+	selected, err := provider.resolveLaunchImage(context.Background(), class, instanceType)
+	require.NoError(t, err)
+	require.Equal(t, "projects/test/global/images/arm64-pin", selected.SourceImage)
+	require.Equal(t, "1.36.4-gke.2046003", selected.Bootstrap.Version)
 }
 
-func TestPatchKubeEnvServerBinaryForArchNoopWhenArchMatches(t *testing.T) {
-	target := metadata.NewInstanceMetadata()
-	target.SetKubeEnvEntry("SERVER_BINARY_TAR_URL", "https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-amd64.tar.gz")
-	instanceType := &cloudprovider.InstanceType{Requirements: scheduling.NewRequirements(
-		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-	)}
-
-	require.NoError(t, (&DefaultProvider{}).patchKubeEnvServerBinaryForArch(context.Background(), target, instanceType))
-
-	_, ok := target.GetKubeEnvEntry("SERVER_BINARY_TAR_HASH")
-	require.False(t, ok)
+func TestResolveLaunchImageWaitsForOldStatusWithoutGuessingRelease(t *testing.T) {
+	class := &v1alpha1.GCENodeClass{Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{{SourceImage: "projects/test/global/images/pinned"}}}}
+	_, err := (&DefaultProvider{}).resolveLaunchImage(context.Background(), class, makeNonGPUIT())
+	require.ErrorContains(t, err, "update CRDs")
+	require.False(t, cloudprovider.IsInsufficientCapacityError(err))
 }
 
-func TestPatchKubeEnvServerBinaryForArchErrors(t *testing.T) {
-	amd64 := &cloudprovider.InstanceType{Requirements: scheduling.NewRequirements(
-		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-	)}
-
-	tests := []struct {
-		name string
-		url  string
-		want string
-	}{
-		{
-			name: "missing",
-			want: "no SERVER_BINARY_TAR_URL",
-		},
-		{
-			name: "unknown architecture",
-			url:  "https://storage.googleapis.com/gke-release/kubernetes/release/v1.30.1-gke.123/kubernetes-server-linux-riscv64.tar.gz",
-			want: "does not name a known kubernetes-server-linux architecture",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			target := metadata.NewInstanceMetadata()
-			if tt.url != "" {
-				target.SetKubeEnvEntry("SERVER_BINARY_TAR_URL", tt.url)
-			}
-
-			err := (&DefaultProvider{}).patchKubeEnvServerBinaryForArch(context.Background(), target, amd64)
-			require.ErrorContains(t, err, tt.want)
-		})
-	}
-}
-
-func TestGetServerBinaryHashCachesByVersionAndArch(t *testing.T) {
-	serverBinaryHashCache.Clear()
-	requests := 0
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requests++
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("cached-sha512  kubernetes-server-linux-arm64.tar.gz")),
-			Header:     http.Header{},
-		}, nil
+func TestResolveLaunchImageDoesNotFallBackOnArtifactFailure(t *testing.T) {
+	class := &v1alpha1.GCENodeClass{Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{{SourceImage: "projects/test/global/images/pinned", KubernetesVersion: "1.36.4-gke.2046003"}}}}
+	failure := errors.New("artifact service unavailable")
+	provider := &DefaultProvider{bootstrapProvider: bootstrapFunc(func(context.Context, string, string) (metadata.BootstrapRelease, error) {
+		return metadata.BootstrapRelease{}, failure
 	})}
-
-	hash, err := getServerBinaryHash(context.Background(), "v1.30.1-gke.123", "arm64", client)
-	require.NoError(t, err)
-	require.Equal(t, "cached-sha512", hash)
-
-	hash, err = getServerBinaryHash(context.Background(), "v1.30.1-gke.123", "arm64", client)
-	require.NoError(t, err)
-	require.Equal(t, "cached-sha512", hash)
-	require.Equal(t, 1, requests)
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
+	_, err := provider.resolveLaunchImage(context.Background(), class, makeNonGPUIT())
+	require.ErrorIs(t, err, failure)
+	require.False(t, cloudprovider.IsInsufficientCapacityError(err))
 }

@@ -317,7 +317,7 @@ func TestGetOrCreateInstanceInsertCapacityError(t *testing.T) {
 			c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
 			p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
 
-			_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
+			_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), imagesReadyNodeClass(), makeNonGPUIT(),
 				makeSourceMetadata("max-pods-per-node=110"),
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 				"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
@@ -457,7 +457,7 @@ func TestGetOrCreateInstanceQuotaExceededDisabled(t *testing.T) {
 	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
 	ctx := options.ToContext(context.Background(), &options.Options{QuotaExceededTTL: 0})
 
-	_, _, retryable, err := p.getOrCreateInstance(ctx, spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
+	_, _, retryable, err := p.getOrCreateInstance(ctx, spotOrOnDemandNodeClaim(), imagesReadyNodeClass(), makeNonGPUIT(),
 		makeSourceMetadata("max-pods-per-node=110"),
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
@@ -495,7 +495,7 @@ func TestGetOrCreateInstanceResourceNotReady(t *testing.T) {
 	c := cache.New(unavailableofferings.DefaultTTL, unavailableofferings.CleanupInterval)
 	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferingsWithCache(c)
 
-	_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
+	_, _, retryable, err := p.getOrCreateInstance(context.Background(), spotOrOnDemandNodeClaim(), imagesReadyNodeClass(), makeNonGPUIT(),
 		makeSourceMetadata("max-pods-per-node=110"),
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", karpv1.CapacityTypeOnDemand, nil, nil, 0, nil)
@@ -537,6 +537,9 @@ func newFakeComputeProvider(t *testing.T, handler http.Handler) *DefaultProvider
 		subnetProvider: emptySubnetProvider{},
 		gkeProvider:    &fakeGKEProvider{},
 		instanceCache:  cache.New(instanceCacheExpiration, instanceCacheExpiration),
+		bootstrapProvider: bootstrapFunc(func(context.Context, string, string) (metadata.BootstrapRelease, error) {
+			return testLaunchImage(&v1alpha1.GCENodeClass{}).Bootstrap, nil
+		}),
 	}
 }
 
@@ -582,7 +585,7 @@ func TestSetupInstanceMetadata_RebuildsLabelsAndTaintsFromTarget(t *testing.T) {
 		Overhead: &cloudprovider.InstanceTypeOverhead{KubeReserved: corev1.ResourceList{}},
 	}
 
-	patched, err := p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false, 0, 0)
+	patched, err := p.setupInstanceMetadata(context.Background(), meta, nodeClass, instanceType, nodeClaim, "europe-west4-c", karpv1.CapacityTypeOnDemand, false, 0, 0, testLaunchImage(nodeClass).Bootstrap)
 	require.NoError(t, err)
 
 	computeMetadata, err := patched.ToComputeMetadata()
@@ -1050,13 +1053,19 @@ func bootDiskNodeClass(category v1alpha1.DiskCategory, iops, throughput *int64) 
 	}
 }
 
+func TestRenderDiskProperties_RequiresPreparedBootImage(t *testing.T) {
+	p := &DefaultProvider{projectID: "my-project"}
+	_, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), bootDiskNodeClass("pd-ssd", nil, nil), "us-central1-a", 0, nil, "")
+	require.ErrorContains(t, err, "no target image provided for boot disk")
+}
+
 func TestRenderDiskProperties_NoProvisioningWhenFieldsAreNil(t *testing.T) {
 	t.Parallel()
 
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-ssd", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1075,7 +1084,7 @@ func TestRenderDiskProperties_DeviceName(t *testing.T) {
 		v1alpha1.Disk{SecondaryBootImage: "projects/project-a/global/images/cache-image", SecondaryBootMode: "CONTAINER_IMAGE_CACHE"},
 	)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 	require.Len(t, disks, 4)
 
@@ -1107,7 +1116,7 @@ func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
 	nodeClaim := spotOrOnDemandNodeClaim()
 	nodeClaim.Labels = map[string]string{karpv1.NodePoolLabelKey: "test-pool"}
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 	require.Len(t, disks, 2)
 	wantLabels := map[string]string{
@@ -1135,7 +1144,7 @@ func TestRenderDiskProperties_InheritsNodeClassLabels(t *testing.T) {
 	require.Equal(t, "dev", disks[1].InitializeParams.Labels["env"])
 
 	nodeClass.Spec.Labels = nil
-	disks, err = p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0, nil)
+	disks, err = p.renderDiskProperties(amd64InstanceType(), nodeClaim, nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{
 		utils.SanitizeGCELabelValue(utils.LabelNodePoolKey):     "test-pool",
@@ -1153,7 +1162,7 @@ func TestRenderDiskProperties_OmitsEmptyDiskCategory(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("", nil, nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1166,7 +1175,7 @@ func TestRenderDiskProperties_SetsProvisionedIOPS(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("pd-extreme", ptr.To(int64(5000)), nil)
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1180,7 +1189,7 @@ func TestRenderDiskProperties_SetsProvisionedThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-throughput", nil, ptr.To(int64(500)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1194,7 +1203,7 @@ func TestRenderDiskProperties_SetsBothIOPSAndThroughput(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 	nodeClass := bootDiskNodeClass("hyperdisk-balanced", ptr.To(int64(10000)), ptr.To(int64(400)))
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 1)
@@ -1257,7 +1266,7 @@ func TestRenderDiskProperties_SsdCountEmitsScratchDisks(t *testing.T) {
 			it := amd64InstanceType()
 			it.Name = tc.instanceTypeName
 			p := &DefaultProvider{projectID: "my-project"}
-			disks, err := p.renderDiskProperties(it, spotOrOnDemandNodeClaim(), nc, "us-central1-a", tc.ssdCount, nil)
+			disks, err := p.renderDiskProperties(it, spotOrOnDemandNodeClaim(), nc, "us-central1-a", tc.ssdCount, nil, testLaunchImage(nc).SourceImage)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantScratchCount, countScratch(disks),
 				"expected %d SCRATCH local-SSD disks", tc.wantScratchCount)
@@ -1301,7 +1310,7 @@ func TestRenderDiskProperties_MultipleDisksSetProvisioningIndependently(t *testi
 		},
 	}
 
-	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil)
+	disks, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, nil, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 
 	require.Len(t, disks, 2)
@@ -1862,8 +1871,9 @@ func spotAndOnDemandIT(name string, spotPrice, onDemandPrice float64) *cloudprov
 func imagesReadyNodeClass() *v1alpha1.GCENodeClass {
 	nodeClass := &v1alpha1.GCENodeClass{}
 	nodeClass.Status.Images = []v1alpha1.Image{{
-		SourceImage:  "projects/gke-node-images/global/images/gke-cos",
-		Requirements: []corev1.NodeSelectorRequirement{{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}}},
+		SourceImage:       "projects/gke-node-images/global/images/gke-cos",
+		KubernetesVersion: "1.36.4-gke.2046003",
+		Requirements:      []corev1.NodeSelectorRequirement{{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}}},
 	}}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
 	return nodeClass
@@ -2047,7 +2057,7 @@ func TestBuildInstance_UsesExternalCapacityTypeNotRecomputed(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeSpot, // externally decided by Create() — must not be recomputed
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(&v1alpha1.GCENodeClass{}),
 	)
 	require.NoError(t, err)
 
@@ -2164,7 +2174,7 @@ func TestBuildInstance_GPUTaintInjected(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nc),
 	)
 
 	require.NoError(t, err)
@@ -2219,7 +2229,7 @@ func TestBuildInstance_GPUTaintNotInjectedWhenDisabled(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nc),
 	)
 
 	require.NoError(t, err)
@@ -2268,15 +2278,9 @@ func makeGPUIT() *cloudprovider.InstanceType {
 	}
 }
 
-// requiredSourceKubeEnv holds the kube-env entries that validateSourceKubeEnv
-// requires in every source template.
-// requiredSourceKubeEnv is the kube-env subset that every source template must
-// have. The archive URLs are fixtures and are never fetched by these tests.
+// The source supplies cluster context only; release artifacts are target-owned.
 const requiredSourceKubeEnv = "CA_CERT: test-ca\n" +
-	"KUBE_MANIFESTS_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.8-gke.1796000/kubernetes-manifests.tar.gz\n" +
-	"KUBERNETES_MASTER_NAME: 10.0.0.2\n" +
-	"SERVER_BINARY_TAR_HASH: amd64-sha512\n" +
-	"SERVER_BINARY_TAR_URL: https://storage.googleapis.com/gke-release/kubernetes/release/v1.35.8-gke.1796000/kubernetes-server-linux-amd64.tar.gz\n"
+	"KUBERNETES_MASTER_NAME: 10.0.0.2\n"
 
 func makeSourceMetadata(kubeLabels string) *compute.Metadata {
 	return computeMetadataValues(map[string]string{
@@ -2335,7 +2339,7 @@ func TestBuildInstance_SortsMetadataAfterAllPatches(t *testing.T) {
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-sort-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.NoError(t, err)
 
@@ -2381,7 +2385,7 @@ func TestBuildInstance_ResourceManagerTags(t *testing.T) {
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 				"us-central1-a", "karpenter-rmtags-test",
 				karpv1.CapacityTypeOnDemand,
-				nil, 0, "pods",
+				nil, 0, "pods", testLaunchImage(nodeClass),
 			)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, instance.Params)
@@ -2421,7 +2425,7 @@ func TestBuildInstance_DiskTypeLabels(t *testing.T) {
 		cluster,
 		"us-central1-a", "karpenter-disk-label-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 
 	require.NoError(t, err)
@@ -2447,7 +2451,7 @@ func TestBuildInstance_RebuildsGCELabelsWithoutTemplateIdentityLabelInheritance(
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-identity-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 
 	require.NoError(t, err)
@@ -2490,7 +2494,7 @@ func TestBuildInstance_GPUDriverVersionLabel(t *testing.T) {
 				makeCluster("net", "subnet", "pods", false),
 				"us-central1-a", "karpenter-gpu-test",
 				karpv1.CapacityTypeOnDemand,
-				nil, 0, "pods",
+				nil, 0, "pods", testLaunchImage(nc),
 			)
 			require.NoError(t, err)
 			kl := kubeLabelsFrom(t, instance)
@@ -2537,7 +2541,7 @@ func TestBuildInstance_GPUDriverVersionNotInjectedForNonGPU(t *testing.T) {
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nc),
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -2559,7 +2563,7 @@ func TestBuildInstance_GPUDriverVersionOverridesTemplate(t *testing.T) {
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nc),
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -2596,7 +2600,7 @@ func TestBuildInstance_NodePoolLabelDoesNotOverrideGPUDriverAtBootTime(t *testin
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nc),
 	)
 	require.NoError(t, err)
 	got := kubeLabelsFrom(t, instance)
@@ -2669,7 +2673,7 @@ func TestBuildInstance_DoesNotCopyKubernetesSchedulingLabelsToGCELabels(t *testi
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-f", "karpenter-no-label-leak",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 
 	require.NoError(t, err)
@@ -3327,7 +3331,7 @@ func buildConfidentialInstance(t *testing.T, nc *v1alpha1.GCENodeClass) *compute
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-confidential-test",
 		karpv1.CapacityTypeOnDemand,
-		nil, 0, "pods",
+		nil, 0, "pods", testLaunchImage(nc),
 	)
 	require.NoError(t, err)
 	return instance
@@ -3655,7 +3659,7 @@ func TestRenderDiskPropertiesBootDiskSwapDoesNotMutateNodeClass(t *testing.T) {
 	}
 	defaultBootDisk := &v1alpha1.Disk{SizeGiB: 100, Category: "pd-standard", Boot: true}
 
-	_, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, defaultBootDisk)
+	_, err := p.renderDiskProperties(amd64InstanceType(), spotOrOnDemandNodeClaim(), nodeClass, "us-central1-a", 0, defaultBootDisk, testLaunchImage(nodeClass).SourceImage)
 	require.NoError(t, err)
 
 	require.Equal(t, []v1alpha1.Disk{

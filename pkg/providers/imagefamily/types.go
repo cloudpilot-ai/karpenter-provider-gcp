@@ -23,8 +23,9 @@ import (
 )
 
 type Image struct {
-	SourceImage  string
-	Requirements scheduling.Requirements
+	SourceImage       string
+	KubernetesVersion string
+	Requirements      scheduling.Requirements
 }
 
 type Images []Image

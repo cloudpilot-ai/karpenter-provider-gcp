@@ -43,6 +43,9 @@ type InstanceMetadata struct {
 
 	kubeEnv KubeEnv
 
+	// bootstrap contains provider-resolved core release scripts, never source scripts.
+	bootstrap BootstrapRelease
+
 	// kubeLabels models the GKE "kube-labels" metadata item. This metadata item
 	// does not apply labels to the registered Kubernetes Node; kubelet registration
 	// labels come from kubeEnv.kubeletArgs.nodeLabels. In GKE source templates this

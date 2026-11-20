@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+### Core node bootstrap follows the selected release, not the source pool
+
+**Upgrade CRDs before the controller**, using the separate `karpenter-crd` release or the project's CRD upgrade procedure. Helm does not upgrade CRDs from the controller chart's `crds/` directory. The additive `status.images[].kubernetesVersion` field must be preserved by the schema; otherwise, new launches keep waiting for complete image status. Allow normal NodeClass reconciliation to refresh old rows. Existing VM adoption remains available during that refresh or an artifact outage.
+
+New COS nodes use the GKE release of their selected official image/channel. Ubuntu and opaque custom image IDs use an exact API-server version snapshot captured during image resolution, instead of the source pool's kubelet release. Image/date pins and explicit source-pool preference remain unchanged; custom images must support the captured release. The Ubuntu image-catalog migration for GKE1.36 is not included.
+
+Allow controller HTTPS access to `https://storage.googleapis.com/gke-release/kubernetes/release/` for scripts and checksum sidecars; nodes continue to need required archives unless matching preloads exist. Source URLs/hashes/scripts no longer select or override the core release. No new mirror setting is provided. Inherited installables/runtime policy remain unchanged under the accepted compatibility assumption; no matching-version source pool is created automatically.
+
+Existing nodes are not upgraded in place, and a release-only status change with the same image is not a new drift trigger. See [Bootstrap release](docs/image-selection.md#bootstrap-release).
+
 ### Release distribution moves to GHCR OCI
 
 Controller images use `ghcr.io/karpenter-gcp/karpenter-provider-gcp:vX.Y.Z`. Helm charts use `oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter` and `/karpenter-crd` with version `X.Y.Z`. Use Helm 3.8+ or Helm 4; replace indexed chart references in Helm automation and allow GHCR image pulls in registry policies. Keep existing release names, namespaces and configured values; upgrade CRDs before the controller. A pinned `controller.image.repository` still overrides the new default and must be updated explicitly.

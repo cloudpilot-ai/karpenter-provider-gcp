@@ -101,10 +101,10 @@ func TestReconcileImagePublicationAndRecovery(t *testing.T) {
 		gpu    = "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-nvda"
 	)
 	reconciler.imageProvider = fakeImageProvider{images: imagefamily.Images{
-		{SourceImage: source, Requirements: scheduling.NewRequirements(
+		{SourceImage: source, KubernetesVersion: "1.35.1-gke.1396004", Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist),
 			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"))},
-		{SourceImage: gpu, Requirements: scheduling.NewRequirements(
+		{SourceImage: gpu, KubernetesVersion: "1.35.1-gke.1396004", Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
 			scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpExists))},
 	}}
@@ -113,11 +113,11 @@ func TestReconcileImagePublicationAndRecovery(t *testing.T) {
 	require.Equal(t, reconcile.Result{RequeueAfter: 5 * time.Minute}, result)
 	require.True(t, nodeClass.StatusConditions().IsTrue(v1alpha1.ConditionTypeImagesReady))
 	want := []v1alpha1.Image{
-		{SourceImage: source, Requirements: []corev1.NodeSelectorRequirement{
+		{SourceImage: source, KubernetesVersion: "1.35.1-gke.1396004", Requirements: []corev1.NodeSelectorRequirement{
 			{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
 			{Key: v1alpha1.LabelInstanceGPUCount, Operator: corev1.NodeSelectorOpDoesNotExist},
 		}},
-		{SourceImage: gpu, Requirements: []corev1.NodeSelectorRequirement{
+		{SourceImage: gpu, KubernetesVersion: "1.35.1-gke.1396004", Requirements: []corev1.NodeSelectorRequirement{
 			{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
 			{Key: v1alpha1.LabelInstanceGPUCount, Operator: corev1.NodeSelectorOpExists},
 		}},

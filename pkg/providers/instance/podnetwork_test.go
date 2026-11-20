@@ -70,7 +70,7 @@ func TestPodNetworkRequestContract(t *testing.T) {
 			}
 			instance, err := makeProvider().buildInstance(context.Background(), onDemandNodeClaim(), class, makeNonGPUIT(),
 				makeSourceMetadata("cloud.google.com/gke-np-default-subnet=source-subnet,cloud.google.com/gke-np-default-pod-range=source-pods"),
-				cluster, "us-central1-a", "test-node", karpv1.CapacityTypeOnDemand, nil, 0, tt.rangeName)
+				cluster, "us-central1-a", "test-node", karpv1.CapacityTypeOnDemand, nil, 0, tt.rangeName, testLaunchImage(class))
 			if tt.wantError {
 				require.ErrorContains(t, err, "multi-networking requires a resolved primary subnet and pod secondary range")
 				require.Nil(t, instance)
@@ -111,9 +111,9 @@ func TestPodNetworkFallbackKeepsLabelsWithAlias(t *testing.T) {
 	cluster := makeCluster("projects/p/global/networks/default", "regions/us-central1/subnetworks/target-subnet", "cluster-pods", false)
 	cluster.NetworkConfig.EnableMultiNetworking = true
 	cluster.IpAllocationPolicy.AdditionalPodRangesConfig = &containerv1.AdditionalPodRangesConfig{PodRangeNames: []string{"extra-pods"}}
-	instance, _, _, err := provider.createInstanceWithPodRanges(context.Background(), onDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(),
+	instance, _, _, err := provider.createInstanceWithPodRanges(context.Background(), onDemandNodeClaim(), imagesReadyNodeClass(), makeNonGPUIT(),
 		makeSourceMetadata("cloud.google.com/gke-np-default-subnet=source-subnet,cloud.google.com/gke-np-default-pod-range=source-pods"),
-		cluster, "us-central1-a", "test-node", karpv1.CapacityTypeOnDemand, nil, 0, map[string]int64{"cluster-pods": 4096, "extra-pods": 8192})
+		cluster, "us-central1-a", "test-node", karpv1.CapacityTypeOnDemand, nil, 0, map[string]int64{"cluster-pods": 4096, "extra-pods": 8192}, testLaunchImage(imagesReadyNodeClass()))
 	require.NoError(t, err)
 	require.Equal(t, "cluster-pods", instance.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName)
 	require.Len(t, attempts, 2)

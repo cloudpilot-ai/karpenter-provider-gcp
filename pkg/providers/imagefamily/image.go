@@ -117,8 +117,13 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	}
 
 	var result Images
+	var masterVersion string
 	for _, term := range nodeClass.Spec.ImageSelectorTerms {
 		imgs, err := p.resolveImageFromTerm(ctx, term)
+		if err != nil {
+			return nil, err
+		}
+		masterVersion, err = p.setBootstrapVersions(ctx, imgs, masterVersion)
 		if err != nil {
 			return nil, err
 		}

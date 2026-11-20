@@ -58,7 +58,7 @@ func TestBuildInstance_RejectsBootDiskSwapForCustomImageFamily(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods",
+		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.ErrorContains(t, err, `not supported for image family "Custom"`)
 }
@@ -78,7 +78,7 @@ func TestBuildInstance_RejectsFailSwapOnTrueWithBootDiskSwap(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods",
+		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.ErrorContains(t, err, "conflicts with kubeletConfiguration.failSwapOn true")
 }
@@ -168,7 +168,7 @@ func TestBuildInstance_RetainsBootDiskSwapReservation(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, instanceType, sourceMetadata,
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods",
+		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.NoError(t, err)
 
@@ -208,7 +208,7 @@ func TestBuildInstance_NoBootDiskSwapKeepsExplicitReservation(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, instanceType, sourceMetadata,
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods",
+		karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.NoError(t, err)
 
@@ -235,7 +235,7 @@ func TestBuildInstance_BootDiskSwapAutomaticSizeNeedsMachineFacts(t *testing.T) 
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.ErrorContains(t, err, "cannot derive a boot-disk swap size")
 }
@@ -267,7 +267,7 @@ func TestBuildInstance_BootDiskSwapKeepsSourceMetadata(t *testing.T) {
 				spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 				makeCluster("net", "subnet", "pods", false),
 				"us-central1-a", "karpenter-swap-test",
-				karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods",
+				karpv1.CapacityTypeOnDemand, swapMachineType(), 0, "pods", testLaunchImage(nodeClass),
 			)
 			require.NoError(t, err)
 

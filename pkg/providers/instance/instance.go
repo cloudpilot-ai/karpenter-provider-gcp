@@ -50,6 +50,7 @@ import (
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/bootstrap"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/disktype"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/imagefamily"
@@ -57,7 +58,6 @@ import (
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/subnet"
-	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils/localssd"
 )
@@ -106,7 +106,7 @@ type DefaultProvider struct {
 	subnetProvider           subnet.Provider
 	instanceTypeProvider     instancetype.Provider
 	nodePoolTemplateProvider nodepooltemplate.Provider
-	versionProvider          version.Provider
+	bootstrapProvider        bootstrap.Provider
 	unavailableOfferings     *unavailableofferings.UnavailableOfferings
 
 	// In current implementation, instanceID == InstanceName
@@ -127,7 +127,7 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 	subnetProvider subnet.Provider,
 	instanceTypeProvider instancetype.Provider,
 	nodePoolTemplateProvider nodepooltemplate.Provider,
-	versionProvider version.Provider,
+	bootstrapProvider bootstrap.Provider,
 	unavailableOfferings *unavailableofferings.UnavailableOfferings,
 ) Provider {
 	return &DefaultProvider{
@@ -135,7 +135,7 @@ func NewProvider(clusterName, clusterLocation, region, projectID, defaultService
 		subnetProvider:           subnetProvider,
 		instanceTypeProvider:     instanceTypeProvider,
 		nodePoolTemplateProvider: nodePoolTemplateProvider,
-		versionProvider:          versionProvider,
+		bootstrapProvider:        bootstrapProvider,
 		unavailableOfferings:     unavailableOfferings,
 		instanceCache:            cache.New(instanceCacheExpiration, instanceCacheExpiration),
 		clusterName:              clusterName,
@@ -647,14 +647,18 @@ func (p *DefaultProvider) getOrCreateInstance(ctx context.Context, nodeClaim *ka
 		}
 	}
 
-	return p.createInstanceWithPodRanges(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount, freeIPs)
+	launch, err := p.resolveLaunchImage(ctx, nodeClass, instanceType)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return p.createInstanceWithPodRanges(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount, freeIPs, launch)
 }
 
-func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, freeIPs map[string]int64) (*compute.Instance, string, bool, error) {
+func (p *DefaultProvider) createInstanceWithPodRanges(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, freeIPs map[string]int64, launch launchImage) (*compute.Instance, string, bool, error) {
 	rangeNames := rankPodRangeNames(resolvedPodRangeNames(nodeClass, clusterConfig), freeIPs)
 	discoveredRanges := len(nodeClass.PodSubnetRangeNames()) == 0
 	for i, rangeName := range rangeNames {
-		instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount, rangeName)
+		instance, err := p.buildInstance(ctx, nodeClaim, nodeClass, instanceType, sourceMetadata, clusterConfig, zone, instanceName, capacityType, mt, ssdCount, rangeName, launch)
 		if err != nil {
 			return nil, "", false, fmt.Errorf("building instance %s: %w", instanceName, err)
 		}
@@ -942,7 +946,7 @@ func (p *DefaultProvider) selectZone(ctx context.Context, nodeClaim *karpv1.Node
 }
 
 func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.InstanceType,
-	nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int, defaultBootDisk *v1alpha1.Disk,
+	nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, zone string, ssdCount int, defaultBootDisk *v1alpha1.Disk, sourceImage string,
 ) ([]*compute.AttachedDisk, error) {
 	// Boot-disk swap needs a disk the provider sizes itself when the node class
 	// configures none, so render that disk alongside the configured ones.
@@ -989,7 +993,7 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 			attachedDisk.InitializeParams.Architecture = imagefamily.OSArchitectureARM
 		}
 
-		if err := setDiskSource(attachedDisk, disk, nodeClass, instanceType); err != nil {
+		if err := setDiskSource(attachedDisk, disk, sourceImage); err != nil {
 			return nil, err
 		}
 
@@ -1011,14 +1015,13 @@ func (p *DefaultProvider) renderDiskProperties(instanceType *cloudprovider.Insta
 // setDiskSource sets the image and device name of one attached disk: the node
 // image on the boot disk, the cache image on a secondary boot disk, and the
 // configured device name on a blank data disk.
-func setDiskSource(attachedDisk *compute.AttachedDisk, disk v1alpha1.Disk, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType) error {
+func setDiskSource(attachedDisk *compute.AttachedDisk, disk v1alpha1.Disk, sourceImage string) error {
 	switch {
 	case disk.Boot:
-		targetImage, found := imagefamily.FindImage(nodeClass.Status.Images, instanceType.Requirements)
-		if !found {
-			return fmt.Errorf("no target image found for node class %s", nodeClass.Name)
+		if sourceImage == "" {
+			return fmt.Errorf("no target image provided for boot disk")
 		}
-		attachedDisk.InitializeParams.SourceImage = targetImage.SourceImage
+		attachedDisk.InitializeParams.SourceImage = sourceImage
 	case disk.DeviceName != "":
 		// The CRD allows deviceName only on a data disk, which has no source image.
 		attachedDisk.DeviceName = disk.DeviceName
@@ -1054,20 +1057,20 @@ func (p *DefaultProvider) scratchDisk(zone string) *compute.AttachedDisk {
 
 // launchDisks resolves the boot disk and the boot-disk swap file for the
 // candidate machine, then renders every disk the instance attaches.
-func (p *DefaultProvider) launchDisks(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, zone string, mt *computepb.MachineType, ssdCount int) ([]*compute.AttachedDisk, instancetype.BootDiskSwap, error) {
+func (p *DefaultProvider) launchDisks(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, zone string, mt *computepb.MachineType, ssdCount int, sourceImage string) ([]*compute.AttachedDisk, instancetype.BootDiskSwap, error) {
 	bootDiskSwap, err := instancetype.ResolveBootDiskSwap(nodeClass, instanceType.Name, int64(mt.GetMemoryMb()))
 	if err != nil {
 		return nil, instancetype.BootDiskSwap{}, fmt.Errorf("resolving boot-disk swap: %w", err)
 	}
-	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClaim, nodeClass, zone, ssdCount, bootDiskSwap.DefaultBootDisk)
+	attachedDisks, err := p.renderDiskProperties(instanceType, nodeClaim, nodeClass, zone, ssdCount, bootDiskSwap.DefaultBootDisk, sourceImage)
 	if err != nil {
 		return nil, instancetype.BootDiskSwap{}, fmt.Errorf("rendering disk properties: %w", err)
 	}
 	return attachedDisks, bootDiskSwap, nil
 }
 
-func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, podRange string) (*compute.Instance, error) {
-	attachedDisks, bootDiskSwap, err := p.launchDisks(nodeClaim, nodeClass, instanceType, zone, mt, ssdCount)
+func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, sourceMetadata *compute.Metadata, clusterConfig *container.Cluster, zone, instanceName, capacityType string, mt *computepb.MachineType, ssdCount int, podRange string, launch launchImage) (*compute.Instance, error) {
+	attachedDisks, bootDiskSwap, err := p.launchDisks(nodeClaim, nodeClass, instanceType, zone, mt, ssdCount, launch.SourceImage)
 	if err != nil {
 		return nil, err
 	}
@@ -1075,7 +1078,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 	isGPUInstance := instanceTypeHasGPU(instanceType)
 
 	// Setup metadata
-	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount, bootDiskSwap.SwapGiB)
+	instanceMetadata, err := p.setupInstanceMetadata(ctx, sourceMetadata, nodeClass, instanceType, nodeClaim, zone, capacityType, isGPUInstance, ssdCount, bootDiskSwap.SwapGiB, launch.Bootstrap)
 	if err != nil {
 		return nil, fmt.Errorf("setting up instance metadata: %w", err)
 	}
@@ -1257,7 +1260,7 @@ func podCIDRRange(maxPods int32) int32 {
 }
 
 // setupInstanceMetadata configures all metadata-related settings for the instance.
-func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool, ssdCount int, swapGiB int64) (*metadata.InstanceMetadata, error) {
+func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetadata *compute.Metadata, nodeClass *v1alpha1.GCENodeClass, instanceType *cloudprovider.InstanceType, nodeClaim *karpv1.NodeClaim, zone string, capacityType string, isGPUInstance bool, ssdCount int, swapGiB int64, release metadata.BootstrapRelease) (*metadata.InstanceMetadata, error) {
 	target, err := metadata.FromSourceTemplate(sourceMetadata)
 	if err != nil {
 		return nil, err
@@ -1265,6 +1268,7 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 	if err := validateSourceKubeEnv(target); err != nil {
 		return nil, err
 	}
+	target.SetBootstrapRelease(release)
 	if err := validateBootDiskSwapNodeClass(nodeClass); err != nil {
 		return nil, err
 	}
@@ -1286,9 +1290,6 @@ func (p *DefaultProvider) setupInstanceMetadata(ctx context.Context, sourceMetad
 		applyBootDiskSwapKubeletDefaults(config, nodeClass)
 		applyBootDiskSwapReservation(config, instanceType, swapGiB)
 	})
-	if err := p.patchKubeEnvServerBinaryForArch(ctx, target, instanceType); err != nil {
-		return nil, err
-	}
 	p.buildTargetMetadata(ctx, target, sourceMetadata, nodeClass, instanceType, nodeClaim, provisioningModel, isGPUInstance)
 	patchLocalSSDMetadata(target, nodeClass, ssdCount)
 
@@ -1387,20 +1388,6 @@ func instanceFamily(instanceType *cloudprovider.InstanceType) string {
 		return req.Any()
 	}
 	return ""
-}
-
-// resolveGKEVersion returns the GKE release version string from the version provider,
-// or empty string on error (caller falls back to URL-based version detection).
-func (p *DefaultProvider) resolveGKEVersion(ctx context.Context) string {
-	if p.versionProvider == nil {
-		return ""
-	}
-	v, err := p.versionProvider.Get(ctx)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to get GKE version for arch patching; falling back to URL parsing")
-		return ""
-	}
-	return v
 }
 
 func inheritedReadinessLabels(sourceMetadata *compute.Metadata) (map[string]string, map[string]string) {
