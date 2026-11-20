@@ -162,6 +162,20 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 		assert: assertMaxPodsCapacity(50),
 	}, SpecTimeout(15*time.Minute)),
 
+	Entry("COS: static CPU manager policy", kubeletConfigCase{
+		tc: environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-4"},
+			ImageFamily:   gcpv1alpha1.ImageFamilyContainerOptimizedOS,
+		},
+		kubeletConfig: map[string]any{
+			"cpuManagerPolicy": "static",
+		},
+		assertOnNode: assertCPUManagerPolicy("static"),
+	}, SpecTimeout(15*time.Minute)),
+
 	Entry("COS: on-demand shutdown defaults", shutdownConfigCase(karpv1.CapacityTypeOnDemand, nil, 0, 0), SpecTimeout(15*time.Minute)),
 	Entry("COS: Spot shutdown defaults", shutdownConfigCase(karpv1.CapacityTypeSpot, nil, 30*time.Second, 15*time.Second), SpecTimeout(15*time.Minute)),
 	Entry("COS: on-demand shutdown overrides", shutdownConfigCase(karpv1.CapacityTypeOnDemand, map[string]any{
@@ -437,6 +451,14 @@ func kubeletConfigz(ctx context.Context, nodeName string) json.RawMessage {
 	Expect(json.Unmarshal(raw, &response)).To(Succeed())
 	Expect(response.KubeletConfig).NotTo(BeNil(), "configz must include kubeletconfig")
 	return *response.KubeletConfig
+}
+
+func assertCPUManagerPolicy(want string) func(context.Context, *corev1.Node) {
+	return func(ctx context.Context, node *corev1.Node) {
+		var config kubeletconfig.KubeletConfiguration
+		Expect(json.Unmarshal(kubeletConfigz(ctx, node.Name), &config)).To(Succeed())
+		Expect(config.CPUManagerPolicy).To(Equal(want))
+	}
 }
 
 // assertKubeletSwapDefaults checks the running kubelet's effective swap policy.
