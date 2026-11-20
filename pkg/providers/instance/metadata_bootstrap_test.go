@@ -114,6 +114,15 @@ func TestApplyNodeClassKubeletConfigLeavesImagePullParallelismUnsetWhenOverlayOm
 	require.Equal(t, int32(64), config.MaxPods)
 }
 
+func TestApplyNodeClassKubeletConfigCPUManagerPolicy(t *testing.T) {
+	config := &kubeletconfig.KubeletConfiguration{CPUManagerPolicy: "none"}
+	applyNodeClassKubeletConfig(config, &v1alpha1.KubeletConfiguration{CPUManagerPolicy: "static"})
+	require.Equal(t, "static", config.CPUManagerPolicy)
+
+	applyNodeClassKubeletConfig(config, &v1alpha1.KubeletConfiguration{})
+	require.Equal(t, "static", config.CPUManagerPolicy, "an unset policy must keep the source template's value")
+}
+
 func TestBuildInstance_Hugepages2MMetadata(t *testing.T) {
 	provider := makeProvider()
 	nodeClass := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{LinuxNodeConfig: &v1alpha1.LinuxNodeConfig{

@@ -335,6 +335,7 @@ type KubeletQuantity string
 // https://github.com/kubernetes/kubernetes/blob/9f82d81e55cafdedab619ea25cabf5d42736dacf/cmd/kubelet/app/options/options.go#L53
 // +kubebuilder:validation:XValidation:message="maxParallelImagePulls greater than 1 requires serializeImagePulls to be explicitly set to false",rule="!has(self.maxParallelImagePulls) || self.maxParallelImagePulls < 2 || (has(self.serializeImagePulls) && self.serializeImagePulls == false)"
 // +kubebuilder:validation:XValidation:message="shutdownGracePeriodCriticalPods requires shutdownGracePeriod and must not exceed it",rule="!has(self.shutdownGracePeriodCriticalPods) || (has(self.shutdownGracePeriod) && duration(self.shutdownGracePeriodCriticalPods) <= duration(self.shutdownGracePeriod))"
+// +kubebuilder:validation:XValidation:message="cpuManagerPolicy static requires a positive cpu in kubeReserved or systemReserved",rule="!has(self.cpuManagerPolicy) || self.cpuManagerPolicy != 'static' || !has(self.kubeReserved) || !('cpu' in self.kubeReserved) || quantity(self.kubeReserved['cpu']).isGreaterThan(quantity('0')) || (has(self.systemReserved) && 'cpu' in self.systemReserved && quantity(self.systemReserved['cpu']).isGreaterThan(quantity('0')))"
 type KubeletConfiguration struct {
 	// clusterDNS is a list of IP addresses for the cluster DNS server.
 	// Note that not all providers may use all addresses.
@@ -406,6 +407,12 @@ type KubeletConfiguration struct {
 	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
 	// +optional
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
+	// CPUManagerPolicy is the kubelet CPU manager policy. With static, containers
+	// of Guaranteed pods that request whole CPUs get exclusive cores.
+	// Default: none
+	// +kubebuilder:validation:Enum:={none,static}
+	// +optional
+	CPUManagerPolicy string `json:"cpuManagerPolicy,omitempty"`
 	// SerializeImagePulls, when enabled, tells the kubelet to pull images one at a
 	// time. Must be explicitly set to false to set MaxParallelImagePulls above 1.
 	// Default: true

@@ -162,6 +162,20 @@ var _ = DescribeTable("kubeletConfiguration honored on provisioned nodes (#398)"
 		assert: assertMaxPodsCapacity(50),
 	}, SpecTimeout(15*time.Minute)),
 
+	Entry("COS: static CPU manager policy", kubeletConfigCase{
+		tc: environment.TestCase{
+			CapacityType:  karpv1.CapacityTypeOnDemand,
+			Arch:          karpv1.ArchitectureAmd64,
+			Families:      []string{"n2"},
+			InstanceTypes: []string{"n2-standard-4"},
+			ImageFamily:   gcpv1alpha1.ImageFamilyContainerOptimizedOS,
+		},
+		kubeletConfig: map[string]any{
+			"cpuManagerPolicy": "static",
+		},
+		assertOnNode: assertStaticCPUManagerPolicy,
+	}, SpecTimeout(15*time.Minute)),
+
 	Entry("COS: on-demand shutdown defaults", shutdownConfigCase(karpv1.CapacityTypeOnDemand, nil, 0, 0), SpecTimeout(15*time.Minute)),
 	Entry("COS: Spot shutdown defaults", shutdownConfigCase(karpv1.CapacityTypeSpot, nil, 30*time.Second, 15*time.Second), SpecTimeout(15*time.Minute)),
 	Entry("COS: on-demand shutdown overrides", shutdownConfigCase(karpv1.CapacityTypeOnDemand, map[string]any{
@@ -439,6 +453,105 @@ func kubeletConfigz(ctx context.Context, nodeName string) json.RawMessage {
 	return *response.KubeletConfig
 }
 
+// assertStaticCPUManagerPolicy checks the effective kubelet policy and that it
+// takes effect: a Guaranteed pod requesting one whole CPU is pinned to exactly
+// one CPU.
+func assertStaticCPUManagerPolicy(ctx context.Context, node *corev1.Node) {
+	var config kubeletconfig.KubeletConfiguration
+	Expect(json.Unmarshal(kubeletConfigz(ctx, node.Name), &config)).To(Succeed())
+	Expect(config.CPUManagerPolicy).To(Equal("static"))
+
+	Expect(guaranteedPodCPUCount(ctx, node)).To(Equal(1),
+		"a Guaranteed pod requesting one CPU must get one exclusive CPU on node %s", node.Name)
+}
+
+// guaranteedPodCPUCount runs a short node-bound Guaranteed pod that requests one
+// whole CPU and returns how many CPUs the kernel lets it run on. Pods in the
+// shared pool may run on every CPU that is not exclusively allocated, so a
+// single-CPU affinity can only come from the static policy.
+func guaranteedPodCPUCount(ctx context.Context, node *corev1.Node) int {
+	name := node.Name + "-cpu-probe"
+	noGrace := int64(0)
+	cpuAndMemory := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("1"),
+		corev1.ResourceMemory: resource.MustParse("64Mi"),
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: environment.TestNamespace,
+			Labels:    map[string]string{environment.E2EOwnerLabel: "true"},
+		},
+		Spec: corev1.PodSpec{
+			NodeName:                      node.Name,
+			RestartPolicy:                 corev1.RestartPolicyNever,
+			TerminationGracePeriodSeconds: &noGrace,
+			Tolerations:                   []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+			Containers: []corev1.Container{{
+				Name:    "probe",
+				Image:   nodeProbeImage,
+				Command: []string{"grep", "Cpus_allowed_list", "/proc/self/status"},
+				// Equal requests and limits make the pod Guaranteed.
+				Resources: corev1.ResourceRequirements{Requests: cpuAndMemory, Limits: cpuAndMemory},
+				SecurityContext: &corev1.SecurityContext{
+					AllowPrivilegeEscalation: lo.ToPtr(false),
+					ReadOnlyRootFilesystem:   lo.ToPtr(true),
+					Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+				},
+			}},
+		},
+	}
+
+	pods := env.KubeClient.CoreV1().Pods(environment.TestNamespace)
+	_, err := pods.Create(ctx, pod, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating CPU probe pod %s", name)
+	DeferCleanup(func(ctx context.Context) {
+		_ = pods.Delete(ctx, name, metav1.DeleteOptions{})
+	})
+
+	Eventually(func(g Gomega) corev1.PodPhase {
+		current, err := pods.Get(ctx, name, metav1.GetOptions{})
+		g.Expect(err).NotTo(HaveOccurred())
+		return current.Status.Phase
+	}).WithContext(ctx).WithTimeout(5 * time.Minute).WithPolling(environment.DefaultPollInterval).
+		Should(Or(Equal(corev1.PodSucceeded), Equal(corev1.PodFailed)))
+
+	logs, err := pods.GetLogs(name, &corev1.PodLogOptions{}).DoRaw(ctx)
+	Expect(err).NotTo(HaveOccurred(), "reading CPU probe logs")
+	current, err := pods.Get(ctx, name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(current.Status.Phase).To(Equal(corev1.PodSucceeded), "CPU probe on node %s failed:\n%s", node.Name, logs)
+	Expect(current.Status.QOSClass).To(Equal(corev1.PodQOSGuaranteed))
+
+	_, list, _ := strings.Cut(string(logs), ":")
+	count, err := countCPUs(strings.TrimSpace(list))
+	Expect(err).NotTo(HaveOccurred(), "parsing CPU probe output %q", logs)
+	return count
+}
+
+// countCPUs returns the number of CPUs in a kernel CPU list such as "2" or "0-3,6".
+func countCPUs(list string) (int, error) {
+	if list == "" {
+		return 0, fmt.Errorf("empty CPU list")
+	}
+	count := 0
+	for _, part := range strings.Split(list, ",") {
+		first, last, isRange := strings.Cut(part, "-")
+		low, err := strconv.Atoi(first)
+		if err != nil {
+			return 0, fmt.Errorf("invalid CPU list %q: %w", list, err)
+		}
+		high := low
+		if isRange {
+			if high, err = strconv.Atoi(last); err != nil || high < low {
+				return 0, fmt.Errorf("invalid CPU range %q in %q", part, list)
+			}
+		}
+		count += high - low + 1
+	}
+	return count, nil
+}
+
 // assertKubeletSwapDefaults checks the running kubelet's effective swap policy.
 func assertKubeletSwapDefaults(config *kubeletconfig.KubeletConfiguration) {
 	Expect(config.FailSwapOn).NotTo(BeNil(), "configz must include failSwapOn")
@@ -446,9 +559,9 @@ func assertKubeletSwapDefaults(config *kubeletconfig.KubeletConfiguration) {
 	Expect(config.MemorySwap.SwapBehavior).To(Equal("LimitedSwap"), "the kubelet must enable pod swap")
 }
 
-// swapProbeImage is the shell image Kubernetes' own e2e tests use for node
-// probes. It only reads host files: the probe is unprivileged and read-only.
-const swapProbeImage = "registry.k8s.io/e2e-test-images/busybox:1.37.0-2"
+// nodeProbeImage is the shell image Kubernetes' own e2e tests use for node
+// probes. The probes are unprivileged and read-only.
+const nodeProbeImage = "registry.k8s.io/e2e-test-images/busybox:1.37.0-2"
 
 //go:embed testdata/swap_probe.sh
 var swapProbeScript string
@@ -528,7 +641,7 @@ func assertSwapBacking(ctx context.Context, node *corev1.Node, encrypted bool, s
 			},
 			Containers: []corev1.Container{{
 				Name:    "probe",
-				Image:   swapProbeImage,
+				Image:   nodeProbeImage,
 				Command: []string{"sh", "-c", swapProbeScript, "swap-probe", strconv.FormatBool(encrypted), strconv.FormatInt(sizeGiB*1024*1024, 10)},
 				SecurityContext: &corev1.SecurityContext{
 					AllowPrivilegeEscalation: lo.ToPtr(false),
