@@ -43,14 +43,13 @@ When no RUNNING pool exists, Karpenter creates a zero-node pool named `karpenter
 
 The `gcp.restrictNonCmekServices` constraint cannot be auto-satisfied because it requires a customer-managed KMS key. On clusters with this policy, pre-create a RUNNING pool that meets your org's requirements and set `DEFAULT_NODEPOOL_TEMPLATE_NAME`.
 
-## Cross-OS and cross-architecture provisioning
+## Core bootstrap release and architecture
 
-Karpenter patches the source pool's kube-env metadata when provisioning nodes with a different OS or architecture:
+The selected pool supplies credentials, cluster context, inherited kubelet configuration and runtime policy. It does **not** choose the core Kubernetes release. Each resolved image carries `status.images[].kubernetesVersion`; new nodes use that release's server archive/hash, manifests archive/hash, kubelet version override and verified configure script/entrypoint. The binary archive always matches the target machine architecture, including when source and target architectures are the same.
 
-- **OS mismatch**: `PatchKubeEnvForOSType` adjusts kube-env fields when the target image (Ubuntu vs COS) differs from the source pool.
-- **Architecture mismatch**: `PatchKubeEnvForArch` adjusts kube-env when provisioning arm64 nodes from an amd64 source pool or vice versa.
+COS uses the selected official image's GKE release. Ubuntu and opaque custom image IDs use an exact API-server version snapshot captured with image resolution. OS/date/image pins remain unchanged; see [Bootstrap release](image-selection.md#bootstrap-release).
 
-This allows a single source pool to bootstrap nodes of any OS and architecture combination.
+The provider retains `RENDERED_INSTALLABLES` and other source runtime policy unchanged under the compatibility assumption that they remain usable during ordinary maintenance-window version skew. This is not complete component synchronization. No target-version template pools are created by this fix, and explicit source-pool preference is unchanged.
 
 ## Resolving the bootstrap pool's instance template
 

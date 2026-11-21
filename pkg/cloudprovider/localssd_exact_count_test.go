@@ -52,12 +52,12 @@ import (
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 	gcpoptions "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/bootstrap"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instancetype"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
-	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/version"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils/localssd"
 )
@@ -140,15 +140,17 @@ func (reproTemplate) GetSourceTemplateMetadata(context.Context) (*compute.Metada
 	}}}, nil
 }
 
-type reproVersion struct{}
+type reproBootstrap struct{}
 
-func (reproVersion) Get(context.Context) (string, error) { return "1.35.0", nil }
+func (reproBootstrap) Get(_ context.Context, version, arch string) (metadata.BootstrapRelease, error) {
+	return metadata.BootstrapRelease{Version: version, ServerBinaryURL: "test-server-" + arch, ServerBinaryHash: strings.Repeat("a", 128), ManifestsURL: "test-manifests", ManifestsHash: strings.Repeat("b", 128), ConfigureScript: "test configure", UserData: "test entrypoint"}, nil
+}
 
 var (
 	_ instancetype.Provider     = reproTypes{}
 	_ gke.Provider              = reproGKE{}
 	_ nodepooltemplate.Provider = reproTemplate{}
-	_ version.Provider          = reproVersion{}
+	_ bootstrap.Provider        = reproBootstrap{}
 )
 
 func TestExactCountCreateMatrix(t *testing.T) {
@@ -364,7 +366,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	ctx = gcpoptions.ToContext(ctx, &gcpoptions.Options{VMMemoryOverheadPercent: .07})
 	mt := &computepb.MachineType{Name: lo.ToPtr("n2d-standard-4"), GuestCpus: lo.ToPtr[int32](4), MemoryMb: lo.ToPtr[int32](16384)}
 	off := corecloud.Offerings{&corecloud.Offering{Available: true, Price: 1, Requirements: scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"), scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand))}}
-	nclass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}, Spec: v1alpha1.GCENodeClassSpec{LocalSsdMode: config.mode, Disks: []v1alpha1.Disk{{Boot: true, SizeGiB: 100}}, ServiceAccount: "node@test"}, Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{{SourceImage: "projects/test/global/images/cos"}}}}
+	nclass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}, Spec: v1alpha1.GCENodeClassSpec{LocalSsdMode: config.mode, Disks: []v1alpha1.Disk{{Boot: true, SizeGiB: 100}}, ServiceAccount: "node@test"}, Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{{SourceImage: "projects/test/global/images/cos", KubernetesVersion: "1.35.8-gke.1796000"}}}}
 	nclass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
 	if len(config.ssdCounts) == 0 {
 		config.ssdCounts = []int{2, 4}
@@ -481,7 +483,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	defer srv.Close()
 	svc, err := compute.NewService(ctx, googleoption.WithEndpoint(srv.URL+"/"), googleoption.WithoutAuthentication())
 	require.NoError(t, err)
-	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", svc, reproGKE{}, nil, typeProvider, reproTemplate{}, reproVersion{}, unavailableofferings.NewUnavailableOfferings())
+	ip := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", svc, reproGKE{}, nil, typeProvider, reproTemplate{}, reproBootstrap{}, unavailableofferings.NewUnavailableOfferings())
 	cp := New(kc, reproEvents{}, typeProvider, ip, nil)
 	if len(results.NewNodeClaims) > 0 {
 		generated := results.NewNodeClaims[0].ToNodeClaim()

@@ -135,7 +135,7 @@ func TestFromSourceTemplateRetainsExplicitGKEBootstrapMetadata(t *testing.T) {
 	require.NoError(t, err)
 	values := metadataValuesFromCompute(rendered)
 	for key, value := range source {
-		if key == KubeLabelsKey || key == "unknown-source-key" || key == "serial-port-logging-enable" {
+		if key == KubeLabelsKey || key == "unknown-source-key" || key == "serial-port-logging-enable" || key == "configure-sh" || key == "user-data" || key == "startup-script" {
 			continue
 		}
 		require.Equal(t, value, values[key], key)
@@ -143,6 +143,9 @@ func TestFromSourceTemplateRetainsExplicitGKEBootstrapMetadata(t *testing.T) {
 	require.Equal(t, "false", values["serial-port-logging-enable"])
 	require.NotEqual(t, "source=true", values[KubeLabelsKey])
 	require.NotContains(t, values, "unknown-source-key")
+	require.NotContains(t, values, "configure-sh")
+	require.NotContains(t, values, "user-data")
+	require.NotContains(t, values, "startup-script")
 }
 
 func TestFromSourceTemplatePreservesUnknownKubeEnvEntries(t *testing.T) {

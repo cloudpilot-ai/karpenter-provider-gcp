@@ -90,6 +90,20 @@ imageSelectorTerms:
   - id: projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre
 ```
 
+## Bootstrap release
+
+Resolved `status.images[]` rows include `kubernetesVersion`, the core GKE release to install with that image. The controller keeps image and release together through caching and launch; it does not reread a new master version after selecting an older cached image.
+
+- **Official COS images:** use the selected image's GKE release, not necessarily the master's exact patch/build. This preserves channel, milestone and explicit image pins. Modern official names with a two-digit Kubernetes minor are decoded, including multi-digit patches; ambiguous historical formats are not guessed.
+- **Ubuntu:** use one exact API-server version snapshot for both minor-scoped image discovery and bootstrap. An Ubuntu date pin fixes the OS image, not the kubelet release. Existing image-project/catalog selection is unchanged; the separate Ubuntu image-catalog migration for GKE1.36 is not included.
+- **Opaque custom image IDs:** keep the pinned image/architecture and use an exact API-server version snapshot. A custom-project image is not treated as official COS merely because its name resembles one. Custom images must be compatible with the chosen bootstrap release.
+
+Core server/manifests URLs and hashes, `KUBELET_VERSION`, `configure-sh` and `user-data` come from the selected release's public GKE distribution, not the source pool. Legacy SALT fields and the competing source startup script are not inherited. Other source runtime policy, including `RENDERED_INSTALLABLES`, remains unchanged under the accepted compatibility assumption; see [Bootstrap pool selection](bootstrap-pool.md#core-bootstrap-release-and-architecture).
+
+The controller needs HTTPS access to `https://storage.googleapis.com/gke-release/kubernetes/release/` for small scripts and checksum sidecars. It caches complete verified bundles with a bounded cache. Nodes use matching preloads or fetch the corresponding archives; an artifact lookup/integrity failure stops a new launch rather than falling back to source artifacts or marking capacity unavailable. No new mirror/alternate-universe endpoint setting is introduced.
+
+Upgrade CRDs before the controller, then allow normal image-status refresh. Old CRDs can prune the new field; a new launch with an incomplete row waits for reconciliation. Existing VMs remain adoptable without a current artifact lookup. A release-only change with the same image does not introduce drift or replace running nodes.
+
 ## Container-Optimized OS variants
 
 Karpenter supports independently published amd64 CPU (`-c-pre`), arm64 CPU (`-cos-arm64-...-c-pre`), and amd64 NVIDIA (`-c-nvda`) images. Specialized builds such as kmod, gVisor, `-test`, and cgroup v1 are excluded.

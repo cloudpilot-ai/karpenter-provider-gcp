@@ -982,6 +982,12 @@ spec:
                   description: Image contains resolved image selector values utilized
                     for node launch
                   properties:
+                    kubernetesVersion:
+                      description: |-
+                        KubernetesVersion is the GKE release selected with this image for new-node bootstrap.
+                        It is independent of the source node pool version and is not a drift trigger.
+                        Older controller status is refreshed before a new VM can use this image.
+                      type: string
                     requirements:
                       description: Requirements of the Image to be utilized on an
                         instance type

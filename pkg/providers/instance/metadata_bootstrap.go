@@ -32,17 +32,11 @@ import (
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 )
 
-// requiredSourceKubeEnvEntries are kube-env entries that GKE writes into every
-// node pool template and that node bootstrap cannot work without. A source
-// template without them means GKE changed its bootstrap format or the source
-// pool is unusable, so fail the launch instead of creating an instance that
-// never registers.
+// requiredSourceKubeEnvEntries are retained cluster context. Core release
+// artifacts are supplied independently and must not be required from a pool.
 var requiredSourceKubeEnvEntries = []string{
 	"CA_CERT",
-	"KUBE_MANIFESTS_TAR_URL",
 	"KUBERNETES_MASTER_NAME",
-	"SERVER_BINARY_TAR_HASH",
-	"SERVER_BINARY_TAR_URL",
 }
 
 func validateSourceKubeEnv(target *metadata.InstanceMetadata) error {

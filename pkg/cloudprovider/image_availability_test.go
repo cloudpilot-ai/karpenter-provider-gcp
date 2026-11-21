@@ -342,7 +342,7 @@ func TestCreateWithPartialImages(t *testing.T) {
 		}
 		unavailable := unavailableofferings.NewUnavailableOfferings()
 		instanceProvider := instance.NewProvider("cluster", "us-central1", "us-central1", "test", "node@test", "", service,
-			reproGKE{}, nil, reproTypes{variants: catalog}, reproTemplate{}, reproVersion{}, unavailable)
+			reproGKE{}, nil, reproTypes{variants: catalog}, reproTemplate{}, reproBootstrap{}, unavailable)
 		provider := New(reproClient{nodeClass: class}, reproEvents{}, reproTypes{variants: catalog}, instanceProvider, nil)
 
 		ctx := karpopts.ToContext(context.Background(), &karpopts.Options{})

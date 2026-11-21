@@ -47,7 +47,7 @@ func TestValidateSourceKubeEnv(t *testing.T) {
 		},
 		{
 			name: "no kube-env",
-			want: "missing required entries: CA_CERT, KUBE_MANIFESTS_TAR_URL, KUBERNETES_MASTER_NAME, SERVER_BINARY_TAR_HASH, SERVER_BINARY_TAR_URL",
+			want: "missing required entries: CA_CERT, KUBERNETES_MASTER_NAME",
 		},
 		{
 			name:    "empty value",
@@ -139,7 +139,7 @@ func TestBuildInstance_Hugepages2MMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestBuildInstance_Hugepages1GMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 
 	require.NoError(t, err)
@@ -186,7 +186,7 @@ func TestBuildInstance_HugepagesBothSizesMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), makeSourceMetadata("max-pods-per-node=110,max-pods=110"),
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 
 	require.NoError(t, err)
@@ -209,7 +209,7 @@ func TestBuildInstance_DropsStaleSourceHugepagesMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-hugepages-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(&v1alpha1.GCENodeClass{}),
 	)
 
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func buildSwapInstanceFromSource(t *testing.T, nodeClass *v1alpha1.GCENodeClass,
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, mt, 0, "pods",
+		karpv1.CapacityTypeOnDemand, mt, 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.NoError(t, err)
 	return swapInstance{
@@ -352,10 +352,10 @@ func TestBuildInstance_SwapReplacesSourceSwapMetadata(t *testing.T) {
 	require.NotContains(t, kubeEnv, "NODE_ZSWAP_")
 }
 
-func timeSharingNodeClass(clients int32) *v1alpha1.GCENodeClass {
+func timeSharingNodeClass() *v1alpha1.GCENodeClass {
 	return &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{GPUSharingConfig: &v1alpha1.GPUSharingConfig{
 		Strategy:               v1alpha1.GPUSharingStrategyTimeSharing,
-		MaxSharedClientsPerGPU: clients,
+		MaxSharedClientsPerGPU: 4,
 	}}}
 }
 
@@ -364,10 +364,10 @@ func TestBuildInstance_GPUTimeSharingMetadata(t *testing.T) {
 
 	instance, err := provider.buildInstance(
 		context.Background(),
-		spotOrOnDemandNodeClaim(), timeSharingNodeClass(4), makeGPUIT(), makeSourceMetadata("max-pods-per-node=110"),
+		spotOrOnDemandNodeClaim(), timeSharingNodeClass(), makeGPUIT(), makeSourceMetadata("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-sharing-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(timeSharingNodeClass()),
 	)
 
 	require.NoError(t, err)
@@ -386,10 +386,10 @@ func TestBuildInstance_GPUTimeSharingIgnoredForNonGPU(t *testing.T) {
 
 	instance, err := provider.buildInstance(
 		context.Background(),
-		spotOrOnDemandNodeClaim(), timeSharingNodeClass(4), makeNonGPUIT(), makeSourceMetadata("max-pods-per-node=110"),
+		spotOrOnDemandNodeClaim(), timeSharingNodeClass(), makeNonGPUIT(), makeSourceMetadata("max-pods-per-node=110"),
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-sharing-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(timeSharingNodeClass()),
 	)
 
 	require.NoError(t, err)
@@ -412,7 +412,7 @@ func TestBuildInstance_DropsStaleSourceGPUSharingMetadata(t *testing.T) {
 		spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeGPUIT(), sourceMetadata,
 		makeCluster("net", "subnet", "pods", false),
 		"us-central1-a", "karpenter-gpu-sharing-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(&v1alpha1.GCENodeClass{}),
 	)
 
 	require.NoError(t, err)
@@ -470,7 +470,7 @@ func TestBuildInstance_KubeletSwapConfig(t *testing.T) {
 		spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-swap-test",
-		karpv1.CapacityTypeOnDemand, nil, 0, "pods",
+		karpv1.CapacityTypeOnDemand, nil, 0, "pods", testLaunchImage(nodeClass),
 	)
 	require.NoError(t, err)
 
@@ -514,7 +514,7 @@ func buildGCFSDInstanceKubeEnv(t *testing.T, sourceKubeEnv string, mt *computepb
 		spotOrOnDemandNodeClaim(), &v1alpha1.GCENodeClass{}, makeNonGPUIT(), sourceMetadata,
 		makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 		"us-central1-a", "karpenter-gcfsd-test",
-		karpv1.CapacityTypeOnDemand, mt, 0, "pods",
+		karpv1.CapacityTypeOnDemand, mt, 0, "pods", testLaunchImage(&v1alpha1.GCENodeClass{}),
 	)
 	require.NoError(t, err)
 	return kubeEnvFrom(t, instance)
@@ -640,7 +640,7 @@ func TestBuildInstance_ShutdownGracePeriod(t *testing.T) {
 				spotOrOnDemandNodeClaim(), nodeClass, makeNonGPUIT(), sourceMetadata,
 				makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false),
 				"us-central1-a", "karpenter-shutdown-test",
-				tc.capacityType, nil, 0, "pods",
+				tc.capacityType, nil, 0, "pods", testLaunchImage(nodeClass),
 			)
 			require.NoError(t, err)
 

@@ -36,6 +36,7 @@ import (
 
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/auth"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/bootstrap"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/imagefamily"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
@@ -157,7 +158,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		subnetProvider,
 		instanceTypeProvider,
 		nodeTemplateProvider,
-		versionProvider,
+		bootstrap.NewDefaultProvider(nil),
 		unavailableOfferingsCache,
 	)
 

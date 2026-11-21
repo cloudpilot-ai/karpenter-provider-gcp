@@ -76,15 +76,16 @@ func TestSelectImage_Ubuntu_ExcludesNonCleanAmd64(t *testing.T) {
 }
 
 func TestBuildImageFilter_Ubuntu_UsesVersionPrefix(t *testing.T) {
-	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1"}, release: "2404"}
-	got := p.buildImageFilter(context.Background())
+	p := &Ubuntu{release: "2404"}
+	got, err := p.buildImageFilter("v1.35.1-gke.123")
+	require.NoError(t, err)
 	require.Equal(t, `name=ubuntu-gke-2404-1-35*`, got)
 }
 
-func TestBuildImageFilter_Ubuntu_FallsBackOnNilProvider(t *testing.T) {
+func TestResolveImages_UbuntuRequiresMasterSnapshot(t *testing.T) {
 	p := &Ubuntu{release: "2404"}
-	got := p.buildImageFilter(context.Background())
-	require.Equal(t, `name=ubuntu-gke-2404*`, got)
+	_, err := p.ResolveImages(context.Background(), "latest")
+	require.ErrorContains(t, err, "API-server version is required")
 }
 
 func TestResolveImages_Ubuntu_FindsBothArchitecturesAcrossPages(t *testing.T) {
@@ -129,7 +130,7 @@ func TestResolveImages_Ubuntu_PinnedVersion_Valid(t *testing.T) {
 	srv := imageListServer(t, images)
 	defer srv.Close()
 
-	p := &Ubuntu{
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1-gke.123"},
 		computeService: buildComputeService(t, srv),
 		release:        "2404",
 	}
@@ -156,7 +157,7 @@ func TestResolveImages_Ubuntu_PinnedVersion_MissingArm64_IsResolutionError(t *te
 	srv := imageListServer(t, images)
 	defer srv.Close()
 
-	p := &Ubuntu{
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1-gke.123"},
 		computeService: buildComputeService(t, srv),
 		release:        "2404",
 	}
@@ -173,7 +174,7 @@ func TestResolveImages_Ubuntu_PinnedVersion_PendingArm64(t *testing.T) {
 	}
 	srv := imageListServer(t, images)
 	defer srv.Close()
-	p := &Ubuntu{computeService: buildComputeService(t, srv), release: "2404"}
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1-gke.123"}, computeService: buildComputeService(t, srv), release: "2404"}
 	_, err := p.ResolveImages(context.Background(), "v20260416")
 	require.Error(t, err)
 	// Ubuntu discovery only admits READY images, so a catalog-PENDING sibling leaves the required
@@ -333,7 +334,7 @@ func TestResolveImages_Ubuntu_SelectsLetterSuffixVersion(t *testing.T) {
 	srv := imageListServer(t, images)
 	defer srv.Close()
 
-	p := &Ubuntu{
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1-gke.123"},
 		computeService: buildComputeService(t, srv),
 		release:        "2404",
 	}
@@ -359,7 +360,7 @@ func TestResolveImages_Ubuntu_ResolvesRealArm64_WhenNewestAmd64IsTpuSuffix(t *te
 	srv := imageListServer(t, images)
 	defer srv.Close()
 
-	p := &Ubuntu{
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1-gke.123"},
 		computeService: buildComputeService(t, srv),
 		release:        "2404",
 	}
@@ -387,7 +388,7 @@ func TestResolveImages_Ubuntu_MissingArm64_IsResolutionError(t *testing.T) {
 	srv := imageListServer(t, images)
 	defer srv.Close()
 
-	p := &Ubuntu{
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.35.1-gke.123"},
 		computeService: buildComputeService(t, srv),
 		release:        "2404",
 	}
@@ -407,7 +408,7 @@ func TestResolveImages_Ubuntu2204_ResolvesRealArm64_WhenNewestAmd64IsTpuSuffix(t
 	srv := imageListServer(t, images)
 	defer srv.Close()
 
-	p := &Ubuntu{
+	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.34.1-gke.123"},
 		computeService: buildComputeService(t, srv),
 		release:        "2204",
 	}
@@ -425,15 +426,16 @@ func TestResolveImages_Ubuntu2204_ResolvesRealArm64_WhenNewestAmd64IsTpuSuffix(t
 }
 
 func TestBuildImageFilter_Ubuntu2204_UsesVersionPrefix(t *testing.T) {
-	p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.34.7"}, release: "2204"}
-	got := p.buildImageFilter(context.Background())
+	p := &Ubuntu{release: "2204"}
+	got, err := p.buildImageFilter("v1.34.7-gke.123")
+	require.NoError(t, err)
 	require.Equal(t, `name=ubuntu-gke-2204-1-34*`, got)
 }
 
-func TestBuildImageFilter_Ubuntu2204_FallsBackOnNilProvider(t *testing.T) {
+func TestBuildImageFilter_UbuntuRejectsUnknownVersion(t *testing.T) {
 	p := &Ubuntu{release: "2204"}
-	got := p.buildImageFilter(context.Background())
-	require.Equal(t, `name=ubuntu-gke-2204*`, got)
+	_, err := p.buildImageFilter("not-a-version")
+	require.Error(t, err)
 }
 
 func TestSelectImage_Ubuntu2204_PicksAmd64NotArm64(t *testing.T) {
@@ -552,7 +554,7 @@ func TestResolveImages_Ubuntu_PinnedVersion_LetterSuffix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := imageListServer(t, tt.images)
 			defer srv.Close()
-			p := &Ubuntu{computeService: buildComputeService(t, srv), release: tt.release}
+			p := &Ubuntu{versionProvider: &fakeVersionProvider{version: "v1.32.1-gke.123"}, computeService: buildComputeService(t, srv), release: tt.release}
 
 			got, err := p.ResolveImages(context.Background(), tt.version)
 			if tt.want == nil {

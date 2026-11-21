@@ -60,6 +60,11 @@ type Image struct {
 	// SourceImage represents the source image, format like projects/gke-node-images/global/images/gke-1309-gke1046000-cos-113-18244-291-9-c-pre
 	// +required
 	SourceImage string `json:"sourceImage"`
+	// KubernetesVersion is the GKE release selected with this image for new-node bootstrap.
+	// It is independent of the source node pool version and is not a drift trigger.
+	// Older controller status is refreshed before a new VM can use this image.
+	// +optional
+	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 	// Requirements of the Image to be utilized on an instance type
 	// +required
 	Requirements []corev1.NodeSelectorRequirement `json:"requirements"`

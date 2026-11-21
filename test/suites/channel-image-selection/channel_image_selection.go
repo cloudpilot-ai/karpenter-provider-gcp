@@ -19,6 +19,7 @@ package channelimageselection
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -81,6 +82,14 @@ func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase)
 		env.CreateNodeClassWithFamilyVersion(ctx, name, tc.family, tc.version)
 	}
 	env.WaitForNodeClassReady(ctx, name)
+	nodeClass, err := env.GetNodeClass(ctx, name)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(nodeClass.Status.Images).NotTo(BeEmpty())
+	expectedRelease := nodeClass.Status.Images[0].KubernetesVersion
+	Expect(expectedRelease).NotTo(BeEmpty(), "selected images must carry their bootstrap release")
+	for _, image := range nodeClass.Status.Images {
+		Expect(image.KubernetesVersion).To(Equal(expectedRelease))
+	}
 
 	// Verify the resolved image version is consistent with the requested selector.
 	sourceImages := env.NodeClassSourceImages(ctx, name)
@@ -127,4 +136,6 @@ func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase)
 	Expect(node.Labels[karpv1.NodeRegisteredLabelKey]).To(Equal("true"))
 	Expect(node.Labels[karpv1.NodePoolLabelKey]).To(Equal(name))
 	Expect(node.Labels[karpv1.CapacityTypeLabelKey]).To(Equal(karpv1.CapacityTypeOnDemand))
+	Expect(strings.TrimPrefix(node.Status.NodeInfo.KubeletVersion, "v")).To(Equal(expectedRelease),
+		"running kubelet must match the selected image release, not the bootstrap source pool")
 }

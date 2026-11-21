@@ -312,6 +312,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `sourceImage` _string_ | SourceImage represents the source image, format like projects/gke-node-images/global/images/gke-1309-gke1046000-cos-113-18244-291-9-c-pre |  | Required: \{\} <br /> |
+| `kubernetesVersion` _string_ | KubernetesVersion is the GKE release selected with this image for new-node bootstrap.<br />It is independent of the source node pool version and is not a drift trigger.<br />Older controller status is refreshed before a new VM can use this image. |  | Optional: \{\} <br /> |
 | `requirements` _[NodeSelectorRequirement](https://kubernetes.io/docs/reference/generated/kubernetes-api/v/#nodeselectorrequirement-v1-core) array_ | Requirements of the Image to be utilized on an instance type |  | Required: \{\} <br /> |
 
 

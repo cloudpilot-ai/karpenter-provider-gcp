@@ -68,7 +68,11 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 			"invalid Ubuntu version %q: must be 'latest' or 'vYYYYMMDD' with an optional release letter (e.g. 'v20260416', 'v20251218a')", version)}
 	}
 
-	images, err := u.listImages(ctx, version)
+	kubernetesVersion, err := bootstrapVersion(ctx, u.versionProvider)
+	if err != nil {
+		return nil, err
+	}
+	images, err := u.listImages(ctx, version, kubernetesVersion)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to resolve Ubuntu GKE image from image project")
 		return Images{}, err
@@ -85,18 +89,23 @@ func (u *Ubuntu) ResolveImages(ctx context.Context, version string) (Images, err
 				u.release, arch, version, ubuntuGKEImageProject)}
 		}
 		ret = append(ret, Image{
-			SourceImage:  fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, name),
-			Requirements: ubuntuRequirementsForArch(arch),
+			SourceImage:       fmt.Sprintf("projects/%s/global/images/%s", ubuntuGKEImageProject, name),
+			KubernetesVersion: kubernetesVersion,
+			Requirements:      ubuntuRequirementsForArch(arch),
 		})
 	}
 	return ret, nil
 }
 
 // listImages retains only the newest matching image for each architecture.
-func (u *Ubuntu) listImages(ctx context.Context, version string) ([]*compute.Image, error) {
-	prefix := strings.TrimSuffix(strings.TrimPrefix(u.buildImageFilter(ctx), "name="), "*")
+func (u *Ubuntu) listImages(ctx context.Context, version, kubernetesVersion string) ([]*compute.Image, error) {
+	filter, err := u.buildImageFilter(kubernetesVersion)
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.TrimSuffix(strings.TrimPrefix(filter, "name="), "*")
 	best := make(map[string]*compute.Image, len(ubuntuArchitectures))
-	err := scanImages(ctx, u.computeService, ubuntuGKEImageProject, func(img *compute.Image) bool {
+	err = scanImages(ctx, u.computeService, ubuntuGKEImageProject, func(img *compute.Image) bool {
 		if !strings.HasPrefix(img.Name, prefix) || (version != "latest" && !strings.HasSuffix(img.Name, "-"+version)) {
 			return false
 		}
@@ -200,20 +209,10 @@ func isUsableUbuntu2204Arm64Image(img *compute.Image) bool {
 }
 
 // buildImageFilter describes the local name scope for the cluster's K8s minor version.
-func (u *Ubuntu) buildImageFilter(ctx context.Context) string {
-	prefix := u.imagePrefix()
-	if u.versionProvider == nil {
-		return fmt.Sprintf(`name=%s*`, prefix)
-	}
-	k8sVer, err := u.versionProvider.Get(ctx)
+func (u *Ubuntu) buildImageFilter(kubernetesVersion string) (string, error) {
+	parsed, err := k8sversion.ParseGeneric(kubernetesVersion)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to get K8s version for Ubuntu image filter, using broad filter")
-		return fmt.Sprintf(`name=%s*`, prefix)
+		return "", fmt.Errorf("parsing Ubuntu image version: %w", err)
 	}
-	parsed, err := k8sversion.ParseGeneric(k8sVer)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to parse K8s version for Ubuntu image filter, using broad filter", "version", k8sVer)
-		return fmt.Sprintf(`name=%s*`, prefix)
-	}
-	return fmt.Sprintf(`name=%s-%d-%d*`, prefix, parsed.Major(), parsed.Minor())
+	return fmt.Sprintf(`name=%s-%d-%d*`, u.imagePrefix(), parsed.Major(), parsed.Minor()), nil
 }

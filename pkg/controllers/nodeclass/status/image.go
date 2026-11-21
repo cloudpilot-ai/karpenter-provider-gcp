@@ -80,8 +80,9 @@ func (i *Image) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass)
 			return reqs[i].Key < reqs[j].Key
 		})
 		return v1alpha1.Image{
-			SourceImage:  image.SourceImage,
-			Requirements: reqs,
+			SourceImage:       image.SourceImage,
+			KubernetesVersion: image.KubernetesVersion,
+			Requirements:      reqs,
 		}
 	})
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
