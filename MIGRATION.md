@@ -14,6 +14,27 @@ Allow controller HTTPS access to `https://storage.googleapis.com/gke-release/kub
 
 Existing nodes are not upgraded in place, and a release-only status change with the same image is not a new drift trigger. See [Bootstrap release](docs/image-selection.md#bootstrap-release).
 
+### Ubuntu images follow the GKE 1.36 image project; `family: Ubuntu` takes an `osVersion`
+
+On GKE 1.36 and later, Ubuntu images are resolved from `gke-ubuntu-node-images` instead of `ubuntu-os-gke-cloud`; earlier minors keep using `ubuntu-os-gke-cloud`. Allow the controller's project, trusted-image-project policy and any VPC Service Controls perimeter to use the new project's images. Existing Ubuntu nodes are not replaced by the project change: GKE publishes the same image names in both projects, and drift treats those as the same image.
+
+**Upgrade CRDs before the controller** to use the new field. `imageSelectorTerms[].osVersion` selects the Ubuntu release for `family: Ubuntu` (`"22.04"`, `"24.04"`, `"26.04"`) and is required there; it is rejected for other families. The families `Ubuntu2404` and `Ubuntu2204` are deprecated but unchanged; they resolve to the same images as `Ubuntu` with `osVersion: "24.04"`/`"22.04"`, so you can switch spellings without drifting nodes. Ubuntu 26.04 is available only through `family: Ubuntu`.
+
+```yaml
+# Before
+imageSelectorTerms:
+  - family: Ubuntu2404
+    version: latest
+
+# After
+imageSelectorTerms:
+  - family: Ubuntu
+    osVersion: "24.04"
+    version: latest
+```
+
+GKE publishes each Ubuntu release only for some minors, and Karpenter never substitutes another release: as of November 2026 Ubuntu 22.04 images stop at Kubernetes 1.31, 24.04 covers 1.31–1.37 and 26.04 covers 1.37 and 1.38 (alpha). A NodeClass whose release has no image for the cluster's minor reports `ImagesReady=False` / `ImageResolutionFailed` naming the release and project; change `osVersion` explicitly (nodes then drift to the new image) before upgrading the cluster. See [OS families](docs/image-selection.md#os-families).
+
 ### Release distribution moves to GHCR OCI
 
 Controller images use `ghcr.io/karpenter-gcp/karpenter-provider-gcp:vX.Y.Z`. Helm charts use `oci://ghcr.io/karpenter-gcp/karpenter-provider-gcp/charts/karpenter` and `/karpenter-crd` with version `X.Y.Z`. Use Helm 3.8+ or Helm 4; replace indexed chart references in Helm automation and allow GHCR image pulls in registry policies. Keep existing release names, namespaces and configured values; upgrade CRDs before the controller. A pinned `controller.image.repository` still overrides the new default and must be updated explicitly.

@@ -5,10 +5,13 @@ metadata:
 spec:
   serviceAccount: "" # fill me
   imageSelectorTerms:
-    - family: Ubuntu2404
+    - family: Ubuntu
+      osVersion: "24.04"
       version: v20250106
-    # - family: Ubuntu2404
-    #   channel: cluster
+    # Newest image of the release for the cluster's Kubernetes minor:
+    # - family: Ubuntu
+    #   osVersion: "24.04"
+    #   version: latest
   labels:
     env: dev
   networkTags:

@@ -231,10 +231,10 @@ func TestGCENodeClassCRDUbuntuVersionPinFormat(t *testing.T) {
 
 	patterns := map[string]string{}
 	for _, v := range term.XValidations {
-		if strings.HasPrefix(v.Message, "Ubuntu2404 version") || strings.HasPrefix(v.Message, "Ubuntu2204 version") {
+		if family, _, found := strings.Cut(v.Message, " version must be"); found && strings.HasPrefix(family, "Ubuntu") {
 			m := celPattern.FindStringSubmatch(v.Rule)
 			require.Len(t, m, 2, "rule %q", v.Rule)
-			patterns[v.Message[:len("Ubuntu2404")]] = m[1]
+			patterns[family] = m[1]
 		}
 	}
 	for _, v := range term.Properties["alias"].XValidations {
@@ -244,7 +244,7 @@ func TestGCENodeClassCRDUbuntuVersionPinFormat(t *testing.T) {
 			patterns["Ubuntu@"] = m[1]
 		}
 	}
-	require.Len(t, patterns, 3)
+	require.Len(t, patterns, 4) // Ubuntu, Ubuntu2404, Ubuntu2204 and the Ubuntu@ alias
 
 	valid := []string{"v20260416", "v20251218a", "v20251218z"}
 	invalid := []string{"20260416", "v2026041", "v202604161", "v20251218ab", "v20251218A", "v20251218-a", "va20251218"}
@@ -261,6 +261,39 @@ func TestGCENodeClassCRDUbuntuVersionPinFormat(t *testing.T) {
 		for _, version := range invalid {
 			require.False(t, re.MatchString(prefix+version), "%s accepts %q", key, version)
 		}
+	}
+}
+
+// TestGCENodeClassCRDUbuntuOSVersion protects the Ubuntu release selector: family Ubuntu must name
+// its release (so Karpenter never picks one), other families must not, the release is a
+// well-formed two-digit dotted value, and the deprecated per-release families keep working.
+func TestGCENodeClassCRDUbuntuOSVersion(t *testing.T) {
+	spec := func(term map[string]any) map[string]any {
+		return map[string]any{"imageSelectorTerms": []any{term}}
+	}
+	for _, osVersion := range []string{"22.04", "24.04", "26.04", "28.04"} {
+		requireAdmitted(t, spec(map[string]any{"family": "Ubuntu", "osVersion": osVersion, "version": "latest"}))
+	}
+	requireAdmitted(t, spec(map[string]any{"family": "Ubuntu", "osVersion": "24.04", "version": "v20251218a"}))
+	// Deprecated families and aliases stay valid.
+	requireAdmitted(t, spec(map[string]any{"family": "Ubuntu2404", "version": "latest"}))
+	requireAdmitted(t, spec(map[string]any{"family": "Ubuntu2204", "version": "v20260416"}))
+	requireAdmitted(t, spec(map[string]any{"family": "ContainerOptimizedOS", "channel": "stable"}))
+
+	requireRejected(t, spec(map[string]any{"family": "Ubuntu", "version": "latest"}), "requires osVersion")
+	requireRejected(t, spec(map[string]any{"family": "Ubuntu2404", "osVersion": "24.04", "version": "latest"}), "only supported for family Ubuntu")
+	requireRejected(t, spec(map[string]any{"family": "ContainerOptimizedOS", "osVersion": "24.04", "version": "latest"}), "only supported for family Ubuntu")
+	requireRejected(t, spec(map[string]any{"family": "Ubuntu", "osVersion": "24.04", "version": "20260416"}), "Ubuntu version must be")
+	requireRejected(t, spec(map[string]any{"family": "Ubuntu", "osVersion": "24.04", "channel": "stable"}), "channel is only supported")
+
+	// The release format is an OpenAPI pattern, which the CEL harness does not evaluate.
+	osVersion := specSchema(t).Properties["imageSelectorTerms"].Items.Schema.Properties["osVersion"]
+	re := regexp.MustCompile(osVersion.Pattern)
+	for _, good := range []string{"22.04", "24.04", "26.04", "28.04"} {
+		require.True(t, re.MatchString(good), "osVersion pattern rejects %q", good)
+	}
+	for _, bad := range []string{"2404", "24.4", "24.04.1", "ubuntu", "24-04", "v24.04", "24.04\n", ""} {
+		require.False(t, re.MatchString(bad), "osVersion pattern accepts %q", bad)
 	}
 }
 

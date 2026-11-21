@@ -6,7 +6,7 @@ This page explains how to control external IP assignment and subnetwork placemen
 
 Karpenter discovers an existing RUNNING node pool in your cluster and reads its network configuration (subnetwork, private-node setting, kubelet settings). It does not create dedicated template pools. See [Bootstrap pool selection](../bootstrap-pool.md) for details on pool selection and the fallback behaviour when no pool exists.
 
-Image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` for Ubuntu) and does not depend on the bootstrap pool's boot disk.
+Image resolution queries GCP image catalogs directly (`gke-node-images` for Container-Optimized OS, `ubuntu-os-gke-cloud` before GKE 1.36 and `gke-ubuntu-node-images` from 1.36 for Ubuntu) and does not depend on the bootstrap pool's boot disk.
 
 ## Cluster-level private nodes
 

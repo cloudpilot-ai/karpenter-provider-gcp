@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,59 +29,6 @@ import (
 
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 )
-
-func TestSelectImage_Ubuntu_SkipsPending(t *testing.T) {
-	images := []*compute.Image{
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z", Status: "PENDING"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260401", CreationTimestamp: "2026-04-01T00:00:00Z", Status: "READY"},
-	}
-	got, ok := (&Ubuntu{release: "2404"}).selectImage(images, OSArchAMD64Requirement, "latest")
-	require.True(t, ok)
-	require.Equal(t, "ubuntu-gke-2404-1-35-amd64-v20260401", got)
-}
-
-func TestSelectImage_Ubuntu_PicksNewestNonDeprecatedAmd64(t *testing.T) {
-	images := []*compute.Image{
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260401", CreationTimestamp: "2026-04-01T00:00:00Z"},
-		// deprecated — must be excluded
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260301", CreationTimestamp: "2026-03-01T00:00:00Z",
-			Deprecated: &compute.DeprecationStatus{State: "DEPRECATED"}},
-	}
-
-	p := &Ubuntu{release: "2404"}
-	got, ok := p.selectImage(readyTestImages(images), OSArchAMD64Requirement, "latest")
-	require.True(t, ok)
-	require.Equal(t, "ubuntu-gke-2404-1-35-amd64-v20260420", got)
-}
-
-func TestSelectImage_Ubuntu_ExcludesNonCleanAmd64(t *testing.T) {
-	images := []*compute.Image{
-		// excluded: arm64 (different architecture)
-		{Name: "ubuntu-gke-2404-1-35-arm64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z"},
-		// excluded: variants, in either infix or trailing-suffix position
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260419-test", CreationTimestamp: "2026-04-19T00:00:00Z"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-cgroupsv1-v20260418", CreationTimestamp: "2026-04-18T00:00:00Z"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260418-tpu", CreationTimestamp: "2026-04-18T12:00:00Z"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-linux64k-v20260416", CreationTimestamp: "2026-04-16T00:00:00Z"},
-		// excluded: obsolete
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260301", CreationTimestamp: "2026-03-01T00:00:00Z", Deprecated: &compute.DeprecationStatus{State: "OBSOLETE"}},
-		// only valid candidate
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260401", CreationTimestamp: "2026-04-01T00:00:00Z"},
-	}
-
-	p := &Ubuntu{release: "2404"}
-	got, ok := p.selectImage(readyTestImages(images), OSArchAMD64Requirement, "latest")
-	require.True(t, ok)
-	require.Equal(t, "ubuntu-gke-2404-1-35-amd64-v20260401", got)
-}
-
-func TestBuildImageFilter_Ubuntu_UsesVersionPrefix(t *testing.T) {
-	p := &Ubuntu{release: "2404"}
-	got, err := p.buildImageFilter("v1.35.1-gke.123")
-	require.NoError(t, err)
-	require.Equal(t, `name=ubuntu-gke-2404-1-35*`, got)
-}
 
 func TestResolveImages_UbuntuRequiresMasterSnapshot(t *testing.T) {
 	p := &Ubuntu{release: "2404"}
@@ -229,81 +177,105 @@ func TestResolveImages_Ubuntu_PinnedVersion_InvalidFormat(t *testing.T) {
 	}
 }
 
-// TestIsUsableUbuntuImage asserts the 2404 amd64 predicate: it accepts a clean amd64 image
-// (including the -v<date>a letter suffix) and rejects deprecated images, the other arch, and
-// every variant build, whether the variant token is a trailing suffix (the real GCP form) or
-// an infix.
-func TestIsUsableUbuntuImage(t *testing.T) {
-	usable := []*compute.Image{
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20251218a"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", Deprecated: &compute.DeprecationStatus{State: ""}},
+// TestUbuntuIsUsableForArch protects the clean-name allowlist per release and architecture: a
+// READY, non-deprecated image with the release own arch token (2204 amd64 has none) is usable
+// (including the -v<date>a letter suffix), and no other architecture, release or variant build is,
+// whether the variant token is a trailing suffix (the real GCP form) or an infix.
+func TestUbuntuIsUsableForArch(t *testing.T) {
+	tests := []struct {
+		release, arch string
+		usable        []string
+		unusable      []string
+	}{
+		{
+			release: "2404", arch: OSArchAMD64Requirement,
+			usable: []string{"ubuntu-gke-2404-1-35-amd64-v20260420", "ubuntu-gke-2404-1-36-amd64-v20251218a"},
+			unusable: []string{
+				"ubuntu-gke-2404-1-35-arm64-v20260420",
+				"ubuntu-gke-2204-1-34-v20260420",
+				"ubuntu-gke-2604-1-38-amd64-v20261119",
+				"ubuntu-gke-2404-1-35-amd64-v20260722-tpu",
+				"ubuntu-gke-2404-1-35-amd64-v20260722-cgroupsv1",
+				"ubuntu-gke-2404-1-35-amd64-v20260722-linux64k",
+				"ubuntu-gke-2404-1-35-amd64-v20260722-test",
+				"ubuntu-gke-2404-1-35-amd64-v20260722-devel",
+				"ubuntu-gke-2404-1-35-amd64-v20260722-tpu-test",
+				"ubuntu-gke-2404-1-35-amd64-v20260722-custom-test",
+				"ubuntu-gke-2404-1-35-amd64-cgroupsv1-v20260420",
+				"ubuntu-gke-2404-1-35-amd64-tpu-v20260420",
+				// per-GKE-patch images in the Ubuntu image project are never "latest" candidates
+				"gke-1365-gke2391000-ubuntu-2404-1-36-amd64-v20260528-c-pre",
+			},
+		},
+		{
+			release: "2404", arch: OSArchARM64Requirement,
+			usable: []string{"ubuntu-gke-2404-1-35-arm64-v20260420", "ubuntu-gke-2404-1-35-arm64-v20251218a"},
+			unusable: []string{
+				"ubuntu-gke-2404-1-35-amd64-v20260420",
+				"ubuntu-gke-2404-1-35-arm64-v20260722-linux64k",
+				"ubuntu-gke-2404-1-37-arm64-v20261112-64k",
+			},
+		},
+		{
+			// 2204 amd64 names carry no arch token.
+			release: "2204", arch: OSArchAMD64Requirement,
+			usable: []string{"ubuntu-gke-2204-1-31-v20260420", "ubuntu-gke-2204-1-31-v20251218a"},
+			unusable: []string{
+				"ubuntu-gke-2204-1-31-arm64-v20260420",
+				"ubuntu-gke-2204-1-31-v20260722-tpu",
+				"ubuntu-gke-2204-1-31-v20260722-cgroupsv1",
+				"ubuntu-gke-2204-1-31-v20260722-cgroupsv1-devel",
+				"ubuntu-gke-2204-1-31-v20260722-devel",
+				"ubuntu-gke-2404-1-31-amd64-v20260420",
+			},
+		},
+		{
+			release: "2204", arch: OSArchARM64Requirement,
+			usable:   []string{"ubuntu-gke-2204-1-31-arm64-v20260420"},
+			unusable: []string{"ubuntu-gke-2204-1-31-v20260420", "ubuntu-gke-2204-1-31-arm64-v20260722-linux64k"},
+		},
+		{
+			release: "2604", arch: OSArchAMD64Requirement,
+			usable: []string{"ubuntu-gke-2604-1-38-amd64-v20261119", "ubuntu-gke-2604-1-37-amd64-v20260925a"},
+			unusable: []string{
+				"ubuntu-gke-2604-1-38-arm64-v20261119",
+				"ubuntu-gke-2404-1-37-amd64-v20261119",
+				"ubuntu-gke-2604-1-38-amd64-v20261119-hwe",
+				"ubuntu-gke-2604-1-38-amd64-v20261119-tpu",
+			},
+		},
+		{
+			release: "2604", arch: OSArchARM64Requirement,
+			usable: []string{"ubuntu-gke-2604-1-38-arm64-v20261119"},
+			unusable: []string{
+				"ubuntu-gke-2604-1-38-amd64-v20261119",
+				"ubuntu-gke-2604-1-38-arm64-v20261119-hwe",
+				"ubuntu-gke-2604-1-38-arm64-v20261119-64k",
+				"ubuntu-gke-2604-1-38-arm64-v20261113-acs",
+				"ubuntu-gke-2604-1-37-arm64-v20260925-linux64k",
+			},
+		},
 	}
-	for _, img := range readyTestImages(usable) {
-		require.True(t, isUsableUbuntuImage(img), "expected %q to be usable", img.Name)
+	for _, tt := range tests {
+		u := &Ubuntu{release: tt.release}
+		for _, name := range tt.usable {
+			require.True(t, u.isUsableForArch(&compute.Image{Name: name, Status: "READY"}, tt.arch),
+				"%s %s: expected %q to be usable", tt.release, tt.arch, name)
+		}
+		for _, name := range tt.unusable {
+			require.False(t, u.isUsableForArch(&compute.Image{Name: name, Status: "READY"}, tt.arch),
+				"%s %s: expected %q to be unusable", tt.release, tt.arch, name)
+		}
 	}
 
-	unusable := []*compute.Image{
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", Deprecated: &compute.DeprecationStatus{State: "DEPRECATED"}},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", Deprecated: &compute.DeprecationStatus{State: "OBSOLETE"}},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420", Deprecated: &compute.DeprecationStatus{State: "DELETED"}},
-		{Name: "ubuntu-gke-2404-1-35-arm64-v20260420"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260722-tpu"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260722-cgroupsv1"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260722-linux64k"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260722-test"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260722-devel"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260722-tpu-test"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260722-custom-test"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-cgroupsv1-v20260420"},
-		{Name: "ubuntu-gke-2404-1-35-amd64-tpu-v20260420"},
+	// Retired or unfinished images are never usable, even with a clean name.
+	u := &Ubuntu{release: "2404"}
+	const clean = "ubuntu-gke-2404-1-35-amd64-v20260420"
+	require.True(t, u.isUsableForArch(&compute.Image{Name: clean, Status: "READY", Deprecated: &compute.DeprecationStatus{State: ""}}, OSArchAMD64Requirement))
+	require.False(t, u.isUsableForArch(&compute.Image{Name: clean, Status: "PENDING"}, OSArchAMD64Requirement))
+	for _, state := range []string{"DEPRECATED", "OBSOLETE", "DELETED"} {
+		require.False(t, u.isUsableForArch(&compute.Image{Name: clean, Status: "READY", Deprecated: &compute.DeprecationStatus{State: state}}, OSArchAMD64Requirement), state)
 	}
-	for _, img := range unusable {
-		require.False(t, isUsableUbuntuImage(img), "expected %q to be unusable", img.Name)
-	}
-}
-
-// TestIsUsableUbuntu2204Image asserts the 2204 amd64 predicate, where amd64 names carry no arch token.
-func TestIsUsableUbuntu2204Image(t *testing.T) {
-	usable := []*compute.Image{
-		{Name: "ubuntu-gke-2204-1-34-v20260420"},
-		{Name: "ubuntu-gke-2204-1-34-v20251218a"},
-		{Name: "ubuntu-gke-2204-1-34-v20260420", Deprecated: &compute.DeprecationStatus{State: ""}},
-	}
-	for _, img := range readyTestImages(usable) {
-		require.True(t, isUsableUbuntu2204Image(img), "expected %q to be usable", img.Name)
-	}
-
-	unusable := []*compute.Image{
-		{Name: "ubuntu-gke-2204-1-34-v20260420", Deprecated: &compute.DeprecationStatus{State: "DEPRECATED"}},
-		{Name: "ubuntu-gke-2204-1-34-v20260420", Deprecated: &compute.DeprecationStatus{State: "OBSOLETE"}},
-		{Name: "ubuntu-gke-2204-1-34-arm64-v20260420"},
-		{Name: "ubuntu-gke-2204-1-34-v20260722-tpu"},
-		{Name: "ubuntu-gke-2204-1-34-v20260722-cgroupsv1"},
-		{Name: "ubuntu-gke-2204-1-34-v20260722-linux64k"},
-		{Name: "ubuntu-gke-2204-1-34-v20260722-test"},
-		{Name: "ubuntu-gke-2204-1-34-v20260722-devel"},
-		{Name: "ubuntu-gke-2204-1-34-v20260722-cgroupsv1-devel"},
-	}
-	for _, img := range unusable {
-		require.False(t, isUsableUbuntu2204Image(img), "expected %q to be unusable", img.Name)
-	}
-}
-
-// TestIsUsableUbuntuArm64Image covers the arm64 predicates added for independent arm64 resolution.
-func TestIsUsableUbuntuArm64Image(t *testing.T) {
-	require.True(t, isUsableUbuntuArm64Image(&compute.Image{Name: "ubuntu-gke-2404-1-35-arm64-v20260420", Status: "READY"}))
-	require.True(t, isUsableUbuntuArm64Image(&compute.Image{Name: "ubuntu-gke-2404-1-35-arm64-v20251218a", Status: "READY"}))
-	require.True(t, isUsableUbuntu2204Arm64Image(&compute.Image{Name: "ubuntu-gke-2204-1-34-arm64-v20260420", Status: "READY"}))
-
-	for _, img := range []*compute.Image{
-		{Name: "ubuntu-gke-2404-1-35-amd64-v20260420"},          // amd64, not arm64
-		{Name: "ubuntu-gke-2404-1-35-arm64-v20260722-linux64k"}, // variant
-		{Name: "ubuntu-gke-2404-1-35-arm64-v20260420", Deprecated: &compute.DeprecationStatus{State: "DEPRECATED"}},
-	} {
-		require.False(t, isUsableUbuntuArm64Image(img), "expected %q to be unusable", img.Name)
-	}
-	require.False(t, isUsableUbuntu2204Arm64Image(&compute.Image{Name: "ubuntu-gke-2204-1-34-v20260420"}))
 }
 
 // Regression coverage for arm64 / trailing-variant-suffix resolution: each architecture is
@@ -425,31 +397,171 @@ func TestResolveImages_Ubuntu2204_ResolvesRealArm64_WhenNewestAmd64IsTpuSuffix(t
 	}
 }
 
-func TestBuildImageFilter_Ubuntu2204_UsesVersionPrefix(t *testing.T) {
-	p := &Ubuntu{release: "2204"}
-	got, err := p.buildImageFilter("v1.34.7-gke.123")
-	require.NoError(t, err)
-	require.Equal(t, `name=ubuntu-gke-2204-1-34*`, got)
-}
-
-func TestBuildImageFilter_UbuntuRejectsUnknownVersion(t *testing.T) {
-	p := &Ubuntu{release: "2204"}
-	_, err := p.buildImageFilter("not-a-version")
-	require.Error(t, err)
-}
-
-func TestSelectImage_Ubuntu2204_PicksAmd64NotArm64(t *testing.T) {
-	images := []*compute.Image{
-		// arm64 — different architecture, must not be selected for amd64
-		{Name: "ubuntu-gke-2204-1-34-arm64-v20260420", CreationTimestamp: "2026-04-20T00:00:00Z"},
-		// valid amd64 (no arch token in 2204)
-		{Name: "ubuntu-gke-2204-1-34-v20260401", CreationTimestamp: "2026-04-01T00:00:00Z"},
+// TestUbuntuImageScope protects which image project and name prefix a cluster minor selects:
+// GKE publishes Ubuntu images for 1.36+ in gke-ubuntu-node-images and for earlier minors in
+// ubuntu-os-gke-cloud.
+func TestUbuntuImageScope(t *testing.T) {
+	tests := []struct {
+		release, version, project, prefix string
+	}{
+		{"2404", "v1.31.14-gke.1", "ubuntu-os-gke-cloud", "ubuntu-gke-2404-1-31"},
+		{"2404", "v1.35.9-gke.1673000", "ubuntu-os-gke-cloud", "ubuntu-gke-2404-1-35"},
+		{"2404", "1.36.0", "gke-ubuntu-node-images", "ubuntu-gke-2404-1-36"},
+		{"2404", "v1.36.5-gke.2262000", "gke-ubuntu-node-images", "ubuntu-gke-2404-1-36"},
+		{"2404", "v1.37.2-gke.1042000", "gke-ubuntu-node-images", "ubuntu-gke-2404-1-37"},
+		{"2604", "v1.38.0-gke.4814000+preview", "gke-ubuntu-node-images", "ubuntu-gke-2604-1-38"},
+		{"2204", "v1.34.7-gke.123", "ubuntu-os-gke-cloud", "ubuntu-gke-2204-1-34"},
+	}
+	for _, tt := range tests {
+		project, prefix, err := (&Ubuntu{release: tt.release}).imageScope(tt.version)
+		require.NoError(t, err, tt.version)
+		require.Equal(t, tt.project, project, "%s %s", tt.release, tt.version)
+		require.Equal(t, tt.prefix, prefix, "%s %s", tt.release, tt.version)
 	}
 
-	p := &Ubuntu{release: "2204"}
-	got, ok := p.selectImage(readyTestImages(images), OSArchAMD64Requirement, "latest")
-	require.True(t, ok)
-	require.Equal(t, "ubuntu-gke-2204-1-34-v20260401", got)
+	_, _, err := (&Ubuntu{release: "2404"}).imageScope("not-a-version")
+	require.Error(t, err, "an unparseable cluster version must not guess a project")
+}
+
+// projectImageServer serves one catalog per image project and records the projects listed.
+func projectImageServer(t *testing.T, catalogs map[string][]*compute.Image) (*httptest.Server, *[]string) {
+	t.Helper()
+	var listed []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		project := ""
+		for i, part := range parts {
+			if part == "projects" && i+1 < len(parts) {
+				project = parts[i+1]
+			}
+		}
+		listed = append(listed, project)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&compute.ImageList{Items: readyTestImages(catalogs[project])})
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &listed
+}
+
+// TestResolveImages_Ubuntu_ListsProjectForClusterMinor protects that images are listed in, and
+// resolved from, only the project GKE uses for the cluster's minor, even when the other project
+// holds a newer image of the same release.
+func TestResolveImages_Ubuntu_ListsProjectForClusterMinor(t *testing.T) {
+	legacy := []*compute.Image{
+		{Name: "ubuntu-gke-2404-1-35-amd64-v20261113", CreationTimestamp: "2026-11-13T00:00:00Z"},
+		{Name: "ubuntu-gke-2404-1-35-arm64-v20261113", CreationTimestamp: "2026-11-13T00:05:00Z"},
+		{Name: "ubuntu-gke-2404-1-36-amd64-v20261120", CreationTimestamp: "2026-11-20T00:00:00Z"},
+		{Name: "ubuntu-gke-2404-1-36-arm64-v20261120", CreationTimestamp: "2026-11-20T00:05:00Z"},
+	}
+	// Served newest first, as images.list orders them; the older clean builds must lose.
+	current := []*compute.Image{
+		{Name: "gke-1365-gke2391000-ubuntu-2404-1-36-amd64-v20260528-c-pre", CreationTimestamp: "2026-11-19T00:00:00Z"},
+		{Name: "gke-1365-gke2391000-ubuntu-2404-1-36-arm64-v20260528-c-pre", CreationTimestamp: "2026-11-19T00:05:00Z"},
+		{Name: "ubuntu-gke-2404-1-36-arm64-v20261117", CreationTimestamp: "2026-11-17T00:05:00Z"},
+		{Name: "ubuntu-gke-2404-1-36-amd64-v20261117", CreationTimestamp: "2026-11-17T00:00:00Z"},
+		{Name: "ubuntu-gke-2404-1-36-amd64-v20261117-tpu", CreationTimestamp: "2026-11-17T00:03:00Z", Status: "READY"},
+		{Name: "ubuntu-gke-2404-1-36-arm64-v20261112", CreationTimestamp: "2026-11-12T00:05:00Z"},
+		{Name: "ubuntu-gke-2404-1-36-amd64-v20261112", CreationTimestamp: "2026-11-12T00:00:00Z"},
+	}
+	tests := []struct {
+		name, version string
+		want          []string
+	}{
+		{"before 1.36 uses the legacy project", "v1.35.9-gke.1673000", []string{
+			"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-amd64-v20261113",
+			"projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-35-arm64-v20261113",
+		}},
+		{"1.36 uses the current project", "v1.36.5-gke.2262000", []string{
+			"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-36-amd64-v20261117",
+			"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-36-arm64-v20261117",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, listed := projectImageServer(t, map[string][]*compute.Image{
+				"ubuntu-os-gke-cloud": legacy, "gke-ubuntu-node-images": current,
+			})
+			p := &Ubuntu{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: tt.version}, release: "2404"}
+			got, err := p.ResolveImages(context.Background(), "latest")
+			require.NoError(t, err)
+			require.Equal(t, tt.want, imageSources(got))
+			require.Equal(t, []string{strings.Split(strings.TrimPrefix(tt.want[0], "projects/"), "/")[0]}, *listed,
+				"only the selected project may be listed")
+		})
+	}
+}
+
+// TestResolveImages_Ubuntu2604 protects the 26.04 release: clean amd64 and arm64 images resolve
+// independently of the -hwe/-tpu/-64k/-acs variants GKE publishes beside them.
+func TestResolveImages_Ubuntu2604(t *testing.T) {
+	srv, _ := projectImageServer(t, map[string][]*compute.Image{"gke-ubuntu-node-images": {
+		{Name: "ubuntu-gke-2604-1-38-amd64-v20261119-tpu", CreationTimestamp: "2026-11-19T00:03:00Z"},
+		{Name: "ubuntu-gke-2604-1-38-amd64-v20261119-hwe", CreationTimestamp: "2026-11-19T00:02:00Z"},
+		{Name: "ubuntu-gke-2604-1-38-amd64-v20261119", CreationTimestamp: "2026-11-19T00:01:00Z"},
+		{Name: "ubuntu-gke-2604-1-38-arm64-v20261119-64k", CreationTimestamp: "2026-11-19T00:06:00Z"},
+		{Name: "ubuntu-gke-2604-1-38-arm64-v20261119-hwe", CreationTimestamp: "2026-11-19T00:05:00Z"},
+		{Name: "ubuntu-gke-2604-1-38-arm64-v20261113-acs", CreationTimestamp: "2026-11-13T00:05:00Z"},
+		{Name: "ubuntu-gke-2604-1-38-arm64-v20261119", CreationTimestamp: "2026-11-19T00:04:00Z"},
+	}})
+	p := &Ubuntu{computeService: buildComputeService(t, srv), versionProvider: &fakeVersionProvider{version: "v1.38.0-gke.4814000"}, release: "2604"}
+	got, err := p.ResolveImages(context.Background(), "latest")
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2604-1-38-amd64-v20261119",
+		"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2604-1-38-arm64-v20261119",
+	}, imageSources(got))
+	for _, image := range got {
+		require.Equal(t, "1.38.0-gke.4814000", image.KubernetesVersion)
+	}
+}
+
+// TestResolveImages_Ubuntu_NoImagesForReleaseOnClusterMinor protects the failure when GKE does not
+// publish a release for the cluster's minor (24.04 on 1.38, 22.04 on 1.35): resolution fails with
+// the project and release named instead of falling back to another release or project.
+func TestResolveImages_Ubuntu_NoImagesForReleaseOnClusterMinor(t *testing.T) {
+	srv, _ := projectImageServer(t, map[string][]*compute.Image{
+		"gke-ubuntu-node-images": {
+			{Name: "ubuntu-gke-2604-1-38-amd64-v20261119", CreationTimestamp: "2026-11-19T00:01:00Z"},
+			{Name: "ubuntu-gke-2604-1-38-arm64-v20261119", CreationTimestamp: "2026-11-19T00:04:00Z"},
+		},
+		"ubuntu-os-gke-cloud": {
+			{Name: "ubuntu-gke-2404-1-35-amd64-v20261113", CreationTimestamp: "2026-11-13T00:00:00Z"},
+			{Name: "ubuntu-gke-2404-1-35-arm64-v20261113", CreationTimestamp: "2026-11-13T00:05:00Z"},
+		},
+	})
+	svc := buildComputeService(t, srv)
+
+	_, err := (&Ubuntu{computeService: svc, versionProvider: &fakeVersionProvider{version: "v1.38.0-gke.1"}, release: "2404"}).ResolveImages(context.Background(), "latest")
+	require.True(t, IsImageResolutionError(err))
+	require.ErrorContains(t, err, "ubuntu-gke-2404")
+	require.ErrorContains(t, err, "gke-ubuntu-node-images")
+
+	_, err = (&Ubuntu{computeService: svc, versionProvider: &fakeVersionProvider{version: "v1.35.9-gke.1"}, release: "2204"}).ResolveImages(context.Background(), "latest")
+	require.True(t, IsImageResolutionError(err))
+	require.ErrorContains(t, err, "only through Kubernetes 1.31", "the catalog limit must be explained")
+}
+
+// TestSameImage protects drift across the Ubuntu image projects: GKE serves identical image names
+// from both, so a node launched from one is not drifted by the other, but a different image,
+// a non-Ubuntu project, or a COS image still is.
+func TestSameImage(t *testing.T) {
+	const (
+		legacy  = "projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-36-amd64-v20261117"
+		current = "projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-36-amd64-v20261117"
+	)
+	require.True(t, SameImage(legacy, legacy))
+	require.True(t, SameImage("https://www.googleapis.com/compute/v1/"+legacy, current), "legacy node, current status")
+	require.True(t, SameImage("https://www.googleapis.com/compute/v1/"+current, legacy), "current node, legacy status")
+
+	require.False(t, SameImage("https://www.googleapis.com/compute/v1/"+legacy,
+		"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-36-amd64-v20261118"), "different build")
+	require.False(t, SameImage("https://www.googleapis.com/compute/v1/"+legacy,
+		"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-36-arm64-v20261117"), "different arch")
+	require.False(t, SameImage("https://www.googleapis.com/compute/v1/projects/other/global/images/ubuntu-gke-2404-1-36-amd64-v20261117", current),
+		"same name in an unrelated project")
+	cos := "projects/gke-node-images/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre"
+	require.True(t, SameImage("https://www.googleapis.com/compute/v1/"+cos, cos))
+	require.False(t, SameImage("https://www.googleapis.com/compute/v1/projects/other/global/images/gke-1351-gke1396004-cos-125-19216-104-126-c-pre", cos))
 }
 
 func TestResolveImages_Ubuntu_PinnedVersion_LetterSuffix(t *testing.T) {
@@ -566,4 +678,52 @@ func TestResolveImages_Ubuntu_PinnedVersion_LetterSuffix(t *testing.T) {
 			require.Equal(t, tt.want, imageSources(got))
 		})
 	}
+}
+
+// TestListUbuntuOSVersionSelectsRelease protects how an Ubuntu term chooses its release: the
+// osVersion of family Ubuntu picks it, the deprecated per-release families and the legacy alias
+// resolve exactly as before, and an unknown release is a configuration error naming the supported
+// ones rather than a fallback to another release.
+func TestListUbuntuOSVersionSelectsRelease(t *testing.T) {
+	catalog := &imageCatalog{pages: [][]*compute.Image{{
+		{Name: "ubuntu-gke-2604-1-37-arm64-v20260925", Status: "READY"},
+		{Name: "ubuntu-gke-2604-1-37-amd64-v20260925", Status: "READY"},
+		{Name: "ubuntu-gke-2404-1-37-arm64-v20261112", Status: "READY"},
+		{Name: "ubuntu-gke-2404-1-37-amd64-v20261112", Status: "READY"},
+	}}}
+	srv := imageCatalogServer(t, catalog)
+	defer srv.Close()
+	p := NewDefaultProvider(buildComputeService(t, srv), &fakeVersionProvider{version: "v1.37.2-gke.1042000"}, &stubGKEProvider{})
+
+	list := func(term v1alpha1.ImageSelectorTerm) (Images, error) {
+		return p.List(context.Background(), &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+			ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{term},
+		}})
+	}
+	const (
+		amd2404 = "projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-37-amd64-v20261112"
+		arm2404 = "projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-37-arm64-v20261112"
+	)
+
+	got, err := list(v1alpha1.ImageSelectorTerm{Family: "Ubuntu", OSVersion: "26.04", Version: "latest"})
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2604-1-37-amd64-v20260925",
+		"projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2604-1-37-arm64-v20260925",
+	}, imageSources(got))
+
+	for name, term := range map[string]v1alpha1.ImageSelectorTerm{
+		"osVersion 24.04":      {Family: "Ubuntu", OSVersion: "24.04", Version: "latest"},
+		"deprecated family":    {Family: "Ubuntu2404", Version: "latest"},
+		"legacy Ubuntu alias":  {Alias: "Ubuntu@latest"},     //nolint:staticcheck
+		"legacy release alias": {Alias: "Ubuntu2404@latest"}, //nolint:staticcheck
+	} {
+		got, err := list(term)
+		require.NoError(t, err, name)
+		require.Equal(t, []string{amd2404, arm2404}, imageSources(got), name)
+	}
+
+	_, err = list(v1alpha1.ImageSelectorTerm{Family: "Ubuntu", OSVersion: "20.04", Version: "latest"})
+	require.True(t, IsImageResolutionError(err))
+	require.ErrorContains(t, err, "22.04, 24.04, 26.04")
 }

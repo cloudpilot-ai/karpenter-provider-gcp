@@ -67,6 +67,13 @@ func TestImageFamily_FromFamilyFieldUbuntu2204(t *testing.T) {
 	require.Equal(t, ImageFamilyUbuntu, nc.ImageFamily())
 }
 
+func TestImageFamily_FromFamilyFieldUbuntuWithOSVersion(t *testing.T) {
+	nc := &GCENodeClass{Spec: GCENodeClassSpec{
+		ImageSelectorTerms: []ImageSelectorTerm{{Family: ImageFamilyUbuntu, OSVersion: "26.04", Version: "latest"}},
+	}}
+	require.Equal(t, ImageFamilyUbuntu, nc.ImageFamily())
+}
+
 func TestImageFamily_NoTerms_ReturnsCustom(t *testing.T) {
 	nc := &GCENodeClass{Spec: GCENodeClassSpec{
 		ImageSelectorTerms: []ImageSelectorTerm{{ID: "projects/p/global/images/some-image"}},

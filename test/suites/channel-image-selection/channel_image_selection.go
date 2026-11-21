@@ -34,9 +34,10 @@ import (
 
 // familyChannelTestCase describes a channel/version-based image selection scenario.
 type familyChannelTestCase struct {
-	family  string
-	channel string // set for channel tests
-	version string // set for version tests
+	family    string
+	osVersion string // set for family Ubuntu
+	channel   string // set for channel tests
+	version   string // set for version tests
 }
 
 var env *environment.Environment
@@ -51,9 +52,14 @@ var _ = DescribeTable("ChannelImageSelection", Label("suite:channel-image-select
 	Entry("COS / channel: stable / amd64 / on-demand",
 		familyChannelTestCase{family: gcpv1alpha1.ImageFamilyContainerOptimizedOS, channel: gcpv1alpha1.ImageChannelStable},
 		SpecTimeout(15*time.Minute)),
-	// family: Ubuntu2404, version: latest — exercises the Ubuntu image resolution path,
-	// which uses different naming conventions and a different GCP project from COS.
-	Entry("Ubuntu2404 / version: latest / amd64 / on-demand",
+	// family: Ubuntu, osVersion: 24.04, version: latest — exercises the Ubuntu image resolution
+	// path, which uses different naming conventions and different GCP projects from COS
+	// (ubuntu-os-gke-cloud before GKE 1.36, gke-ubuntu-node-images from 1.36).
+	Entry("Ubuntu osVersion 24.04 / version: latest / amd64 / on-demand",
+		familyChannelTestCase{family: gcpv1alpha1.ImageFamilyUbuntu, osVersion: "24.04", version: "latest"},
+		SpecTimeout(15*time.Minute)),
+	// The deprecated per-release family must keep resolving to the same image.
+	Entry("Ubuntu2404 (deprecated) / version: latest / amd64 / on-demand",
 		familyChannelTestCase{family: gcpv1alpha1.ImageFamilyUbuntu2404, version: "latest"},
 		SpecTimeout(15*time.Minute)),
 )
@@ -63,8 +69,8 @@ func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase)
 	suffix := environment.UniqueSuffix()
 	name := prefix + "-" + suffix
 
-	GinkgoWriter.Printf("[setup] family=%s channel=%s version=%s nodePool=%s\n",
-		tc.family, tc.channel, tc.version, name)
+	GinkgoWriter.Printf("[setup] family=%s osVersion=%s channel=%s version=%s nodePool=%s\n",
+		tc.family, tc.osVersion, tc.channel, tc.version, name)
 
 	var provisionedNodeName string
 	DeferCleanup(func(ctx context.Context) {
@@ -76,9 +82,12 @@ func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase)
 		}
 	})
 
-	if tc.channel != "" {
+	switch {
+	case tc.channel != "":
 		env.CreateNodeClassWithFamilyChannel(ctx, name, tc.family, tc.channel)
-	} else {
+	case tc.osVersion != "":
+		env.CreateNodeClassWithUbuntuOSVersion(ctx, name, tc.osVersion, tc.version)
+	default:
 		env.CreateNodeClassWithFamilyVersion(ctx, name, tc.family, tc.version)
 	}
 	env.WaitForNodeClassReady(ctx, name)
@@ -108,11 +117,13 @@ func runChannelImageSelectionTest(ctx context.Context, tc familyChannelTestCase)
 		Expect(sourceImages[0]).To(ContainSubstring(expectedSubstr),
 			"resolved COS image does not match channel %s version %s (expected pattern %s in %s)",
 			tc.channel, expectedGKEVersion, expectedSubstr, sourceImages[0])
-	case tc.version == "latest" && tc.family == gcpv1alpha1.ImageFamilyUbuntu2404:
-		// For version: latest, the resolved image must embed the independently-queried Ubuntu version.
+	case tc.version == "latest" && (tc.family == gcpv1alpha1.ImageFamilyUbuntu2404 || tc.osVersion == "24.04"):
+		// For version: latest, the resolved image must embed the independently-queried Ubuntu 24.04 version.
 		expectedVer := env.ResolveCurrentUbuntuVersion(ctx)
+		Expect(sourceImages[0]).To(ContainSubstring("ubuntu-gke-2404-"),
+			"resolved image is not an Ubuntu 24.04 image: %s", sourceImages[0])
 		Expect(sourceImages[0]).To(ContainSubstring(expectedVer),
-			"resolved Ubuntu2404 image does not contain expected version %s", expectedVer)
+			"resolved Ubuntu 24.04 image does not contain expected version %s", expectedVer)
 	}
 
 	env.CreateNodePool(ctx, name, name, environment.TestCase{

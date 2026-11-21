@@ -79,26 +79,25 @@ type DefaultProvider struct {
 	gkeProvider     gke.Provider
 	versionProvider versionprovider.Provider
 
-	providers map[string]ImageFamily
+	cos    ImageFamily
+	ubuntu map[string]ImageFamily // by Ubuntu release token (see ubuntuReleases)
 }
 
 // NewDefaultProvider creates the image provider. gkeProvider is used for channel-based
 // resolution; pass a no-op implementation if channel: terms are not needed.
 func NewDefaultProvider(computeService *compute.Service, versionProvider versionprovider.Provider, gkeProvider gke.Provider) *DefaultProvider {
 	cos := &ContainerOptimizedOS{computeService: computeService, versionProvider: versionProvider}
-	ubuntu2404 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2404"}
-	ubuntu2204 := &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: "2204"}
+	ubuntu := make(map[string]ImageFamily, len(ubuntuReleases))
+	for release := range ubuntuReleases {
+		ubuntu[release] = &Ubuntu{computeService: computeService, versionProvider: versionProvider, release: release}
+	}
 	return &DefaultProvider{
 		cache:           cache.New(imageCacheTTL, imageCacheCleanupInterval),
 		computeService:  computeService,
 		gkeProvider:     gkeProvider,
 		versionProvider: versionProvider,
-		providers: map[string]ImageFamily{
-			v1alpha1.ImageFamilyContainerOptimizedOS: cos,
-			v1alpha1.ImageFamilyUbuntu2404:           ubuntu2404,
-			v1alpha1.ImageFamilyUbuntu:               ubuntu2404, // legacy alias path
-			v1alpha1.ImageFamilyUbuntu2204:           ubuntu2204,
-		},
+		cos:             cos,
+		ubuntu:          ubuntu,
 	}
 }
 
@@ -157,8 +156,9 @@ func (p *DefaultProvider) resolveAliasTerm(ctx context.Context, term v1alpha1.Im
 		return nil, fmt.Errorf("malformed alias %q: expected family@version", term.Alias)
 	}
 	family, version := components[0], components[1]
-	provider := p.getImageFamilyProvider(family)
-	if provider == nil {
+	// The Ubuntu alias has always meant Ubuntu 24.04.
+	provider, err := p.imageFamilyProvider(family, "")
+	if err != nil {
 		return nil, fmt.Errorf("unsupported alias family %q", family)
 	}
 	ims, err := provider.ResolveImages(ctx, version)
@@ -201,9 +201,9 @@ func (p *DefaultProvider) resolveFamilyTerm(ctx context.Context, term v1alpha1.I
 	if err != nil {
 		return nil, err
 	}
-	provider := p.getImageFamilyProvider(term.Family)
-	if provider == nil {
-		return nil, fmt.Errorf("unsupported family %q", term.Family)
+	provider, err := p.imageFamilyProvider(term.Family, term.OSVersion)
+	if err != nil {
+		return nil, err
 	}
 	ims, err := provider.ResolveImages(ctx, version)
 	if err != nil {
@@ -251,8 +251,33 @@ func (p *DefaultProvider) resolveVersion(ctx context.Context, term v1alpha1.Imag
 	return version, nil
 }
 
-func (p *DefaultProvider) getImageFamilyProvider(family string) ImageFamily {
-	return p.providers[family]
+// imageFamilyProvider returns the resolver for a family and, for Ubuntu, its release ("24.04").
+// An empty Ubuntu osVersion means the legacy alias, which is 24.04; the deprecated Ubuntu2204 and
+// Ubuntu2404 families carry their release in the name. An unavailable release is a configuration
+// error, never a fallback to another release.
+func (p *DefaultProvider) imageFamilyProvider(family, osVersion string) (ImageFamily, error) {
+	var release string
+	switch family {
+	case v1alpha1.ImageFamilyContainerOptimizedOS:
+		return p.cos, nil
+	case v1alpha1.ImageFamilyUbuntu2204:
+		release = "2204"
+	case v1alpha1.ImageFamilyUbuntu2404:
+		release = "2404"
+	case v1alpha1.ImageFamilyUbuntu:
+		release = "2404"
+		if osVersion != "" {
+			release = strings.Replace(osVersion, ".", "", 1)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported family %q", family)
+	}
+	provider, ok := p.ubuntu[release]
+	if !ok {
+		return nil, &imageResolutionError{msg: fmt.Sprintf("unsupported Ubuntu osVersion %q: supported releases are %s",
+			osVersion, strings.Join(ubuntuOSVersions(), ", "))}
+	}
+	return provider, nil
 }
 
 // COS latest is already validated; exact COS siblings may be unavailable independently.
