@@ -461,6 +461,34 @@ func (e *Environment) CreateNodeClassWithGvnicAndMinCpuPlatform(ctx context.Cont
 	e.trackNodeClass(name)
 }
 
+// CreateNodeClassWithVtpm creates a GCENodeClass for imageFamily that requires a
+// vTPM, so native TPM attestation proofs are available for its kubelet CSRs.
+func (e *Environment) CreateNodeClassWithVtpm(ctx context.Context, name, imageFamily string) {
+	diskGiB := int64(DefaultE2EDiskGiB)
+	if imageFamily == gcpv1alpha1.ImageFamilyUbuntu {
+		diskGiB = 50
+	}
+	deleteIfExists(ctx, e.DynamicClient, gceNodeClassGVR, name)
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.k8s.gcp/v1alpha1",
+		"kind":       "GCENodeClass",
+		"metadata":   map[string]any{"name": name, "labels": map[string]any{e2eOwnerLabel: "true"}},
+		"spec": map[string]any{
+			"imageSelectorTerms": []any{
+				map[string]any{"alias": imageFamily + "@latest"},
+			},
+			"disks": []any{
+				map[string]any{"sizeGiB": diskGiB, "boot": true},
+			},
+			"shieldedInstanceConfig": map[string]any{"enableVtpm": true},
+			"subnetRangeName":        e.PodsRangeName,
+		},
+	}}
+	_, err := e.DynamicClient.Resource(gceNodeClassGVR).Create(ctx, obj, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "creating GCENodeClass %s", name)
+	e.trackNodeClass(name)
+}
+
 // CreateNodeClassWithNamedDataDisks creates a GCENodeClass with a pd-balanced
 // boot disk plus one blank pd-balanced data disk per entry in deviceNames.
 func (e *Environment) CreateNodeClassWithNamedDataDisks(ctx context.Context, name string, dataDiskGiB int64, deviceNames []string) {

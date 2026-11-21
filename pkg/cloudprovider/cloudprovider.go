@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/awslabs/operatorpkg/status"
@@ -113,12 +114,38 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		}
 	}
 
+	if err := checkLaunchableIncarnation(nodeClaim, inst); err != nil {
+		return nil, err
+	}
+
 	nc := c.instanceToNodeClaim(inst, instanceType)
 	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
 		v1alpha1.AnnotationGCENodeClassHash:        nodeClass.Hash(),
 		v1alpha1.AnnotationGCENodeClassHashVersion: v1alpha1.GCENodeClassHashVersion,
 	})
 	return nc, nil
+}
+
+// checkLaunchableIncarnation refuses to return a NodeClaim for a VM that cannot be
+// bound to a trusted incarnation. Get, List and Adopt still surface VMs launched
+// before the ownership label existed so they can be cleaned up and keep renewing,
+// but a claim must not be marked launched while its incarnation is unknown and a
+// recorded incarnation must never be replaced. The core launch path merges returned
+// annotations over the existing NodeClaim, so both checks have to fail the create.
+func checkLaunchableIncarnation(nodeClaim *karpv1.NodeClaim, inst *instance.Instance) error {
+	if inst.NumericID == 0 {
+		return cloudprovider.NewCreateError(
+			fmt.Errorf("instance %s has no trusted numeric instance ID for NodeClaim %s", inst.Name, nodeClaim.Name),
+			"InstanceIncarnationUnknown",
+			"Existing instance has no recorded VM incarnation; delete or replace the NodeClaim to launch a new VM")
+	}
+	recorded := nodeClaim.Annotations[v1alpha1.AnnotationInstanceNumericID]
+	if recorded == "" || recorded == strconv.FormatUint(inst.NumericID, 10) {
+		return nil
+	}
+	return cloudprovider.NewCreateError(
+		fmt.Errorf("instance %s has numeric ID %d but NodeClaim %s recorded %s", inst.Name, inst.NumericID, nodeClaim.Name, recorded),
+		"InstanceIncarnationMismatch", "The instance for this NodeClaim is a different VM incarnation")
 }
 
 func (c *CloudProvider) applyAdoptedNodeOverlay(ctx context.Context, nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
@@ -522,6 +549,10 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 	// enter the cache or appear in List().
 	if v, ok := i.Labels[utils.LabelClusterLocationKey]; ok {
 		labels[utils.LabelClusterLocationKey] = v
+	}
+
+	if i.NumericID != 0 {
+		annotations[v1alpha1.AnnotationInstanceNumericID] = strconv.FormatUint(i.NumericID, 10)
 	}
 
 	nodeClaim.Labels = labels

@@ -215,3 +215,131 @@ func TestGetClusterConfig_CacheHit(t *testing.T) {
 	require.Equal(t, c1, c2)
 	require.Equal(t, int32(1), calls.Load(), "expected no additional API calls on cache hit")
 }
+
+func TestProjectNumber(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	numericID := uint64(123456789)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/projects/p" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&computev1.Project{Name: "p", Id: numericID})
+	}))
+	defer srv.Close()
+
+	svc, err := computev1.NewService(context.Background(),
+		googleapioption.WithoutAuthentication(),
+		googleapioption.WithEndpoint(srv.URL+"/"),
+	)
+	require.NoError(t, err)
+
+	p := &DefaultProvider{
+		computeService:  svc,
+		projectID:       "p",
+		projectNumCache: cache.New(0, 0),
+	}
+
+	number, err := p.ProjectNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, numericID, number)
+	number, err = p.ProjectNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, numericID, number)
+	require.Equal(t, int32(1), calls.Load(), "the immutable project number must be read once")
+
+	numericID = 0
+	p.projectNumCache = cache.New(0, 0)
+	_, err = p.ProjectNumber(context.Background())
+	require.Error(t, err, "a project without a numeric ID must not be treated as authoritative")
+}
+
+func TestShieldedNodesEnabled(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		// body is the raw cluster response. shieldedNodes: {} is how the API
+		// serializes a present policy whose Enabled value is false.
+		body        string
+		status      int
+		wantEnabled bool
+		wantErr     bool
+	}{
+		{name: "enabled", body: `{"name":"test-cluster","shieldedNodes":{"enabled":true}}`, wantEnabled: true},
+		{name: "disabled policy omitted by proto3 defaults", body: `{"name":"test-cluster","shieldedNodes":{}}`},
+		{name: "explicitly disabled", body: `{"name":"test-cluster","shieldedNodes":{"enabled":false}}`},
+		{name: "policy absent from the response is unknown", body: `{"name":"test-cluster"}`, wantErr: true},
+		{name: "null response is unknown", body: `null`, wantErr: true},
+		{name: "API failure", body: `{"error":{"code":503,"message":"unavailable"}}`, status: http.StatusServiceUnavailable, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/projects/p/locations/us-central1/clusters/test-cluster" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if tt.status != 0 {
+					w.WriteHeader(tt.status)
+				}
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			enabled, err := newTestProvider(t, srv.URL, "us-central1").ShieldedNodesEnabled(context.Background())
+			if tt.wantErr {
+				require.Error(t, err)
+				require.False(t, enabled, "an unknown policy must not look enabled or disabled")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantEnabled, enabled)
+		})
+	}
+}
+
+// TestShieldedNodesEnabledIgnoresTheClusterConfigCache guards the approval
+// decision against the 30-minute cluster cache: an old disabled answer must not
+// hide a later enabled policy or a failed read, and the read must not refill it.
+func TestShieldedNodesEnabledIgnoresTheClusterConfigCache(t *testing.T) {
+	var calls atomic.Int32
+	responses := []func(w http.ResponseWriter){
+		func(w http.ResponseWriter) {
+			_, _ = w.Write([]byte(`{"name":"test-cluster","shieldedNodes":{"enabled":true}}`))
+		},
+		func(w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) },
+		func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"name":"test-cluster","shieldedNodes":{}}`)) },
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		responses[calls.Add(1)-1](w)
+	}))
+	defer srv.Close()
+
+	p := newTestProvider(t, srv.URL, "us-central1")
+	// A previously cached cluster config that reports Shielded Nodes disabled.
+	p.clusterCache.SetDefault(clusterCacheKey, &containerv1.Cluster{Name: "test-cluster", ShieldedNodes: &containerv1.ShieldedNodes{}})
+
+	enabled, err := p.ShieldedNodesEnabled(context.Background())
+	require.NoError(t, err)
+	require.True(t, enabled, "the live policy wins over the cached disabled configuration")
+
+	_, err = p.ShieldedNodesEnabled(context.Background())
+	require.Error(t, err, "a failed read must not fall back to the cached configuration")
+
+	enabled, err = p.ShieldedNodesEnabled(context.Background())
+	require.NoError(t, err)
+	require.False(t, enabled)
+	require.Equal(t, int32(3), calls.Load(), "every call reads the cluster")
+
+	cached, err := p.GetClusterConfig(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, cached.ShieldedNodes, "shared configuration discovery keeps its own cache")
+	require.Equal(t, int32(3), calls.Load())
+}

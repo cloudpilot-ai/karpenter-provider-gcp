@@ -678,7 +678,7 @@ func TestDelete_IssuesDeleteWhenInstanceIsRunning(t *testing.T) {
 	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			deleteCalled = true
-			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE", TargetId: 1001})
 			return
 		}
 		writeJSON(w, &compute.Instance{Name: "karpenter-node1", Status: InstanceStatusRunning})
@@ -692,6 +692,8 @@ func TestDelete_IssuesDeleteWhenInstanceIsRunning(t *testing.T) {
 
 type fakeGKEProvider struct {
 	zones []string
+	// projectNumber is returned by ProjectNumber; zero defaults to 1.
+	projectNumber uint64
 }
 
 func (f *fakeGKEProvider) ResolveClusterZones(context.Context) ([]string, error) {
@@ -705,6 +707,13 @@ func (f *fakeGKEProvider) GetClusterConfig(context.Context) (*containerv1.Cluste
 			Subnetwork: "projects/test-project/regions/europe-west4/subnetworks/default",
 		},
 	}, nil
+}
+
+func (f *fakeGKEProvider) ProjectNumber(context.Context) (uint64, error) {
+	if f.projectNumber != 0 {
+		return f.projectNumber, nil
+	}
+	return 1, nil
 }
 
 func (f *fakeGKEProvider) GetServerConfig(context.Context) (*containerv1.ServerConfig, error) {
@@ -800,6 +809,7 @@ func TestAdoptExistingInstance_PopulatesFieldsFromGCEInstance(t *testing.T) {
 	p := &DefaultProvider{projectID: "my-project"}
 
 	gceInstance := &compute.Instance{
+		Id:                4567,
 		Name:              "karpenter-test-node",
 		Zone:              "https://www.googleapis.com/compute/v1/projects/my-project/zones/us-west4-a",
 		MachineType:       "https://www.googleapis.com/compute/v1/projects/my-project/zones/us-west4-a/machineTypes/n2-standard-8",
@@ -819,9 +829,13 @@ func TestAdoptExistingInstance_PopulatesFieldsFromGCEInstance(t *testing.T) {
 		},
 	}
 
-	result := p.adoptExistingInstance(ctx, gceInstance, karpv1.CapacityTypeSpot)
+	nodeClaim := &karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "test-node", UID: "claim-uid"}}
+	gceInstance.Labels[utils.SanitizeGCELabelValue(utils.LabelNodeClaimUIDKey)] = string(nodeClaim.UID)
+
+	result := p.adoptExistingInstance(ctx, gceInstance, nodeClaim, karpv1.CapacityTypeSpot)
 
 	require.Equal(t, "karpenter-test-node", result.InstanceID)
+	require.Equal(t, uint64(4567), result.NumericID, "the adopted VM incarnation must be recorded")
 	require.Equal(t, "karpenter-test-node", result.Name)
 	require.Equal(t, "us-west4-a", result.Location, "zone URL should be trimmed to zone name")
 	require.Equal(t, "n2-standard-8", result.Type, "machineType URL should be trimmed to type name")
@@ -855,7 +869,7 @@ func TestAdoptExistingInstance_UsesActualStatusNotProvisioning(t *testing.T) {
 				Status:            status,
 				CreationTimestamp: "2025-10-31T11:09:17Z",
 			}
-			result := p.adoptExistingInstance(ctx, gceInstance, karpv1.CapacityTypeOnDemand)
+			result := p.adoptExistingInstance(ctx, gceInstance, &karpv1.NodeClaim{}, karpv1.CapacityTypeOnDemand)
 			require.Equal(t, status, result.Status)
 		})
 	}
@@ -1799,6 +1813,8 @@ func (f *fakeClusterGKEProvider) GetClusterConfig(context.Context) (*containerv1
 	return makeCluster("projects/p/global/networks/my-vpc", "regions/us-central1/subnetworks/my-subnet", "pods", false), nil
 }
 
+func (f *fakeClusterGKEProvider) ProjectNumber(context.Context) (uint64, error) { return 1, nil }
+
 // newFakeCreateProvider returns a provider whose fake GCE API rejects an insert with the
 // reason insertError returns for its instance type and capacity type, and accepts it when
 // the reason is empty. It records each insert as "<instance type>/<capacity type>".
@@ -1823,9 +1839,9 @@ func newFakeCreateProvider(t *testing.T, insertError func(instanceType, capacity
 				writeJSON(w, map[string]any{"error": map[string]any{"errors": []map[string]string{{"reason": reason}}}})
 				return
 			}
-			writeJSON(w, map[string]any{"name": "op-1", "status": "DONE"})
+			writeJSON(w, map[string]any{"name": "op-1", "status": "DONE", "targetId": "1001"})
 		case strings.Contains(r.URL.Path, "/operations/"):
-			writeJSON(w, map[string]any{"name": "op-1", "status": "DONE"})
+			writeJSON(w, map[string]any{"name": "op-1", "status": "DONE", "targetId": "1001"})
 		case strings.HasSuffix(r.URL.Path, "/aggregated/instances"):
 			writeJSON(w, map[string]any{})
 		default:
@@ -2743,11 +2759,12 @@ func TestWaitOperationDone_RetriesOnTransient503(t *testing.T) {
 			writeJSON(w, &googleapi.Error{Code: http.StatusServiceUnavailable, Message: "Visibility check was unavailable"})
 			return
 		}
-		writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+		writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE", TargetId: 1001})
 	}))
 
-	err := p.waitOperationDone(context.Background(), "us-central1-a", "op-123")
+	op, err := p.waitOperationDone(context.Background(), "us-central1-a", "op-123")
 	require.NoError(t, err)
+	require.Equal(t, uint64(1001), op.TargetId, "the terminal operation carries the created resource's ID")
 
 	require.Equal(t, int32(3), callCount.Load())
 }
@@ -2763,7 +2780,7 @@ func TestWaitOperationDone_FailsOnPersistent503(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := p.waitOperationDone(ctx, "us-central1-a", "op-123")
+	_, err := p.waitOperationDone(ctx, "us-central1-a", "op-123")
 
 	require.Error(t, err)
 }
@@ -3467,7 +3484,7 @@ func TestGetOrCreateInstance_AdoptsInstanceFromEarlierAttemptZone(t *testing.T) 
 	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			insertCalled = true
-			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE", TargetId: 1001})
 			return
 		}
 		if strings.Contains(r.URL.Path, "/zones/us-central1-f/instances/") {
@@ -3504,7 +3521,7 @@ func TestGetOrCreateInstance_AdoptsInstanceInSelectedZone(t *testing.T) {
 	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			insertCalled = true
-			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE"})
+			writeJSON(w, &compute.Operation{Name: "op-123", Status: "DONE", TargetId: 1001})
 			return
 		}
 		writeJSON(w, &compute.Instance{
@@ -3629,6 +3646,10 @@ func TestPatchLocalSSDMetadata(t *testing.T) {
 }
 
 func (*fakeGKEProvider) InvalidateClusterConfig() {}
+
+func (*fakeGKEProvider) ShieldedNodesEnabled(context.Context) (bool, error) {
+	return false, errors.New("cluster shielded nodes policy is not faked")
+}
 
 func TestInsufficientCapacityBackoffTTLUsesOptions(t *testing.T) {
 	t.Parallel()

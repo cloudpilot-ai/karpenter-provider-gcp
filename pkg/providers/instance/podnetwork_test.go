@@ -90,7 +90,7 @@ func TestPodNetworkFallbackKeepsLabelsWithAlias(t *testing.T) {
 	var attempts []*compute.Instance
 	provider := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			writeJSON(w, &compute.Operation{Name: "created", Status: "DONE"})
+			writeJSON(w, &compute.Operation{Name: "created", Status: "DONE", TargetId: 1001})
 			return
 		}
 		var instance compute.Instance
@@ -105,7 +105,7 @@ func TestPodNetworkFallbackKeepsLabelsWithAlias(t *testing.T) {
 			writeJSON(w, map[string]any{"error": map[string]any{"errors": []map[string]string{{"reason": "IP_SPACE_EXHAUSTED"}}}})
 			return
 		}
-		writeJSON(w, &compute.Operation{Name: "created", Status: "DONE"})
+		writeJSON(w, &compute.Operation{Name: "created", Status: "DONE", TargetId: 1001})
 	}))
 	provider.computeDefaultSA = "node@test-project.iam.gserviceaccount.com"
 	cluster := makeCluster("projects/p/global/networks/default", "regions/us-central1/subnetworks/target-subnet", "cluster-pods", false)

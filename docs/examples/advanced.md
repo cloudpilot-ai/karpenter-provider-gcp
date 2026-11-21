@@ -296,11 +296,13 @@ shieldedInstanceConfig:
   enableIntegrityMonitoring: true
 ```
 
-The options are:
+These fields follow Terraform GCE's `shielded_instance_config` options, using camelCase. Unspecified fields (including an omitted `shieldedInstanceConfig`) are left to Compute Engine rather than defaulted by the CRD. For Shielded VM-capable instances, [GCE's defaults](https://cloud.google.com/compute/shielded-vm/docs/modifying-shielded-vm#overview) are:
 
-- **enableSecureBoot**: Verifies all boot components (firmware, bootloader, kernel) are signed by trusted publishers. Prevents boot-level rootkits.
-- **enableVtpm**: Enables a virtual Trusted Platform Module that validates guest VM integrity before and during boot.
-- **enableIntegrityMonitoring**: Monitors and reports changes to the boot sequence. View integrity reports in Cloud Monitoring.
+- **enableSecureBoot**: Defaults to **false**. Verifies all boot components (firmware, bootloader, kernel) are signed by trusted publishers. Prevents boot-level rootkits.
+- **enableVtpm**: Defaults to **true**. Enables a virtual Trusted Platform Module used for measured boot and kubelet CSR attestation.
+- **enableIntegrityMonitoring**: Defaults to **true**. Monitors and reports changes to the boot sequence. View integrity reports in Cloud Monitoring. Disabling vTPM also disables integrity monitoring in GCE.
+
+> **Enrollment precaution:** `enableVtpm: false` prevents TPM-attested kubelet enrollment and re-enrollment. It never enables an un-attested fallback for TPM bootstrap identities. The separate legacy enrollment path is controlled by the cluster's Shielded GKE Nodes setting, not this VM field. Leave vTPM enabled for attested nodes; see the [CSR approval contract](../security/csr-approval.md) and [migration guide](../../MIGRATION.md#kubelet-csr-approval-now-requires-tpm-attestation-bound-to-the-launched-vm).
 
 See [GCP Shielded VM documentation](https://cloud.google.com/compute/shielded-vm/docs/shielded-vm) for details on each feature.
 

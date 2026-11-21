@@ -124,7 +124,8 @@ func variantInstanceType(name string, count string) *karpcloudprovider.InstanceT
 
 func instanceWithSSDLabel(instanceType, count string) *instance.Instance {
 	return &instance.Instance{
-		Type: instanceType,
+		Type:      instanceType,
+		NumericID: 4321,
 		Labels: map[string]string{
 			utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount): count,
 		},
@@ -316,4 +317,82 @@ func TestRepairPolicies(t *testing.T) {
 			require.Zero(t, *policy.TerminationGracePeriod)
 		})
 	}
+}
+
+func TestInstanceToNodeClaim_RecordsNumericInstanceID(t *testing.T) {
+	t.Parallel()
+
+	nc := (&CloudProvider{}).instanceToNodeClaim(&instance.Instance{Name: "test-node", NumericID: 123456789}, nil)
+	require.Equal(t, "123456789", nc.Annotations[v1alpha1.AnnotationInstanceNumericID],
+		"the launched VM incarnation must be recorded on the NodeClaim for attested CSR approval")
+
+	legacy := (&CloudProvider{}).instanceToNodeClaim(&instance.Instance{Name: "legacy-node"}, nil)
+	_, recorded := legacy.Annotations[v1alpha1.AnnotationInstanceNumericID]
+	require.False(t, recorded, "an unknown incarnation must not be recorded as zero")
+}
+
+func TestCheckLaunchableIncarnation(t *testing.T) {
+	t.Parallel()
+
+	claim := &karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name:        "test-node",
+		Annotations: map[string]string{v1alpha1.AnnotationInstanceNumericID: "1234"},
+	}}
+
+	require.NoError(t, checkLaunchableIncarnation(claim, &instance.Instance{Name: "karpenter-test-node", NumericID: 1234}))
+
+	// A legacy VM adopted by name has no incarnation, so the claim must not launch.
+	err := checkLaunchableIncarnation(claim, &instance.Instance{Name: "karpenter-test-node"})
+	var unknownErr *karpcloudprovider.CreateError
+	require.ErrorAs(t, err, &unknownErr)
+	require.Equal(t, "InstanceIncarnationUnknown", unknownErr.ConditionReason)
+
+	err = checkLaunchableIncarnation(claim, &instance.Instance{Name: "karpenter-test-node", NumericID: 5678})
+	require.Error(t, err, "a same-named replacement VM must not take over the claim's recorded identity")
+	var createErr *karpcloudprovider.CreateError
+	require.ErrorAs(t, err, &createErr)
+	require.Equal(t, "InstanceIncarnationMismatch", createErr.ConditionReason)
+}
+
+// TestLegacyInstanceStillServedForCleanup distinguishes the launch refusal above
+// from Get/List continuity: a VM launched before incarnation tracking is still
+// reported (without an incarnation) so it can be cleaned up and keep renewing.
+func TestLegacyInstanceStillServedForCleanup(t *testing.T) {
+	t.Parallel()
+
+	legacy := &instance.Instance{Name: "legacy-node", ProjectID: "test-project", Location: "us-central1-a"}
+	nodeClaim := (&CloudProvider{}).instanceToNodeClaim(legacy, nil)
+	require.Equal(t, "gce://test-project/us-central1-a/legacy-node", nodeClaim.Status.ProviderID)
+	_, recorded := nodeClaim.Annotations[v1alpha1.AnnotationInstanceNumericID]
+	require.False(t, recorded, "a legacy VM must not gain an invented incarnation")
+
+	err := checkLaunchableIncarnation(&karpv1.NodeClaim{}, legacy)
+	require.Error(t, err, "the launch path must refuse the same legacy VM")
+}
+
+// TestCreateRefusesLegacyAdoptedInstanceWithoutIncarnation guards the launch
+// boundary: adopting a VM that predates incarnation tracking must fail with an
+// actionable error instead of returning a NodeClaim that core marks Launched and
+// that can never complete attested enrollment.
+func TestCreateRefusesLegacyAdoptedInstanceWithoutIncarnation(t *testing.T) {
+	t.Parallel()
+
+	class := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
+	class.StatusConditions().SetFalse(v1alpha1.ConditionTypeImagesReady, "ImageLookupFailed", "lookup failed")
+	it := launchableInstanceType("n2-standard-2", "amd64", "")
+	provider := New(reproClient{nodeClass: class}, reproEvents{}, reproTypes{variants: []*karpcloudprovider.InstanceType{it}},
+		adoptOnlyInstanceProvider{vm: &instance.Instance{Name: "karpenter-claim", Type: it.Name, ProjectID: "test", Location: "us-central1-a"}}, nil)
+
+	claim := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim"},
+		Spec: karpv1.NodeClaimSpec{NodeClassRef: &karpv1.NodeClassReference{
+			Group: "karpenter.k8s.gcp", Kind: "GCENodeClass", Name: "default",
+		}},
+	}
+	got, err := provider.Create(karpopts.ToContext(context.Background(), &karpopts.Options{}), claim)
+	require.Nil(t, got, "a legacy VM without a trusted incarnation must not be returned as a launched NodeClaim")
+	var createErr *karpcloudprovider.CreateError
+	require.ErrorAs(t, err, &createErr)
+	require.Equal(t, "InstanceIncarnationUnknown", createErr.ConditionReason)
+	require.Contains(t, createErr.ConditionMessage, "replace the NodeClaim", "the error must tell the operator how to proceed")
 }

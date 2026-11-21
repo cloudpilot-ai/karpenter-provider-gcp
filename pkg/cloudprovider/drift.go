@@ -16,6 +16,7 @@ package cloudprovider
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/samber/lo"
@@ -30,11 +31,22 @@ import (
 )
 
 const (
-	NodeClassDrift cloudprovider.DriftReason = "NodeClassDrift"
-	ImageDrift     cloudprovider.DriftReason = "ImageDrift"
+	NodeClassDrift           cloudprovider.DriftReason = "NodeClassDrift"
+	ImageDrift               cloudprovider.DriftReason = "ImageDrift"
+	InstanceIncarnationDrift cloudprovider.DriftReason = "InstanceIncarnationDrift"
 )
 
 func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, _ *karpv1.NodePool, nodeClass *v1alpha1.GCENodeClass) cloudprovider.DriftReason {
+	if nodeClaim.DeletionTimestamp.IsZero() && nodeClaim.StatusConditions().IsTrue(karpv1.ConditionTypeLaunched) && nodeClaim.StatusConditions().IsTrue(karpv1.ConditionTypeRegistered) {
+		// Old registered claims cannot use attested re-enrollment without a trusted incarnation.
+		// Replace them through normal drift rather than backfilling identity from a VM name.
+		// TODO: Remove after v0.10 once upgrades from pre-incarnation versions must first
+		// roll their nodes through v0.10; direct upgrades would otherwise miss this drift.
+		id, err := strconv.ParseUint(nodeClaim.Annotations[v1alpha1.AnnotationInstanceNumericID], 10, 64)
+		if err != nil || id == 0 {
+			return InstanceIncarnationDrift
+		}
+	}
 	if drifted := c.areStaticFieldsDrifted(nodeClaim, nodeClass); drifted != "" {
 		log.FromContext(ctx).Info("nodeclass drifted", "drifted", drifted)
 		return drifted

@@ -17,24 +17,32 @@ limitations under the License.
 package csr
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	certv1 "k8s.io/api/certificates/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
 )
 
 const (
 	bootstrapUser = "kubelet-nodepool-bootstrap"
+	tpmBootstrap  = "kubelet-bootstrap"
 	nodePoolOrg   = "gke:nodepool:name:karpenter-default"
 	instanceOrg   = "gke:instance:123456789:us-central1-a:987654321"
 )
@@ -78,278 +86,762 @@ func nodeCSR(request []byte, nodeName string) *certv1.CertificateSigningRequest 
 	return kubeletCSR(request, "system:node:"+nodeName, "system:nodes", nodePoolOrg, instanceOrg, "system:authenticated")
 }
 
-func launchedNodeClaim(name, instance string) karpv1.NodeClaim {
+// launchedNodeClaim returns a launched claim for a VM with this name and numeric
+// incarnation ID.
+func launchedNodeClaim(name, instanceName string, numericID uint64) karpv1.NodeClaim {
 	nc := karpv1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Annotations: map[string]string{v1alpha1.AnnotationInstanceNumericID: strconv.FormatUint(numericID, 10)},
+		},
 		Spec: karpv1.NodeClaimSpec{NodeClassRef: &karpv1.NodeClassReference{
 			Group: apis.Group,
 			Kind:  "GCENodeClass",
 			Name:  "default",
 		}},
 	}
-	nc.Status.ProviderID = "gce://my-project/us-central1-a/" + instance
+	nc.Status.ProviderID = "gce://my-project/us-central1-a/" + instanceName
 	nc.StatusConditions().SetTrue(karpv1.ConditionTypeLaunched)
 	return nc
 }
 
-func registeredNodeClaim(name, instance string) karpv1.NodeClaim {
-	nc := launchedNodeClaim(name, instance)
-	nc.Status.NodeName = instance
+func registeredNodeClaim(name, instanceName string, numericID uint64) karpv1.NodeClaim {
+	nc := launchedNodeClaim(name, instanceName, numericID)
+	nc.Status.NodeName = instanceName
 	nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
 	return nc
 }
 
-func TestValidateKubeletClientCSR(t *testing.T) {
-	launched := launchedNodeClaim("default-abc", "karpenter-default-abc")
-	registered := registeredNodeClaim("default-xyz", "karpenter-default-xyz")
-	nodeClaims := []karpv1.NodeClaim{launched, registered}
+// identityProviderFunc adapts a function to the IdentityProvider seam.
+type identityProviderFunc func(ctx context.Context, zone, name string) (*instance.InstanceIdentity, error)
 
-	tests := []struct {
-		name    string
-		csr     func(t *testing.T) *certv1.CertificateSigningRequest
-		approve bool
+func (f identityProviderFunc) GetIdentity(ctx context.Context, zone, name string) (*instance.InstanceIdentity, error) {
+	return f(ctx, zone, name)
+}
+
+// GetIncarnation is not faked: the TPM and self-renewal scenarios must not use it.
+func (f identityProviderFunc) GetIncarnation(context.Context, string, string) (*instance.InstanceIncarnation, error) {
+	return nil, errors.New("incarnation lookup is not faked")
+}
+
+// shieldedPolicyFunc adapts a function to the ShieldedPolicyProvider seam.
+type shieldedPolicyFunc func(ctx context.Context) (bool, error)
+
+func (f shieldedPolicyFunc) ShieldedNodesEnabled(ctx context.Context) (bool, error) {
+	return f(ctx)
+}
+
+// newTestController wires a controller for scenarios that must not depend on the
+// cluster Shielded Nodes policy: reading it fails the test and the read.
+func newTestController(t *testing.T, api kubernetes.Interface, identity IdentityProvider) *Controller {
+	t.Helper()
+	return NewController(api, identity, shieldedPolicyFunc(func(context.Context) (bool, error) {
+		t.Error("the TPM and self-renewal paths must not read the cluster Shielded Nodes policy")
+		return false, errors.New("unexpected Shielded Nodes policy read")
+	}))
+}
+
+func fixtureIdentity(t *testing.T, fixture *attestationFixture) *instance.InstanceIdentity {
+	t.Helper()
+	return &instance.InstanceIdentity{
+		ProjectID:         fixture.vm.ProjectName,
+		ProjectNumber:     fixture.vm.ProjectID,
+		Zone:              fixture.vm.Zone,
+		Name:              fixture.vm.Name,
+		NumericID:         fixture.vm.ID,
+		AttestationKeyPEM: fixture.attestationKeyPEM(t),
+	}
+}
+
+func TestAuthorizeKubeletClientCSR(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// csr returns the request under test.
+		csr func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest
+		// claims returns the NodeClaims the controller lists.
+		claims func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim
+		// identity returns the authoritative instance evidence; nil means the
+		// evidence for the fixture VM and its attestation key.
+		identity     func(t *testing.T, fixture *attestationFixture) (*instance.InstanceIdentity, error)
+		sarDenied    bool
+		sarError     bool
+		wantApproved bool
+		wantRetry    bool
+		wantRequest  string
 	}{
 		{
-			name: "bootstrap for a launched, unregistered NodeClaim",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(nodeRequest(t, "karpenter-default-abc"))
+			name: "attested initial enrollment",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
 			},
-			approve: true,
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			wantApproved: true,
+			wantRequest:  nodeClientSubresource,
 		},
 		{
-			name: "bootstrap with usages in a different order",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				csr := bootstrapCSR(nodeRequest(t, "karpenter-default-abc"))
-				csr.Spec.Usages = []certv1.KeyUsage{certv1.UsageClientAuth, certv1.UsageDigitalSignature, certv1.UsageKeyEncipherment}
-				return csr
+			name: "attested initial enrollment with the GKE TPM bootstrap requester",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return kubeletCSR(encodePEMBlocks(fixture.blocks(t)), tpmBootstrap, nodePoolOrg, "system:authenticated")
 			},
-			approve: true,
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			wantApproved: true,
+			wantRequest:  nodeClientSubresource,
 		},
 		{
-			name: "bootstrap without key encipherment",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				csr := bootstrapCSR(nodeRequest(t, "karpenter-default-abc"))
-				csr.Spec.Usages = []certv1.KeyUsage{certv1.UsageDigitalSignature, certv1.UsageClientAuth}
-				return csr
+			name: "attested re-enrollment for a registered claim",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
 			},
-			approve: true,
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
+			},
+			wantApproved: true,
+			wantRequest:  nodeClientSubresource,
 		},
 		{
-			name: "bootstrap with only the system:nodes organization",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return kubeletCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:nodes"}},
-				}), "kubelet-nodepool-bootstrap", "system:authenticated")
+			name: "attested re-enrollment while the registered claim drains",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
 			},
-			approve: true,
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				now := metav1.Now()
+				nc.DeletionTimestamp = &now
+				return []karpv1.NodeClaim{nc}
+			},
+			wantApproved: true,
+			wantRequest:  nodeClientSubresource,
 		},
 		{
-			name: "GKE TPM bootstrap requester with node pool organizations",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return kubeletCSR(nodeRequest(t, "karpenter-default-abc"), "kubelet-bootstrap", nodePoolOrg, "system:authenticated")
+			name: "bootstrap request without attestation proof",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(nodeRequest(t, attestationVM.Name))
 			},
-			approve: true,
-		},
-		{
-			name: "GKE TPM bootstrap requester missing the requested node pool group",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return kubeletCSR(nodeRequest(t, "karpenter-default-abc"), "kubelet-bootstrap", "system:authenticated")
-			},
-		},
-		{
-			name: "requester that is not the bootstrap identity",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return kubeletCSR(nodeRequest(t, "karpenter-default-abc"), "system:serviceaccount:default:attacker", "system:serviceaccounts", nodePoolOrg, "system:authenticated")
-			},
-		},
-		{
-			name: "bootstrap for a node with no NodeClaim",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(nodeRequest(t, "gke-cluster-default-pool-1234"))
-			},
-		},
-		{
-			name: "bootstrap for an already registered NodeClaim",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(nodeRequest(t, "karpenter-default-xyz"))
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
 			},
 		},
 		{
-			name: "renewal from the node itself",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return nodeCSR(nodeRequest(t, "karpenter-default-xyz"), "karpenter-default-xyz")
+			name: "GKE TPM bootstrap request without attestation proof",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return kubeletCSR(nodeRequest(t, attestationVM.Name), tpmBootstrap, nodePoolOrg, "system:authenticated")
 			},
-			approve: true,
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
 		},
 		{
-			name: "renewal for a node with no NodeClaim",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return nodeCSR(nodeRequest(t, "gke-cluster-default-pool-1234"), "gke-cluster-default-pool-1234")
+			name: "registered claim cannot be re-enrolled without attestation proof",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(nodeRequest(t, attestationVM.Name))
 			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "attestation proof for a different VM name",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				fixture.vm.Name = "another-node"
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attestation proof for a different zone",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				fixture.vm.Zone = "us-central1-b"
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attestation proof for another project",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				fixture.vm.ProjectID++
+				fixture.vm.ProjectName = "another-project"
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attestation proof for another VM incarnation",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				fixture.vm.ID++
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attested enrollment with a malformed leading PEM block",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				malformed := []byte("-----BEGIN CERTIFICATE REQUEST-----\n!!!!not-base64!!!!\n-----END CERTIFICATE REQUEST-----\n")
+				return bootstrapCSR(append(malformed, encodePEMBlocks(fixture.blocks(t))...))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attested initial enrollment requesting another project number in the instance organization",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(fixture.requestWithOrganizations(t, []string{"system:nodes", nodePoolOrg,
+					"gke:instance:999999999:us-central1-a:987654321"}))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attested initial enrollment requesting another instance ID in the instance organization",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(fixture.requestWithOrganizations(t, []string{"system:nodes", nodePoolOrg,
+					"gke:instance:123456789:us-central1-a:111111111"}))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attested initial enrollment requesting another zone in the instance organization",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(fixture.requestWithOrganizations(t, []string{"system:nodes", nodePoolOrg,
+					"gke:instance:123456789:us-east1-b:987654321"}))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attested re-enrollment requesting another instance ID in the instance organization",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(fixture.requestWithOrganizations(t, []string{"system:nodes", nodePoolOrg,
+					"gke:instance:123456789:us-central1-a:111111111"}))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "attested re-enrollment during drain requesting another project number in the instance organization",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(fixture.requestWithOrganizations(t, []string{"system:nodes", nodePoolOrg,
+					"gke:instance:999999999:us-central1-a:987654321"}))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				now := metav1.Now()
+				nc.DeletionTimestamp = &now
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "attested initial enrollment requesting an incomplete instance organization",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(fixture.requestWithOrganizations(t, []string{"system:nodes", nodePoolOrg,
+					"gke:instance:123456789:us-central1-a"}))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "claim without a recorded VM incarnation",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "pending")
+				delete(nc.Annotations, v1alpha1.AnnotationInstanceNumericID)
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "live VM incarnation differs from the recorded one",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			identity: func(t *testing.T, fixture *attestationFixture) (*instance.InstanceIdentity, error) {
+				identity := fixtureIdentity(t, fixture)
+				identity.NumericID++
+				return identity, nil
+			},
+		},
+		{
+			name: "attestation key belongs to another VM",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			identity: func(t *testing.T, _ *attestationFixture) (*instance.InstanceIdentity, error) {
+				other := newAttestationFixture(t)
+				return fixtureIdentity(t, other), nil
+			},
+		},
+		{
+			name: "attestation proof that does not certify the requested key",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+				require.NoError(t, err)
+				blocks := fixture.blocks(t)
+				blocks[0] = pemBlock{Type: csrRequestBlock, Bytes: certificateRequestDER(t, other, attestationVM.Name)}
+				return bootstrapCSR(encodePEMBlocks(blocks))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attestation proof with a tampered signature",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				blocks := fixture.blocks(t)
+				sig := append([]byte{}, fixture.sig...)
+				sig[0] ^= 0xff
+				blocks[3] = pemBlock{Type: attestationSignatureBlock, Bytes: sig}
+				return bootstrapCSR(encodePEMBlocks(blocks))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "attestation proof with duplicate blocks",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				blocks := append(fixture.blocks(t), pemBlock{Type: attestationDataBlock, Bytes: fixture.data})
+				return bootstrapCSR(encodePEMBlocks(blocks))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "initial enrollment of a deleting claim",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "pending")
+				now := metav1.Now()
+				nc.DeletionTimestamp = &now
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "initial enrollment of an unlaunched claim",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "pending")
+				nc.Status.Conditions = nil
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "re-enrollment of a claim registered as another node",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = "another-node"
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "attested request for a node with no NodeClaim",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				fixture.vm.Name = "gke-cluster-default-pool-1234"
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim { return nil },
+		},
+		{
+			name: "attested request for a NodeClaim of another provider",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "pending")
+				nc.Spec.NodeClassRef.Group = "another.provider.example"
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "attested request for a claim in another zone",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "pending")
+				nc.Status.ProviderID = "gce://my-project/us-central1-b/" + attestationVM.Name
+				return []karpv1.NodeClaim{nc}
+			},
+		},
+		{
+			name: "live VM no longer exists",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			identity: func(*testing.T, *attestationFixture) (*instance.InstanceIdentity, error) { return nil, nil },
+		},
+		{
+			name: "instance identity lookup fails temporarily",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			identity: func(*testing.T, *attestationFixture) (*instance.InstanceIdentity, error) {
+				return nil, errors.New("compute unavailable")
+			},
+			wantRetry: true,
+		},
+		{
+			name: "subject access review rejects the attested request",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			sarDenied: true,
+		},
+		{
+			name: "subject access review fails temporarily",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+			sarError:  true,
+			wantRetry: true,
+		},
+		{
+			name: "ordinary self renewal",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return nodeCSR(nodeRequest(t, attestationVM.Name), attestationVM.Name)
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
+			},
+			wantApproved: true,
+			wantRequest:  selfNodeClientSubresource,
+		},
+		{
+			name: "self renewal while the registered claim drains",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return nodeCSR(nodeRequest(t, attestationVM.Name), attestationVM.Name)
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				now := metav1.Now()
+				nc.DeletionTimestamp = &now
+				return []karpv1.NodeClaim{nc}
+			},
+			wantApproved: true,
+			wantRequest:  selfNodeClientSubresource,
+		},
+		{
+			name: "self renewal without the recorded VM incarnation",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return nodeCSR(nodeRequest(t, attestationVM.Name), attestationVM.Name)
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				delete(nc.Annotations, v1alpha1.AnnotationInstanceNumericID)
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
+			},
+			wantApproved: true,
+			wantRequest:  selfNodeClientSubresource,
+		},
+		{
+			name: "self renewal subject access review rejected",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return nodeCSR(nodeRequest(t, attestationVM.Name), attestationVM.Name)
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
+			},
+			sarDenied: true,
 		},
 		{
 			name: "node requesting a registered node's identity",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return nodeCSR(nodeRequest(t, "karpenter-default-xyz"), "karpenter-default-abc")
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return nodeCSR(nodeRequest(t, attestationVM.Name), "another-node")
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				nc := claimForFixture(t, "registered")
+				nc.Status.NodeName = attestationVM.Name
+				nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+				return []karpv1.NodeClaim{nc}
 			},
 		},
 		{
-			name: "node requesting an unregistered node's identity",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return nodeCSR(nodeRequest(t, "karpenter-default-abc"), "karpenter-default-xyz")
+			name: "self renewal for an unregistered claim",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return nodeCSR(nodeRequest(t, attestationVM.Name), attestationVM.Name)
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
 			},
 		},
 		{
-			name: "requester in the nodes group with another username",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return kubeletCSR(nodeRequest(t, "karpenter-default-abc"), "some-user", "system:nodes", nodePoolOrg)
+			name: "bootstrap request for a node pool group the requester is not in",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return kubeletCSR(encodePEMBlocks(fixture.blocks(t)), bootstrapUser, "system:authenticated")
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
+		},
+		{
+			name: "requester that is not a supported bootstrap or node identity",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				return kubeletCSR(encodePEMBlocks(fixture.blocks(t)), "system:serviceaccount:default:attacker", nodePoolOrg, "system:authenticated")
+			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
 			},
 		},
 		{
 			name: "kubelet serving signer",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				csr := bootstrapCSR(nodeRequest(t, "karpenter-default-abc"))
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				csr := bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
 				csr.Spec.SignerName = certv1.KubeletServingSignerName
 				return csr
 			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
 		},
 		{
-			name: "server auth usage",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				csr := bootstrapCSR(nodeRequest(t, "karpenter-default-abc"))
+			name: "unsupported usage",
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
+				csr := bootstrapCSR(encodePEMBlocks(fixture.blocks(t)))
 				csr.Spec.Usages = append(csr.Spec.Usages, certv1.UsageServerAuth)
 				return csr
 			},
-		},
-		{
-			name: "missing client auth usage",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				csr := bootstrapCSR(nodeRequest(t, "karpenter-default-abc"))
-				csr.Spec.Usages = []certv1.KeyUsage{certv1.UsageDigitalSignature, certv1.UsageKeyEncipherment}
-				return csr
-			},
-		},
-		{
-			name: "wrong organization",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:masters"}},
-				}))
-			},
-		},
-		{
-			name: "extra organization",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:nodes", "system:masters"}},
-				}))
-			},
-		},
-		{
-			name: "gke organizations without system:nodes",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"gke:nodepool:name:karpenter-default"}},
-				}))
-			},
-		},
-		{
-			name: "common name without node prefix",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "karpenter-default-abc", Organization: []string{"system:nodes"}},
-				}))
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
 			},
 		},
 		{
 			name: "subject alternative names",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
 				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject:  pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:nodes"}},
-					DNSNames: []string{"karpenter-default-abc"},
+					Subject:  pkix.Name{CommonName: "system:node:" + attestationVM.Name, Organization: []string{"system:nodes"}},
+					DNSNames: []string{attestationVM.Name},
 				}))
 			},
-		},
-		{
-			name: "bootstrap with a node pool organization the requester is not in",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:nodes", "gke:nodepool:name:privileged-pool", instanceOrg}},
-				}))
-			},
-		},
-		{
-			name: "bootstrap with an instance organization in another zone",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:nodes", nodePoolOrg, "gke:instance:123456789:us-east1-b:987654321"}},
-				}))
-			},
-		},
-		{
-			name: "bootstrap with two instance organizations",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return bootstrapCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-abc", Organization: []string{"system:nodes", nodePoolOrg, instanceOrg, "gke:instance:123456789:us-central1-a:111"}},
-				}))
-			},
-		},
-		{
-			name: "renewal with an instance organization the node is not in",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return nodeCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-xyz", Organization: []string{"system:nodes", nodePoolOrg, "gke:instance:123456789:us-central1-a:111"}},
-				}), "karpenter-default-xyz")
-			},
-		},
-		{
-			name: "renewal with a node pool organization the node is not in",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
-				return nodeCSR(requestPEM(t, &x509.CertificateRequest{
-					Subject: pkix.Name{CommonName: "system:node:karpenter-default-xyz", Organization: []string{"system:nodes", "gke:nodepool:name:privileged-pool", instanceOrg}},
-				}), "karpenter-default-xyz")
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
 			},
 		},
 		{
 			name: "request that is not PEM",
-			csr: func(t *testing.T) *certv1.CertificateSigningRequest {
+			csr: func(t *testing.T, fixture *attestationFixture) *certv1.CertificateSigningRequest {
 				return bootstrapCSR([]byte("not a csr"))
 			},
+			claims: func(t *testing.T, fixture *attestationFixture) []karpv1.NodeClaim {
+				return []karpv1.NodeClaim{claimForFixture(t, "pending")}
+			},
 		},
-	}
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newAttestationFixture(t)
+			identity := identityProviderFunc(func(context.Context, string, string) (*instance.InstanceIdentity, error) {
+				if tc.identity != nil {
+					return tc.identity(t, fixture)
+				}
+				return fixtureIdentity(t, fixture), nil
+			})
+			api, double := newKubeAPIDouble(t)
+			double.sarAllowed = !tc.sarDenied
+			double.sarFailure = tc.sarError
+			controller := newTestController(t, api, identity)
+			controller.client = &csrReadClient{request: tc.csr(t, fixture), claims: tc.claims(t, fixture)}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateKubeletClientCSR(tt.csr(t), nodeClaims)
-			if tt.approve {
-				require.NoError(t, err)
-			} else {
+			_, err := controller.Reconcile(context.Background())
+			if tc.wantRetry {
 				require.Error(t, err)
+				require.True(t, isRetryable(err), "temporary failures must stay retryable, got %v", err)
+			} else {
+				require.NoError(t, err)
 			}
+			approvals := double.recordedApprovals()
+			reviews := double.recordedReviews()
+			if !tc.wantApproved {
+				require.Empty(t, approvals)
+				if tc.sarDenied {
+					require.Len(t, reviews, 1, "a denied authorization query must not approve the request")
+				} else {
+					require.Empty(t, reviews)
+				}
+				return
+			}
+			require.Len(t, approvals, 1)
+			require.Len(t, reviews, 1)
+			require.Equal(t, tc.wantRequest, reviews[0].Spec.ResourceAttributes.Subresource)
+			require.Equal(t, "certificates.k8s.io", reviews[0].Spec.ResourceAttributes.Group)
+			require.Equal(t, "certificatesigningrequests", reviews[0].Spec.ResourceAttributes.Resource)
+			require.Equal(t, "create", reviews[0].Spec.ResourceAttributes.Verb)
+			require.Equal(t, certv1.CertificateApproved, approvals[0].Status.Conditions[0].Type)
+			require.Equal(t, "KarpenterAutoApprover", approvals[0].Status.Conditions[0].Reason)
 		})
 	}
 }
 
-func TestValidateKubeletClientCSRRegisteredCondition(t *testing.T) {
-	nc := launchedNodeClaim("default-abc", "karpenter-default-abc")
-	nc.StatusConditions().SetTrue(karpv1.ConditionTypeRegistered)
+func TestAuthorizeKubeletClientCSRPropagatesOriginalIdentity(t *testing.T) {
+	fixture := newAttestationFixture(t)
+	api, double := newKubeAPIDouble(t)
+	double.sarAllowed = true
+	request := kubeletCSR(encodePEMBlocks(fixture.blocks(t)), tpmBootstrap, nodePoolOrg, "system:authenticated")
+	request.Spec.UID = "8d3b1a4e-2222-4444-8888-000000000001"
+	request.Spec.Extra = map[string]certv1.ExtraValue{
+		"authentication.kubernetes.io/credential-id": {"gke-tpm-bootstrap"},
+	}
+	controller := newTestController(t, api, identityProviderFunc(func(context.Context, string, string) (*instance.InstanceIdentity, error) {
+		return fixtureIdentity(t, fixture), nil
+	}))
+	controller.client = &csrReadClient{request: request, claims: []karpv1.NodeClaim{claimForFixture(t, "pending")}}
 
-	err := validateKubeletClientCSR(bootstrapCSR(nodeRequest(t, "karpenter-default-abc")), []karpv1.NodeClaim{nc})
+	_, err := controller.Reconcile(context.Background())
+	require.NoError(t, err)
+
+	reviews := double.recordedReviews()
+	require.Len(t, reviews, 1)
+	require.Equal(t, tpmBootstrap, reviews[0].Spec.User)
+	require.Equal(t, "8d3b1a4e-2222-4444-8888-000000000001", reviews[0].Spec.UID)
+	require.Equal(t, []string{nodePoolOrg, "system:authenticated"}, reviews[0].Spec.Groups)
+	require.Equal(t, []string{"gke-tpm-bootstrap"}, []string(reviews[0].Spec.Extra["authentication.kubernetes.io/credential-id"]))
+}
+
+func claimForFixture(t *testing.T, name string) karpv1.NodeClaim {
+	t.Helper()
+	return launchedNodeClaim(name, attestationVM.Name, attestationVM.ID)
+}
+
+func TestValidateRenewal(t *testing.T) {
+	claim := registeredNodeClaim("target", attestationVM.Name, attestationVM.ID)
+	groups := sets.New[string]("system:nodes", nodePoolOrg, instanceOrg)
+	subject := kubeletClientSubject{nodeName: attestationVM.Name, nodePoolOrg: nodePoolOrg, instanceOrg: instanceOrg}
+	require.NoError(t, validateRenewal(subject, groups, []karpv1.NodeClaim{claim}))
+
+	// The instance organization belongs to the requester in the authenticated groups.
+	require.Error(t, validateRenewal(subject, sets.New[string]("system:nodes"), []karpv1.NodeClaim{claim}))
+	// The claim must be registered, not merely launched.
+	require.Error(t, validateRenewal(subject, groups, []karpv1.NodeClaim{claimForFixture(t, "pending")}))
+}
+
+func TestParseKubeletClientSubjectRejectsDuplicateOrganizations(t *testing.T) {
+	_, err := parseKubeletClientSubject("system:node:node-a", []string{"system:nodes", nodePoolOrg, nodePoolOrg})
+	require.Error(t, err)
+	_, err = parseKubeletClientSubject("system:node:node-a", []string{"system:nodes", "system:masters"})
+	require.Error(t, err)
+	_, err = parseKubeletClientSubject("node-a", []string{"system:nodes"})
 	require.Error(t, err)
 }
 
 func TestParseProviderID(t *testing.T) {
-	zone, instance := parseProviderID("gce://project/us-central1-a/vm-1")
+	project, zone, instanceName := parseProviderID("gce://project/us-central1-a/vm-1")
+	require.Equal(t, "project", project)
 	require.Equal(t, "us-central1-a", zone)
-	require.Equal(t, "vm-1", instance)
+	require.Equal(t, "vm-1", instanceName)
 	for _, id := range []string{"aws:///us-east-1a/i-123", "gce://project/vm-1", "gce:///us-central1-a/vm-1", "gce://project//vm-1", "gce://project/us-central1-a/", ""} {
-		zone, instance = parseProviderID(id)
+		project, zone, instanceName = parseProviderID(id)
+		require.Empty(t, project)
 		require.Empty(t, zone)
-		require.Empty(t, instance)
+		require.Empty(t, instanceName)
 	}
 }
 
-func TestInstanceOrgZone(t *testing.T) {
-	require.Equal(t, "us-central1-a", instanceOrgZone(instanceOrg))
-	require.Empty(t, instanceOrgZone("gke:instance:us-central1-a"))
+func TestParseInstanceOrg(t *testing.T) {
+	projectNumber, zone, numericID, err := parseInstanceOrg(instanceOrg)
+	require.NoError(t, err)
+	require.Equal(t, attestationVM.ProjectID, projectNumber)
+	require.Equal(t, attestationVM.Zone, zone)
+	require.Equal(t, attestationVM.ID, numericID)
+
+	for _, org := range []string{
+		"gke:instance:123456789:us-central1-a",
+		"gke:instance::us-central1-a:987654321",
+		"gke:instance:123456789::987654321",
+		"gke:instance:123456789:us-central1-a:0",
+		"gke:instance:not-a-number:us-central1-a:987654321",
+		"gke:instance:123456789:us-central1-a:987654321:extra",
+	} {
+		_, _, _, err := parseInstanceOrg(org)
+		require.Error(t, err, "incomplete or non-numeric instance organization %q must be rejected", org)
+	}
+}
+
+func TestRecordedIncarnation(t *testing.T) {
+	claim := claimForFixture(t, "pending")
+	id, err := recordedIncarnation(&claim)
+	require.NoError(t, err)
+	require.Equal(t, attestationVM.ID, id)
+
+	for _, tt := range []struct {
+		name       string
+		annotation func(*karpv1.NodeClaim)
+	}{
+		{name: "missing", annotation: func(nc *karpv1.NodeClaim) { delete(nc.Annotations, v1alpha1.AnnotationInstanceNumericID) }},
+		{name: "empty", annotation: func(nc *karpv1.NodeClaim) { nc.Annotations[v1alpha1.AnnotationInstanceNumericID] = "" }},
+		{name: "zero", annotation: func(nc *karpv1.NodeClaim) { nc.Annotations[v1alpha1.AnnotationInstanceNumericID] = "0" }},
+		{name: "not a number", annotation: func(nc *karpv1.NodeClaim) { nc.Annotations[v1alpha1.AnnotationInstanceNumericID] = "vm-1" }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			claim := claimForFixture(t, "pending")
+			tt.annotation(&claim)
+			_, err := recordedIncarnation(&claim)
+			require.Error(t, err)
+		})
+	}
 }

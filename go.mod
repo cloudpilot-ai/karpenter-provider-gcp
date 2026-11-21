@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	cloud.google.com/go/compute v1.75.0
 	github.com/awslabs/operatorpkg v0.0.0-20261002163259-5e8ed3699dea
+	github.com/google/go-tpm v0.9.8
 	github.com/googleapis/gax-go/v2 v2.27.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/onsi/ginkgo/v2 v2.34.0

@@ -42,6 +42,7 @@ import (
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/imagefamily"
+	providerinstance "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instance"
 	providerinstancetype "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/instancetype"
 	providernodepooltemplate "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/nodepooltemplate"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
@@ -64,6 +65,7 @@ func NewController(
 	authOptions *auth.Credential,
 	gkeProvider gke.Provider,
 	subnetProvider subnet.Provider,
+	instanceProvider providerinstance.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclassstatus.NewController(kubeClient, imageProvider, gkeProvider, subnetProvider),
@@ -71,7 +73,7 @@ func NewController(
 		nodeclasstermination.NewController(kubeClient),
 		nodeclasshash.NewController(kubeClient),
 		instancetype.NewController(instanceTypeProvider),
-		csr.NewController(kubernetesInterface),
+		csr.NewController(kubernetesInterface, instanceProvider, gkeProvider),
 		controllerspricing.NewController(pricingProvider),
 		nodeclaimgc.NewController(kubeClient, cloudProvider),
 		gcecustommachinetype.NewController(kubeClient, authOptions, gkeProvider),

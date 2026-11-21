@@ -19,6 +19,7 @@ package imagefamily
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -43,6 +44,8 @@ func (s *stubGKEProvider) ResolveClusterZones(_ context.Context) ([]string, erro
 func (s *stubGKEProvider) GetClusterConfig(_ context.Context) (*containerv1.Cluster, error) {
 	return s.clusterConfig, nil
 }
+func (s *stubGKEProvider) ProjectNumber(_ context.Context) (uint64, error) { return 1, nil }
+
 func (s *stubGKEProvider) GetServerConfig(_ context.Context) (*containerv1.ServerConfig, error) {
 	return s.serverConfig, nil
 }
@@ -386,3 +389,7 @@ func TestDispatch_ChannelCluster_UnspecifiedCluster_ReturnsError(t *testing.T) {
 }
 
 func (*stubGKEProvider) InvalidateClusterConfig() {}
+
+func (*stubGKEProvider) ShieldedNodesEnabled(context.Context) (bool, error) {
+	return false, errors.New("cluster shielded nodes policy is not faked")
+}

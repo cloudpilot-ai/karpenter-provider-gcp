@@ -113,6 +113,10 @@ type reproGKE struct{}
 
 func (reproGKE) InvalidateClusterConfig() {}
 
+func (reproGKE) ShieldedNodesEnabled(context.Context) (bool, error) {
+	return false, errors.New("cluster shielded nodes policy is not faked")
+}
+
 func (reproGKE) ResolveClusterZones(context.Context) ([]string, error) {
 	return []string{"us-central1-a"}, nil
 }
@@ -120,6 +124,8 @@ func (reproGKE) ResolveClusterZones(context.Context) ([]string, error) {
 func (reproGKE) GetClusterConfig(context.Context) (*container.Cluster, error) {
 	return &container.Cluster{Id: "deadbeef", NetworkConfig: &container.NetworkConfig{Network: "projects/test/global/networks/default", Subnetwork: "projects/test/regions/us-central1/subnetworks/default"}}, nil
 }
+
+func (reproGKE) ProjectNumber(context.Context) (uint64, error) { return 1, nil }
 
 func (reproGKE) GetServerConfig(context.Context) (*container.ServerConfig, error) {
 	return &container.ServerConfig{}, nil
@@ -360,6 +366,9 @@ type createConfig struct {
 	existingInstance bool
 }
 
+// adoptedClaimUID is the NodeClaim UID the response-lost adoption fixtures use.
+const adoptedClaimUID = "claim-uid"
+
 func runCreateScenario(t *testing.T, config createConfig) createResult { //nolint:gocyclo
 	t.Helper()
 	ctx := karpopts.ToContext(context.Background(), &karpopts.Options{})
@@ -460,22 +469,25 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 			result.insertAttempts++
 			inserted = &request
 			mu.Unlock()
-			reproWriteJSON(w, &compute.Operation{Name: "op", Status: "DONE"})
+			reproWriteJSON(w, &compute.Operation{Name: "op", Status: "DONE", TargetId: 1001})
 			return
 		}
 		if r.URL.Path == "/projects/test/aggregated/instances" {
 			items := map[string]compute.InstancesScopedList{}
 			if config.existingInstance {
 				items["zones/us-central1-a"] = compute.InstancesScopedList{Instances: []*compute.Instance{{
-					Name: "karpenter-claim", Zone: "zones/us-central1-a", MachineType: "zones/us-central1-a/machineTypes/n2d-standard-4",
-					Labels: map[string]string{utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount): "4"},
+					Name: "karpenter-claim", Id: 4321, Zone: "zones/us-central1-a", MachineType: "zones/us-central1-a/machineTypes/n2d-standard-4",
+					Labels: map[string]string{
+						utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount): "4",
+						utils.SanitizeGCELabelValue(utils.LabelNodeClaimUIDKey):          string(adoptedClaimUID),
+					},
 				}}}
 			}
 			reproWriteJSON(w, &compute.InstanceAggregatedList{Items: items})
 			return
 		}
 		if r.URL.Path == "/projects/test/zones/us-central1-a/operations/op" {
-			reproWriteJSON(w, &compute.Operation{Name: "op", Status: "DONE"})
+			reproWriteJSON(w, &compute.Operation{Name: "op", Status: "DONE", TargetId: 1001})
 			return
 		}
 		http.Error(w, r.Method+" "+r.URL.Path, http.StatusNotFound)
@@ -488,6 +500,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	if len(results.NewNodeClaims) > 0 {
 		generated := results.NewNodeClaims[0].ToNodeClaim()
 		generated.Name = "claim"
+		generated.UID = adoptedClaimUID
 		generated.Labels[karpv1.NodePoolLabelKey] = "pool"
 		for _, r := range generated.Spec.Requirements {
 			if r.Key == v1alpha1.LabelInstanceLocalSsdCount {
