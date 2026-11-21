@@ -189,6 +189,22 @@ func TestIsImageDrifted(t *testing.T) {
 		want      karpcloudprovider.DriftReason
 	}{
 		{
+			// GKE serves identical Ubuntu image names from two projects; moving the catalog to the
+			// new project must not roll nodes launched from the old one.
+			name: "no drift when an Ubuntu node runs the same image from the other Ubuntu project",
+			nodeClaim: claim("https://www.googleapis.com/compute/v1/projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-36-amd64-v20261117",
+				map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: class(imageWithRequirements("projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-36-amd64-v20261117", cpuImageRequirements("amd64")...)),
+			want:      "",
+		},
+		{
+			name: "drift when an Ubuntu node runs an older build than the published one",
+			nodeClaim: claim("https://www.googleapis.com/compute/v1/projects/ubuntu-os-gke-cloud/global/images/ubuntu-gke-2404-1-36-amd64-v20261112",
+				map[string]string{corev1.LabelArchStable: "amd64"}),
+			nodeClass: class(imageWithRequirements("projects/gke-ubuntu-node-images/global/images/ubuntu-gke-2404-1-36-amd64-v20261117", cpuImageRequirements("amd64")...)),
+			want:      ImageDrift,
+		},
+		{
 			name:      "no drift when the node still runs a published image",
 			nodeClaim: claim(amd64Image, map[string]string{corev1.LabelArchStable: "amd64"}),
 			nodeClass: class(amd64CPUImage, arm64CPUImage),

@@ -38,11 +38,12 @@ gcloud compute images list \
   | sort
 ```
 
-**Ubuntu** — replace `1-35` with your K8s minor version (e.g. 1.35.x → 1-35):
+**Ubuntu** — GKE publishes Ubuntu images in `ubuntu-os-gke-cloud` for Kubernetes before 1.36 and in `gke-ubuntu-node-images` for 1.36 and later. Set `PROJECT` accordingly and replace `1-35` with your K8s minor version (e.g. 1.35.x → 1-35):
 
 ```bash
+PROJECT=ubuntu-os-gke-cloud # use gke-ubuntu-node-images for Kubernetes 1.36 and later
 gcloud compute images list \
-  --project=ubuntu-os-gke-cloud \
+  --project="$PROJECT" \
   --filter="name~'^ubuntu-gke-2404-1-35-amd64-v[0-9]+[a-z]?$' AND NOT deprecated:* AND status=READY" \
   --format="value(name)" \
   | grep -oE 'v[0-9]+[a-z]?$' | sort -u
@@ -59,7 +60,7 @@ For arm64, change the arch token in the filter (`amd64` → `arm64`):
 
 ```bash
 gcloud compute images list \
-  --project=ubuntu-os-gke-cloud \
+  --project="$PROJECT" \
   --filter="name~'^ubuntu-gke-2404-1-35-arm64-v[0-9]+[a-z]?$' AND NOT deprecated:* AND status=READY" \
   --format="value(name)" \
   | grep -oE 'v[0-9]+[a-z]?$' | sort -u
@@ -72,7 +73,7 @@ v20260408
 v20260420a
 ```
 
-For Ubuntu 22.04, the `ubuntu-gke-2204` amd64 image names do not carry an `-amd64-` token. Drop the arch token from the amd64 filter: use `^ubuntu-gke-2204-1-35-v[0-9]+[a-z]?$` for amd64 and `^ubuntu-gke-2204-1-35-arm64-v[0-9]+[a-z]?$` for arm64.
+The `2404` in the filter is the `osVersion` without the dot (`24.04`). For Ubuntu 26.04, replace it with `2604`. For Ubuntu 22.04, replace it with `2204`; its amd64 image names do not carry an `-amd64-` token, so drop the arch token from the amd64 filter: use `^ubuntu-gke-2204-1-31-v[0-9]+[a-z]?$` for amd64 and `^ubuntu-gke-2204-1-31-arm64-v[0-9]+[a-z]?$` for arm64. GKE publishes each series only for some Kubernetes minors; an empty result means the series has no image for that minor.
 
 > **Note:** A date shown with a trailing letter (for example, `v20260416a`) is a separate build of that date. Pins match exactly: to pin it, include the letter (`version: "v20260416a"`). A pin without the letter (`v20260416`) does not resolve to `v20260416a`, and a letter pin does not resolve to the letterless build. Pin a token that appears in the output for both amd64 and arm64.
 
@@ -104,7 +105,8 @@ imageSelectorTerms:
 
 ```yaml
 imageSelectorTerms:
-  - family: Ubuntu2404
+  - family: Ubuntu
+    osVersion: "24.04"
     version: "v20260416"
 ```
 
@@ -182,8 +184,8 @@ The `alias` field (`Family@version`) is deprecated. Use `family` with `channel` 
 | Old alias syntax                                | Replacement                                                    |
 |-------------------------------------------------|----------------------------------------------------------------|
 | `alias: ContainerOptimizedOS@latest`            | `family: ContainerOptimizedOS`, `version: latest`              |
-| `alias: Ubuntu@latest`                          | `family: Ubuntu2404`, `version: latest`                        |
+| `alias: Ubuntu@latest`                          | `family: Ubuntu`, `osVersion: "24.04"`, `version: latest`      |
 | `alias: ContainerOptimizedOS@125.19216.104.126` | `family: ContainerOptimizedOS`, `version: "125.19216.104.126"` |
-| `alias: Ubuntu@v20260416`                       | `family: Ubuntu2404`, `version: "v20260416"`                   |
+| `alias: Ubuntu@v20260416`                       | `family: Ubuntu`, `osVersion: "24.04"`, `version: "v20260416"` |
 
 The `alias` field continues to work and is validated at admission. It will be removed in a future release.

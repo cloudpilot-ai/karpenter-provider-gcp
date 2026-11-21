@@ -304,9 +304,11 @@ spec:
                     family:
                       description: |-
                         Family specifies the OS image family. Required when using Channel or Version.
-                        Valid values: ContainerOptimizedOS, Ubuntu2404, Ubuntu2204.
+                        Valid values: ContainerOptimizedOS, Ubuntu (requires OSVersion), and the deprecated
+                        Ubuntu2404 and Ubuntu2204, which are equivalent to Ubuntu with osVersion 24.04 and 22.04.
                       enum:
                       - ContainerOptimizedOS
+                      - Ubuntu
                       - Ubuntu2404
                       - Ubuntu2204
                       type: string
@@ -318,11 +320,21 @@ spec:
                       - message: '''id'' is improperly formatted, must match the format
                           ''id'''
                         rule: self.matches('^.*$')
+                    osVersion:
+                      description: |-
+                        OSVersion selects the Ubuntu release for family Ubuntu, for example "24.04". It is required
+                        for Ubuntu and not allowed for other families, so Karpenter never moves nodes to a new Ubuntu
+                        release on its own. GKE publishes each release only for some Kubernetes minors; an
+                        unavailable release fails image resolution instead of falling back to another one.
+                        Version still pins the image build within the release.
+                      maxLength: 5
+                      pattern: ^[0-9]{2}\.[0-9]{2}$
+                      type: string
                     version:
                       description: |-
                         Version pins the image to a specific version or "latest".
                         For ContainerOptimizedOS: "latest" or "milestone.build.build.build" (e.g. "125.19216.104.126").
-                        For Ubuntu2404/Ubuntu2204: "latest" or "vYYYYMMDD" with an optional release letter (e.g. "v20260416", "v20251218a").
+                        For Ubuntu (and the deprecated Ubuntu2404/Ubuntu2204): "latest" or "vYYYYMMDD" with an optional release letter (e.g. "v20260416", "v20251218a").
                       maxLength: 32
                       type: string
                   type: object
@@ -351,9 +363,16 @@ spec:
                       an optional release letter (e.g. 'v20260416', 'v20251218a')
                     rule: '!has(self.version) || !has(self.family) || self.family
                       != ''Ubuntu2204'' || self.version == ''latest'' || self.version.matches(''^v[0-9]{8}[a-z]?$'')'
-                  - message: family 'Ubuntu' is not valid; use Ubuntu2404 for Ubuntu
-                      24.04 or Ubuntu2204 for Ubuntu 22.04
-                    rule: '!has(self.family) || self.family != ''Ubuntu'''
+                  - message: Ubuntu version must be 'latest' or 'vYYYYMMDD' with an
+                      optional release letter (e.g. 'v20260416', 'v20251218a')
+                    rule: '!has(self.version) || !has(self.family) || self.family
+                      != ''Ubuntu'' || self.version == ''latest'' || self.version.matches(''^v[0-9]{8}[a-z]?$'')'
+                  - message: family Ubuntu requires osVersion (for example '24.04');
+                      Karpenter never picks an Ubuntu release for you
+                    rule: '!has(self.family) || self.family != ''Ubuntu'' || has(self.osVersion)'
+                  - message: osVersion is only supported for family Ubuntu
+                    rule: '!has(self.osVersion) || (has(self.family) && self.family
+                      == ''Ubuntu'')'
                 maxItems: 30
                 minItems: 1
                 type: array
